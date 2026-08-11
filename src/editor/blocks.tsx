@@ -124,6 +124,13 @@ export const MermaidBlock = createReactBlockSpec(
       <MermaidBlockView
         code={props.block.props.code as string}
         onChangeCode={(code) => props.editor.updateBlock(props.block, { props: { code } } as never)}
+        // The document's own history, handed to the block (M29.53). Every
+        // visual op already flows into it through onChangeCode; what the block
+        // could not do was REACH it, because its chrome takes DOM focus away
+        // from the editor and BlockNote only answers the keystroke while it
+        // holds focus.
+        onUndo={() => props.editor.undo()}
+        onRedo={() => props.editor.redo()}
       />
     ),
   },

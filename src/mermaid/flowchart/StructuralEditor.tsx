@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MutableRefObject,
   type ReactNode,
 } from 'react';
@@ -73,6 +74,23 @@ export type NodePlacer = (model: FlowchartModel, id: string) => FlowchartModel;
  * the human hand, which does not zoom.
  */
 const MOVE_THRESHOLD_PX = 3;
+
+/**
+ * The node toolbar's own height and the gap it keeps from its node, and half a
+ * link badge — all SCREEN pixels, because that is what the chrome is measured
+ * in once it counter-scales (M29.51).
+ *
+ * They are applied at RENDER time rather than baked into the stored anchor
+ * (M29.53). Baking them in converted a screen constant into plane units at the
+ * scale in force when the anchor was captured, and a wheel-zoom changes the
+ * scale without recapturing anything: MEASURED, a badge sitting +1,+1 from its
+ * node's corner at 100% floated −20,−20 away at 400%, and a toolbar's 6px gap
+ * became 24px. The drift is exactly `k·(s − s₀)`, which is what a constant
+ * multiplied by the wrong scale looks like.
+ */
+const TOOLBAR_H = 34;
+const TOOLBAR_GAP = 6;
+const BADGE_HALF = 7;
 
 /** True when the source's YAML frontmatter pins mermaid's ELK layout engine. */
 function isElk(code: string): boolean {
@@ -159,12 +177,15 @@ export function StructuralEditor({
 }) {
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  /** This editor's outermost element — see the window key listener below. */
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<FlowchartSvgBinding | null>(null);
   /** The live manual-layout measurement, null in auto mode (M29.42). */
   const manualRef = useRef<ManualLayoutSession | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  // `dy` is the SCREEN-pixel offset from the anchor — see TOOLBAR_H.
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number; dy: number } | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
   const [shapeOpen, setShapeOpen] = useState(false);
   // The INSERT palette (M29.39), on the structural toolbar rather than the node
@@ -181,7 +202,11 @@ export function StructuralEditor({
   // id is a close-order ordinal that an edit elsewhere in the document can
   // silently re-key.
   const [selectedSub, setSelectedSub] = useState<number | null>(null);
-  const [subToolbarPos, setSubToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [subToolbarPos, setSubToolbarPos] = useState<{
+    x: number;
+    y: number;
+    dy: number;
+  } | null>(null);
   const [subTitle, setSubTitle] = useState('');
   const [multi, setMulti] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
@@ -248,8 +273,23 @@ export function StructuralEditor({
    * the inline block host is byte-identical to before.
    */
   const scale = useCanvasScale();
-  const unzoom =
-    scale === 1 ? undefined : { transform: `scale(${1 / scale})`, transformOrigin: '0 0' };
+  /**
+   * The style that makes a plane-anchored overlay behave like screen chrome:
+   * the counter-scale, plus any offset the piece keeps from its anchor.
+   *
+   * The offset rides INSIDE the transform, after the counter-scale, so its
+   * pixels are screen pixels at whatever the zoom happens to be right now —
+   * and `scale` is a value subscription, so a wheel tick re-renders this and
+   * re-applies it. Off a viewport (the inline block) the scale is 1 and no
+   * counter-scale is emitted at all.
+   */
+  const screenChrome = (dx = 0, dy = 0): CSSProperties | undefined => {
+    const parts: string[] = [];
+    if (scale !== 1) parts.push(`scale(${1 / scale})`);
+    if (dx !== 0 || dy !== 0) parts.push(`translate(${dx}px, ${dy}px)`);
+    if (parts.length === 0) return undefined;
+    return { transform: parts.join(' '), transformOrigin: '0 0' };
+  };
 
   /**
    * Overlays that belong to the SCREEN, not to any node: they sit at the top
@@ -260,6 +300,11 @@ export function StructuralEditor({
    * `absolute left-1/2` already means what it says.
    */
   const overlayHost = useCanvasOverlayHost();
+  // The same element through a latest-ref: the pointer-gesture effect below
+  // registers once per model and would otherwise close over the host as it was
+  // when that diagram last changed.
+  const overlayHostRef = useRef(overlayHost);
+  overlayHostRef.current = overlayHost;
   const screenLayer = (node: ReactNode): ReactNode =>
     overlayHost === null ? node : createPortal(node, overlayHost);
 
@@ -543,15 +588,18 @@ export function StructuralEditor({
             // parked the toolbar directly ON such a node — covering its
             // center, so the second click of a double-click rename landed on
             // toolbar buttons instead of the node (observed live, M29.19).
-            // The gaps are SCREEN pixels — subtracted before the divide, not
-            // after it (M29.51). The toolbar counter-scales now, so 34 is its
-            // real height at every zoom; leaving `- 34` on the plane side of
-            // the divide would push it 34·scale pixels clear of the node at
-            // 400% and let it overlap at 25%.
+            // Headroom is asked in SCREEN pixels, because that is what the
+            // counter-scaled toolbar is 34 of (M29.51). What gets STORED is
+            // the node's own corner and nothing else: the gap itself is
+            // re-applied at render time, so a later zoom cannot re-multiply it
+            // (M29.53).
             const s = transformRef.current.scale;
-            const above = (box.top - hostBox.top - 34) / s;
-            const y = above >= 0 ? above : (box.bottom - hostBox.top + 6) / s;
-            setToolbarPos({ x: (box.left - hostBox.left) / s, y });
+            const fitsAbove = box.top - hostBox.top - TOOLBAR_H >= 0;
+            setToolbarPos({
+              x: (box.left - hostBox.left) / s,
+              y: ((fitsAbove ? box.top : box.bottom) - hostBox.top) / s,
+              dy: fitsAbove ? -TOOLBAR_H : TOOLBAR_GAP,
+            });
           }
         };
         el.ondblclick = (e) => {
@@ -591,7 +639,13 @@ export function StructuralEditor({
             dot.setAttribute('class', 'cerebro-connect-handle');
             dot.setAttribute('cx', String(Math.round(box.halfW)));
             dot.setAttribute('cy', '0');
-            dot.setAttribute('r', '5');
+            // Plane units, so it has to be divided by the live scale to stay a
+            // 10px SCREEN dot (M29.53): as an r=5 in plane units it measured
+            // 3.86px across at 39% — half of it over the node, where a press
+            // starts a move instead of a connect — and 23.58px at 236%. The
+            // handle is created on hover, i.e. after whatever zoom is in force,
+            // so reading the scale here is reading it fresh.
+            dot.setAttribute('r', String(5 / transformRef.current.scale));
             dot.setAttribute('fill', 'var(--cortex-500)');
             dot.style.cursor = 'crosshair';
             dot.addEventListener('pointerdown', (de: PointerEvent) => {
@@ -634,13 +688,17 @@ export function StructuralEditor({
             const hostBox = host.getBoundingClientRect();
             const box = el.getBoundingClientRect();
             // Same scale conversion, same screen-pixel gaps and same
-            // above/below flip as the node toolbar: screen deltas become plane
-            // coordinates, and a block with no headroom gets its controls
+            // above/below flip as the node toolbar: screen deltas stay screen
+            // deltas (applied at render), the anchor is the cluster's own
+            // corner, and a block with no headroom gets its controls
             // underneath rather than on top of its own title.
             const s = transformRef.current.scale;
-            const above = (box.top - hostBox.top - 34) / s;
-            const y = above >= 0 ? above : (box.bottom - hostBox.top + 6) / s;
-            setSubToolbarPos({ x: (box.left - hostBox.left) / s, y });
+            const fitsAbove = box.top - hostBox.top - TOOLBAR_H >= 0;
+            setSubToolbarPos({
+              x: (box.left - hostBox.left) / s,
+              y: ((fitsAbove ? box.top : box.bottom) - hostBox.top) / s,
+              dy: fitsAbove ? -TOOLBAR_H : TOOLBAR_GAP,
+            });
           }
         };
       }
@@ -681,11 +739,13 @@ export function StructuralEditor({
             id: nid,
             target: link.target,
             contested: link.contested,
-            // Half the badge's 14px SCREEN size, subtracted before the divide:
-            // the badge counter-scales, so at 400% a `- 7` on the plane side
-            // would centre a 14px dot on a point 28px away from the corner.
-            x: (box.right - hostBox.left - 7) / s,
-            y: (box.top - hostBox.top - 7) / s,
+            // The node's own top-right corner, and nothing else. Half the
+            // badge's 14px SCREEN size used to be subtracted here, which fixed
+            // it to the scale in force at THIS render: a wheel-zoom to 400%
+            // then dragged the badge 20px up-left of the corner it names
+            // (MEASURED). The offset is applied at render time now (M29.53).
+            x: (box.right - hostBox.left) / s,
+            y: (box.top - hostBox.top) / s,
           });
         }
         setBadges(next);
@@ -845,8 +905,13 @@ export function StructuralEditor({
         return;
       }
 
-      const host = hostRef.current;
-      if (host !== null && target !== null && host.contains(target)) {
+      // The drop surface is the whole viewport, not just mermaid's own box
+      // (M29.53). The svg is a small island inside a full-bleed canvas —
+      // MEASURED at a quarter of it — so a connect drag released 40px below the
+      // diagram used to land on nothing and end as a silent no-op, while the
+      // same gesture 40px higher minted a node.
+      const surface: Element | null = overlayHostRef.current ?? hostRef.current;
+      if (surface !== null && target !== null && surface.contains(target)) {
         // Dropped on empty canvas: spin up a fresh node and wire it in one
         // motion, same as the toolbar's "Add connected node" — but in manual
         // mode it lands where the pointer let go, because the user just said
@@ -864,6 +929,141 @@ export function StructuralEditor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- apply closes over model/onChangeCode; re-registering per render would tear the listeners down mid-gesture.
   }, [model]);
+
+  /**
+   * The editor's keyboard, claimed at the WINDOW (M29.53).
+   *
+   * The Delete/Backspace handler used to be a React `onKeyDown` on this
+   * component's root. MEASURED: clicking a node inside a document block leaves
+   * `document.activeElement` on ProseMirror's root — an ANCESTOR of this
+   * subtree, never a descendant — so the keydown never travelled through the
+   * root and the handler could not fire. ProseMirror's own "delete the selected
+   * node" answered instead, and one Backspace took the whole diagram out of the
+   * document (842 → 700 bytes on disk, four fences down to three). Escape had
+   * the mirror of it on the canvas hosts, where the only listener that ever
+   * answered was the dialog's, so the first Escape after selecting a node
+   * closed the entire full-screen editor.
+   *
+   * Capture phase on `window`: it runs before every host's own document-level
+   * listener, so stopping the event here is what keeps the key from reaching
+   * ProseMirror or the Dialog at all — moving focus around cannot do that, and
+   * measurement says so (forcing focus into this root first still lost the
+   * block, because the old handler stopped nothing).
+   *
+   * The state it reads goes through a latest-ref rather than a dependency
+   * array: a listener that re-registered on every selection change would move
+   * to the back of the queue and lose its precedence over the host.
+   */
+  const keyStateRef = useRef<{
+    handle: (e: KeyboardEvent) => void;
+  }>({ handle: () => {} });
+  keyStateRef.current.handle = (e: KeyboardEvent) => {
+    const root = rootRef.current;
+    if (root === null || model === null) return;
+    const target = e.target instanceof Element ? e.target : null;
+    // A text field owns its own keys: the rename box, the group title, the
+    // link target, the edge label — Backspace there means "erase a letter".
+    if (target !== null && target.closest('input, textarea') !== null) return;
+    // More than one of these can be mounted at once (two blocks of the same
+    // document, both open for editing). Only the one the keystroke is aimed
+    // at answers; a key aimed at neither (focus on BODY, or on the document
+    // root, which is the shipped case) reaches every one of them, and each
+    // still needs its own selection before it does anything.
+    const inEditor = target?.closest('[data-structural-editor]') ?? null;
+    if (inEditor !== null && inEditor !== root) return;
+
+    // An open popover owns Escape (it has its own dismiss) and must not have
+    // Backspace read as "delete the node I am about to restyle" — the three
+    // tests that pin that leak are older than this listener.
+    const popoverOpen = shapeOpen || styleOpen || iconOpen || linkOpen || insertOpen;
+
+    if (e.key === 'Escape') {
+      // A connect drag in flight is the innermost thing Escape can peel: the
+      // ghost line used to survive it, and the pointerup that followed minted
+      // the node the user had just changed their mind about.
+      if (dragFrom.current !== null) {
+        dragFrom.current = null;
+        setGhost(null);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (popoverOpen || renaming !== null) return;
+      // Then the selection — one layer per keystroke. Only when something is
+      // actually selected: with a bare canvas, Escape still belongs to the
+      // dialog (or to the block's edit session), which is where it goes.
+      if (
+        validSelected !== null ||
+        validMulti.length > 0 ||
+        validSelectedSub !== null ||
+        edgeEditor !== null
+      ) {
+        setSelected(null);
+        setToolbarPos(null);
+        setMulti([]);
+        setSelectedSub(null);
+        setSubToolbarPos(null);
+        setEdgeEditor(null);
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+
+    if (
+      (e.key === 'Delete' || e.key === 'Backspace') &&
+      validSelected !== null &&
+      renaming === null &&
+      !popoverOpen
+    ) {
+      // preventDefault AND stopPropagation, in that order of importance: the
+      // old handler did neither, so even when it did run, ProseMirror's node
+      // delete ran too and the block went with the node.
+      e.preventDefault();
+      e.stopPropagation();
+      apply(deleteNode(model, validSelected));
+      setSelected(null);
+      setToolbarPos(null);
+    }
+  };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => keyStateRef.current.handle(e);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+
+  /**
+   * The whole viewport clears a selection, not just the diagram's own box
+   * (M29.53).
+   *
+   * The clear-selection `onClick` below lives on this component's root, which
+   * shrink-wraps mermaid's svg — MEASURED at 25.1% of the canvas on the .mmd
+   * page at rest and 6.7% at 39% zoom. On the other ~75% the click landed on
+   * the viewport and nothing answered it, so the floating node toolbar could
+   * not be dismissed at all. The viewport is what a user reads as "the
+   * canvas", so it is where the background click belongs; inside a document
+   * block there is no viewport and the root's own handler is still the surface.
+   */
+  useEffect(() => {
+    if (overlayHost === null) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target instanceof Element ? e.target : null;
+      // The diagram, a node, and every floating surface answer for themselves —
+      // `data-no-pan` is the marker the canvas already uses for "chrome, not
+      // canvas", and the editor's own subtree includes the svg.
+      if (target !== null && target.closest('[data-no-pan], [data-structural-editor]') !== null) {
+        return;
+      }
+      setSelected(null);
+      setToolbarPos(null);
+      setMulti([]);
+      setSelectedSub(null);
+      setSubToolbarPos(null);
+      setEdgeEditor(null);
+    };
+    overlayHost.addEventListener('click', onClick);
+    return () => overlayHost.removeEventListener('click', onClick);
+  }, [overlayHost]);
 
   // Selection outline via inline stroke on the bound group's shapes. This
   // effect intentionally has no dependency array: it must resync the DOM
@@ -885,7 +1085,14 @@ export function StructuralEditor({
       )) {
         if (outlined.has(id)) {
           shapeEl.style.stroke = 'var(--cortex-500)';
-          shapeEl.style.strokeWidth = '2.5px';
+          // Divided by the live scale, so the ring is 2.5 SCREEN px wherever
+          // the zoom is (M29.53). Written in PLANE units it measured 0.96px at
+          // 39% — thinner than the node's own 1px border, i.e. no selection cue
+          // at all — and 5.89px at 236%, while every other affordance around it
+          // had already been made screen-sized. This effect re-runs on every
+          // render and `scale` is a value subscription, so a wheel tick
+          // resyncs it.
+          shapeEl.style.strokeWidth = `${2.5 / scale}px`;
         } else {
           shapeEl.style.stroke = '';
           shapeEl.style.strokeWidth = '';
@@ -926,7 +1133,15 @@ export function StructuralEditor({
 
   return (
     <div
-      className="relative px-3 py-2"
+      ref={rootRef}
+      data-structural-editor
+      // `outline-none` pairs with the tabIndex below. Chromium's :focus-visible
+      // heuristic counts a focus as keyboard-initiated whenever the preceding
+      // interaction involved a key, so a shift-click (or any click after a
+      // keystroke) painted the UA's blue ring around this whole container —
+      // MEASURED at 1384×350 across the canvas. `<main>` in App.tsx carries the
+      // same pair for the same reason.
+      className="relative px-3 py-2 outline-none"
       onClick={() => {
         setSelected(null);
         setToolbarPos(null);
@@ -940,17 +1155,10 @@ export function StructuralEditor({
         // so a press INSIDE it still cannot close it by accident.
         setEdgeEditor(null);
       }}
-      onKeyDown={(e) => {
-        if (
-          (e.key === 'Delete' || e.key === 'Backspace') &&
-          validSelected !== null &&
-          renaming === null
-        ) {
-          apply(deleteNode(model, validSelected));
-          setSelected(null);
-          setToolbarPos(null);
-        }
-      }}
+      // Delete/Backspace/Escape are NOT handled here any more: this element is
+      // not on the dispatch path of the keystrokes that matter (M29.53 — see
+      // the window listener above). The tabIndex stays because the editor still
+      // has to be focusable for the keyboard entry point below.
       tabIndex={-1}
     >
       {toolbar && (
@@ -1112,7 +1320,7 @@ export function StructuralEditor({
             data-testid="mermaid-node-toolbar"
             data-no-pan
             className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-            style={{ left: toolbarPos.x, top: toolbarPos.y, ...unzoom }}
+            style={{ left: toolbarPos.x, top: toolbarPos.y, ...screenChrome(0, toolbarPos.dy) }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -1303,14 +1511,18 @@ export function StructuralEditor({
             />,
           )}
 
-        <LinkBadges badges={badges} onOpenPath={onOpenPath} unzoom={unzoom} />
+        <LinkBadges
+          badges={badges}
+          onOpenPath={onOpenPath}
+          chrome={screenChrome(-BADGE_HALF, -BADGE_HALF)}
+        />
 
         {validSelectedSub !== null && subToolbarPos !== null && (
           <SubgraphToolbar
             model={model}
             index={validSelectedSub}
             pos={subToolbarPos}
-            unzoom={unzoom}
+            chrome={screenChrome(0, subToolbarPos.dy)}
             title={subTitle}
             onChangeTitle={setSubTitle}
             apply={apply}

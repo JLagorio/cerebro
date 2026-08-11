@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { type Direction, type FlowchartModel, subgraphs } from './model';
 import {
@@ -31,7 +31,7 @@ export function SubgraphToolbar({
   model,
   index,
   pos,
-  unzoom,
+  chrome,
   title,
   onChangeTitle,
   apply,
@@ -44,9 +44,11 @@ export function SubgraphToolbar({
   pos: { x: number; y: number };
   /**
    * The counter-scale that keeps this toolbar its true size at every zoom
-   * (M29.51). `undefined` off a viewport, where the scale is already 1.
+   * (M29.51), plus the screen-pixel gap it holds from its cluster — built per
+   * render by the editor's `screenChrome`, so a zoom re-applies both (M29.53).
+   * `undefined` off a viewport with no gap to hold.
    */
-  unzoom?: { transform: string; transformOrigin: string };
+  chrome?: CSSProperties;
   /** The in-flight title being typed. */
   title: string;
   onChangeTitle: (title: string) => void;
@@ -107,7 +109,7 @@ export function SubgraphToolbar({
       data-testid="mermaid-subgraph-toolbar"
       data-no-pan
       className="absolute z-10 flex flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
-      style={{ left: pos.x, top: pos.y, ...unzoom }}
+      style={{ left: pos.x, top: pos.y, ...chrome }}
       onClick={(e) => e.stopPropagation()}
       // Backspace on any control in here would otherwise reach the editor's own
       // onKeyDown and delete the SELECTED NODE — the leak M29.33 measured on

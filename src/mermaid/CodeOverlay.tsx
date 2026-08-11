@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
 import { HighlightedTextarea } from './HighlightedTextarea';
+import { claimedByHostEditor } from './keys';
 import { useDebounced } from './useDebounced';
 
 /**
@@ -113,7 +114,14 @@ export function CodeOverlay({
       data-testid="code-overlay"
       data-no-pan
       className="absolute left-3 top-3 z-20 flex max-h-[calc(100%-24px)] w-[340px] flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
-      onKeyDown={(e) => e.stopPropagation()}
+      // Only the keys the surrounding editor would claim (M29.53). The blanket
+      // stop this used to be also killed the app's own window-level shortcuts —
+      // MEASURED: ⌘K and ⌘J were dead in this panel on the .mmd canvas, where
+      // BlockNote is not even mounted, so the guard's stated reason could not
+      // apply. React's synthetic stopPropagation stops the native event too.
+      onKeyDown={(e) => {
+        if (claimedByHostEditor(e)) e.stopPropagation();
+      }}
       onPointerDown={(e) => e.stopPropagation()}
     >
       <div className="flex flex-none items-center gap-2 border-b border-n-100 px-2.5 py-1.5">

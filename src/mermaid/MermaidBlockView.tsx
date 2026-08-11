@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { writeTextFile } from '@/lib/ipc';
@@ -7,6 +7,7 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { detectDiagramType } from './detect';
+import { claimedByHostEditor } from './keys';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
 import { FullScreenDiagramEditor } from './FullScreenDiagramEditor';
@@ -56,9 +57,27 @@ async function saveAsFile(code: string): Promise<void> {
 export function MermaidBlockView({
   code,
   onChangeCode,
+  onUndo,
+  onRedo,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
+  /**
+   * The document's own history, reached explicitly (M29.53).
+   *
+   * The block never held a history of its own and never should — every visual
+   * op flows through `onChangeCode` into BlockNote, which is the undo stack.
+   * But BlockNote only answers ⌘Z while its editor has DOM focus, and this
+   * block's chrome takes focus away from it: MEASURED, `+ Node` then ⌘Z left
+   * the node in the file (activeElement was the button), a rename committed
+   * with Enter left focus on BODY and ⌘Z did nothing there either, and even
+   * pressing the block's own Done did not restore it. Clicking a paragraph
+   * first worked — an undiscoverable extra step. So the block routes the key
+   * itself while it is editing, exactly as `useDiagramFile` does for the
+   * standalone .mmd canvas.
+   */
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   // M29.38 — the link popover's record search and what a link badge opens.
   // `in-place`, not `navigate`: this surface IS the backdrop, and yanking a
@@ -66,6 +85,8 @@ export function MermaidBlockView({
   // that doc away (M9.3).
   const entries = useVaultStore((s) => s.entries);
   const openPath = useOpenPath('in-place');
+  /** This block's outermost element — see the key listener below. */
+  const blockRef = useRef<HTMLDivElement | null>(null);
   const [editing, setEditing] = useState(false);
   // `draft` only matters in code mode: visual mode renders `code` directly
   // (see the visual pane below) and every op commits through onChangeCode as
@@ -114,8 +135,82 @@ export function MermaidBlockView({
     setEditing(false);
   };
 
+  /**
+   * An uncommitted code draft outlives the block, not the session (M29.53).
+   *
+   * MEASURED: typing a new diagram into the source box and then navigating away
+   * — the rail, another doc — lost every byte of it, with no prompt, no dirty
+   * chip and no undo entry, because `draft` was component state that only Done,
+   * ⌘Enter or the Show-diagram toggle ever committed. The same keystrokes typed
+   * into the .mmd page's code panel survive the identical navigation, because
+   * that panel flushes on unmount; this was the one code surface with no flush.
+   *
+   * `useLayoutEffect`, and the distinction is data loss: React runs passive
+   * cleanups parent-first, so a passive flush here would arrive after the
+   * document page's own unmount save had already read an empty buffer.
+   * CodeOverlay carries the same reasoning at greater length.
+   */
+  const flushRef = useRef({ code, draft, editing, editMode, onChangeCode });
+  flushRef.current = { code, draft, editing, editMode, onChangeCode };
+  useLayoutEffect(() => {
+    return () => {
+      const f = flushRef.current;
+      if (f.editing && f.editMode === 'code' && f.draft !== f.code) f.onChangeCode(f.draft);
+    };
+  }, []);
+
+  /**
+   * The block's own keyboard while it is editing (M29.53).
+   *
+   * Escape is documented four lines below as "just exits", and it did not:
+   * MEASURED, `document.activeElement` right after pressing Edit is BODY, and
+   * after any click inside the pane it is ProseMirror's root — an ANCESTOR of
+   * this block, so a React `onKeyDown` on a wrapper div was never on the
+   * dispatch path. (Pressing Tab once put focus inside and the same handler
+   * worked perfectly, which is how we know it was reachability and not logic.)
+   * Code mode escaped correctly only because its textarea holds focus.
+   *
+   * Capture phase on `document`, one level in from the structural editor's
+   * `window` listener, so a selection inside the diagram gets to answer Escape
+   * first and this only sees the keystrokes it left alone.
+   */
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    const block = blockRef.current;
+    if (block === null) return;
+    const target = e.target instanceof Element ? e.target : null;
+    // A text field owns its own keys — the source box (which cancels on
+    // Escape itself), the rename box, a link target.
+    if (target !== null && target.closest('input, textarea') !== null) return;
+    // Another block of the same document can be open at the same time; a key
+    // aimed into one of them is not aimed at this one.
+    const inBlock = target?.closest('[data-testid="mermaid-block"]') ?? null;
+    if (inBlock !== null && inBlock !== block) return;
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (editMode === 'code') cancel();
+      else setEditing(false);
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) onRedo?.();
+      else onUndo?.();
+    }
+  };
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => keyRef.current(e);
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [editing]);
+
   return (
     <div
+      ref={blockRef}
       data-testid="mermaid-block"
       contentEditable={false}
       className="my-1 w-full rounded-lg border border-n-200 bg-n-0"
@@ -190,19 +285,12 @@ export function MermaidBlockView({
       </div>
 
       {editing && editMode === 'visual' && isVisualCapable && (
-        <div
-          onKeyDown={(e) => {
-            // No Stage-B textarea here to swallow BlockNote hotkeys via
-            // e.stopPropagation on every keystroke, so only intercept the one
-            // key this pane cares about: Escape just exits — every visual op
-            // already committed through onChangeCode as it happened, so
-            // there is nothing left to revert (unlike Stage B's cancel()).
-            if (e.key === 'Escape') {
-              e.stopPropagation();
-              setEditing(false);
-            }
-          }}
-        >
+        /* Escape is handled by the document listener above, not here: nothing
+           inside this pane ever holds focus, so a React onKeyDown on this
+           wrapper was on an element the keystroke never passed through
+           (M29.53). Every visual op has already committed through onChangeCode
+           as it happened, so exiting has nothing left to revert. */
+        <div>
           {/* Renders the `code` prop directly, never `draft` (M29.18.1 fix):
               visual ops commit immediately through onChangeCode, so the prop
               IS the live state, and an external code change (undo, another
@@ -225,8 +313,12 @@ export function MermaidBlockView({
             placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
             onChange={setDraft}
             onKeyDown={(e) => {
-              // BlockNote hotkeys must not fire while typing in the source box.
-              e.stopPropagation();
+              // BlockNote hotkeys must not fire while typing in the source box
+              // — but the APP's must (⌘K, ⌘J, ⌘⇧L). A blanket stop killed both,
+              // because React's synthetic stopPropagation also stops the native
+              // event at the React root, where App.tsx's window listener never
+              // sees it (MEASURED: document-capture saw ⌘K, window saw nothing).
+              if (claimedByHostEditor(e)) e.stopPropagation();
               if (e.key === 'Escape') {
                 e.preventDefault();
                 cancel();
@@ -242,7 +334,19 @@ export function MermaidBlockView({
       )}
 
       {!editing && code.trim() !== '' && (
-        <div className="px-3 py-2">
+        /* Double-click is the universal "let me edit this" gesture and the
+           block was the one content type in the document that ignored it — the
+           only way in was a 34x22px grey text link at the far right of the
+           header (M29.53). ProseMirror consumes the event as a node selection,
+           so nothing is lost by claiming it. */
+        <div
+          className="px-3 py-2"
+          onDoubleClick={() => {
+            setDraft(code);
+            setEditMode(entryMode(code));
+            setEditing(true);
+          }}
+        >
           <MermaidDiagram
             code={code}
             onExpand={(svg) => setLightboxSvg(svg)}

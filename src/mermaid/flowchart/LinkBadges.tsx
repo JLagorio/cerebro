@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { isVaultPath, isWebUrl } from './linkTargets';
 
@@ -7,7 +8,11 @@ export interface LinkBadge {
   target: string;
   /** True when a click statement the editor does not own also writes this slot. */
   contested: boolean;
-  /** Host-relative plane coordinates, already divided by the canvas scale. */
+  /**
+   * The node's own top-right corner, in host-relative plane coordinates
+   * (already divided by the canvas scale). The half-badge offset that centres
+   * the dot on it is a SCREEN constant and lives in `chrome`, not here.
+   */
   x: number;
   y: number;
 }
@@ -44,15 +49,18 @@ function badgeTitle(b: LinkBadge): string {
 export function LinkBadges({
   badges,
   onOpenPath,
-  unzoom,
+  chrome,
 }: {
   badges: LinkBadge[];
   onOpenPath?: (path: string) => void;
   /**
-   * The counter-scale that keeps a 14px badge 14px at every zoom (M29.51).
-   * `undefined` off a viewport, where the scale is already 1.
+   * The counter-scale that keeps a 14px badge 14px at every zoom (M29.51),
+   * plus the half-badge offset that centres it on its node's corner — both
+   * built fresh per render by the editor's `screenChrome`, so a wheel-zoom
+   * re-applies them instead of leaving a badge measured at the old scale
+   * (M29.53). `undefined` off a viewport with nothing to offset.
    */
-  unzoom?: { transform: string; transformOrigin: string };
+  chrome?: CSSProperties;
 }) {
   return (
     <>
@@ -65,7 +73,7 @@ export function LinkBadges({
           disabled={!isWebUrl(b.target) && !isVaultPath(b.target)}
           title={badgeTitle(b)}
           className="absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-n-200 bg-n-0 shadow-sm hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ left: b.x, top: b.y, ...unzoom }}
+          style={{ left: b.x, top: b.y, ...chrome }}
           onClick={(e) => {
             e.stopPropagation();
             if (isWebUrl(b.target)) {

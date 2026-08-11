@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockFs } from '@/lib/mockIpc';
@@ -389,5 +389,115 @@ describe('MermaidBlockView full screen (M29.27)', () => {
     render(<MermaidBlockView code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.queryByRole('button', { name: 'Open full screen' })).toBeNull();
+  });
+
+  /**
+   * The block's keyboard, delivered where the browser delivers it (M29.53).
+   *
+   * Every case fires at `document.body`, because that is where the shipped app
+   * puts the keystroke: MEASURED, `document.activeElement` right after pressing
+   * Edit is BODY, and after any click inside the visual pane it is
+   * ProseMirror's root — an ANCESTOR of this block. The old handler was a React
+   * onKeyDown on a wrapper div inside it, so it could not fire, and the tests
+   * that "covered" Escape all typed into the source box first, i.e. the one
+   * mode where focus IS inside the block.
+   */
+  describe('keys that arrive from outside the block', () => {
+    it('Escape leaves the visual editor', async () => {
+      renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+      render(<Controlled initialCode={'flowchart TD\n  A --> B'} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      expect(await screen.findByTestId('structural-host')).toBeTruthy();
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('structural-host')).toBeNull());
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
+    });
+
+    it('⌘Z reaches the document history even with focus on the chrome that just changed it', async () => {
+      renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+      const onUndo = vi.fn();
+      const onRedo = vi.fn();
+      render(
+        <MermaidBlockView
+          code={'flowchart TD\n  A --> B'}
+          onChangeCode={() => {}}
+          onUndo={onUndo}
+          onRedo={onRedo}
+        />,
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      await screen.findByTestId('structural-host');
+      // The measured sequence: press + Node, regret it, ⌘Z. Focus is on the
+      // button, so BlockNote never saw the key and the node stayed in the file.
+      fireEvent.keyDown(document.body, { key: 'z', metaKey: true });
+      expect(onUndo).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(document.body, { key: 'z', metaKey: true, shiftKey: true });
+      expect(onRedo).toHaveBeenCalledTimes(1);
+    });
+
+    it("⌘Z inside the source box stays the textarea's own undo", async () => {
+      renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+      const onUndo = vi.fn();
+      render(
+        <MermaidBlockView
+          code={'sequenceDiagram\n  A->>B: hi'}
+          onChangeCode={() => {}}
+          onUndo={onUndo}
+        />,
+      );
+      await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+      const source = await screen.findByLabelText('Mermaid source');
+      fireEvent.keyDown(source, { key: 'z', metaKey: true });
+      expect(onUndo).not.toHaveBeenCalled();
+    });
+  });
+
+  it('flushes an uncommitted source draft when the block goes away', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    const onChangeCode = vi.fn();
+    const { unmount } = render(
+      <MermaidBlockView code={'sequenceDiagram\n  A->>B: hi'} onChangeCode={onChangeCode} />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const source = await screen.findByLabelText('Mermaid source');
+    await userEvent.clear(source);
+    await userEvent.type(source, 'sequenceDiagram');
+    expect(onChangeCode).not.toHaveBeenCalled();
+    // Navigating away used to take the typed bytes with it: no prompt, no
+    // dirty chip, no undo entry — the one code surface in the app with no
+    // unmount flush (MEASURED against the .mmd page, which survives it).
+    unmount();
+    expect(onChangeCode).toHaveBeenCalledWith('sequenceDiagram');
+  });
+
+  it('a double-click on the picture opens the editor', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<Controlled initialCode={'flowchart TD\n  A --> B'} />);
+    await waitFor(() => expect(screen.getByTestId('mermaid-diagram')).toBeTruthy());
+    await userEvent.dblClick(screen.getByTestId('mermaid-diagram'));
+    // The only way in was a 34x22px grey text link at the far right of the
+    // header; every other content type in the document takes a click or a
+    // double-click to edit.
+    expect(await screen.findByTestId('structural-host')).toBeTruthy();
+  });
+
+  it('lets the app keep ⌘K while the source box is focused, and still silences plain keys', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<MermaidBlockView code={'sequenceDiagram\n  A->>B: hi'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const source = await screen.findByLabelText('Mermaid source');
+    const seen: string[] = [];
+    const spy = (e: KeyboardEvent) => seen.push(e.key);
+    window.addEventListener('keydown', spy);
+    try {
+      fireEvent.keyDown(source, { key: 'k', metaKey: true });
+      fireEvent.keyDown(source, { key: 'x' });
+      fireEvent.keyDown(source, { key: 'b', metaKey: true });
+    } finally {
+      window.removeEventListener('keydown', spy);
+    }
+    // ⌘K is the app's; plain typing and ⌘B are the surrounding editor's, and
+    // stopping those is the guard's whole stated reason.
+    expect(seen).toEqual(['k']);
   });
 });

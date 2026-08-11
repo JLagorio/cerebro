@@ -1704,11 +1704,14 @@ describe('manual layout: the orderings the comments claim (M29.42)', () => {
         />,
       );
       const badge = await screen.findByTestId('mermaid-link-badge');
-      // A is moved to plane x=50, so its right edge is 60 and the badge sits at
-      // 60 - 7. Measured before the manual pass ran, it would be pinned at
-      // 40 - 7 = 33 and stranded there for the life of the render.
-      expect(badge.style.left).toBe('53px');
-      expect(badge.style.top).toBe('3px');
+      // A is moved to plane x=50, so its right edge is 60 and the badge is
+      // anchored there. Measured before the manual pass ran, it would be pinned
+      // at 40 and stranded there for the life of the render. The half-badge
+      // offset is a SCREEN constant applied in the transform (M29.53), not
+      // baked into this coordinate.
+      expect(badge.style.left).toBe('60px');
+      expect(badge.style.top).toBe('10px');
+      expect(badge.style.transform).toBe('translate(-7px, -7px)');
     } finally {
       restore();
     }
@@ -1909,19 +1912,60 @@ describe('StructuralEditor inside a zoomed CanvasViewport', () => {
       // A toolbar that zooms with the diagram is 74px tall with 46px buttons at
       // 218% and 21px tall with 13px ones at 63% — measured live, neither
       // usable. Counter-scaled about its own anchor corner it is 34px at both.
-      expect(toolbar.style.transform).toBe(`scale(${1 / ZOOMED})`);
-      expect(toolbar.style.transformOrigin).toBe('0 0');
       // Node top 10 leaves no headroom for a 34px SCREEN toolbar, so it flips
-      // below: (bottom 30 + 6 screen) / 1.1. The gaps are subtracted BEFORE
-      // the divide — `- 34` on the plane side would be 34·scale on screen.
-      expect(toolbar.style.top).toBe(`${(30 + 6) / ZOOMED}px`);
+      // below — and the 6px gap rides in the TRANSFORM, past the counter-scale,
+      // where it is 6 screen pixels at whatever the zoom is now. Baked into the
+      // stored coordinate instead (M29.51's cut) it froze at the scale in force
+      // when the node was clicked, and a later zoom re-multiplied it: measured
+      // live, a 6px gap became 24px at 400% (M29.53).
+      expect(toolbar.style.transform).toBe(`scale(${1 / ZOOMED}) translate(0px, 6px)`);
+      expect(toolbar.style.transformOrigin).toBe('0 0');
+      // The ANCHOR is the node's own bottom edge, in plane units — nothing else.
+      expect(toolbar.style.top).toBe(`${30 / ZOOMED}px`);
       expect(toolbar.style.left).toBe(`${20 / ZOOMED}px`);
     } finally {
       Element.prototype.getBoundingClientRect = original;
     }
   });
 
-  it('emits no transform at all when there is no zoom to undo', async () => {
+  it('re-applies the toolbar gap when the ZOOM changes and nothing is re-clicked', async () => {
+    await renderZoomed();
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    const before = screen.getByTestId('mermaid-node-toolbar').style.transform;
+    expect(before).toBe(`scale(${1 / ZOOMED}) translate(0px, 6px)`);
+    // A wheel-zoom changes the scale without any click, which is exactly the
+    // gesture the old code could not survive: the gap was already a plane
+    // number by then, so it drifted by 6·(s/s₀) and the toolbar walked away
+    // from its node (MEASURED: 6px at 100% → 24px at 400%).
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.getByTestId('mermaid-node-toolbar').style.transform).toBe(
+      `scale(${1 / (ZOOMED * ZOOMED)}) translate(0px, 6px)`,
+    );
+  });
+
+  it('keeps the selection ring 2.5 SCREEN pixels wide at every zoom', async () => {
+    await renderZoomed();
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    const shape = document.querySelector<SVGElement>('#flowchart-A-0 rect')!;
+    // In plane units the same 2.5 measured 0.96px at 39% — thinner than the
+    // node's own 1px border — and 5.89px at 236%.
+    expect(shape.style.strokeWidth).toBe(`${2.5 / ZOOMED}px`);
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(shape.style.strokeWidth).toBe(`${2.5 / (ZOOMED * ZOOMED)}px`);
+  });
+
+  it("a click on bare viewport — outside the diagram's own box — clears the selection", async () => {
+    await renderZoomed();
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+    // The editor's own root shrink-wraps mermaid's svg: MEASURED at 25.1% of
+    // the canvas at rest and 6.7% at 39% zoom, so on the other three quarters
+    // the floating toolbar could not be dismissed at all.
+    await userEvent.click(viewport());
+    expect(screen.queryByTestId('mermaid-node-toolbar')).toBeNull();
+  });
+
+  it('emits no counter-scale when there is no zoom to undo', async () => {
     render(
       <CanvasViewport>
         <StructuralEditor code={CODE} onChangeCode={() => {}} />
@@ -1929,6 +1973,100 @@ describe('StructuralEditor inside a zoomed CanvasViewport', () => {
     );
     await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
     await userEvent.click(document.getElementById('flowchart-A-0')!);
-    expect(screen.getByTestId('mermaid-node-toolbar').style.transform).toBe('');
+    // The gap is still a transform — it is a screen constant either way — but
+    // there is no `scale()` in it, so the inline block host pays nothing for a
+    // zoom it does not have.
+    expect(screen.getByTestId('mermaid-node-toolbar').style.transform).toBe('translate(0px, 6px)');
+  });
+});
+
+/**
+ * The editor's keyboard, at the window (M29.53).
+ *
+ * Every case here fires the key at `document.body` — NOT at the editor — which
+ * is where the shipped app actually delivers it: clicking a node inside a
+ * document block leaves focus on ProseMirror's root, an ancestor of this
+ * subtree, so the React onKeyDown these cases used to exercise was never on the
+ * dispatch path. Firing at the editor is what made the old tests pass while a
+ * real Backspace deleted the whole diagram from the document.
+ */
+describe('StructuralEditor keyboard, delivered where the browser delivers it', () => {
+  const CODE = 'flowchart TD\n  A[Start] --> B[End]\n  B --> C[Ship]';
+
+  async function open(onChangeCode: (c: string) => void = () => {}) {
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+  }
+
+  it('Backspace aimed at the document body deletes the SELECTED NODE', async () => {
+    const onChangeCode = vi.fn();
+    await open(onChangeCode);
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    // B keeps the label the deleted line carried for it — deleteNode's own
+    // contract, unchanged; what this case is about is that the key arrived.
+    expect(onChangeCode).toHaveBeenCalledWith('flowchart TD\n  B[End]\n  B --> C[Ship]');
+  });
+
+  it('stops that Backspace, so the host editor never also deletes the block', async () => {
+    await open();
+    // The measured failure was not "the editor did not delete the node" — the
+    // node WAS deleted in the contrast run — it was that ProseMirror deleted
+    // the block too, because the old handler called neither of these.
+    const e = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+    fireEvent(document.body, e);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('Backspace with nothing selected is left alone', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const e = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+    fireEvent(document.body, e);
+    expect(e.defaultPrevented).toBe(false);
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('Escape clears the selection and goes no further — the dialog above keeps its layer', async () => {
+    await open();
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    fireEvent(document.body, e);
+    // One keystroke, one layer: the selection goes, the surface stays.
+    expect(screen.queryByTestId('mermaid-node-toolbar')).toBeNull();
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('Escape with nothing selected belongs to whoever is above', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    fireEvent(document.body, e);
+    expect(e.defaultPrevented).toBe(false);
+  });
+
+  it('Escape cancels an in-flight connect drag, and the release mints nothing', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    fireEvent.pointerDown(document.getElementById('flowchart-A-0')!, { clientX: 5, clientY: 5 });
+    expect(document.querySelector('line')).not.toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    // The ghost used to survive the key, and the pointerup that followed wrote
+    // the node and the edge the user had just changed their mind about.
+    expect(document.querySelector('line')).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 300, clientY: 300 });
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('a text field inside the editor keeps its own Backspace', async () => {
+    const onChangeCode = vi.fn();
+    await open(onChangeCode);
+    await userEvent.dblClick(document.getElementById('flowchart-A-0')!);
+    const input = screen.getByLabelText('Node label');
+    input.focus();
+    fireEvent.keyDown(input, { key: 'Backspace' });
+    expect(onChangeCode).not.toHaveBeenCalled();
   });
 });
