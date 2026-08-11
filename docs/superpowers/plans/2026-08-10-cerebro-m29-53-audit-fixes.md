@@ -3,9 +3,16 @@
 **Branch** `m29-mermaid` · **Base** `988c56a` (the audit handoff) · **HEAD**
 `69bdbfa` · nine commits, 39 files, +2560/−371
 
-The audit raised 71 findings. This wave closed **46 of them**, refused 5 as
-refuted, and left 20 open with reasons. Gate at HEAD: unit **3126 / 2 skipped**
-(187 files) · e2e **46** · lint, typecheck, format clean.
+The audit raised 71 findings. **57 are closed, 6 were refuted, 8 are open** —
+every one of those numbers driven in Chromium at HEAD rather than reasoned
+(§3). Gate at HEAD: unit **3126 / 2 skipped** (187 files) · e2e **46** · lint,
+typecheck, format clean.
+
+> An earlier draft of this file said "46 closed / 5 refuted / 20 open". That
+> was a tally, not a measurement, and it was wrong in both directions: the
+> fixes closed 54 findings, three more turned out to have been closed already
+> by M29.52 or by a side effect of this wave, and only 8 survive. The count
+> below is the measured one.
 
 Read §1 first. It is not a summary of the work — it is the thing that would
 have cost the next session a day.
@@ -114,52 +121,73 @@ title no longer eating ⌘K, and full screen reachable from a block being edited
 
 ---
 
-## 3. What is left, and why
+## 3. What is left — all eight driven in Chromium at HEAD
 
-**Needs a person, not a patch.**
+Every claim below was re-driven with real input against `8d99d58` before it was
+written down. Three findings that were listed here as "needs re-measuring" did
+not reproduce and are closed:
 
-1. **The BlockNote hard-break corruption.** Any block edit round-trips the
-   document through the markdown serializer and rewrites unrelated prose with a
-   `\`+newline. Not caused by M29 and parked by the M29 handoff for the same
-   reason it is parked here: it needs an editor-area owner and a decision.
-2. **A link badge clicked inside the full-screen dialog navigates the whole
-   app** and takes the dialog with it. The fix is a product call —
-   `useOpenPath('in-place')` is deliberate for the inline block, and the dialog
-   needs either a peek panel or a close-first.
-3. **Focus restore after the dialog closes** lands on the ProseMirror root
-   rather than the trigger, and the next keystrokes go nowhere.
-   `useFocusRestore` captures a node BlockNote later re-creates.
+| Closed by measurement | What the probe found |
+|---|---|
+| Tabbing to an overflowed toolbar button scrolls the content pane 100px sideways | after 22 Tab presses the ONLY scrolled element is the toolbar itself (239px); `whiteboard-view` stayed at x=236. The `overflow-x-auto` in `c058d4d` moved the nearest scrollable ancestor from the page pane to the strip |
+| "Add record" drops the 4th record and beyond outside the canvas | five records, five nodes inside the viewport (x=872..1177 against a canvas that ends at 1280) |
+| There is no undo on the whiteboard canvas | ⌘Z after placing a record returned the file to its two-line seed |
 
-**Real, measured, and simply not done.**
+And the eight that DO reproduce:
 
-4. **The four node popovers do not track their anchor through a wheel zoom.**
-   The node toolbar and the link badges do now; `Popover` re-measures on window
-   resize and its own ResizeObserver, neither of which a CSS-transform zoom
-   fires. The fix belongs in `Popover` (a scale subscription), not in another
-   caller.
-5. **Below ~50% zoom the node toolbar covers the node under it**, so a
-   shift-click on that node silently does nothing. The toolbar is 34 screen px
-   and the node gap is 40 plane px; picking a side by headroom is not enough
-   once the sides can be occupied.
-6. **Record chips repeat their node's label, overhang it, cover its bottom
-   edge, and cannot be grabbed to move the node.** A real design pass.
-7. **The Add-record picker has no keyboard navigation** and never says which
-   offer Enter will take. ⌘K's own scorer already does both — copy that.
-8. **Exports name a bundled webfont they do not embed**, so a rasterised
-   diagram is set in the fallback face and 5.3% narrower than the box mermaid
-   measured for it. Needs the font fetched and inlined as a data URI.
+**Needs a decision before it needs a patch.**
 
-**Needs re-measuring before anyone spends time on it** — each was driven at
-`f88c292`, and M29.52 or this wave may have closed it:
+1. **The BlockNote hard-break corruption** (`wrong`, not ours). MEASURED at
+   HEAD: `strategy/systems-map.md` 842 → 844 bytes on a node rename, and the
+   prose line `…The flowchart below uses the` gains a trailing `\`. It is the
+   document's markdown round-trip, not M29 — an inline source edit does it too
+   — but M29 gives it a trigger a user hits daily. Needs an editor-area owner.
+2. **A link badge clicked inside the full-screen dialog destroys it and
+   navigates the whole app** (`rough`, but it is surface loss on a click that
+   never asked for it). MEASURED: dialog count 1 → 0, scrims 0, doc title
+   "Systems map" → "Phoenix cutover standup". `useOpenPath('in-place')` is
+   deliberate for the inline block, where the doc IS the backdrop; in the
+   dialog the backdrop is what gets replaced. Peek panel, or close-first — a
+   product call.
+3. **Below ~50% zoom the node toolbar covers the node under it** (`wrong`).
+   MEASURED at 39%: `elementFromPoint` at the second node's own centre returns
+   `mermaid-node-toolbar`, so shift-click multi-select on it is dead. The
+   toolbar is 34 SCREEN px and the node gap is 40 PLANE px, so below ~85% they
+   must collide somewhere; choosing above-vs-below by headroom cannot help
+   once both sides are occupied. Wants a placement rule (flip to the side,
+   or clamp into free space), which is a design call.
+4. **Record chips repeat their node's label and cannot be grabbed**
+   (`rough`). MEASURED: chip text "Rack layout sign-offDone" against node text
+   "Rack layout sign-off"; 1762px² of overlap with the node's bottom edge; a
+   real 200px drag by the chip moved the node 0px and opened nothing. One part
+   of the original finding is now FALSE and should not be fixed: chips are
+   NARROWER than their nodes today (176 vs 345, 229 vs 455), not 30-39px wider.
 
-9. "Add record drops the 4th record outside the canvas" (M29.52 added measured
-   placement; the resize re-centring in `2f57da1` also bears on it).
-10. "There is no undo on the whiteboard" (M29.52 added the stack).
-11. "Tabbing to an overflowed toolbar button scrolls the content pane sideways"
-    — the toolbar is its own scroll container now, so Chromium should scroll
-    that instead of the page. Expected fixed; not driven.
+**Cheap, contained, and simply not done.**
 
-**Refused, with the measurement:** the five refuted findings in §1's table.
+5. **The four node popovers do not track their anchor through a wheel zoom.**
+   MEASURED: five wheel steps to 161% moved the node by (−358, −214) and the
+   shape palette by (0, +2.4), still open, now over an unrelated part of the
+   diagram. The node toolbar and the link badges track their anchors since
+   `7fa27fe`; `Popover` re-measures on window `resize` and its own
+   ResizeObserver, neither of which a CSS-transform zoom fires. The fix belongs
+   in `Popover` — a canvas-scale subscription — not in a fifth caller.
+   (A BUTTON zoom dismisses the palette, because pressing the button is an
+   outside press. Only the wheel reproduces it, which is why the first probe
+   run's "pass" was thrown away.)
+6. **The Add-record picker has no keyboard navigation.** MEASURED: 25 options,
+   0 marked, `aria-activedescendant` null, and ArrowDown moves nothing. ⌘K's
+   own scorer already does roving selection — copy that.
+7. **Exports name a bundled webfont they do not embed.** MEASURED: a
+   14,890-character exported svg names `'Instrument Sans'` in nine places and
+   carries 0 `@font-face` rules, so every rasterised diagram is set in the
+   fallback face against box geometry computed for another one.
+8. **Focus restore after the dialog closes** lands on the ProseMirror root
+   (`DIV`, text "Systems mapHow the demo produc…"), not on the "Open full
+   screen" button it came from — `useFocusRestore` captures a node BlockNote
+   later re-creates.
+
+**Refused, with the measurement:** the refuted findings in §1's table.
 The Ask AI toolbar is less obscuring than the text-selection toolbar that
 ships; left-aligned diagrams and the illegible inline gantt were fixed by
 M29.52; "Save as file… writes two files" is documented, deliberate and
