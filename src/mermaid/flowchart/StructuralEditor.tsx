@@ -80,6 +80,43 @@ function isElk(code: string): boolean {
 }
 
 /**
+ * How far each cascade step moves, and how close counts as "already taken".
+ *
+ * Both are a NODE-HEIGHT rather than a token gap: a typical flowchart node is
+ * ~50 plane units tall, and a step smaller than that lands the new node on the
+ * old one's label — measured at 28, where three records tiled into an unreadable
+ * pile with their record cards overlapping each other's titles.
+ */
+const CASCADE_STEP = 52;
+const CASCADE_HIT = 44;
+
+/**
+ * Nudges a new node off any node already sitting where it was about to land
+ * (M29.52).
+ *
+ * Every placement here answers "the middle of what the user is looking at",
+ * which is the right answer once and the wrong answer the second time: two
+ * `+ Node` presses without a drag between them put one node exactly on top of
+ * another, and it reads as the first press having done nothing. The
+ * window-cascade every desktop uses is the whole fix — step down-right until
+ * the spot is free, and give up after a few tries rather than walking a node
+ * off into the distance to satisfy a tie.
+ */
+function cascade(at: { x: number; y: number }, model: FlowchartModel): { x: number; y: number } {
+  const taken = [...storedPositions(model).values()];
+  let { x, y } = at;
+  for (let i = 0; i < 8; i++) {
+    const clash = taken.some(
+      (p) => Math.abs(p.x - x) < CASCADE_HIT && Math.abs(p.y - y) < CASCADE_HIT,
+    );
+    if (!clash) break;
+    x += CASCADE_STEP;
+    y += CASCADE_STEP;
+  }
+  return { x, y };
+}
+
+/**
  * The structural editor (M29.17–.18): mermaid renders, we bind its SVG, and
  * every interaction becomes a surgical text edit flowing out through
  * onChangeCode — the same channel typing uses, so BlockNote history gives
@@ -373,7 +410,7 @@ export function StructuralEditor({
       // since the bind effect would otherwise drop the node somewhere else.
       const frame = measurePlaneFrame(session.svg);
       if (frame === null) return base;
-      return setNodePosition(base, id, clientToPlane(frame, client));
+      return setNodePosition(base, id, cascade(clientToPlane(frame, client), base));
     },
     [],
   );
@@ -1033,7 +1070,23 @@ export function StructuralEditor({
           // select-none: a manual-mode drag across labels otherwise paints the
           // whole diagram in selection highlight. CanvasViewport carries the
           // same pair for the full-screen surface; this is the inline one.
-          className="select-none [&_svg]:h-auto [&_svg]:max-w-full"
+          //
+          // `max-w-full` ONLY off a viewport (M29.52). In a document column the
+          // svg has to fit the column. On a canvas it must not: the plane's
+          // transform is the zoom, the svg renders at its natural size, and
+          // manual layout GROWS the viewBox as nodes spread out — so refitting
+          // to the container would shrink the whole diagram a little further
+          // every time the user dragged a node outward, which is the opposite
+          // of what dragging a node outward should do.
+          //
+          // `mx-auto` for the same reason and on the same arm: a 109px diagram
+          // pinned to the left of a 638px column reads as a layout bug, not as
+          // a small diagram (measured, M29.52). On a canvas the fit already
+          // centres and the pan owns the position, so centring there would be
+          // a second opinion about the same thing.
+          className={`select-none [&_svg]:h-auto ${
+            overlayHost === null ? '[&>svg]:mx-auto [&_svg]:max-w-full' : ''
+          }`}
         />
 
         {ghost !== null && (

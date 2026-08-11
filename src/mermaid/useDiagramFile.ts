@@ -8,6 +8,20 @@ import { useVaultStore } from '@/stores/vaultStore';
 const SAVE_DEBOUNCE_MS = 500;
 
 /**
+ * How many source versions the undo stack keeps, and how close together two
+ * changes have to be to count as one (M29.52).
+ *
+ * 250ms separates the two kinds of edit this surface produces without needing
+ * to be told which is which: typing in the code overlay arrives every 50–150ms
+ * and collapses into one step, while two structural ops need two deliberate
+ * clicks and stay two. The wave's ops were all built to be "one op, one
+ * onChangeCode, one undo step" — this is the stack that claim was about, and
+ * until now it did not exist.
+ */
+const HISTORY_LIMIT = 200;
+const COALESCE_MS = 250;
+
+/**
  * The trust signal beside a diagram's title; `idle` stays quiet on purpose.
  *
  * It lives with the hook that produces `saveState` rather than with either
@@ -30,6 +44,11 @@ export interface DiagramFile {
   saveState: SaveState;
   /** The one write channel: every edit — typed or structural — goes through here. */
   handleChange: (next: string) => void;
+  /** Step back / forward through this session's edits (M29.52). No-ops at the ends. */
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 /**
@@ -99,10 +118,38 @@ export function useDiagramFile(path: string): DiagramFile {
     }
   };
 
-  const handleChange = (next: string) => {
+  // The undo stack (M29.52). Strings, not diffs: a `.mmd` is small, the whole
+  // wave's ops are already whole-source rewrites, and holding versions means
+  // undo cannot drift from what is on screen the way a replayed inverse can.
+  const past = useRef<string[]>([]);
+  const future = useRef<string[]>([]);
+  const lastPush = useRef(0);
+  // The stack lives in refs so a keystroke does not re-arm effects; this is the
+  // one bit of it a RENDER depends on, for the toolbar's disabled states.
+  const [ends, setEnds] = useState({ canUndo: false, canRedo: false });
+  const syncEnds = () =>
+    setEnds({ canUndo: past.current.length > 0, canRedo: future.current.length > 0 });
+
+  /**
+   * Every write to `code`, in one place. `remember` is false for the two moves
+   * that are themselves history navigation — otherwise undoing would push the
+   * state it just left onto the past and the stack could never advance.
+   */
+  const applyCode = (next: string, remember: boolean) => {
+    if (remember) {
+      const now = Date.now();
+      if (past.current.length === 0 || now - lastPush.current > COALESCE_MS) {
+        past.current.push(latest.current);
+        if (past.current.length > HISTORY_LIMIT) past.current.shift();
+      }
+      lastPush.current = now;
+      // A fresh edit forks the timeline: whatever was redoable is unreachable.
+      future.current = [];
+    }
     latest.current = next;
     setCode(next);
     setSaveState('dirty');
+    syncEnds();
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
@@ -110,12 +157,66 @@ export function useDiagramFile(path: string): DiagramFile {
     }, SAVE_DEBOUNCE_MS);
   };
 
+  const handleChange = (next: string) => applyCode(next, true);
+
+  const undo = () => {
+    const prev = past.current.pop();
+    if (prev === undefined) return;
+    future.current.push(latest.current);
+    applyCode(prev, false);
+  };
+
+  const redo = () => {
+    const next = future.current.pop();
+    if (next === undefined) return;
+    past.current.push(latest.current);
+    applyCode(next, false);
+  };
+
+  // Read through refs by the window listener below, which registers once.
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
+
+  /**
+   * Cmd/Ctrl+Z anywhere on this surface, because the thing a user has just
+   * clicked is a `<g>` in an svg and there is nowhere else for the key to go
+   * (measured: a real Cmd+Z after `+ Node` left the node in the file). A
+   * control with its OWN undo keeps it — the code overlay's textarea is a real
+   * text field and the browser's history there is better than ours.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))
+      ) {
+        return;
+      }
+      e.preventDefault();
+      if (e.shiftKey) redoRef.current();
+      else undoRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Load once per mount (the host's key makes a path change a fresh mount).
   useEffect(() => {
     let cancelled = false;
     setCode(null);
     setSaveState('idle');
     setLoadFailed(false);
+    // A fresh file is a fresh timeline. The host keys this hook on the path, so
+    // in practice this is a fresh mount too — but the effect also re-runs on a
+    // vault change, and undoing into another file's bytes would be a data bug,
+    // not a UI one.
+    past.current = [];
+    future.current = [];
+    setEnds({ canUndo: false, canRedo: false });
     if (vaultPath === null) return;
     void readNote(vaultPath, path)
       .then((raw) => {
@@ -146,5 +247,5 @@ export function useDiagramFile(path: string): DiagramFile {
     };
   }, []);
 
-  return { code, loadFailed, saveState, handleChange };
+  return { code, loadFailed, saveState, handleChange, undo, redo, ...ends };
 }

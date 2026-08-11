@@ -58,7 +58,8 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   // The whole file lifecycle. The entry mode is latched by
   // FullScreenDiagramEditor, from the source it mounts with — which is this
   // load's result, so the M29.21 rule is unchanged.
-  const { code, loadFailed, saveState, handleChange } = useDiagramFile(selection.path);
+  const { code, loadFailed, saveState, handleChange, undo, redo, canUndo, canRedo } =
+    useDiagramFile(selection.path);
 
   // Only a FAILED READ tombstones the page (see loadFailed above): an entry
   // the scanner has not adopted yet still opens, and an entry that lingers
@@ -120,6 +121,7 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         <FullScreenDiagramEditor
           code={code}
           onChangeCode={handleChange}
+          history={{ undo, redo, canUndo, canRedo }}
           entries={entries}
           onOpenPath={openPath}
         />

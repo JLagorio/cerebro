@@ -736,8 +736,26 @@ describe('growth is capped', () => {
     moveNode(session, binding, 'A', { x: 100_000, y: 20 });
     // Uncapped this is a ~100000-unit box, every real node sub-pixel, the
     // diagram blank. Capped, the outlier clips — the no-growth behaviour.
-    expect(svg.getAttribute('viewBox')).toBe('0 0 500 100');
-    expect(svg.style.maxWidth).toBe('500px');
+    // 920 = 200 (mermaid's own box) + 1.5 x 480, the FLOORED base (M29.52):
+    // the fixture's 200-unit box is smaller than MIN_GROWTH_BASE, so the
+    // budget is computed against the floor rather than against it.
+    expect(svg.getAttribute('viewBox')).toBe('0 0 920 100');
+    expect(svg.style.maxWidth).toBe('920px');
+    // The point of the cap, stated as the property rather than the number: the
+    // runaway is bounded to something a diagram can still be read at, and the
+    // real nodes keep a sane share of the box.
+    expect(920).toBeLessThan(100_000 / 100);
+  });
+
+  it('floors the budget against a base, so a nearly-empty canvas is arrangeable', () => {
+    // The whiteboard case, measured live before this floor existed (M29.52):
+    // one node, a ~131-unit box, and `1.5 x 131` allowed a second node barely
+    // 197 units away — `+ Node` placed one the svg then clipped 45px of.
+    const { binding, session, svg } = liveSetup({ left: 0, top: 0, width: 200 });
+    moveNode(session, binding, 'A', { x: 600, y: 20 });
+    // 600 + halfW 10 + PAD 8 = 618, comfortably inside the 920 the floor
+    // allows and far outside the 500 the bare multiple did.
+    expect(svg.getAttribute('viewBox')).toBe('0 0 618 100');
   });
 });
 

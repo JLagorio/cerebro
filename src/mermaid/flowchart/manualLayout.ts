@@ -131,6 +131,22 @@ const PAD = 8;
  */
 const GROWTH_BUDGET = 1.5;
 
+/**
+ * The extent the budget is computed against when mermaid's own box is SMALLER
+ * than this (M29.52).
+ *
+ * A multiple of mermaid's box is the right shape for the runaway it was written
+ * to stop — `%% cerebro:pos A 100000,0` must not blank the diagram — but it is
+ * the wrong shape for a canvas that starts nearly empty. A whiteboard's first
+ * node draws a ~131-unit box, so 1.5x of it allowed a second node to sit barely
+ * 197 units away: measured live, `+ Node` on a fresh whiteboard placed a node
+ * the svg then CLIPPED 45px of, label and all, because the growth hit this cap
+ * (viewBox `0 -32.75 328.69 98.25` = exactly 2.5 x 131.5). Floor the base at a
+ * few node-widths and a small diagram gets a canvas worth arranging on, while
+ * the multiple still governs anything already large enough to be at risk.
+ */
+const MIN_GROWTH_BASE = 480;
+
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 const IDENTITY: Mat = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
@@ -602,10 +618,15 @@ export function growViewBox(session: ManualLayoutSession): boolean {
   // growth is the one place manual mode can destroy the render of a diagram it
   // should mostly have left alone. Past the budget the outlier is simply
   // clipped, which is precisely the no-growth behaviour.
-  minX = Math.max(minX, vb.x - GROWTH_BUDGET * vb.w);
-  maxX = Math.min(maxX, vb.x + vb.w + GROWTH_BUDGET * vb.w);
-  minY = Math.max(minY, vb.y - GROWTH_BUDGET * vb.h);
-  maxY = Math.min(maxY, vb.y + vb.h + GROWTH_BUDGET * vb.h);
+  //
+  // The base is FLOORED (M29.52), because a multiple of a nearly-empty
+  // diagram's box is a cap of a few hundred units — see MIN_GROWTH_BASE.
+  const budgetX = GROWTH_BUDGET * Math.max(vb.w, MIN_GROWTH_BASE);
+  const budgetY = GROWTH_BUDGET * Math.max(vb.h, MIN_GROWTH_BASE);
+  minX = Math.max(minX, vb.x - budgetX);
+  maxX = Math.min(maxX, vb.x + vb.w + budgetX);
+  minY = Math.max(minY, vb.y - budgetY);
+  maxY = Math.min(maxY, vb.y + vb.h + budgetY);
   const next = {
     x: round2(minX),
     y: round2(minY),

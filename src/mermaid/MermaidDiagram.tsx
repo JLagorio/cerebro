@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { applyStoredManualLayout } from './flowchart/manualLayout';
 import { renderMermaid, type RenderResult } from './render';
+import { useLegibleWidth } from './legibleWidth';
 import { useInertDiagramLinks } from './svgLinks';
 import { useThemeEpoch } from './useThemeEpoch';
 
@@ -39,6 +40,8 @@ export function MermaidDiagram({
   // React rewrites the subtree with a new render.
   const renderedSvg = result !== null && result.ok ? result.svg : null;
   const svgRef = useInertDiagramLinks<HTMLDivElement>(renderedSvg);
+  // A wide diagram scrolls rather than shrinking into illegibility (M29.52).
+  useLegibleWidth(svgRef, renderedSvg);
 
   /**
    * MEASURED, and not what the docs imply: React 19 re-applies
@@ -131,7 +134,7 @@ export function MermaidDiagram({
     <div className="group relative w-full" data-testid="mermaid-diagram">
       <div
         ref={svgRef}
-        className="overflow-auto [&_svg]:h-auto [&_svg]:max-w-full"
+        className="overflow-auto [&>svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
         style={{ maxHeight: collapseHeight }}
         // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
         dangerouslySetInnerHTML={html}

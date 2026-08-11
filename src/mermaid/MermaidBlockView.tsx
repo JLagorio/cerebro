@@ -14,6 +14,7 @@ import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
 import { renderMermaid } from './render';
+import { useLegibleWidth } from './legibleWidth';
 import { useInertDiagramLinks } from './svgLinks';
 import { TEMPLATES } from './templates';
 import { useDebounced } from './useDebounced';
@@ -357,6 +358,8 @@ function LivePreview({ code }: { code: string }) {
   // so the strip has to key off the svg actually on screen rather than the
   // source being typed.
   const svgRef = useInertDiagramLinks<HTMLDivElement>(svg);
+  // A wide diagram scrolls rather than shrinking into illegibility (M29.52).
+  useLegibleWidth(svgRef, svg);
 
   useEffect(() => {
     if (debounced.trim() === '') {
@@ -395,7 +398,7 @@ function LivePreview({ code }: { code: string }) {
         <div
           ref={svgRef}
           data-testid="mermaid-live-preview"
-          className={`overflow-auto [&_svg]:h-auto [&_svg]:max-w-full ${error !== null ? 'opacity-60' : ''}`}
+          className={`overflow-auto [&>svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full ${error !== null ? 'opacity-60' : ''}`}
           // Safe: strict-mode mermaid output, same as every other sink in
           // this module (MermaidDiagram, MermaidLightbox) — mermaid runs in
           // securityLevel: 'strict', so the svg it returns is sanitized.

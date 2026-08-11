@@ -143,12 +143,33 @@ function startsPan(target: EventTarget | null): boolean {
  * MermaidLightbox deliberately does NOT migrate here (spec D2) — it is a
  * read-only viewer with its own settled behavior.
  */
+/**
+ * The dot grid's spacing in PLANE units, and the screen spacing it refuses to
+ * go below (M29.52).
+ *
+ * Dots are drawn on the viewport, not the plane, because a background painted
+ * inside a scaled element scales its dots into blobs — so the pattern is
+ * re-derived from the transform every frame instead: spacing × scale, offset by
+ * the pan. Below MIN_DOT_GAP the dots are closer together than they are wide
+ * and the grid turns into grey noise that moires against the pixel grid, so it
+ * fades out entirely rather than getting denser.
+ */
+const DOT_GAP = 24;
+const MIN_DOT_GAP = 9;
+
 export function CanvasViewport({
   children,
   initialFit = false,
+  dots = false,
 }: {
   children: React.ReactNode;
   initialFit?: boolean;
+  /**
+   * Paint the infinite-canvas dot grid (M29.52). On for the whiteboard, which
+   * is a place to arrange things; off for a diagram FILE, which is a document
+   * that happens to be pannable.
+   */
+  dots?: boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   // The same element as a STATE value, because a ref does not re-render the
@@ -278,6 +299,27 @@ export function CanvasViewport({
     return () => ro.disconnect();
   }, [initialFit]);
 
+  // The dot grid, re-derived from the live transform (M29.52). Painted as this
+  // element's own background rather than as a child, so it costs no node, takes
+  // no hit test, and cannot be dragged; `background-position` follows the pan
+  // exactly because both are in the same screen pixels.
+  const gap = DOT_GAP * t.scale;
+  const dotStyle: React.CSSProperties | undefined =
+    !dots || gap < MIN_DOT_GAP
+      ? undefined
+      : {
+          // `at 1px 1px` puts the dot's centre one pixel in from the tile's
+          // corner, so the pattern's origin lands on the plane's origin rather
+          // than half a tile off it.
+          backgroundImage:
+            'radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0)',
+          backgroundSize: `${gap}px ${gap}px`,
+          // Modulo the gap, so the numbers stay small at extreme pans instead of
+          // growing without bound (Chromium quantises very large background
+          // offsets, which shows up as the grid visibly jittering under a drag).
+          backgroundPosition: `${t.offset.x % gap}px ${t.offset.y % gap}px`,
+        };
+
   return (
     <CanvasTransformRefContext.Provider value={tRef}>
       <CanvasTransformContext.Provider value={t}>
@@ -288,6 +330,8 @@ export function CanvasViewport({
                 viewportRef.current = el;
                 setOverlayHost(el);
               }}
+              style={dotStyle}
+              data-dots={dots ? (gap < MIN_DOT_GAP ? 'faded' : 'on') : undefined}
               data-testid="canvas-viewport"
               // `touch-none select-none`: pan is this surface's primary gesture, and
               // pointerdown never calls preventDefault, so without them a background

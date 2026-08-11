@@ -94,7 +94,9 @@ export function recordBindings(code: string, entries: Entry[]): Map<string, Reco
  */
 export type InsertRefusal = 'opaque' | 'unbindable';
 
-export type InsertRecordResult = { ok: true; code: string } | { ok: false; reason: InsertRefusal };
+export type InsertRecordResult =
+  /** `id` is the minted node's model id, so a host can place it (M29.52). */
+  { ok: true; code: string; id: string } | { ok: false; reason: InsertRefusal };
 
 /**
  * "Add record": a node labeled with the record's title plus the click line
@@ -119,5 +121,5 @@ export function insertRecordNode(code: string, target: Entry): InsertRecordResul
   if (recordBindings(next, [target]).get(added.id)?.entry !== target) {
     return { ok: false, reason: 'unbindable' };
   }
-  return { ok: true, code: next };
+  return { ok: true, code: next, id: added.id };
 }

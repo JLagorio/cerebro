@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { useUiStore } from '@/stores/uiStore';
@@ -45,6 +46,7 @@ export function DiagramToolbar({
   showCode,
   onToggleShowCode,
   onEditVisually,
+  history,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
@@ -72,6 +74,13 @@ export function DiagramToolbar({
    * button — or null when there is nothing to promote to.
    */
   onEditVisually: (() => void) | null;
+  /**
+   * Undo/redo, when the host owns a file and therefore a history (M29.52) —
+   * the diagram page and the whiteboard. Absent inside a document block, where
+   * the DOCUMENT's own history already covers the diagram and a second pair of
+   * buttons would be a second, disagreeing timeline.
+   */
+  history?: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean };
 }) {
   const toast = useUiStore((s) => s.toast);
   const model = useMemo(() => parseFlowchart(code), [code]);
@@ -112,6 +121,29 @@ export function DiagramToolbar({
     >
       {title !== undefined && (
         <span className="mr-1 truncate text-sm font-medium text-n-900">{title}</span>
+      )}
+      {history !== undefined && (
+        <>
+          {/* First in the row, ahead of the mode-dependent controls, because
+              they are the only two buttons here that mean the same thing in
+              every mode — and because a user reaches for undo without
+              looking. */}
+          <IconButton
+            icon="undo-2"
+            label="Undo"
+            size="sm"
+            disabled={!history.canUndo}
+            onClick={history.undo}
+          />
+          <IconButton
+            icon="redo-2"
+            label="Redo"
+            size="sm"
+            disabled={!history.canRedo}
+            onClick={history.redo}
+          />
+          <span className="mx-0.5 h-4 w-px bg-n-100" />
+        </>
       )}
       {mode === 'visual' && model !== null && (
         <>

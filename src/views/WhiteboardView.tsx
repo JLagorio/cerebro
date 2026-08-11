@@ -9,6 +9,8 @@ import { writeTextFile } from '@/lib/ipc';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { slugify } from '@/lib/slug';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
+import type { NodePlacer } from '@/mermaid/flowchart/StructuralEditor';
+import { parseFlowchart, serialize } from '@/mermaid/flowchart/model';
 import { SAVE_LABEL, useDiagramFile } from '@/mermaid/useDiagramFile';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -228,7 +230,11 @@ function WhiteboardCanvas({
   onPresentationChange?: (next: Presentation) => void;
   viewName: string;
 }) {
-  const { code, loadFailed, saveState, handleChange } = useDiagramFile(file);
+  const { code, loadFailed, saveState, handleChange, undo, redo, canUndo, canRedo } =
+    useDiagramFile(file);
+  // Shared with the editor inside FullScreenDiagramEditor, so "Add record"
+  // places a node exactly as `+ Node` does (M29.52).
+  const placerRef = useRef<NodePlacer | null>(null);
   // The link popover's record search and what a link badge opens (M29.38) —
   // the same wiring DiagramPage gives the shared editor, so a whiteboard can
   // bind a node to a record instead of being URL-only. `in-place`, not
@@ -262,18 +268,17 @@ function WhiteboardCanvas({
    * step. A refusal is a true no-op — no commit, nothing to undo — and says so
    * rather than throwing (the store-layer ethos, AGENTS.md).
    *
-   * KNOWN LIMITATION, deliberate (M29.48): the new node gets no stored manual
-   * position. The seed asks for manual layout, but `applyManualLayout` only
-   * moves nodes the source already places, so this one lands wherever dagre
-   * put it and the user drags it once — after which the drag stores a position
-   * like any other. Placing it properly means the toolbar's `NodePlacer`,
-   * which lives on `FullScreenDiagramEditor`'s internal `placerRef` and is
-   * armed only while the structural editor is mounted in manual mode. Reaching
-   * it from out here is a second additive prop to a Stage D file plus a
-   * "not placeable right now" branch for the demoted (code-mode) canvas, and
-   * "where should a record added from a BAR land" is a product question the
-   * toolbar's viewport-centre answer does not obviously settle. Left to a
-   * stage that can decide it; the current behaviour is safe and self-correcting.
+   * CLOSED (M29.52), and the limitation this comment used to record is worth
+   * keeping because it is why the surface looked broken: the new node got no
+   * stored position, so on a manual-layout canvas it landed wherever dagre put
+   * it — a row that widened with every record until, measured live at three,
+   * the third was already clipped by the viewport and a fourth was invisible.
+   * The answer turned out to be the one the note doubted: the toolbar's
+   * viewport-centre placement, which is what `+ Node` has always done here, so
+   * both insert paths now agree instead of disagreeing. `placerRef` is shared
+   * rather than internal, and a canvas with no armed placer (code mode, an
+   * unmeasurable host) falls through to the unplaced insertion exactly as
+   * before — a refusal to place is never a refusal to insert.
    */
   const addRecord = (entry: Entry) => {
     setAdding(false);
@@ -291,7 +296,17 @@ function WhiteboardCanvas({
       );
       return;
     }
-    handleChange(result.code);
+    // The record lands where the user is looking, exactly as `+ Node` does
+    // (M29.52). This used to be the KNOWN LIMITATION above: with no stored
+    // position the node went wherever dagre put it, which on a manual-layout
+    // canvas meant a widening row marching off the right-hand edge — measured
+    // live at three records, the third already clipped by the viewport. The
+    // placer is the editor's own, shared through `placerRef`, so the answer is
+    // the toolbar's answer rather than a second one; and it cascades off
+    // anything already there, so two records in a row do not stack.
+    const model = parseFlowchart(result.code);
+    const placed = model === null ? null : (placerRef.current?.(model, result.id) ?? null);
+    handleChange(placed === null ? result.code : serialize(placed));
   };
 
   if (loadFailed) {
@@ -382,6 +397,13 @@ function WhiteboardCanvas({
         onChangeCode={handleChange}
         title={viewName}
         embedded
+        // The one surface that gets the dot grid (M29.52): a whiteboard is a
+        // place you arrange things on, and every tool that offers one — Miro,
+        // Lucidchart, ClickUp — says so with dots. A `.mmd` file does not get
+        // them; that surface is a document that happens to pan.
+        dots
+        history={{ undo, redo, canUndo, canRedo }}
+        placerRef={placerRef}
         entries={vaultEntries}
         onOpenPath={openPath}
         overlay={<RecordChipOverlay code={code} entries={vaultEntries} schema={schema} />}

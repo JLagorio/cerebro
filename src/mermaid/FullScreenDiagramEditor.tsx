@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { Entry } from '@/engine/types';
 import { CanvasViewport } from './CanvasViewport';
 import { CodeOverlay } from './CodeOverlay';
@@ -42,6 +42,9 @@ export function FullScreenDiagramEditor({
   // `_` prefix is the repo's documented marker for an intentionally unused
   // binding (eslint.config.js) — the PROP keeps its real name for callers.
   embedded: _embedded = false,
+  dots = false,
+  history,
+  placerRef: externalPlacerRef,
   overlay,
   entries,
   onOpenPath,
@@ -55,6 +58,16 @@ export function FullScreenDiagramEditor({
   onOpenPath?: (path: string) => void;
   /** Stage-H forward contract (spec D1): fill the given container, assume no page chrome. */
   embedded?: boolean;
+  /**
+   * Paint the canvas dot grid (M29.52). Pure pass-through to CanvasViewport.
+   * The whiteboard asks for it; a diagram FILE does not, because that surface
+   * is a document you happen to be able to pan, not a board you arrange on.
+   */
+  dots?: boolean;
+  /** Undo/redo from the host's own file history (M29.52); pure pass-through. */
+  history?: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean };
+  /** Share the editor's node placer, for a host with its own insert action (M29.52). */
+  placerRef?: MutableRefObject<NodePlacer | null>;
   /** Spec D1: rendered INSIDE the CanvasViewport plane, so an overlay pans and zooms with
    *  the diagram and can measure in plane units (`useCanvasTransformRef`). The whiteboard's
    *  record chips are the one host using it (M29.47); pure pass-through here. */
@@ -107,7 +120,11 @@ export function FullScreenDiagramEditor({
    * well enough to place one. This ref is the whole contract between them —
    * filled while manual mode is on, null otherwise (M29.42 review).
    */
-  const placerRef = useRef<NodePlacer | null>(null);
+  const ownPlacerRef = useRef<NodePlacer | null>(null);
+  // A host that mints nodes of its own (the whiteboard's "Add record") needs
+  // the same measured placement the toolbar gets, so it may supply the ref
+  // and share one (M29.52). Nobody else passes one; the default is private.
+  const placerRef = externalPlacerRef ?? ownPlacerRef;
 
   return (
     <div data-testid="fullscreen-diagram-editor" className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -115,6 +132,7 @@ export function FullScreenDiagramEditor({
         code={code}
         onChangeCode={onChangeCode}
         placerRef={placerRef}
+        history={history}
         title={title}
         mode={mode}
         showCode={showCode}
@@ -122,7 +140,7 @@ export function FullScreenDiagramEditor({
         onEditVisually={flowchartCapable && mode === 'code' ? () => setMode('visual') : null}
       />
       <div className="relative min-h-0 flex-1">
-        <CanvasViewport initialFit>
+        <CanvasViewport initialFit dots={dots}>
           {/*
             `&& flowchartCapable`, matching DiagramPage.tsx:232. Demotion below
             is a PASSIVE effect, so a source that stops parsing as a flowchart

@@ -157,6 +157,11 @@
   --surface-raised: var(--n-0);
   --surface-selected: var(--cortex-50);
   --surface-ai: var(--synapse-50);
+  /* The whiteboard's dot grid (M29.52). A literal, not an alias: this is the
+     only thing in the app drawn as 1px dots on a 24px pitch, and at that size
+     it has to sit between --n-100 (invisible) and --n-300 (a texture that
+     competes with the diagram). Picked by eye against --surface-board. */
+  --canvas-dot: #d5d9e3;
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
   --text-muted: var(--n-500);
@@ -294,6 +299,10 @@
   --surface-raised: var(--n-100);
   --surface-selected: #1b2547;
   --surface-ai: #241c3d;
+  /* Lighter than the ground it sits on, the inverse of the light theme — and
+     nearer its ground than the light one is to hers, because a light dot on a
+     dark field reads louder than a dark dot on a light one at the same delta. */
+  --canvas-dot: #333a49;
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
   --text-muted: var(--n-500);
