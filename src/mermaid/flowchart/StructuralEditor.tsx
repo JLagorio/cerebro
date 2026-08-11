@@ -201,8 +201,13 @@ export function StructuralEditor({
   const manualRef = useRef<ManualLayoutSession | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
-  // `dy` is the SCREEN-pixel offset from the anchor — see TOOLBAR_H.
-  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number; dy: number } | null>(null);
+  // `dx`/`dy` are the SCREEN-pixel offsets from the anchor — see TOOLBAR_H.
+  const [toolbarPos, setToolbarPos] = useState<{
+    x: number;
+    y: number;
+    dx: number;
+    dy: number;
+  } | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
   const [shapeOpen, setShapeOpen] = useState(false);
   // The INSERT palette (M29.39), on the structural toolbar rather than the node
@@ -600,11 +605,46 @@ export function StructuralEditor({
         const hostBox = host.getBoundingClientRect();
         const box = el.getBoundingClientRect();
         const s = transformRef.current.scale;
-        const fitsAbove = box.top - hostBox.top - TOOLBAR_H >= 0;
+
+        /**
+         * Which side of the node is FREE (M29.53).
+         *
+         * Choosing by headroom alone was not enough. The toolbar is 34 SCREEN
+         * px and the gap between two nodes is 40 PLANE px, so below about 85%
+         * they must overlap somewhere — MEASURED at 39%, `elementFromPoint` at
+         * the next node's own centre returned the toolbar, which made
+         * shift-click multi-select on that node do nothing at all, silently.
+         * So a side is only free if no OTHER node is sitting in it.
+         */
+        const others: DOMRect[] = [];
+        for (const [otherId, otherEl] of binding.nodeEls) {
+          if (otherId !== id) others.push(otherEl.getBoundingClientRect());
+        }
+        const occupied = (top: number): boolean =>
+          others.some(
+            (o) =>
+              o.bottom > top && o.top < top + TOOLBAR_H && o.right > box.left && o.left < box.right,
+          );
+        const hasHeadroom = box.top - hostBox.top - TOOLBAR_H >= 0;
+        const above = hasHeadroom && !occupied(box.top - TOOLBAR_H);
+        const below = !occupied(box.bottom + TOOLBAR_GAP);
+
+        if (above || below) {
+          setToolbarPos({
+            x: (box.left - hostBox.left) / s,
+            y: ((above ? box.top : box.bottom) - hostBox.top) / s,
+            dx: 0,
+            dy: above ? -TOOLBAR_H : TOOLBAR_GAP,
+          });
+          return;
+        }
+        // Both sides taken: go beside the node, where a column of nodes never
+        // is. The anchor is its top-right corner and the gap is horizontal.
         setToolbarPos({
-          x: (box.left - hostBox.left) / s,
-          y: ((fitsAbove ? box.top : box.bottom) - hostBox.top) / s,
-          dy: fitsAbove ? -TOOLBAR_H : TOOLBAR_GAP,
+          x: (box.right - hostBox.left) / s,
+          y: (box.top - hostBox.top) / s,
+          dx: TOOLBAR_GAP,
+          dy: 0,
         });
       };
 
@@ -1436,7 +1476,11 @@ export function StructuralEditor({
             data-testid="mermaid-node-toolbar"
             data-no-pan
             className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-            style={{ left: toolbarPos.x, top: toolbarPos.y, ...screenChrome(0, toolbarPos.dy) }}
+            style={{
+              left: toolbarPos.x,
+              top: toolbarPos.y,
+              ...screenChrome(toolbarPos.dx, toolbarPos.dy),
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <button

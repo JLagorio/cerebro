@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
@@ -56,6 +56,12 @@ const rect = (left: number, top: number, width: number, height: number): DOMRect
     toJSON: () => ({}),
   }) as DOMRect;
 
+// jsdom implements no PointerEvent, and the press-forward below constructs one
+// — the same shim CanvasViewport.test.tsx and MermaidLightbox.test.tsx carry.
+if (typeof window.PointerEvent === 'undefined') {
+  window.PointerEvent = MouseEvent as unknown as typeof window.PointerEvent;
+}
+
 const RECTS = new Map<string, DOMRect>();
 const NATIVE_RECT = Element.prototype.getBoundingClientRect;
 
@@ -109,11 +115,16 @@ describe('RecordChipOverlay', () => {
     Element.prototype.getBoundingClientRect = NATIVE_RECT;
   });
 
-  it('draws a chip for each bound node, titled and status-badged', async () => {
+  it('adds what the node does not already say, and not its title again', async () => {
     render(<Plane code={CODE} />);
     const chip = await screen.findByTestId('whiteboard-record-chip');
-    expect(chip.textContent).toContain('Ship v2');
     expect(chip.textContent).toContain('Doing');
+    // The node's own label IS the record's title — MEASURED byte for byte on a
+    // real whiteboard — so printing it again said nothing and cost the chip its
+    // whole width (M29.53). The name lives in the accessible label, where a
+    // screen reader still reads it.
+    expect(chip.textContent).not.toContain('Ship v2');
+    expect(chip.getAttribute('aria-label')).toBe('Open Ship v2');
   });
 
   it('positions the chip in PLANE units — origin subtracted, scale divided', async () => {
@@ -155,6 +166,37 @@ describe('RecordChipOverlay', () => {
     // M9.3: the whiteboard IS the backdrop, so the detail panel opens over it
     // rather than the app navigating somewhere to show the record in context.
     expect(h.modes).toContain('in-place');
+  });
+
+  /**
+   * The whiteboard's primary gesture, through the thing sitting on top of it
+   * (M29.53). MEASURED before this: a 200px drag by the chip moved the node
+   * 0px, wrote no position, and opened nothing — the press was simply eaten by
+   * a button.
+   */
+  it('hands a press down to the node, so a drag by the chip moves it', async () => {
+    render(<Plane code={CODE} />);
+    const chip = await screen.findByTestId('whiteboard-record-chip');
+    const seen: { x: number; y: number }[] = [];
+    document
+      .getElementById('flowchart-a-0')!
+      .addEventListener('pointerdown', (e) => seen.push({ x: e.clientX, y: e.clientY }));
+    fireEvent.pointerDown(chip, { clientX: 80, clientY: 44 });
+    expect(seen).toEqual([{ x: 80, y: 44 }]);
+  });
+
+  it('and a drag is not a click — the record does not open under the cursor', async () => {
+    render(<Plane code={CODE} />);
+    const chip = await screen.findByTestId('whiteboard-record-chip');
+    fireEvent.pointerDown(chip, { clientX: 80, clientY: 44 });
+    // The browser fires `click` after any pointerup on the same element, so
+    // without the distance check every drag BY a chip also opened its record.
+    fireEvent.click(chip, { clientX: 200, clientY: 160 });
+    expect(h.open).not.toHaveBeenCalled();
+    // A press that went nowhere is still a click.
+    fireEvent.pointerDown(chip, { clientX: 80, clientY: 44 });
+    fireEvent.click(chip, { clientX: 81, clientY: 45 });
+    expect(h.open).toHaveBeenCalledWith('delivery/ship-v2.md');
   });
 
   it('draws nothing when no click line binds', async () => {

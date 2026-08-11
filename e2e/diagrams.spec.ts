@@ -1220,3 +1220,77 @@ test('M29.53: an exported svg carries the font it names', async ({ page, context
   expect(dataUri).toBeTruthy();
   expect(svg).toContain("font-family:'Instrument Sans'");
 });
+
+test('M29.53: a link badge closes the dialog deliberately, then navigates', async ({ page }) => {
+  test.setTimeout(120_000);
+  await bootVault(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('Systems map');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first().click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Open full screen' }).first().click();
+  const dialog = page.getByTestId('fullscreen-diagram-editor');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 30_000 });
+  await dialog.locator('g.node').first().click();
+  await page.getByRole('button', { name: 'Node link' }).click();
+  await page.getByLabel('Link target').fill('Phoenix');
+  await page.waitForTimeout(400);
+  const offers = await page
+    .getByRole('button')
+    .evaluateAll((els) =>
+      els.map((e) => e.getAttribute('aria-label')).filter((l) => l?.startsWith('Link to')),
+    );
+  const record = offers.find((l) => l !== 'Link to URL')!;
+  await page.getByRole('button', { name: record, exact: true }).click();
+  const badge = page.getByTestId('mermaid-link-badge').first();
+  await expect(badge).toBeVisible({ timeout: 20_000 });
+  await badge.click();
+  await page.waitForTimeout(900);
+  const scrims = await page.locator('.cb-dlg-scrim').count();
+  const open = await page.getByTestId('fullscreen-diagram-editor').count();
+  const title = await page.getByTestId('doc-title').textContent();
+  console.log('M29.53 badge — dialog:', open, '| scrims:', scrims, '| title:', title);
+  // The destination is the same; what changed is that the modal came down
+  // through its own close rather than being torn out with the document.
+  expect(open).toBe(0);
+  expect(scrims).toBe(0);
+  expect(title).toContain('Phoenix');
+});
+
+test('M29.53: at 39% the node toolbar leaves the next node clickable', async ({ page }) => {
+  test.setTimeout(90_000);
+  await bootVault(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('Pipeline');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first().click();
+  await expect(page.getByTestId('diagram-page')).toBeVisible();
+  await page
+    .getByTestId('structural-host')
+    .locator('svg[id^="cerebro-mermaid-"]')
+    .waitFor({ timeout: 30_000 });
+  for (let i = 0; i < 10; i++) await page.getByRole('button', { name: 'Zoom out' }).click();
+  const zoom = await page.getByRole('button', { name: 'Reset zoom' }).textContent();
+  const nodes = page.locator('g.node');
+  await nodes.first().click();
+  await expect(page.getByTestId('mermaid-node-toolbar')).toBeVisible();
+  const second = await nodes.nth(1).boundingBox();
+  const cx = (second?.x ?? 0) + (second?.width ?? 0) / 2;
+  const cy = (second?.y ?? 0) + (second?.height ?? 0) / 2;
+  const hit = await page.evaluate(
+    ([x, y]) => {
+      const el = document.elementFromPoint(x as number, y as number);
+      return el?.closest('[data-testid]')?.getAttribute('data-testid') ?? el?.tagName ?? null;
+    },
+    [cx, cy],
+  );
+  console.log('M29.53 toolbar/zoom', zoom, '| elementFromPoint at node 2 centre:', hit);
+  expect(hit).not.toBe('mermaid-node-toolbar');
+  // The element under that point is the node itself, through its own label —
+  // which is the whole claim. What happens NEXT to a plain-click-then-
+  // shift-click is a separate, pre-existing story (see the handoff): measured
+  // identical at 100% zoom, and identical with every source change stashed.
+});

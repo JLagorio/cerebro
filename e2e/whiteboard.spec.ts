@@ -163,7 +163,10 @@ test('whiteboard: a tab creates its canvas, takes a record, and opens it', async
   const chip = page.getByTestId('whiteboard-record-chip');
   await expect(chip).toHaveCount(1, { timeout: 20_000 });
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText(pickedTitle);
+  // NOT the title (M29.53): the node's own label IS the record's title, so the
+  // chip printed it twice and spent its whole width doing it. The name is in
+  // the accessible label below, which is where a screen reader reads it.
+  await expect(chip).not.toContainText(pickedTitle);
   // The chip names the record it opens, for a screen reader and for the tooltip.
   await expect(chip).toHaveAttribute('aria-label', `Open ${pickedTitle}`);
   await expect(chip).toHaveAttribute('title', pickedPath);
@@ -255,4 +258,55 @@ test('whiteboard: the record picker marks the row Enter will take', async ({ pag
   expect(state.painted).toBe(1);
   expect(state.markedIsSecond).toBe(true);
   expect(state.activeDescendant).toBeTruthy();
+});
+
+test('whiteboard: a chip adds only what the node does not say, and drags it', async ({ page }) => {
+  test.setTimeout(150_000);
+  await boot(page);
+  await openDeliverySchedule(page);
+  await addWhiteboardTab(page);
+  await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 15_000 });
+  await page
+    .getByTestId('structural-host')
+    .locator('svg[id^="cerebro-mermaid-"]')
+    .waitFor({ timeout: 30_000 });
+  await page.getByTestId('whiteboard-add-record').click();
+  await page.getByTestId('whiteboard-add-option').first().click();
+  await page.waitForTimeout(900);
+  const chip = page.getByTestId('whiteboard-record-chip').first();
+  await expect(chip).toBeVisible({ timeout: 15_000 });
+  const node = page.locator('g.node').first();
+  const nodeText = (await node.textContent())?.trim() ?? '';
+  const chipText = (await chip.textContent())?.trim() ?? '';
+  const cb = await chip.boundingBox();
+  const nb0 = await node.boundingBox();
+  console.log(
+    'M29.53 chip — node text:',
+    JSON.stringify(nodeText),
+    '| chip text:',
+    JSON.stringify(chipText),
+  );
+  expect(chipText).not.toContain(nodeText);
+
+  await page.mouse.move((cb?.x ?? 0) + (cb?.width ?? 0) / 2, (cb?.y ?? 0) + (cb?.height ?? 0) / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i++) {
+    await page.mouse.move(
+      (cb?.x ?? 0) + (cb?.width ?? 0) / 2 - 25 * i,
+      (cb?.y ?? 0) + (cb?.height ?? 0) / 2 - 15 * i,
+    );
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(1200);
+  const nb1 = await node.boundingBox();
+  const moved = Math.round(
+    Math.abs((nb1?.x ?? 0) - (nb0?.x ?? 0)) + Math.abs((nb1?.y ?? 0) - (nb0?.y ?? 0)),
+  );
+  const panel = await page.getByTestId('detail-panel').count();
+  console.log('M29.53 chip — node moved by', moved, 'px | detail panel opened by the drag:', panel);
+  expect(moved).toBeGreaterThan(20);
+  expect(panel).toBe(0);
+  // A click that goes nowhere still opens the record.
+  await chip.click();
+  await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 10_000 });
 });

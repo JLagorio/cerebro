@@ -1995,6 +1995,42 @@ describe('StructuralEditor inside a zoomed CanvasViewport', () => {
     expect(screen.queryByTestId('mermaid-node-toolbar')).toBeNull();
   });
 
+  it('goes BESIDE the node when another node holds both the space above and below', async () => {
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      // A at the very top (no headroom for a 34px toolbar above it) with B
+      // parked in the strip immediately below it — the shape of a top-down
+      // flowchart at low zoom, where the 34 SCREEN px of toolbar cannot fit in
+      // a 40 PLANE px gap.
+      'flowchart-A-0': { left: 20, top: 0, width: 20, height: 20 },
+      'flowchart-B-1': { left: 20, top: 26, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const r = rects[this.id] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      await renderZoomed();
+      await userEvent.click(document.getElementById('flowchart-A-0')!);
+      const toolbar = screen.getByTestId('mermaid-node-toolbar');
+      // MEASURED at 39% before this: elementFromPoint at the SECOND node's own
+      // centre returned this toolbar, so shift-clicking it to multi-select did
+      // nothing at all, silently. Beside the node is where a column never is.
+      expect(toolbar.style.left).toBe(`${40 / ZOOMED}px`);
+      expect(toolbar.style.top).toBe('0px');
+      expect(toolbar.style.transform).toBe(`scale(${1 / ZOOMED}) translate(6px, 0px)`);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
   it('emits no counter-scale when there is no zoom to undo', async () => {
     render(
       <CanvasViewport>

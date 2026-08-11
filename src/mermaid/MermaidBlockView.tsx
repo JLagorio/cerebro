@@ -468,7 +468,20 @@ export function MermaidBlockView({
             code={code}
             onChangeCode={onChangeCode}
             entries={entries}
-            onOpenPath={openPath}
+            // The dialog comes down first, deliberately (M29.53). `in-place` is
+            // right for the INLINE block, where the doc being replaced IS the
+            // backdrop — but in here the backdrop is what the navigation
+            // replaces, and this Dialog is rendered inside the block's own
+            // React subtree, so unmounting the doc unmounted the modal with no
+            // onClose, no focus restore and no chance to say no. MEASURED: one
+            // badge click took the dialog 1 → 0, the scrims to 0, and the app
+            // from "Systems map" to "Phoenix cutover standup". Closing first
+            // means the surface leaves the way it does for every other exit,
+            // and focus lands back on the trigger.
+            onOpenPath={(path) => {
+              setFullScreen(false);
+              openPath(path);
+            }}
           />
         </Dialog>
       )}

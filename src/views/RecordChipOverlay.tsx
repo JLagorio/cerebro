@@ -5,6 +5,7 @@ import { useCanvasScale, useCanvasTransformRef } from '@/mermaid/CanvasViewport'
 import { claimedByHostEditor } from '@/mermaid/keys';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { bindFlowchartSvg } from '@/mermaid/flowchart/svgBinding';
+import { Icon } from '@/components/ui/Icon';
 import { FieldChip } from '@/views/FieldChip';
 import type { RecordBinding } from '@/views/whiteboardBindings';
 import { modelRecordBindings } from '@/views/whiteboardBindings';
@@ -97,6 +98,19 @@ export function RecordChipOverlay({
     scale === 1 ? undefined : { transform: `scale(${1 / scale})`, transformOrigin: '0 0' };
   const rootRef = useRef<HTMLDivElement>(null);
   const [rects, setRects] = useState<ReadonlyMap<string, NodeRect>>(NO_RECTS);
+  /**
+   * The node elements the last measure resolved, and the press in flight
+   * (M29.53).
+   *
+   * A chip is a button, so a press on it never reached the node's own
+   * pointerdown handler — MEASURED, a 200px drag by the chip moved the node
+   * 0px and opened nothing, on a surface whose primary gesture is dragging
+   * things around. The press is handed to the node now; the click that follows
+   * still opens the record, unless the pointer travelled far enough to have
+   * been a drag.
+   */
+  const nodeElsRef = useRef<Map<string, SVGGElement>>(new Map());
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
 
   // ONE parse per code change, shared by the bindings and the measurement.
   // `measure` re-runs on every plane mutation — which includes the structural
@@ -120,6 +134,7 @@ export function RecordChipOverlay({
     const base = root.getBoundingClientRect();
     const scale = transformRef.current.scale;
     const next = new Map<string, NodeRect>();
+    nodeElsRef.current = binding.nodeEls;
     for (const [id, el] of binding.nodeEls) {
       if (!bound.has(id)) continue;
       const r = el.getBoundingClientRect();
@@ -179,10 +194,34 @@ export function RecordChipOverlay({
                 ? `${entry.path} — another click line also links this node, so the canvas may open something else`
                 : entry.path
             }
+            onPointerDown={(e) => {
+              pressRef.current = { x: e.clientX, y: e.clientY };
+              const node = nodeElsRef.current.get(id);
+              if (node === undefined || typeof PointerEvent !== 'function') return;
+              // Dispatched AT the node, not bubbled: the editor's own
+              // `addEventListener('pointerdown')` is what starts a move, and a
+              // bubbling copy would also reach the viewport's pan handler.
+              node.dispatchEvent(
+                new PointerEvent('pointerdown', {
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  bubbles: false,
+                  cancelable: true,
+                }),
+              );
+            }}
             onClick={(e) => {
               // The node underneath is the structural editor's selection
               // target; opening a record must not also select the node.
               e.stopPropagation();
+              // A drag is not a click. The browser fires this after any
+              // pointerup on the same element, so without the distance check
+              // every drag BY a chip would also open the record it dragged.
+              const press = pressRef.current;
+              pressRef.current = null;
+              if (press !== null && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 3) {
+                return;
+              }
               open(entry.path);
             }}
             // Only the keys the canvas would act on (M29.53). A blanket stop
@@ -209,10 +248,15 @@ export function RecordChipOverlay({
             }}
             className="pointer-events-auto absolute flex items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 shadow-[var(--shadow-sm)] hover:border-cortex-500"
           >
-            <span className="truncate text-xs font-medium text-n-800">{entry.title}</span>
-            {/* Capability-gated: a record whose type declares no status field
-                gets no badge, and `FieldChip` renders null for an empty
-                display, so an unset status is silent rather than blank. */}
+            {/* The node's own label IS the record's title — MEASURED, byte
+                for byte — so printing it again said nothing and cost the chip
+                its whole width. What is left is the affordance (this glyph is
+                what says "there is a record here to open") plus whatever the
+                node does NOT already say. Capability-gated: a record whose type
+                declares no status field gets no badge, and `FieldChip` renders
+                null for an empty display, so an unset status is silent rather
+                than blank. */}
+            <Icon name="arrow-up-right" size={11} color="var(--n-500)" />
             {status !== null && <FieldChip resolved={status} />}
           </button>
         );
