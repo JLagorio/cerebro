@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import type { Entry, Schema } from '@/engine/types';
 import { useCanvasScale, useCanvasTransformRef } from '@/mermaid/CanvasViewport';
+import { claimedByHostEditor } from '@/mermaid/keys';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { bindFlowchartSvg } from '@/mermaid/flowchart/svgBinding';
 import { FieldChip } from '@/views/FieldChip';
@@ -184,7 +185,14 @@ export function RecordChipOverlay({
               e.stopPropagation();
               open(entry.path);
             }}
-            onKeyDown={(e) => e.stopPropagation()}
+            // Only the keys the canvas would act on (M29.53). A blanket stop
+            // also ate Escape — and the chip KEEPS focus after its own click,
+            // so the detail panel it had just opened could not be closed with
+            // the key that closes every other panel (MEASURED twice, in two
+            // runs; Tab first, or a click anywhere else, and Escape worked).
+            onKeyDown={(e) => {
+              if (claimedByHostEditor(e) && e.key !== 'Escape') e.stopPropagation();
+            }}
             // Anchored to the node's lower edge, slightly overlapping it, so
             // the card reads as attached without covering the node's own
             // label — and clear of the link badge, which the shared editor

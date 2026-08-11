@@ -175,6 +175,19 @@ export function ViewTabs({
             This removes the tab and everything it holds — its{' '}
             {layoutLabel(deleting.presentation.type).toLowerCase()} layout, filters, sort, grouping
             and column arrangement. The records stay where they are.
+            {deleting.presentation.type === 'whiteboard' && (
+              <>
+                {' '}
+                {/* The one thing the sentence above got wrong (M29.53): a
+                    whiteboard's drawing lives in its own `.mmd` file, and
+                    deleting the tab drops the pointer to it without touching
+                    the file — MEASURED, the orphan was still on disk with both
+                    record nodes in it, and re-creating a view of the same name
+                    minted a second file beside it. Keeping the drawing is the
+                    right call; saying so is the missing half. */}
+                Its drawing stays too, as a file under this list&rsquo;s whiteboards folder.
+              </>
+            )}
           </p>
         </Dialog>
       )}

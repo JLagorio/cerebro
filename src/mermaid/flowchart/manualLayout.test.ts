@@ -408,7 +408,9 @@ describe('growViewBox (M29.40 spike exit criterion: clipping is TOTAL, not parti
     moveNode(session, binding, 'A', { x: 50, y: 20 });
     expect(svg.getAttribute('viewBox')).toBe('0 0 200 100');
     expect(svg.style.maxWidth).toBe('200px');
-    expect(growViewBox(session)).toBe(false);
+    // `grew` false AND no picture shift: nothing needed the room, so nothing
+    // moved (M29.53 widened the return to carry that second answer).
+    expect(growViewBox(session)).toEqual({ grew: false, shift: { x: 0, y: 0 } });
   });
 
   it('scales width and height attributes when mermaid wrote pixel sizes instead', () => {
@@ -790,5 +792,35 @@ describe('the last two honest-degradation cases', () => {
     moveNode(session, binding, 'A', { x: 30, y: 20 });
     expect(svg.getAttribute('viewBox')).toBe('0 0 148.625 100.3125');
     expect(svg.style.maxWidth).toBe('200px');
+  });
+});
+
+/**
+ * The drag that moved everything except the node under the cursor (M29.53).
+ *
+ * MEASURED live on a whiteboard: a (-600, -420) drag left node A at exactly
+ * left=880 through every sample of the gesture and after the drop, while
+ * untouched node B travelled 1108,550 -> 1709,969 — the exact negation of the
+ * gesture — which put it and its record chip outside the canvas. The stored
+ * position was right the whole time (`%% cerebro:pos n1 -503,-387`), which is
+ * why every unit test passed: the geometry was never wrong, the PICTURE moved.
+ */
+describe('growViewBox reports how far the picture moved', () => {
+  it('an origin that moves left slides the content right, in screen pixels', () => {
+    const { binding, session } = setup();
+    // The same drag as the case above: A to plane x=-50, origin 0 -> -68.
+    const shift = moveNode(session, binding, 'A', { x: -50, y: 20 });
+    // One screen pixel per plane unit in this fixture (200px wide, 200 units),
+    // so the picture just travelled 68px to the right — which is precisely what
+    // made the OTHER node appear to move while the dragged one stood still.
+    expect(shift.x).toBeCloseTo(68, 6);
+    expect(shift.y).toBeCloseTo(0, 6);
+  });
+
+  it('reports nothing when the origin holds still, however much the box grows', () => {
+    const { binding, session } = setup();
+    // Growing to the RIGHT moves no plane point relative to the svg's origin,
+    // so there is nothing for a host to cancel.
+    expect(moveNode(session, binding, 'A', { x: 280, y: 20 })).toEqual({ x: 0, y: 0 });
   });
 });

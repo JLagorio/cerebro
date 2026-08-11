@@ -11,7 +11,12 @@ import {
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
-import { useCanvasOverlayHost, useCanvasScale, useCanvasTransformRef } from '../CanvasViewport';
+import {
+  useCanvasOverlayHost,
+  useCanvasPan,
+  useCanvasScale,
+  useCanvasTransformRef,
+} from '../CanvasViewport';
 import { renderMermaid } from '../render';
 import { useThemeEpoch } from '../useThemeEpoch';
 import { neutralizeDiagramLinks } from '../svgLinks';
@@ -270,6 +275,13 @@ export function StructuralEditor({
   // mount and mis-place every overlay after a zoom — and jsdom rects are all
   // 0×0, so no unit test could ever catch that.
   const transformRef = useCanvasTransformRef();
+  /**
+   * Cancels the picture-shift a viewBox growth causes (M29.53). Held through a
+   * ref because the gesture listeners register once per model, not per render.
+   */
+  const panBy = useCanvasPan();
+  const panByRef = useRef(panBy);
+  panByRef.current = panBy;
 
   /**
    * Chrome does not zoom with the diagram (M29.51).
@@ -831,9 +843,17 @@ export function StructuralEditor({
         }
         const delta = clientDeltaToPlane(gesture.frame, { x: dx, y: dy });
         // Transform + incident-edge writes only: no React state, no model
-        // churn, nothing that could re-render this component mid-gesture.
+        // churn, nothing that could re-render this component mid-gesture —
+        // except the pan below, which is a screen correction rather than a
+        // change to the diagram, and only happens on a frame that grew the box.
         const target = { x: gesture.from.x + delta.x, y: gesture.from.y + delta.y };
-        moveNode(session, binding, gesture.id, target);
+        const shift = moveNode(session, binding, gesture.id, target);
+        // Dragging up or left extends the viewBox origin, which slides the
+        // whole picture down-right inside an svg whose own screen box has not
+        // moved: MEASURED, the dragged node stayed at its starting pixel for the
+        // entire gesture and its untouched neighbour travelled (+601, +419) off
+        // the canvas. The plane's own pan is where that is undone.
+        panByRef.current(-shift.x, -shift.y);
         const box = session.boxes.get(gesture.id);
         gesture.placed ||= box !== undefined && box.cx === target.x && box.cy === target.y;
         return;

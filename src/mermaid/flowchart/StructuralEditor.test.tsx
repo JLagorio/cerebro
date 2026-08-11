@@ -1457,6 +1457,34 @@ describe('manual-mode gestures (M29.43)', () => {
     );
   });
 
+  it('a drag that grows the viewBox origin pans the canvas to match', async () => {
+    render(
+      <CanvasViewport>
+        <StructuralEditor code={MANUAL_CODE} onChangeCode={() => {}} />
+      </CanvasViewport>,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const a = document.getElementById('flowchart-A-0')!;
+    const plane = screen.getByTestId('canvas-plane');
+    expect(plane.style.transform).toBe('translate(0px, 0px) scale(1)');
+
+    // Drag LEFT, which is the direction that moves the viewBox origin — and
+    // therefore slides every OTHER node right by the same amount inside an svg
+    // whose own screen box has not moved. MEASURED live: the dragged node held
+    // its starting pixel for the whole gesture while its untouched neighbour
+    // travelled (+601, +419) clean off the canvas.
+    firePointer(a, 'pointerdown', { clientX: 30, clientY: 20 });
+    firePointer(window, 'pointermove', { clientX: -20, clientY: 20 });
+    firePointer(window, 'pointerup', { clientX: -20, clientY: 20 });
+
+    // The plane took the opposite step, so the world stayed where it was.
+    const [, x] = /translate\((-?[\d.]+)px/.exec(plane.style.transform) as unknown as [
+      string,
+      string,
+    ];
+    expect(Number(x)).toBeLessThan(0);
+  });
+
   it('a sub-3px wiggle is a click, not a move', async () => {
     const onChangeCode = vi.fn();
     render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);

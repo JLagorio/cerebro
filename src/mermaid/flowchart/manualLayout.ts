@@ -598,8 +598,9 @@ function moveEdgeLabel(
  * below it would crop the clusters, labels and markers this function does not
  * track.
  */
-export function growViewBox(session: ManualLayoutSession): boolean {
+export function growViewBox(session: ManualLayoutSession): { grew: boolean; shift: Pt } {
   const { vb } = session;
+  const before = parseViewBox(session.svg.getAttribute('viewBox')) ?? vb;
   let minX = vb.x;
   let minY = vb.y;
   let maxX = vb.x + vb.w;
@@ -642,15 +643,31 @@ export function growViewBox(session: ManualLayoutSession): boolean {
     next.w !== round2(vb.w) ||
     next.h !== round2(vb.h);
   const text = grew ? `${next.x} ${next.y} ${next.w} ${next.h}` : session.sizes.viewBox;
-  if (session.svg.getAttribute('viewBox') === text) return false;
+  if (session.svg.getAttribute('viewBox') === text) return { grew: false, shift: { x: 0, y: 0 } };
   session.svg.setAttribute('viewBox', text);
+  /**
+   * How far the PICTURE just moved, in screen pixels (M29.53).
+   *
+   * Moving the origin left by `d` slides every plane point right by `d` — the
+   * svg's own screen box does not move, so the content inside it does. That is
+   * why dragging a node up or left appeared to move everything EXCEPT the node
+   * being dragged: MEASURED, a (-600, -420) drag left node A at exactly its
+   * starting pixel through every sample of the gesture and pushed untouched
+   * node B by (+601, +419), which put it and its record chip outside the canvas.
+   * The caller cancels it with a pan; nothing here changes the geometry, which
+   * was right all along.
+   */
+  const shift = {
+    x: (before.x - next.x) * session.frame.scale,
+    y: (before.y - next.y) * session.frame.scale,
+  };
   if (!grew) {
     // Nothing needs the room any more: hand mermaid's own strings back exactly
     // as it wrote them, rather than a re-multiplied approximation of them.
     setOrRemove(session.svg, 'width', session.sizes.width);
     setOrRemove(session.svg, 'height', session.sizes.height);
     session.svg.style.maxWidth = session.sizes.maxWidth;
-    return true;
+    return { grew: true, shift };
   }
   // Same plane-units-per-pixel as mermaid chose: the canvas gets bigger, the
   // diagram does not silently zoom. (A CSS max-width on the host then decides
@@ -661,7 +678,7 @@ export function growViewBox(session: ManualLayoutSession): boolean {
   if (maxWidth !== null) {
     session.svg.style.maxWidth = `${round2(Number(maxWidth[1]) * (next.w / vb.w))}px`;
   }
-  return true;
+  return { grew: true, shift };
 }
 
 function setOrRemove(svg: SVGSVGElement, name: string, value: string | null): void {
@@ -700,15 +717,17 @@ export function moveNode(
   binding: FlowchartSvgBinding,
   id: string,
   centre: Pt,
-): void {
+): Pt {
+  const still = { x: 0, y: 0 };
   const el = binding.nodeEls.get(id);
-  if (el === undefined) return;
-  if (!refreshFrame(session)) return;
-  if (!setNodeTransform(session, el, id, centre)) return;
+  if (el === undefined) return still;
+  if (!refreshFrame(session)) return still;
+  if (!setNodeTransform(session, el, id, centre)) return still;
   for (const bound of binding.edgeEls) {
     if (bound.from === id || bound.to === id) rerouteEdge(session, bound);
   }
-  growViewBox(session);
+  // The screen-pixel shift the growth just caused, for the caller to cancel.
+  return growViewBox(session).shift;
 }
 
 /**
