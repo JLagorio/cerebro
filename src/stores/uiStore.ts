@@ -138,6 +138,33 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+
+  /**
+   * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
+   *
+   * On by default because shape and colour are what make a repo tree scannable
+   * before you read a single name. Off gives one neutral glyph per kind, for
+   * when the colour is noise rather than signal.
+   */
+  workspaceFileIcons: boolean;
+  setWorkspaceFileIcons(v: boolean): void;
+
+  /** Show gitignored entries in the workspace tree (M30); persisted. */
+  workspaceShowIgnored: boolean;
+  setWorkspaceShowIgnored(v: boolean): void;
+
+  /** Line numbers in the code viewer (M30.24); persisted. On, as in an editor. */
+  workspaceLineNumbers: boolean;
+  setWorkspaceLineNumbers(v: boolean): void;
+
+  /**
+   * Wrap long source lines instead of scrolling them (M30.24); persisted.
+   *
+   * Off by default: wrapping reflows code whose indentation carries meaning,
+   * so an editor makes you ask for it.
+   */
+  workspaceWordWrap: boolean;
+  setWorkspaceWordWrap(v: boolean): void;
   /**
    * The open sidebar-tree context menu (M10), keyed by node id.
    *
@@ -296,6 +323,10 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
+const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
+const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
+const WORD_WRAP_KEY = 'cerebro.workspaceWordWrap';
 const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
@@ -667,6 +698,30 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
+  },
+
+  workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',
+  setWorkspaceFileIcons: (v) => {
+    storeString(FILE_ICONS_KEY, String(v));
+    set({ workspaceFileIcons: v });
+  },
+
+  workspaceShowIgnored: loadString(SHOW_IGNORED_KEY, 'false') === 'true',
+  setWorkspaceShowIgnored: (v) => {
+    storeString(SHOW_IGNORED_KEY, String(v));
+    set({ workspaceShowIgnored: v });
+  },
+
+  workspaceLineNumbers: loadString(LINE_NUMBERS_KEY, 'true') === 'true',
+  setWorkspaceLineNumbers: (v) => {
+    storeString(LINE_NUMBERS_KEY, String(v));
+    set({ workspaceLineNumbers: v });
+  },
+
+  workspaceWordWrap: loadString(WORD_WRAP_KEY, 'false') === 'true',
+  setWorkspaceWordWrap: (v) => {
+    storeString(WORD_WRAP_KEY, String(v));
+    set({ workspaceWordWrap: v });
   },
 
   inboxEnabled: loadString(INBOX_ENABLED_KEY, 'true') === 'true',

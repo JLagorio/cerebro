@@ -149,6 +149,11 @@ export function placeLabel(
       return 'Pulse';
     case 'library':
       return 'Library';
+    // M30 — one place, not one per file. `placeOf` already strips `root` and
+    // `path` through its default, which is the doctrine above applied
+    // unchanged: the open file is a lens, exactly like the open record.
+    case 'workspace':
+      return 'Workspace';
     case 'settings':
       return 'Settings';
     case 'knowledge': {

@@ -1,0 +1,264 @@
+/*
+ * Workspace surface styling (M30).
+ *
+ * Imported by WorkspacePage rather than the global index.css, following
+ * editor.css: a surface that is not on screen should not be paying for its
+ * stylesheet.
+ *
+ * Every colour here is a DS token. Shiki is the ONE exception and it is not a
+ * violation: it emits inline colours baked from a theme chosen to match
+ * `data-theme`, so the palette is already resolved by the time it reaches the
+ * DOM. The rules below deliberately do not fight those inline colours — they
+ * only own the surface the tokens sit on.
+ */
+
+.code-surface {
+  background: var(--n-25);
+  border: 1px solid var(--n-100);
+}
+
+/* Shiki paints its own background onto the <pre>. Ours already provides the
+   card, so let the code sit transparently on it rather than stacking two
+   slightly different greys. */
+.code-surface pre,
+.code-surface pre.shiki {
+  margin: 0;
+  background: transparent !important;
+  font-family: var(--font-mono);
+}
+
+.code-surface code {
+  font-family: var(--font-mono);
+}
+
+/*
+ * THE per-line boxes.
+ *
+ * `code` in tokens/base.css is an INLINE CHIP — background, border, padding,
+ * a fixed 12px. Shiki's output is `<pre><code>`, and an inline box that spans
+ * many lines repaints its background and border once per VISUAL line, so a
+ * fenced block came out as a stack of little bordered strips. A block of code
+ * is a surface, not a chip: it inherits the surface it was given and the size
+ * the viewer asked for.
+ */
+.code-surface pre code,
+.doc-prose pre code {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Unhighlighted fallback: inherit the surface's text colour rather than
+   whatever the browser defaults <pre> to. */
+.code-surface .shiki-plain code {
+  color: var(--n-700);
+}
+
+/*
+ * One line, one box.
+ *
+ * Shiki emits `<span class="line">` separated by literal newline TEXT NODES;
+ * `highlighter.tsx` strips those separators so each line can be a block here
+ * without every line coming out double-spaced. Blocks are what make a gutter,
+ * a current-line highlight and wrapping possible at all — an inline line has
+ * no box to hang any of them on.
+ */
+.code-surface .line {
+  display: block;
+  min-height: 1.6em;
+}
+
+/*
+ * Line numbers as a COUNTER, never as elements.
+ *
+ * `::before` content is not part of the selection, so code copied out of the
+ * viewer arrives without its line numbers attached. Real number elements would
+ * have to be stripped by hand from every paste.
+ */
+.code-numbered {
+  counter-reset: cb-line;
+  /*
+   * The gutter's three parts, named once so the wrap rules below can line the
+   * code up against exactly the same total. `--cb-gutter` is set per file from
+   * its line count, so the column never widens as you scroll past line 99.
+   */
+  --cb-gutter-lead: 1rem;
+  --cb-gutter-gap: 0.75rem;
+  --cb-gutter-total: calc(var(--cb-gutter, 3ch) + var(--cb-gutter-lead) + var(--cb-gutter-gap));
+}
+
+.code-numbered .line {
+  counter-increment: cb-line;
+}
+
+.code-numbered .line::before {
+  content: counter(cb-line);
+  display: inline-block;
+  /* Sticky, so the gutter stays put while a long line scrolls sideways
+     underneath it — the whole point of a gutter. A positioned box also paints
+     above the in-flow text of its own line, which is what hides the code
+     passing behind it. */
+  position: sticky;
+  left: 0;
+  /*
+   * CONTENT-box, against Tailwind's global border-box: `width` then means the
+   * space the DIGITS get, and the lead and gap add to it rather than eating
+   * into it. Sized the other way, a two-digit number had less room than it
+   * needed and overflowed left, out of the pane.
+   *
+   * The surface carries no left padding while numbered (see CodeViewer):
+   * sticky pins to the scroll container's CONTENT box, so any left padding
+   * would be a strip the gutter cannot reach and scrolling code shows through
+   * it. `--cb-gutter-lead` is that inset, on the right side of the pin.
+   */
+  box-sizing: content-box;
+  width: var(--cb-gutter, 3ch);
+  padding-left: var(--cb-gutter-lead);
+  /* The gap is PADDING, not margin: padding is part of the pinned box and
+     survives a horizontal scroll, so code sliding underneath never touches
+     the digits. */
+  padding-right: var(--cb-gutter-gap);
+  text-align: right;
+  color: var(--n-400);
+  background: var(--n-25);
+  user-select: none;
+}
+
+/*
+ * Wrapping mode.
+ *
+ * A wrapped line has no horizontal scroll for the number to stick against, and
+ * an inline-block number would push only the FIRST visual row across. Absolute
+ * positioning plus matching padding indents every row of a wrapped line to the
+ * same column, which is what makes wrapped code still readable as code.
+ */
+.code-wrap .line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-wrap.code-numbered .line {
+  position: relative;
+  padding-left: var(--cb-gutter-total);
+}
+
+.code-wrap.code-numbered .line::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: transparent;
+}
+
+/*
+ * Reading typography for rendered markdown.
+ *
+ * Cerebro has no prose stylesheet — the vault editor is BlockNote, which
+ * styles its own blocks. A document viewer therefore has to bring its own, or
+ * headings render at browser defaults and the measure means nothing.
+ */
+.doc-prose {
+  color: var(--n-800);
+}
+
+.doc-prose > *:first-child {
+  margin-top: 0;
+}
+
+.doc-prose h1,
+.doc-prose h2,
+.doc-prose h3,
+.doc-prose h4 {
+  color: var(--n-900);
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+  line-height: 1.3;
+  margin: 1.6em 0 0.5em;
+}
+
+.doc-prose h1 {
+  font-size: 1.7em;
+}
+.doc-prose h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--n-100);
+  padding-bottom: 0.25em;
+}
+.doc-prose h3 {
+  font-size: 1.12em;
+}
+.doc-prose h4 {
+  font-size: 1em;
+}
+
+.doc-prose p,
+.doc-prose ul,
+.doc-prose ol,
+.doc-prose blockquote {
+  margin: 0.75em 0;
+}
+
+.doc-prose ul,
+.doc-prose ol {
+  padding-left: 1.4em;
+}
+.doc-prose ul {
+  list-style: disc;
+}
+.doc-prose ol {
+  list-style: decimal;
+}
+.doc-prose li {
+  margin: 0.25em 0;
+}
+.doc-prose li::marker {
+  color: var(--n-400);
+}
+
+.doc-prose blockquote {
+  border-left: 3px solid var(--n-200);
+  padding-left: 1em;
+  color: var(--n-600);
+}
+
+.doc-prose hr {
+  border: 0;
+  border-top: 1px solid var(--n-100);
+  margin: 2em 0;
+}
+
+.doc-prose table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  margin: 1em 0;
+  font-size: 0.92em;
+}
+
+.doc-prose th,
+.doc-prose td {
+  border: 1px solid var(--n-100);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.doc-prose th {
+  background: var(--n-50);
+  font-weight: 600;
+}
+
+.doc-prose img {
+  max-width: 100%;
+  border-radius: var(--r-md);
+}
+
+/* A task list should not carry a bullet as well as its checkbox. */
+.doc-prose li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.2em;
+}
+
+.doc-prose input[type='checkbox'] {
+  margin-right: 0.5em;
+}

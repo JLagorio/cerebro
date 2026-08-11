@@ -203,6 +203,10 @@ export type Selection =
   // "the release scout's triggers" is a place the back button can return to
   // rather than component state that a re-render forgets.
   | { kind: 'library'; tab?: LibraryTab; path?: string }
+  // M30 — mounted roots. `root` and `path` ride on the selection rather than in
+  // component state so "the README of cerebro" is a place Back returns to, the
+  // same contract `list.view` and `library.tab` already follow.
+  | { kind: 'workspace'; root?: string; path?: string }
   | { kind: 'settings' };
 
 /**

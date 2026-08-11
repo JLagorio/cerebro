@@ -23,6 +23,7 @@ import { PulsePage } from '@/pages/PulsePage';
 import { LibraryPage } from '@/library/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
+import { WorkspacePage } from '@/pages/WorkspacePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
@@ -114,6 +115,10 @@ function CanvasOutlet() {
       return <PulsePage />;
     case 'library':
       return <LibraryPage />;
+    // M30 — mounted repositories: file tree, viewer, and the cross-root docs
+    // index. Takes the selection so the open file survives Back.
+    case 'workspace':
+      return <WorkspacePage selection={selection} />;
     case 'settings':
       return <SettingsPage />;
   }
