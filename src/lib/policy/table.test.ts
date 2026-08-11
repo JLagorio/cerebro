@@ -19,6 +19,7 @@ import {
   POLICY,
   POLICY_DIGEST_PATH,
   POLICY_PATH,
+  retryVerdict,
   transitionFor,
   type PolicyTable,
 } from './table';
@@ -103,6 +104,40 @@ describe('load refuses an artifact it cannot fully understand', () => {
       ].sort();
     });
     expect(() => parseTable(raw)).toThrow(/just_because/);
+  });
+
+  it('refuses a retryable code that is not a code', () => {
+    const raw = mutated((t) => {
+      t.in_session_retry!.retryable_rejections = [
+        ...t.in_session_retry!.retryable_rejections,
+        'aardvark_unavailable',
+      ].sort();
+    });
+    expect(() => parseTable(raw)).toThrow(/aardvark_unavailable/);
+  });
+
+  it('refuses a table that makes a human decision retryable', () => {
+    const raw = mutated((t) => {
+      t.in_session_retry!.retryable_rejections = [
+        ...t.in_session_retry!.retryable_rejections,
+        'human_rejected',
+      ].sort();
+    });
+    expect(() => parseTable(raw)).toThrow(/not a stale precondition/);
+  });
+
+  it('refuses zero attempts, which would forbid submitting at all', () => {
+    const raw = mutated((t) => {
+      t.in_session_retry!.max_attempts = 0;
+    });
+    expect(() => parseTable(raw)).toThrow(/counts the first attempt/);
+  });
+
+  it('refuses a format-2 table with no retry rule', () => {
+    const raw = mutated((t) => {
+      delete t.in_session_retry;
+    });
+    expect(() => parseTable(raw)).toThrow(/declares no in_session_retry/);
   });
 
   it('refuses an escalator pointing at no threshold', () => {
@@ -220,6 +255,20 @@ describe('the table answers the questions an interpreter asks', () => {
     expect(transitionFor(POLICY, 'edit_relation', { action: 'sideways' })).toBeNull();
     // Single-transition ops do not consult the payload at all.
     expect(transitionFor(POLICY, 'promote_draft', {})).toBe('qualify');
+  });
+
+  it('answers retry with three distinct verdicts, and never from a v1 table', () => {
+    // The twin of `retry_is_bounded_typed_and_never_granted_by_a_table_that
+    // _predates_it` in table.rs, replayed from the same artifact.
+    expect(retryVerdict(POLICY, 'stale_target_version', 1)).toBe('retry');
+    expect(retryVerdict(POLICY, 'stale_target_version', 3)).toBe('exhausted');
+    // Substance, not state: not retryable at any count.
+    expect(retryVerdict(POLICY, 'self_ancestry', 0)).toBe('not_retryable');
+    expect(retryVerdict(POLICY, 'human_rejected', 0)).toBe('not_retryable');
+    // A table that predates the rule grants nothing.
+    expect(
+      retryVerdict({ ...POLICY, in_session_retry: undefined }, 'stale_target_version', 0),
+    ).toBe('not_retryable');
   });
 
   it('knows every stage the interpreter implements', () => {

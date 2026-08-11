@@ -168,8 +168,40 @@ export interface PolicyTable {
     predicate: string;
     rejection: string;
   };
+  /**
+   * When a run may resubmit a refused proposal inside the run it is already
+   * paying for (M26.4e). Retryability is policy — a list hand-written here
+   * and again in Rust is the twin implementation the artifact prevents.
+   * Absent means format 1, and absence is never permission.
+   */
+  in_session_retry?: {
+    max_attempts: number;
+    retryable_rejections: string[];
+  };
   risk_ladder: Record<Risk, LadderRung>;
   ops: Record<string, OpRule>;
+}
+
+/** What a run may do after a typed rejection. */
+export type RetryVerdict = 'retry' | 'exhausted' | 'not_retryable';
+
+/**
+ * May a run resubmit after this refusal, having already made
+ * `attemptsSoFar` attempts on this proposal?
+ *
+ * Three answers rather than a boolean: "the table says no" and "you have used
+ * your attempts" are different sentences, and the window's explanation should
+ * say which one happened. The twin of `PolicyTable::retry_verdict`.
+ */
+export function retryVerdict(
+  table: PolicyTable,
+  code: string,
+  attemptsSoFar: number,
+): RetryVerdict {
+  const rule = table.in_session_retry;
+  if (rule === undefined) return 'not_retryable';
+  if (!rule.retryable_rejections.includes(code)) return 'not_retryable';
+  return attemptsSoFar >= rule.max_attempts ? 'exhausted' : 'retry';
 }
 
 /** Sorted, unique, non-empty — the shape every closed list must have. */
@@ -428,6 +460,29 @@ export function parseTable(value: unknown): PolicyTable {
           `ops.${name} requires "${ancestry.predicate}" and preventive_ancestry does not list it`,
         );
       }
+    }
+  }
+
+  // The format-2 in-session retry rule, on the same terms as the binding
+  // above: absent is legal only for format 1.
+  const retry = table.in_session_retry;
+  if (retry === undefined) {
+    if (table.format >= 2) {
+      throw new Error(`${POLICY_PATH}: format ${table.format} declares no in_session_retry`);
+    }
+  } else {
+    if (retry.max_attempts === 0) {
+      throw new Error(
+        'in_session_retry.max_attempts counts the first attempt, so 0 would forbid submitting at all',
+      );
+    }
+    checkMembers('in_session_retry.retryable_rejections', retry.retryable_rejections, codes);
+    // The one code that must never be here, named rather than left to
+    // whoever edits the list next.
+    if (retry.retryable_rejections.includes('human_rejected')) {
+      throw new Error(
+        'in_session_retry.retryable_rejections names human_rejected — a human decision is not a stale precondition',
+      );
     }
   }
 

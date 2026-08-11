@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "artifact_version": 5,
+  "artifact_version": 6,
   "target_classes": [
     "belief",
     "comparison",
@@ -210,6 +210,20 @@
     ],
     "predicate": "no_self_ancestry",
     "rejection": "self_ancestry"
+  },
+  "in_session_retry": {
+    "max_attempts": 3,
+    "retryable_rejections": [
+      "candidate_receipt_stale",
+      "contradiction_edge_stale",
+      "equivalence_receipt_stale",
+      "internal_cas_race",
+      "malformed_arguments",
+      "policy_precondition_stale",
+      "schema_invalid",
+      "stale_target_version",
+      "subject_resolution_stale"
+    ]
   },
   "risk_ladder": {
     "LOW": {

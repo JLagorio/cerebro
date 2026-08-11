@@ -181,6 +181,39 @@ pub struct PreventiveAncestryRule {
     pub rejection: String,
 }
 
+/// When an agent may resubmit a refused proposal inside the run it is already
+/// paying for (M26.4e).
+///
+/// **Retryability is policy, not plumbing.** "May the agent try this again?"
+/// has one answer, and an answer hand-listed in Rust and again in TS is the
+/// twin implementation the artifact exists to prevent. So the list is data,
+/// and the loader proves every entry is a code that exists.
+///
+/// The line the list draws: retryable refusals are about the STATE OF THE
+/// REQUEST — the world moved under it, a receipt went stale, the message was
+/// malformed. Refusals about the SUBSTANCE of the change are not retryable at
+/// any count, because retrying those is not adjustment, it is wearing the
+/// gate down. Growing this list needs that argument made in review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InSessionRetryRule {
+    /// Attempts per proposal INCLUDING the first. 1 would mean no retry.
+    pub max_attempts: u32,
+    pub retryable_rejections: Vec<String>,
+}
+
+/// What a run may do after a typed rejection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryVerdict {
+    /// Adjust and resubmit inside this run.
+    Retry,
+    /// Retryable in principle, and this proposal has had its attempts.
+    Exhausted,
+    /// The refusal is about the substance of the change. Resubmitting it is
+    /// not adjustment.
+    NotRetryable,
+}
+
 /// The table-decidable evaluation stages, in the order the artifact fixes.
 /// Precedence between refusals IS policy — "does an unavailable capability
 /// outrank an understated risk?" has an answer, and that answer belongs in
@@ -306,6 +339,8 @@ pub struct PolicyTable {
     /// the gate to nothing" must not be the same reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preventive_ancestry: Option<PreventiveAncestryRule>,
+    #[serde(default)]
+    pub in_session_retry: Option<InSessionRetryRule>,
     pub risk_ladder: BTreeMap<Risk, LadderRung>,
     pub ops: BTreeMap<String, OpRule>,
 }
@@ -722,6 +757,46 @@ impl PolicyTable {
             }
         }
 
+        // The format-2 in-session retry rule, on the same terms as the
+        // ancestry binding: absent is legal only for format 1.
+        match &self.in_session_retry {
+            None if self.format >= 2 => {
+                return Err(format!(
+                    "{POLICY_PATH}: format {} declares no in_session_retry rule",
+                    self.format
+                ))
+            }
+            None => {}
+            Some(rule) => {
+                if rule.max_attempts == 0 {
+                    return Err(
+                        "in_session_retry.max_attempts counts the first attempt, so 0 \
+                                would forbid submitting at all"
+                            .into(),
+                    );
+                }
+                check_members(
+                    "in_session_retry.retryable_rejections",
+                    &rule.retryable_rejections,
+                    &codes,
+                )?;
+                // The one code that must never be here, named rather than
+                // left to whoever edits the list next. A human said no; a
+                // retry is not an adjustment, it is asking again.
+                if rule
+                    .retryable_rejections
+                    .iter()
+                    .any(|c| c == "human_rejected")
+                {
+                    return Err(
+                        "in_session_retry.retryable_rejections names human_rejected — a human \
+                         decision is not a stale precondition"
+                            .into(),
+                    );
+                }
+            }
+        }
+
         // Every registered transition must belong to some op, or it is a
         // name with no meaning; every predicate likewise.
         let mut used_transitions = BTreeSet::new();
@@ -767,6 +842,28 @@ impl PolicyTable {
 
     pub fn op(&self, name: &str) -> Option<&OpRule> {
         self.ops.get(name)
+    }
+
+    /// May a run resubmit after this refusal, having already made
+    /// `attempts_so_far` attempts on this proposal?
+    ///
+    /// Three answers rather than a bool, because "the table says no" and "you
+    /// have used your attempts" are different sentences and the window's
+    /// explanation should say which one happened.
+    pub fn retry_verdict(&self, code: &str, attempts_so_far: u32) -> RetryVerdict {
+        let Some(rule) = &self.in_session_retry else {
+            // A table with no rule grants no retries. The safe direction: a
+            // format-1 table predates the concept and must not be read as
+            // permission.
+            return RetryVerdict::NotRetryable;
+        };
+        if !rule.retryable_rejections.iter().any(|c| c == code) {
+            return RetryVerdict::NotRetryable;
+        }
+        if attempts_so_far >= rule.max_attempts {
+            return RetryVerdict::Exhausted;
+        }
+        RetryVerdict::Retry
     }
 
     pub fn threshold(&self, key: &str) -> Option<u64> {
@@ -884,6 +981,7 @@ mod tests {
         let v1 = PolicyTable::parse(POLICY_V1_JSON).expect("the frozen v1 table must still load");
         assert_eq!(v1.format, 1);
         assert_eq!(v1.preventive_ancestry, None);
+        assert_eq!(v1.in_session_retry, None);
     }
 
     fn mutated(f: impl FnOnce(&mut serde_json::Value)) -> String {
@@ -1026,6 +1124,104 @@ mod tests {
         assert!(PolicyTable::parse(&raw)
             .unwrap_err()
             .contains("declares no preventive_ancestry binding"));
+    }
+
+    #[test]
+    fn a_format_two_table_with_no_retry_rule_fails_the_load() {
+        let raw = mutated(|v| {
+            v.as_object_mut().unwrap().remove("in_session_retry");
+        });
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("declares no in_session_retry rule"));
+    }
+
+    #[test]
+    fn a_retryable_code_that_is_not_a_code_fails_the_load() {
+        let raw = mutated(|v| {
+            v["in_session_retry"]["retryable_rejections"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!("aardvark_unavailable"));
+        });
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("in_session_retry.retryable_rejections"));
+    }
+
+    #[test]
+    fn a_human_decision_can_never_be_made_retryable() {
+        // Named in the loader rather than left to whoever edits the list
+        // next. A human said no; asking again is not adjustment.
+        let raw = mutated(|v| {
+            let list = v["in_session_retry"]["retryable_rejections"]
+                .as_array_mut()
+                .unwrap();
+            list.push(serde_json::json!("human_rejected"));
+            list.sort_by_key(|c| c.as_str().unwrap().to_string());
+        });
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("not a stale precondition"));
+    }
+
+    #[test]
+    fn zero_attempts_would_forbid_submitting_at_all() {
+        let raw = mutated(|v| {
+            v["in_session_retry"]["max_attempts"] = serde_json::json!(0);
+        });
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("counts the first attempt"));
+    }
+
+    #[test]
+    fn retry_is_bounded_typed_and_never_granted_by_a_table_that_predates_it() {
+        let table = PolicyTable::load().expect("the live table");
+        // A stale precondition is the world moving under the request.
+        assert_eq!(
+            table.retry_verdict("stale_target_version", 1),
+            RetryVerdict::Retry
+        );
+        // The bound counts the first attempt, so the third is the last.
+        assert_eq!(
+            table.retry_verdict("stale_target_version", 3),
+            RetryVerdict::Exhausted
+        );
+        // A refusal about the substance of the change is not retryable at any
+        // count — the two answers are distinct on purpose.
+        assert_eq!(
+            table.retry_verdict("self_ancestry", 0),
+            RetryVerdict::NotRetryable
+        );
+        assert_eq!(
+            table.retry_verdict("human_rejected", 0),
+            RetryVerdict::NotRetryable
+        );
+        // The frozen v1 table has no rule, and absence is not permission.
+        let v1 = PolicyTable::parse(POLICY_V1_JSON).expect("the frozen table");
+        assert_eq!(
+            v1.retry_verdict("stale_target_version", 0),
+            RetryVerdict::NotRetryable
+        );
+    }
+
+    #[test]
+    fn every_retryable_code_is_one_some_op_can_actually_report() {
+        // A code no op declares would be a retry rule for a refusal that
+        // cannot happen — dead policy that reads as coverage.
+        let table = PolicyTable::load().expect("the live table");
+        let rule = table.in_session_retry.as_ref().expect("format 2 has one");
+        for code in &rule.retryable_rejections {
+            let reportable = table
+                .ops
+                .values()
+                .any(|op| op.possible_rejections.contains(code))
+                || table.transport_rejections.contains(code)
+                || table.writer_rejections.contains(code)
+                || table.mint_rejections.contains(code);
+            assert!(reportable, "no op or channel can report {code:?}");
+        }
     }
 
     #[test]
