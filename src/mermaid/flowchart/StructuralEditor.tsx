@@ -225,6 +225,14 @@ export function StructuralEditor({
   } | null>(null);
   const [subTitle, setSubTitle] = useState('');
   const [multi, setMulti] = useState<string[]>([]);
+  /**
+   * The live multi-selection, for the imperative handlers below (M29.53). A
+   * shift-click FOCUSES the node before it clicks it, and focus selects — so
+   * without this the second shift-click cleared the pair it was building and
+   * the group bar never appeared.
+   */
+  const multiRef = useRef<string[]>([]);
+  multiRef.current = multi;
   const [groupTitle, setGroupTitle] = useState('');
   const [badges, setBadges] = useState<LinkBadge[]>([]);
   const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
@@ -638,7 +646,13 @@ export function StructuralEditor({
         el.setAttribute('aria-label', nodes(model).get(id)?.label ?? id);
         // One entry point into the diagram; the arrows do the rest.
         el.setAttribute('tabindex', index === 0 ? '0' : '-1');
-        el.onfocus = () => selectNode(id, el);
+        // Focus selects — unless a multi-selection is being built, in which
+        // case the shift-click that caused this focus is about to say what the
+        // selection is and must not find it already cleared.
+        el.onfocus = () => {
+          if (multiRef.current.length > 0) return;
+          selectNode(id, el);
+        };
         el.onkeydown = (e) => {
           if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
             e.preventDefault();

@@ -59,8 +59,17 @@ test('mermaid renders in docs, and the lightbox zooms', async ({ page }) => {
   await diagrams.first().hover();
   await page.getByRole('button', { name: 'Expand diagram' }).first().click();
   await expect(page.getByTestId('lightbox-canvas').locator('svg')).toBeVisible();
+  // RELATIVE, not '110%' (M29.53): the viewer opens on a fit now — it used to
+  // open at "100%" that meant nothing in particular, since mermaid sizes its
+  // svg to the container, so a wide gantt filled 17% of the viewer at "100%"
+  // while the sequence diagram beside it was at natural size for the same
+  // number. What this case is about is that the readout MOVES with the button.
+  const readout = page.getByRole('button', { name: 'Reset zoom' });
+  const before = Number((await readout.textContent())?.replace('%', ''));
   await page.getByRole('button', { name: 'Zoom in' }).click();
-  await expect(page.getByRole('button', { name: 'Reset zoom' })).toContainText('110%');
+  await expect
+    .poll(async () => Number((await readout.textContent())?.replace('%', '')))
+    .toBe(Math.round(before * 1.1));
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('lightbox-canvas')).toHaveCount(0);
 });
