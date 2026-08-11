@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "artifact_version": 2,
+  "artifact_version": 3,
   "target_classes": [
     "belief",
     "comparison",
@@ -82,6 +82,7 @@
     "run_actor_mismatch": "operational",
     "schema_invalid": "operational",
     "self_ancestry": "ledger",
+    "semantic_search_unavailable": "operational",
     "silence_transition_forbidden": "ledger",
     "stale_target_version": "ledger",
     "subject_resolution_mismatch": "ledger",
@@ -104,6 +105,9 @@
   "writer_rejections": [
     "idempotency_key_reused",
     "internal_cas_race"
+  ],
+  "mint_rejections": [
+    "semantic_search_unavailable"
   ],
   "unbound_rejections": [],
   "evaluation_order": [

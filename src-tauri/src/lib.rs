@@ -10,6 +10,7 @@ pub mod knowledge;
 pub mod ledger;
 pub mod mcp;
 pub mod policy;
+pub mod retrieval;
 pub mod roots;
 pub mod roots_commands;
 pub mod runtime;

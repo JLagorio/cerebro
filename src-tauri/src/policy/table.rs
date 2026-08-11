@@ -250,6 +250,12 @@ pub struct PolicyTable {
     pub rule_codes: Vec<String>,
     pub transport_rejections: Vec<String>,
     pub writer_rejections: Vec<String>,
+    /// Codes the server returns while MINTING a search receipt — before any
+    /// proposal exists (M26.2). A fourth category beside transport and
+    /// writer because it fails at a fourth place: not the wire, not the
+    /// ledger, and not an op's policy evaluation. Absent in format 1.
+    #[serde(default)]
+    pub mint_rejections: Vec<String>,
     pub unbound_rejections: Vec<String>,
     pub evaluation_order: Vec<Stage>,
     pub thresholds: BTreeMap<String, u64>,
@@ -375,6 +381,8 @@ impl PolicyTable {
         // rejection nobody can ever route.
         check_members("transport_rejections", &self.transport_rejections, &codes)?;
         check_members("writer_rejections", &self.writer_rejections, &codes)?;
+        check_possibly_empty_list("mint_rejections", &self.mint_rejections)?;
+        check_all_registered("mint_rejections", &self.mint_rejections, &codes)?;
         check_possibly_empty_list("unbound_rejections", &self.unbound_rejections)?;
         check_all_registered("unbound_rejections", &self.unbound_rejections, &codes)?;
 
@@ -561,12 +569,13 @@ impl PolicyTable {
                 .transport_rejections
                 .iter()
                 .chain(self.writer_rejections.iter())
+                .chain(self.mint_rejections.iter())
                 .chain(self.unbound_rejections.iter())
             {
                 if possible.contains(code.as_str()) {
                     return Err(format!(
                         "ops.{name}.possible_rejections lists {code:?}, which is a \
-                         transport/writer/unbound code the interpreter never returns per-op"
+                         transport/writer/mint/unbound code the interpreter never returns per-op"
                     ));
                 }
             }

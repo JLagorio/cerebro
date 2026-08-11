@@ -29,7 +29,26 @@ use crate::ledger::schema::{
 use crate::ledger::LedgerHead;
 
 /// The receipt format this build mints. A bump means the legs changed.
-pub const SEARCH_VERSION: u64 = 2;
+///
+/// **Three, not two, and the design says two.** The M26 design describes the
+/// semantic-carrying receipt as "v2" on the assumption that M24 shipped v1 —
+/// but M24.7 already bumped to 2 when it made the three deterministic legs
+/// real. Reusing 2 here would leave receipts minted by an M24.7 build
+/// (`semantic: not_available`) and receipts minted by this one
+/// (`semantic: completed`) claiming the same version, and the version's only
+/// job is to let a validator tell those apart. Corrected in the handoff's
+/// ground-truth table.
+pub const SEARCH_VERSION: u64 = 3;
+
+/// The server could not run semantic retrieval, so no receipt exists.
+///
+/// A create with no receipt is refused by `candidate_receipt_missing` at
+/// proposal time; this is the earlier, operational answer to "why is there
+/// nothing to submit". It is deliberately NOT a ledger refusal: no proposal
+/// was ever built, so there is nothing for a ledger entry to point at (the
+/// same reasoning M24.7 recorded when it moved `candidate_receipt_missing`
+/// the other way).
+pub const RETRIEVAL_UNAVAILABLE: &str = "semantic_search_unavailable";
 
 /// The index head an empty ledger presents: no events, nothing to have
 /// searched. Spelled rather than faked, so a receipt can never claim to have
@@ -68,7 +87,48 @@ pub fn mint(
     subject_id: &str,
     exact_query: &str,
     alias_queries: &[String],
+    content: &str,
 ) -> Result<CandidateSearchReceipt, String> {
+    mint_with(
+        state,
+        index_head,
+        subject_id,
+        exact_query,
+        alias_queries,
+        content,
+        crate::retrieval::candidates,
+    )
+}
+
+/// `mint`, with the retriever injected.
+///
+/// The seam exists so `semantic_search_unavailable` has a REACHABLE producer
+/// and a test. `expansion-v1` reads reducer state and cannot fail on its own
+/// — but the code has to be live before a retriever that can fail (a model
+/// that will not load, an index that will not open) is swapped in behind
+/// `retriever_version`. A refusal nothing can produce is a refusal nobody has
+/// ever seen work.
+pub fn mint_with(
+    state: &EpistemicState,
+    index_head: &str,
+    subject_id: &str,
+    exact_query: &str,
+    alias_queries: &[String],
+    content: &str,
+    retrieve: impl Fn(&EpistemicState, &crate::retrieval::Query) -> crate::retrieval::Outcome,
+) -> Result<CandidateSearchReceipt, String> {
+    // THE SEMANTIC LEG (M26.2). Run first: a failure mints no receipt at all,
+    // and doing the deterministic work before finding that out would leave a
+    // half-built receipt on the floor for someone to be tempted by.
+    let query = crate::retrieval::Query {
+        subject_id,
+        content,
+        aliases: alias_queries,
+    };
+    let semantic_hits = retrieve(state, &query).map_err(|detail| {
+        format!("{RETRIEVAL_UNAVAILABLE}: semantic retrieval did not complete — {detail}")
+    })?;
+
     let mut exact_hits: Vec<String> = state
         .projection_paths
         .get(exact_query)
@@ -120,21 +180,45 @@ pub fn mint(
         .iter()
         .chain(alias_hits.iter())
         .chain(scoped_hits.iter())
+        .chain(semantic_hits.iter())
         .map(String::as_str)
         .collect();
     seen.sort_unstable();
     seen.dedup();
+    let deterministic: std::collections::BTreeSet<&str> = exact_hits
+        .iter()
+        .chain(alias_hits.iter())
+        .chain(scoped_hits.iter())
+        .map(String::as_str)
+        .collect();
     for candidate in seen {
+        // The SERVER's default disposition, and the only one it is entitled
+        // to. A DETERMINISTIC hit means the thing is already here under this
+        // identity, so the honest move is to revise it.
+        //
+        // A SEMANTIC-ONLY hit is a different claim: expansion reached it by
+        // name or by one relation hop, which is evidence of PROXIMITY and
+        // not of identity. The server cannot say "revise that" about a
+        // neighbour it only knows is nearby, so the default matches what the
+        // create is already asserting — different thing — and the reason
+        // says exactly what the server did and did not establish. The
+        // proposer changes it to `update` when they are the same, and the
+        // ledger then holds that judgement against them, which is the point.
+        let (decision, reason) = if deterministic.contains(candidate) {
+            (
+                crate::ledger::schema::CandidateDecision::Update,
+                "the deterministic index already holds this identity",
+            )
+        } else {
+            (
+                crate::ledger::schema::CandidateDecision::Distinct,
+                "semantic expansion reached this by name or relation, not by identity",
+            )
+        };
         considered.push(crate::ledger::schema::ConsideredCandidate {
             candidate_id: candidate.to_string(),
-            // The SERVER's default disposition, and the only one it is
-            // entitled to: a deterministic hit means the thing is already
-            // here, so the honest move is to revise it. A proposer who
-            // believes otherwise replaces this with `distinct` and says why
-            // — a judgement the ledger then holds against them, which is the
-            // point.
-            decision: crate::ledger::schema::CandidateDecision::Update,
-            reason: "the deterministic index already holds this identity".to_string(),
+            decision,
+            reason: reason.to_string(),
         });
     }
 
@@ -169,8 +253,19 @@ pub fn mint(
             candidate_ids: scoped_hits,
         },
         semantic: SemanticLeg {
-            status: SemanticStatus::NotAvailable,
-            candidate_ids: vec![],
+            status: SemanticStatus::Completed,
+            retriever_version: Some(crate::retrieval::RETRIEVER_VERSION.to_string()),
+            // The SAME head the receipt names. Two heads on one receipt would
+            // let a real search be relabelled with a fresher one and stop
+            // looking stale; `validate` refuses the mismatch.
+            index_head: Some(index_head.to_string()),
+            query_fingerprint: Some(crate::retrieval::query_fingerprint(&query)),
+            candidate_ids: {
+                let mut ids = semantic_hits;
+                ids.sort();
+                ids.dedup();
+                ids
+            },
         },
         considered,
     };
@@ -275,17 +370,71 @@ mod tests {
         aliases: &[&str],
     ) -> CandidateSearchReceipt {
         let aliases: Vec<String> = aliases.iter().map(|a| a.to_string()).collect();
-        mint(state, EMPTY_INDEX_HEAD, subject, query, &aliases).unwrap()
+        mint(state, EMPTY_INDEX_HEAD, subject, query, &aliases, "").unwrap()
     }
 
     #[test]
     fn a_search_of_an_empty_base_returns_nothing_and_says_so_per_leg() {
         let receipt = search(&EpistemicState::default(), SUBJECT, "churn.md", &["Churn"]);
         assert!(receipt.returned_candidates().is_empty());
-        // Not "no candidates" but "not available": an empty attempted leg
-        // would read as searched-and-found-nothing.
-        assert_eq!(receipt.semantic.status, SemanticStatus::NotAvailable);
+        // M26.2 flipped this leg's meaning, and the distinction it was
+        // guarding survives: `completed` with an empty set is
+        // searched-and-found-nothing, which is now TRUE. `not_available`
+        // was the honest answer while nothing searched; saying it now would
+        // understate what the server did.
+        assert_eq!(receipt.semantic.status, SemanticStatus::Completed);
+        assert!(receipt.semantic.candidate_ids.is_empty());
+        assert_eq!(
+            receipt.semantic.retriever_version.as_deref(),
+            Some(crate::retrieval::RETRIEVER_VERSION)
+        );
+        // The leg names the head the receipt names — never a fresher one.
+        assert_eq!(
+            receipt.semantic.index_head.as_deref(),
+            Some(EMPTY_INDEX_HEAD)
+        );
+        assert!(receipt.semantic.query_fingerprint.is_some());
         assert_eq!(receipt.scoped.subject_id, SUBJECT);
+    }
+
+    #[test]
+    fn a_retriever_that_cannot_answer_mints_no_receipt_at_all() {
+        // `semantic_search_unavailable`. `expansion-v1` cannot fail — it
+        // reads state already in memory — so the refusal is exercised
+        // through the seam, which is the only way to know the path works
+        // before a retriever that CAN fail is swapped in behind
+        // `retriever_version`.
+        let failed = mint_with(
+            &EpistemicState::default(),
+            EMPTY_INDEX_HEAD,
+            SUBJECT,
+            "churn.md",
+            &[],
+            "",
+            |_, _| Err("the index would not open".to_string()),
+        )
+        .unwrap_err();
+        assert!(failed.contains(RETRIEVAL_UNAVAILABLE), "{failed}");
+        // NO HALF-BUILT RECEIPT. The deterministic legs are cheap and it
+        // would be easy to return them with an empty semantic leg; that
+        // receipt would then read as a complete search that found nothing.
+        assert!(failed.contains("did not complete"), "{failed}");
+    }
+
+    #[test]
+    fn the_unavailable_code_is_a_registered_operational_one() {
+        // Two records, two destinies. No proposal was ever built, so there is
+        // nothing for a ledger entry to point at — and the table has to agree,
+        // or the refusal is filed nowhere.
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        assert_eq!(
+            table.destiny(RETRIEVAL_UNAVAILABLE),
+            Some(crate::policy::table::Destiny::Operational)
+        );
+        assert!(table
+            .mint_rejections
+            .iter()
+            .any(|code| code == RETRIEVAL_UNAVAILABLE));
     }
 
     #[test]

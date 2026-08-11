@@ -106,6 +106,13 @@ export interface PolicyTable {
   rule_codes: string[];
   transport_rejections: string[];
   writer_rejections: string[];
+  /**
+   * Codes the server returns while MINTING a search receipt, before any
+   * proposal exists (M26.2). A fourth category beside transport and writer
+   * because it fails at a fourth place: not the wire, not the ledger, and not
+   * an op's policy evaluation. Absent in format 1.
+   */
+  mint_rejections?: string[];
   unbound_rejections: string[];
   evaluation_order: Stage[];
   thresholds: Record<string, number>;
@@ -222,6 +229,9 @@ export function parseTable(value: unknown): PolicyTable {
   if (codes.size === 0) throw new Error('rejection_destinies is empty');
   checkMembers('transport_rejections', table.transport_rejections, codes);
   checkMembers('writer_rejections', table.writer_rejections, codes);
+  const mint = table.mint_rejections ?? [];
+  checkPossiblyEmptyList('mint_rejections', mint);
+  checkAllRegistered('mint_rejections', mint, codes);
   checkPossiblyEmptyList('unbound_rejections', table.unbound_rejections);
   checkAllRegistered('unbound_rejections', table.unbound_rejections, codes);
 
@@ -312,6 +322,7 @@ export function parseTable(value: unknown): PolicyTable {
   const specialCodes = new Set([
     ...table.transport_rejections,
     ...table.writer_rejections,
+    ...mint,
     ...table.unbound_rejections,
   ]);
   for (const [name, op] of Object.entries(table.ops)) {
@@ -327,7 +338,7 @@ export function parseTable(value: unknown): PolicyTable {
       if (possible.has(code)) {
         throw new Error(
           `ops.${name}.possible_rejections lists "${code}", which is a ` +
-            `transport/writer/unbound code the interpreter never returns per-op`,
+            `transport/writer/mint/unbound code the interpreter never returns per-op`,
         );
       }
     }

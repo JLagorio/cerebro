@@ -1837,6 +1837,10 @@ mod tests {
             &entity_id,
             "fresh.md",
             &["Fresh Thing".to_string()],
+            // The prose the create below proposes. Minting against anything
+            // else refuses at submit on the M26.2 fingerprint check, which is
+            // what that check is for.
+            "# fresh\n",
         )
         .unwrap();
         assert!(

@@ -226,6 +226,19 @@ describe('the table answers the questions an interpreter asks', () => {
     expect([...POLICY.evaluation_order].sort()).toEqual([...ALL_STAGES].sort());
   });
 
+  it('keeps mint-time refusals out of every op row', () => {
+    // `semantic_search_unavailable` (M26.2) fails at a fourth place: not the
+    // wire, not the ledger writer, and not an op's policy evaluation — the
+    // server could not run retrieval, so no proposal was ever built. An op
+    // that listed it would be claiming it can produce a refusal that happens
+    // before it exists.
+    expect(POLICY.mint_rejections).toEqual(['semantic_search_unavailable']);
+    expect(destiny(POLICY, 'semantic_search_unavailable')).toBe('operational');
+    for (const [name, rule] of Object.entries(POLICY.ops)) {
+      expect(rule.possible_rejections, `${name}`).not.toContain('semantic_search_unavailable');
+    }
+  });
+
   it('binds the preventive ancestry walk to the ops that change a belief basis', () => {
     // The walk is Rust-only — it reads reducer state the mock has no
     // counterpart for — but WHERE it runs is policy, and both loaders hold

@@ -172,7 +172,10 @@ fn basis_refs_valid(state: &EpistemicState, proposal: &ProposalV1) -> Preconditi
 /// under the old id would make the record say a human approved a search they
 /// never saw.
 fn candidate_receipt_current(state: &EpistemicState, proposal: &ProposalV1) -> PreconditionResult {
-    let ProposalOp::CreateBelief { subject, .. } = &proposal.op else {
+    let ProposalOp::CreateBelief {
+        subject, content, ..
+    } = &proposal.op
+    else {
         return Ok(());
     };
     let refuse = |code: &'static str, expected: TypedValue, actual: TypedValue| {
@@ -224,6 +227,30 @@ fn candidate_receipt_current(state: &EpistemicState, proposal: &ProposalV1) -> P
         ));
     }
 
+    // THE QUERY THE RECEIPT SEARCHED WITH IS THE ONE THIS PROPOSAL CARRIES
+    // (M26.2). The deterministic legs record their own queries, but the
+    // semantic leg expands over the proposed CONTENT, and content is not
+    // stored on the receipt — so without this, a caller could mint against
+    // innocuous prose and then attach the receipt to a proposal saying
+    // something else entirely. The fingerprint is server-derived from the
+    // subject, the normalized content, and the claimed spellings; if it
+    // disagrees, this receipt is a real search wearing another proposal's
+    // clothes.
+    if let Some(claimed) = &receipt.semantic.query_fingerprint {
+        let actual = crate::retrieval::query_fingerprint(&crate::retrieval::Query {
+            subject_id: &subject_id,
+            content,
+            aliases: &receipt.aliases.queries,
+        });
+        if claimed != &actual {
+            return Err(refuse(
+                "candidate_receipt_caller_authored",
+                TypedValue::string(&actual),
+                TypedValue::string(claimed),
+            ));
+        }
+    }
+
     // The same search, run again, here.
     let fresh = super::candidates::mint(
         state,
@@ -231,6 +258,7 @@ fn candidate_receipt_current(state: &EpistemicState, proposal: &ProposalV1) -> P
         &subject_id,
         &receipt.exact.query,
         &receipt.aliases.queries,
+        content,
     )
     .map_err(|detail| {
         refuse(
@@ -575,7 +603,7 @@ mod tests {
                     entity_id: B.into(),
                     aliases: vec!["churn.md".into()],
                 },
-                content: "# Churn\n".into(),
+                content: CREATION_CONTENT.into(),
                 fields: serde_json::json!({}),
                 basis: crate::ledger::schema::BeliefBasis::Unsupported {
                     reason: "fixture".into(),
@@ -589,6 +617,11 @@ mod tests {
         p
     }
 
+    /// The content `creation()` proposes. Shared so the receipt is minted
+    /// with the prose it will be attached to — the fingerprint check refuses
+    /// the pair otherwise, which is the point of it.
+    const CREATION_CONTENT: &str = "# Churn\n";
+
     fn minted(state: &EpistemicState) -> crate::ledger::schema::CandidateSearchReceipt {
         super::super::candidates::mint(
             state,
@@ -596,6 +629,7 @@ mod tests {
             B,
             "churn.md",
             &["churn.md".to_string()],
+            CREATION_CONTENT,
         )
         .unwrap()
     }
@@ -652,6 +686,85 @@ mod tests {
         let failure = candidate_receipt_current(&empty, &creation(Some(receipt))).unwrap_err();
         assert_eq!(failure.code, "candidate_receipt_caller_authored");
         assert_eq!(failure.actual, TypedValue::string(A));
+    }
+
+    #[test]
+    fn the_minted_receipt_carries_a_completed_semantic_leg() {
+        // M26.2's registration precondition, asserted where it is produced.
+        // The whole argument for turning proposal tools on is that a create
+        // has been looked for semantically, not just by identity.
+        let empty = EpistemicState::default();
+        let receipt = minted(&empty);
+        assert_eq!(
+            receipt.semantic.status,
+            crate::ledger::schema::SemanticStatus::Completed
+        );
+        assert_eq!(
+            receipt.semantic.retriever_version.as_deref(),
+            Some(crate::retrieval::RETRIEVER_VERSION)
+        );
+        assert_eq!(
+            receipt.semantic.index_head.as_ref(),
+            Some(&receipt.index_head)
+        );
+    }
+
+    #[test]
+    fn a_receipt_minted_for_different_prose_is_not_this_proposals_receipt() {
+        // THE GAP THE FINGERPRINT CLOSES. The deterministic legs record their
+        // own queries, so tampering with them is already caught — but the
+        // semantic leg expands over the proposed CONTENT, and content is not
+        // stored on the receipt. Without this check a caller could mint
+        // against innocuous prose and attach the receipt to a proposal saying
+        // something else, and every other check would pass.
+        let empty = EpistemicState::default();
+        let receipt = super::super::candidates::mint(
+            &empty,
+            super::super::candidates::EMPTY_INDEX_HEAD,
+            B,
+            "churn.md",
+            &["churn.md".to_string()],
+            "# Something else entirely\n",
+        )
+        .unwrap();
+        let failure = candidate_receipt_current(&empty, &creation(Some(receipt))).unwrap_err();
+        assert_eq!(failure.code, "candidate_receipt_caller_authored");
+    }
+
+    #[test]
+    fn a_semantic_leg_naming_a_fresher_head_than_its_receipt_is_refused() {
+        // Two heads on one receipt would let a real search be relabelled and
+        // stop looking stale. Caught in the SHAPE layer, so it cannot reach
+        // policy at all.
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.semantic.index_head = Some("a".repeat(32));
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn a_semantic_leg_that_only_claims_to_have_tried_is_refused() {
+        // `attempted` is the shape a caller reaches for to claim credit for a
+        // search that did not finish. M26.2 mints no receipt at all when
+        // retrieval fails, so this status can only be invented — and the
+        // vocabulary keeps the word precisely to have somewhere to say no.
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.semantic.status = crate::ledger::schema::SemanticStatus::Attempted;
+        receipt.semantic.retriever_version = None;
+        receipt.semantic.index_head = None;
+        receipt.semantic.query_fingerprint = None;
+        let error = receipt.validate().unwrap_err();
+        assert!(error.contains("attempted"), "{error}");
+    }
+
+    #[test]
+    fn a_completed_semantic_leg_that_cannot_say_what_ran_is_refused() {
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.semantic.retriever_version = None;
+        let error = receipt.validate().unwrap_err();
+        assert!(error.contains("retriever_version"), "{error}");
     }
 
     #[test]

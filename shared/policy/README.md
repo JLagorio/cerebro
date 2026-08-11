@@ -259,6 +259,28 @@ come first in each language.
   transitive, old-revision, cycle, unrelated control) live in `ancestry.rs`,
   where the graph can be built in code.
 
+## Mint-time refusals (M26.2)
+
+- **`mint_rejections` is a fourth registry beside transport and writer**, and
+  it exists because `semantic_search_unavailable` fails at a fourth place. A
+  transport code fails on the wire; a writer code fails at the ledger; an op's
+  `possible_rejections` fail during policy evaluation. This one fails while
+  the server is MINTING a candidate-search receipt — before any proposal
+  exists — so no op may list it, and load enforces that alongside the other
+  three.
+- **Its destiny is operational, and that is not the timid default.** No
+  proposal was ever built, so there is nothing for a ledger entry to point at.
+  This is the same reasoning M24.7 applied in the other direction when it
+  moved `candidate_receipt_missing` INTO the ledger: a create that reached the
+  proposal stage without a receipt is epistemic history, and a create that
+  never got that far is a capability gap.
+- **The receipt this build mints is `search_version: 3`, and the design says
+  2.** The design assumed M24 shipped v1; M24.7 had already bumped to 2 when
+  it made the three deterministic legs real. Reusing 2 would leave an M24.7
+  receipt (`semantic: not_available`) and an M26.2 receipt
+  (`semantic: completed`) claiming the same version, and telling those apart
+  is the version's only job.
+
 ## What is deliberately NOT here yet
 
 `conflict_classification` and `contradiction_edges` are declared unavailable

@@ -421,7 +421,10 @@ fn route(
         );
         let receipt = match &op {
             schema::ProposalOp::CreateBelief {
-                subject, fields, ..
+                subject,
+                fields,
+                content,
+                ..
             } => {
                 let (subject_id, mut queries) = match subject {
                     schema::SubjectRef::Resolved { entity_id, aliases } => {
@@ -441,6 +444,7 @@ fn route(
                     &subject_id,
                     krel,
                     &queries,
+                    content,
                 )?)
             }
             _ => None,

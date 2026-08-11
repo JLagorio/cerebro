@@ -300,23 +300,103 @@ pub struct ScopedLeg {
     pub candidate_ids: Vec<String>,
 }
 
-/// M24 implements the deterministic legs only. The semantic leg is
-/// explicitly `not_available` rather than quietly absent, so nobody can read
-/// this receipt as proof that semantic retrieval happened. M26 implements it
-/// and makes an attempted semantic leg a precondition for registering the
-/// proposal tools at all.
+/// M24 implemented the deterministic legs only and said so: `not_available`
+/// rather than quietly absent, because an empty `attempted` leg would read as
+/// "searched, found nothing" when nothing was searched. M26.2 supplies the
+/// real leg as `completed`.
+///
+/// `Attempted` remains spellable and is REFUSED on a minted receipt (see
+/// `SemanticLeg::validate`). It is the shape a caller would reach for to
+/// claim credit for a search that did not finish, so the vocabulary keeps the
+/// word in order to have somewhere to say no.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SemanticStatus {
     NotAvailable,
     Attempted,
+    Completed,
 }
 
+/// The semantic leg. `retriever_version`, `index_head`, and
+/// `query_fingerprint` are present exactly when the status is `completed` —
+/// a completed search that could not say WHICH retriever ran, against WHICH
+/// head, for WHICH query is not checkable, and an unavailable one carrying
+/// those fields would be describing a search that never ran.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SemanticLeg {
     pub status: SemanticStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retriever_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_head: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_fingerprint: Option<String>,
     pub candidate_ids: Vec<String>,
+}
+
+impl SemanticLeg {
+    /// The leg's own shape, independent of the receipt around it.
+    fn validate(&self) -> Result<(), String> {
+        match self.status {
+            // The whole point of the M24 spelling: it claims nothing.
+            SemanticStatus::NotAvailable => {
+                if !self.candidate_ids.is_empty() {
+                    return Err(
+                        "an unavailable semantic leg cannot have returned candidates".into(),
+                    );
+                }
+                self.refuse_completed_fields("unavailable")
+            }
+            // A search that started and did not finish is not evidence that
+            // anything was looked for. M26.2 mints no receipt at all when
+            // retrieval fails (`semantic_search_unavailable`), so this status
+            // can only arrive from a caller inventing one.
+            SemanticStatus::Attempted => Err(
+                "a semantic leg may not be `attempted`: retrieval either completed or no receipt \
+                 was minted"
+                    .into(),
+            ),
+            SemanticStatus::Completed => {
+                for (label, value) in [
+                    ("retriever_version", &self.retriever_version),
+                    ("index_head", &self.index_head),
+                    ("query_fingerprint", &self.query_fingerprint),
+                ] {
+                    match value {
+                        None => {
+                            return Err(format!("a completed semantic leg needs {label}"));
+                        }
+                        Some(value) if value.trim().is_empty() => {
+                            return Err(format!("a completed semantic leg needs a real {label}"));
+                        }
+                        Some(_) => {}
+                    }
+                }
+                for (label, value) in [
+                    ("index_head", &self.index_head),
+                    ("query_fingerprint", &self.query_fingerprint),
+                ] {
+                    if !value.as_deref().is_some_and(is_id128) {
+                        return Err(format!("semantic {label} is not an id"));
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn refuse_completed_fields(&self, label: &str) -> Result<(), String> {
+        if self.retriever_version.is_some()
+            || self.index_head.is_some()
+            || self.query_fingerprint.is_some()
+        {
+            return Err(format!(
+                "an {label} semantic leg cannot name a retriever, a head, or a query"
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,13 +469,16 @@ impl CandidateSearchReceipt {
         if !is_id128(&self.scoped.subject_id) {
             return Err("candidate receipt scoped.subject_id is not an id".into());
         }
-        // The semantic leg is unavailable in M24, and saying so is the
-        // point: an empty `attempted` leg would read as "searched, found
-        // nothing" when nothing was searched.
-        if self.semantic.status == SemanticStatus::NotAvailable
-            && !self.semantic.candidate_ids.is_empty()
-        {
-            return Err("an unavailable semantic leg cannot have returned candidates".into());
+        self.semantic.validate()?;
+        // A completed search must have run against the head the receipt
+        // names. Two heads on one receipt would let a real search be
+        // relabelled with a fresher head and stop looking stale.
+        if let Some(head) = &self.semantic.index_head {
+            if head != &self.index_head {
+                return Err(
+                    "the semantic leg names a different head than the receipt it is part of".into(),
+                );
+            }
         }
 
         let mut considered = std::collections::BTreeSet::new();
@@ -896,6 +979,9 @@ mod tests {
             },
             semantic: SemanticLeg {
                 status: SemanticStatus::NotAvailable,
+                retriever_version: None,
+                index_head: None,
+                query_fingerprint: None,
                 candidate_ids: vec![],
             },
             considered,
