@@ -23,3 +23,4 @@
 pub mod independence;
 pub mod prefilter;
 pub mod resolver;
+pub mod window;
