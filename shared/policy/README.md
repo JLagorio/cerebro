@@ -16,12 +16,13 @@ preemptively.)
 
 | File | What it is |
 | --- | --- |
-| `policy.v1.json` | The table: target classes, predicates, transitions, rejection destinies, escalators, capability gates, silence/absence/high-stakes rules, the risk ladder, and one row per op. |
-| `policy.v1.sha256` | SHA-256 of `policy.v1.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
+| `policy.v2.json` | **The table** (`format: 2`, M26.3): target classes, predicates, transitions, rejection destinies, escalators, capability gates, silence/absence/high-stakes/preventive-ancestry rules, the risk ladder, and one row per op. |
+| `policy.v2.sha256` | SHA-256 of `policy.v2.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
+| `policy.v1.json` + `.sha256` | **Frozen** (`format: 1`, M24–M25). Not history for its own sake: it is the negative control for M26.3's live-registration gate — a table that parses cleanly and simply predates `no_self_ancestry`. Both loaders still read it, and nothing edits it. |
 | `authority-routes.v1.json` | The current predicate- and stage-specific authority routes (D11). |
 | `authority-routes/<hash>.json` | Immutable content-addressed snapshots. A queued proposal pins `(route_id, rule_version, artifact_hash)`, so an approval tomorrow is evaluated against the rule the agent was actually shown. |
 | `independence-rules.v1.json` + `.sha256` | The two deterministic positive-independence predicates (M25.5), loaded by `src-tauri/src/ingest/independence.rs`. `rule_version` is bumped by ANY predicate change and pinned into every event the producer emits. |
-| `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators) and `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against). Declaring `versions` requires `rust_only: true` — CAS is out of the mock's scope by declaration, so the TS runner skips it loudly rather than the directory quietly missing the case. |
+| `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), and `ancestry` (the support graph M26.3's preventive walk runs over). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 
 The whole directory is `.prettierignore`d: the bytes are hashed, and a
 formatter that reflowed them would break the anchor.
@@ -33,7 +34,7 @@ the suite does on its own:
 
 ```sh
 cd src-tauri
-# after ANY edit to policy.v1.json
+# after ANY edit to policy.v2.json
 cargo test --lib policy::table::tests::write_policy_digest -- --ignored
 # after an edit to authority-routes.v1.json (bump artifact_version and every
 # changed route's authority_rule_version first; the prior snapshot stays)
@@ -50,7 +51,8 @@ can evaluate.
 Every closed list is non-empty, duplicate-free, and in canonical order, because
 two artifacts that mean the same thing must not be able to differ.
 
-- In `policy.v1.json`, canonical means **sorted**.
+- In `policy.v2.json`, canonical means **sorted**. `unbound_rejections` is the
+  one list allowed to be *empty*, and format 2 emptied it (see below).
 - In `authority-routes.v1.json`, canonical means the **enum declaration order**
   the M22 schema fixes: `planned … shipping` reads as reality moving forward,
   `project_owner … unknown` as authority descending. Load reports the expected
@@ -216,10 +218,55 @@ come first in each language.
   counts only when it says `yes`, because `unknown` is an answer and it is
   not "we checked and it holds".
 
+## Format 2 — the preventive anti-self-ancestry binding (M26.3)
+
+- **`no_self_ancestry` binds to exactly the two ops that carry a
+  `BeliefBasis`** — `create_belief` and `update_belief`. Those are the only
+  payloads that can introduce a support Observation, so they are the only ones
+  the walk can ever refuse. Binding it to `split_belief` or
+  `merge_beliefs_exact` would read as broader protection and provide none:
+  those redistribute evidence a Belief already rests on. `ancestry.rs`'s
+  `basis_target` is an exhaustive match with no wildcard arm, so an op variant
+  added later that *does* carry a basis cannot reach the table without the
+  compiler asking about this list first.
+- **Which ops run the gate is DATA, in a `preventive_ancestry` block.** The
+  walk is code — it reads reducer state — but "an op that changes what a
+  Belief rests on must run it" is a policy statement, and one hand-listed
+  inside the registration gate would be the second inventory the parity rules
+  forbid. The block is shaped like `contradiction_addressing`, and load proves
+  the three facts agree in both directions: every listed op `requires` the
+  predicate and declares the rejection, and no unlisted op requires it. So "is
+  the gate bound?" is one question with one answer.
+- **Format 2 without the block fails the load.** A version bump whose whole
+  content is optional would let a v2 table look modern and gate nothing.
+- **`unbound_rejections` may now be empty, and is.** It names the codes
+  registered in the destiny registry that no op can yet produce; format 2
+  bound the last one. Refusing an empty list would mean keeping a fake
+  reservation alive to satisfy a validator.
+- **Both loaders read formats 1 *and* 2.** v1 is not kept for nostalgia: it is
+  the negative control proving M26.3's registration gate refuses for the right
+  reason. Pointed at v1, `ancestry::table_binding` must fail on the *absent
+  binding*, not on an unknown code — the wrong-reason failure would evaporate
+  the day somebody registered the code without wiring the walk. A hand-written
+  stub could not prove that, because a stub is written by whoever wants the
+  test to pass.
+- **The self-ancestry goldens are `rust_only`, and that is not a gap.** The
+  walk reads reducer state the mock has no counterpart for, so only Rust
+  replays the verdict. What the TS runner still asserts over those files is
+  the half parity is actually about: that the shared table declares
+  `self_ancestry` possible for the ops that produce it, and routes it to the
+  ledger. The fixtures pin the BINDING; the walk's own five vectors (direct,
+  transitive, old-revision, cycle, unrelated control) live in `ancestry.rs`,
+  where the graph can be built in code.
+
 ## What is deliberately NOT here yet
 
-`self_ancestry` is registered in the destiny registry (so the registry is
-closed from birth) but has no binding predicate: M26 adds `no_self_ancestry` to
-the same versioned schema. `conflict_classification` and `contradiction_edges`
-are declared unavailable until M27 ships their bodies, reducers, and vectors —
-the ops are typed-unavailable rather than emitting an unnamed mutation.
+`conflict_classification` and `contradiction_edges` are declared unavailable
+until M27 ships their bodies, reducers, and vectors — the ops are
+typed-unavailable rather than emitting an unnamed mutation.
+
+The proposal tools are still absent from the live and mock MCP servers. The
+gate above landed first ON PURPOSE: a predicate the table requires and nothing
+evaluates is a rule that looks like protection, so the walk (M26.3a) shipped
+with nothing depending on it, the binding (M26.3b) second, and registration —
+which must also carry M26.2's semantic-receipt-v2 validator — last.

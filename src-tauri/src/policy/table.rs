@@ -1,5 +1,5 @@
-//! `shared/policy/policy.v1.json` — the declarative mutation-governance
-//! table (M24.1).
+//! `shared/policy/policy.v2.json` — the declarative mutation-governance
+//! table (M24.1, format 2 at M26.3).
 //!
 //! **The rule this module exists to enforce: policy is DATA.** Every risk
 //! assignment, legal transition, required predicate, rejection destiny, and
@@ -21,20 +21,39 @@ use serde::{Deserialize, Serialize};
 
 /// The one artifact. `include_str!` binds it at compile time so a shipped
 /// binary can never disagree with the tree it was built from.
-pub const POLICY_V1_JSON: &str = include_str!("../../../shared/policy/policy.v1.json");
+pub const POLICY_JSON: &str = include_str!("../../../shared/policy/policy.v2.json");
 
 /// Repo-relative location, for the test that proves both languages read the
 /// same path.
-pub const POLICY_V1_PATH: &str = "shared/policy/policy.v1.json";
+pub const POLICY_PATH: &str = "shared/policy/policy.v2.json";
 
 /// The committed SHA-256 of the table's bytes. Rust and TS each hash what
 /// they actually loaded and compare against THIS file — which is the only
 /// way two processes in two languages assert the same bytes rather than
 /// each asserting self-consistency. Regenerate deliberately after a table
 /// edit (see `write_policy_digest`).
+pub const POLICY_DIGEST_PATH: &str = "shared/policy/policy.v2.sha256";
+
+/// The FROZEN format-1 artifact (M24). It is kept compiled in for one
+/// reason: it is the negative control that proves the M26.3 live-registration
+/// gate refuses for the RIGHT reason. A v1 table is a perfectly valid table
+/// that simply does not bind `no_self_ancestry`, so registering the proposal
+/// tools against it must fail on the absent binding rather than on an
+/// unknown code — and a hand-written stub could not prove that, because a
+/// stub is written by whoever wants the test to pass.
+///
+/// Nothing edits these bytes. Policy changes land in `POLICY_JSON`.
+pub const POLICY_V1_JSON: &str = include_str!("../../../shared/policy/policy.v1.json");
+pub const POLICY_V1_PATH: &str = "shared/policy/policy.v1.json";
 pub const POLICY_V1_DIGEST_PATH: &str = "shared/policy/policy.v1.sha256";
 
-pub const FORMAT: u64 = 1;
+/// The format this build SHIPS.
+pub const FORMAT: u64 = 2;
+
+/// Every format this build can READ. A published artifact is history: format
+/// 1 was the whole of M24 and M25, and refusing to parse it would mean the
+/// only way to demonstrate what format 2 added is a fixture nobody committed.
+pub const SUPPORTED_FORMATS: &[u64] = &[1, 2];
 
 /// Risk is a PERSISTED vocabulary — a Proposal declares one and
 /// `proposal.applied` records the effective one — so it is defined once in
@@ -145,6 +164,23 @@ pub struct ContradictionAddressingRule {
     pub stale_rejection: String,
 }
 
+/// The format-2 binding for the preventive anti-self-ancestry walk (M26.3).
+///
+/// **Which ops must prove it is DATA.** The walk itself is code — it reads a
+/// proposal's basis and a reducer index — but "an op that changes what a
+/// Belief rests on must run it" is a policy statement, and a policy statement
+/// hand-listed inside the registration gate is the second inventory this
+/// milestone's parity rules forbid. Load proves the block, the ops'
+/// `requires`, and the ops' `possible_rejections` all agree, so "is the gate
+/// bound?" is one question with one answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreventiveAncestryRule {
+    pub required_for_ops: Vec<String>,
+    pub predicate: String,
+    pub rejection: String,
+}
+
 /// The table-decidable evaluation stages, in the order the artifact fixes.
 /// Precedence between refusals IS policy — "does an unavailable capability
 /// outrank an understated risk?" has an answer, and that answer belongs in
@@ -224,6 +260,11 @@ pub struct PolicyTable {
     pub absence: AbsenceRule,
     pub high_stakes: HighStakesRule,
     pub contradiction_addressing: ContradictionAddressingRule,
+    /// Absent in format 1, required from format 2. `Option` rather than a
+    /// `default` value: "this table predates the gate" and "this table binds
+    /// the gate to nothing" must not be the same reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preventive_ancestry: Option<PreventiveAncestryRule>,
     pub risk_ladder: BTreeMap<Risk, LadderRung>,
     pub ops: BTreeMap<String, OpRule>,
 }
@@ -234,6 +275,15 @@ fn check_closed_list(label: &str, items: &[String]) -> Result<(), String> {
     if items.is_empty() {
         return Err(format!("{label} is empty"));
     }
+    check_possibly_empty_list(label, items)
+}
+
+/// The same shape check without the non-empty requirement, for the one list
+/// whose emptiness is a real and desirable state: `unbound_rejections` names
+/// the codes registered in the destiny registry that no op can yet produce,
+/// and format 2 emptied it by binding the last one. Demanding a member would
+/// mean keeping a fake reservation alive to satisfy a validator.
+fn check_possibly_empty_list(label: &str, items: &[String]) -> Result<(), String> {
     let mut seen = BTreeSet::new();
     for item in items {
         if item.is_empty() {
@@ -253,6 +303,14 @@ fn check_closed_list(label: &str, items: &[String]) -> Result<(), String> {
 
 fn check_members(label: &str, items: &[String], universe: &BTreeSet<&str>) -> Result<(), String> {
     check_closed_list(label, items)?;
+    check_all_registered(label, items, universe)
+}
+
+fn check_all_registered(
+    label: &str,
+    items: &[String],
+    universe: &BTreeSet<&str>,
+) -> Result<(), String> {
     for item in items {
         if !universe.contains(item.as_str()) {
             return Err(format!("{label} names unregistered value {item:?}"));
@@ -264,27 +322,25 @@ fn check_members(label: &str, items: &[String], universe: &BTreeSet<&str>) -> Re
 impl PolicyTable {
     /// Parse and fully validate the compiled-in artifact.
     pub fn load() -> Result<PolicyTable, String> {
-        Self::parse(POLICY_V1_JSON)
+        Self::parse(POLICY_JSON)
     }
 
     pub fn parse(raw: &str) -> Result<PolicyTable, String> {
         let table: PolicyTable =
-            serde_json::from_str(raw).map_err(|e| format!("{POLICY_V1_PATH}: {e}"))?;
+            serde_json::from_str(raw).map_err(|e| format!("{POLICY_PATH}: {e}"))?;
         table.validate()?;
         Ok(table)
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.format != FORMAT {
+        if !SUPPORTED_FORMATS.contains(&self.format) {
             return Err(format!(
-                "{POLICY_V1_PATH}: unsupported policy format {}",
+                "{POLICY_PATH}: unsupported policy format {}",
                 self.format
             ));
         }
         if self.artifact_version == 0 {
-            return Err(format!(
-                "{POLICY_V1_PATH}: artifact_version must be positive"
-            ));
+            return Err(format!("{POLICY_PATH}: artifact_version must be positive"));
         }
         check_closed_list("target_classes", &self.target_classes)?;
         check_closed_list("predicates", &self.predicates)?;
@@ -319,7 +375,8 @@ impl PolicyTable {
         // rejection nobody can ever route.
         check_members("transport_rejections", &self.transport_rejections, &codes)?;
         check_members("writer_rejections", &self.writer_rejections, &codes)?;
-        check_members("unbound_rejections", &self.unbound_rejections, &codes)?;
+        check_possibly_empty_list("unbound_rejections", &self.unbound_rejections)?;
+        check_all_registered("unbound_rejections", &self.unbound_rejections, &codes)?;
 
         // Every stage runs exactly once. A missing stage would silently
         // disable a whole class of refusal; a repeated one would make
@@ -558,6 +615,69 @@ impl PolicyTable {
             }
         }
 
+        // The format-2 preventive-ancestry binding. Absent is legal only for
+        // format 1 — a format-2 table that omits it would claim the newer
+        // format while carrying none of what the newer format is FOR.
+        match &self.preventive_ancestry {
+            None if self.format >= 2 => {
+                return Err(format!(
+                    "{POLICY_PATH}: format {} declares no preventive_ancestry binding",
+                    self.format
+                ))
+            }
+            None => {}
+            Some(rule) => {
+                if !predicates.contains(rule.predicate.as_str()) {
+                    return Err(format!(
+                        "preventive_ancestry.predicate names unregistered predicate {:?}",
+                        rule.predicate
+                    ));
+                }
+                if !codes.contains(rule.rejection.as_str()) {
+                    return Err(format!(
+                        "preventive_ancestry.rejection names unregistered rejection {:?}",
+                        rule.rejection
+                    ));
+                }
+                check_members(
+                    "preventive_ancestry.required_for_ops",
+                    &rule.required_for_ops,
+                    &op_names,
+                )?;
+                // The binding is only a binding if the op rows agree. An op
+                // named here that does not REQUIRE the predicate would run
+                // no walk, and one that cannot report the rejection would
+                // have to refuse under a code it never declared.
+                for name in &rule.required_for_ops {
+                    let op = &self.ops[name];
+                    if !op.requires.contains(&rule.predicate) {
+                        return Err(format!(
+                            "preventive_ancestry requires {name:?} to run {:?}, and its row does not",
+                            rule.predicate
+                        ));
+                    }
+                    if !op.possible_rejections.contains(&rule.rejection) {
+                        return Err(format!(
+                            "ops.{name} runs {:?} and cannot report {:?}",
+                            rule.predicate, rule.rejection
+                        ));
+                    }
+                }
+                // And nothing outside the list may require it, or the block
+                // would be a partial description of where the gate runs.
+                for (name, op) in &self.ops {
+                    if op.requires.contains(&rule.predicate)
+                        && !rule.required_for_ops.contains(name)
+                    {
+                        return Err(format!(
+                            "ops.{name} requires {:?} and preventive_ancestry does not list it",
+                            rule.predicate
+                        ));
+                    }
+                }
+            }
+        }
+
         // Every registered transition must belong to some op, or it is a
         // name with no meaning; every predicate likewise.
         let mut used_transitions = BTreeSet::new();
@@ -645,18 +765,18 @@ mod tests {
 
     #[test]
     fn the_loaded_bytes_match_the_committed_digest() {
-        // The cross-language anchor. `policy.v1.test.ts` hashes the bytes it
+        // The cross-language anchor. `table.test.ts` hashes the bytes it
         // loaded and compares against the same file, so if the two languages
         // ever read different artifacts they disagree with this digest
         // rather than quietly diverging.
-        let committed = std::fs::read_to_string(repo(POLICY_V1_DIGEST_PATH))
+        let committed = std::fs::read_to_string(repo(POLICY_DIGEST_PATH))
             .expect("read the committed policy digest")
             .trim()
             .to_string();
         assert_eq!(
-            crate::ledger::sha256_hex(POLICY_V1_JSON.as_bytes()),
+            crate::ledger::sha256_hex(POLICY_JSON.as_bytes()),
             committed,
-            "the table changed without regenerating {POLICY_V1_DIGEST_PATH} — run \
+            "the table changed without regenerating {POLICY_DIGEST_PATH} — run \
              `cargo test --lib policy::table::tests::write_policy_digest -- --ignored`"
         );
     }
@@ -665,21 +785,51 @@ mod tests {
     #[test]
     #[ignore = "run explicitly after a deliberate policy-table edit"]
     fn write_policy_digest() {
-        let digest = crate::ledger::sha256_hex(POLICY_V1_JSON.as_bytes());
-        std::fs::write(repo(POLICY_V1_DIGEST_PATH), format!("{digest}\n")).unwrap();
-        println!("policy.v1.json digest = {digest}");
+        let digest = crate::ledger::sha256_hex(POLICY_JSON.as_bytes());
+        std::fs::write(repo(POLICY_DIGEST_PATH), format!("{digest}\n")).unwrap();
+        println!("{POLICY_PATH} digest = {digest}");
     }
 
     #[test]
     fn the_compiled_table_is_the_file_on_disk() {
         // `include_str!` binds at compile time; a stale build that disagreed
         // with the tree would make every other policy test meaningless.
-        let disk = std::fs::read_to_string(repo(POLICY_V1_PATH)).expect("read the shared table");
+        let disk = std::fs::read_to_string(repo(POLICY_PATH)).expect("read the shared table");
+        assert_eq!(disk, POLICY_JSON);
+    }
+
+    #[test]
+    fn the_frozen_v1_artifact_still_hashes_to_what_m24_published() {
+        // v1 is HISTORY, and it is also the negative control the M26.3
+        // registration gate is tested against. A "small fix" to it would
+        // quietly change what that control proves, so its bytes are pinned
+        // exactly like the live table's — with no regeneration test, because
+        // there is no legitimate edit.
+        let disk = std::fs::read_to_string(repo(POLICY_V1_PATH)).expect("read the frozen table");
         assert_eq!(disk, POLICY_V1_JSON);
+        let committed = std::fs::read_to_string(repo(POLICY_V1_DIGEST_PATH))
+            .expect("read the frozen digest")
+            .trim()
+            .to_string();
+        assert_eq!(
+            crate::ledger::sha256_hex(POLICY_V1_JSON.as_bytes()),
+            committed
+        );
+    }
+
+    #[test]
+    fn the_frozen_v1_artifact_still_loads() {
+        // Not nostalgia: the gate's negative control must be a table that
+        // PARSES and simply lacks the binding. If v1 stopped loading, the
+        // "registration against v1 refuses for the right reason" test would
+        // start passing for the wrong one.
+        let v1 = PolicyTable::parse(POLICY_V1_JSON).expect("the frozen v1 table must still load");
+        assert_eq!(v1.format, 1);
+        assert_eq!(v1.preventive_ancestry, None);
     }
 
     fn mutated(f: impl FnOnce(&mut serde_json::Value)) -> String {
-        let mut raw: serde_json::Value = serde_json::from_str(POLICY_V1_JSON).unwrap();
+        let mut raw: serde_json::Value = serde_json::from_str(POLICY_JSON).unwrap();
         f(&mut raw);
         raw.to_string()
     }
@@ -795,6 +945,86 @@ mod tests {
                 .sort_by_key(|t| t.as_str().unwrap().to_string());
         });
         assert!(PolicyTable::parse(&raw).unwrap_err().contains("zzz_orphan"));
+    }
+
+    #[test]
+    fn an_unsupported_format_still_fails_the_load() {
+        // Widening to a SET is not the same as accepting anything: a table
+        // from a build that knew more than this one must refuse, not be read
+        // with the fields this build happens to recognise.
+        let raw = mutated(|v| v["format"] = serde_json::json!(99));
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("unsupported policy format 99"));
+    }
+
+    #[test]
+    fn a_format_two_table_with_no_ancestry_binding_fails_the_load() {
+        // The whole point of the version bump. A v2 that dropped the block
+        // would look modern and gate nothing.
+        let raw = mutated(|v| {
+            v.as_object_mut().unwrap().remove("preventive_ancestry");
+        });
+        assert!(PolicyTable::parse(&raw)
+            .unwrap_err()
+            .contains("declares no preventive_ancestry binding"));
+    }
+
+    #[test]
+    fn a_bound_op_that_does_not_run_the_predicate_fails_the_load() {
+        // The binding is three facts that must agree. This is the one that
+        // would otherwise ship as protection: the block names the op, and
+        // the op's row runs no walk.
+        let raw = mutated(|v| {
+            let requires = v["ops"]["update_belief"]["requires"]
+                .as_array_mut()
+                .unwrap();
+            requires.retain(|p| p.as_str() != Some("no_self_ancestry"));
+        });
+        let err = PolicyTable::parse(&raw).unwrap_err();
+        assert!(err.contains("its row does not"), "{err}");
+    }
+
+    #[test]
+    fn a_bound_op_that_cannot_report_the_rejection_fails_the_load() {
+        let raw = mutated(|v| {
+            let codes = v["ops"]["update_belief"]["possible_rejections"]
+                .as_array_mut()
+                .unwrap();
+            codes.retain(|c| c.as_str() != Some("self_ancestry"));
+        });
+        let err = PolicyTable::parse(&raw).unwrap_err();
+        assert!(err.contains("cannot report"), "{err}");
+    }
+
+    #[test]
+    fn an_op_that_runs_the_walk_outside_the_block_fails_the_load() {
+        // The other direction, and the reason the block is the single
+        // answer to "where does the gate run?": an op that requires the
+        // predicate without being listed would make the block a partial map.
+        let raw = mutated(|v| {
+            let requires = v["ops"]["contest_belief"]["requires"]
+                .as_array_mut()
+                .unwrap();
+            requires.push(serde_json::json!("no_self_ancestry"));
+            requires.sort_by_key(|p| p.as_str().unwrap().to_string());
+        });
+        let err = PolicyTable::parse(&raw).unwrap_err();
+        assert!(
+            err.contains("preventive_ancestry does not list it"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_last_reserved_rejection_became_a_bound_one() {
+        // `unbound_rejections` may now be empty, and in the shipped table it
+        // is: every registered code an op can produce is declared by an op.
+        // The list stays in the format because the NEXT reserved code will
+        // need it.
+        let table = PolicyTable::load().unwrap();
+        assert!(table.unbound_rejections.is_empty());
+        assert_eq!(table.destiny("self_ancestry"), Some(Destiny::Ledger));
     }
 
     #[test]

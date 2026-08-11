@@ -14,16 +14,19 @@ import {
   ALL_STAGES,
   blockingCapability,
   destiny,
+  FORMAT,
   parseTable,
   POLICY,
-  POLICY_V1_DIGEST_PATH,
-  POLICY_V1_PATH,
+  POLICY_DIGEST_PATH,
+  POLICY_PATH,
   transitionFor,
   type PolicyTable,
 } from './table';
 
 const REPO = join(__dirname, '../../..');
-const RAW = readFileSync(join(REPO, POLICY_V1_PATH), 'utf8');
+const RAW = readFileSync(join(REPO, POLICY_PATH), 'utf8');
+/** The frozen format-1 artifact — still readable, and still not the table. */
+const RAW_V1 = readFileSync(join(REPO, 'shared/policy/policy.v1.json'), 'utf8');
 
 describe('the shared artifact is one artifact', () => {
   it('hashes to the digest the Rust core also asserts', () => {
@@ -32,7 +35,7 @@ describe('the shared artifact is one artifact', () => {
     // different bytes, both disagree with the digest instead of quietly
     // drifting apart. Regenerate deliberately after a table edit with
     // `cargo test --lib policy::table::tests::write_policy_digest -- --ignored`.
-    const committed = readFileSync(join(REPO, POLICY_V1_DIGEST_PATH), 'utf8').trim();
+    const committed = readFileSync(join(REPO, POLICY_DIGEST_PATH), 'utf8').trim();
     expect(sha256Hex(RAW)).toBe(committed);
   });
 
@@ -41,8 +44,21 @@ describe('the shared artifact is one artifact', () => {
   });
 
   it('validates on load', () => {
-    expect(POLICY.format).toBe(1);
+    expect(POLICY.format).toBe(FORMAT);
     expect(Object.keys(POLICY.ops).length).toBeGreaterThan(0);
+  });
+
+  it('still reads the frozen format-1 artifact, which binds no ancestry gate', () => {
+    // Format 1 is history, and the Rust core keeps it as the negative
+    // control for M26.3's registration gate — a table that PARSES and simply
+    // predates the binding. Both loaders accept the same set of formats, or
+    // "which tables are readable" would have two answers.
+    const v1 = parseTable(JSON.parse(RAW_V1));
+    expect(v1.format).toBe(1);
+    expect(v1.preventive_ancestry).toBeUndefined();
+    // And its digest is still the one M24 published: nothing edits it.
+    const committed = readFileSync(join(REPO, 'shared/policy/policy.v1.sha256'), 'utf8').trim();
+    expect(sha256Hex(RAW_V1)).toBe(committed);
   });
 });
 
@@ -126,6 +142,55 @@ describe('load refuses an artifact it cannot fully understand', () => {
     });
     expect(() => parseTable(raw)).toThrow(/no transition_selector/);
   });
+
+  it('refuses a format it does not know', () => {
+    // Widening to a SET is not the same as accepting anything: a table from
+    // a build that knew more than this one must refuse, not be read with the
+    // fields this build happens to recognise.
+    const raw = mutated((t) => {
+      t.format = 99;
+    });
+    expect(() => parseTable(raw)).toThrow(/unsupported policy format 99/);
+  });
+
+  it('refuses a format-2 table that binds no ancestry gate', () => {
+    // The whole point of the version bump. A v2 that dropped the block would
+    // look modern and gate nothing.
+    const raw = mutated((t) => {
+      delete t.preventive_ancestry;
+    });
+    expect(() => parseTable(raw)).toThrow(/declares no preventive_ancestry/);
+  });
+
+  it('refuses a bound op whose row runs no walk', () => {
+    // The binding is three facts that must agree. This is the one that would
+    // otherwise ship as protection: the block names the op, and the op's row
+    // requires nothing.
+    const raw = mutated((t) => {
+      t.ops.update_belief.requires = t.ops.update_belief.requires.filter(
+        (p) => p !== 'no_self_ancestry',
+      );
+    });
+    expect(() => parseTable(raw)).toThrow(/its row does not/);
+  });
+
+  it('refuses a bound op that cannot report the rejection', () => {
+    const raw = mutated((t) => {
+      t.ops.update_belief.possible_rejections = t.ops.update_belief.possible_rejections.filter(
+        (c) => c !== 'self_ancestry',
+      );
+    });
+    expect(() => parseTable(raw)).toThrow(/cannot report/);
+  });
+
+  it('refuses an op that runs the walk outside the block', () => {
+    // The other direction, and the reason the block is the single answer to
+    // "where does the gate run?".
+    const raw = mutated((t) => {
+      t.ops.contest_belief.requires = [...t.ops.contest_belief.requires, 'no_self_ancestry'].sort();
+    });
+    expect(() => parseTable(raw)).toThrow(/preventive_ancestry does not list it/);
+  });
 });
 
 describe('the table answers the questions an interpreter asks', () => {
@@ -159,5 +224,19 @@ describe('the table answers the questions an interpreter asks', () => {
 
   it('knows every stage the interpreter implements', () => {
     expect([...POLICY.evaluation_order].sort()).toEqual([...ALL_STAGES].sort());
+  });
+
+  it('binds the preventive ancestry walk to the ops that change a belief basis', () => {
+    // The walk is Rust-only — it reads reducer state the mock has no
+    // counterpart for — but WHERE it runs is policy, and both loaders hold
+    // the artifact to the same three-way agreement. `ancestry.rs` asserts
+    // this same list against `basis_target`'s exhaustive match.
+    const ancestry = POLICY.preventive_ancestry;
+    expect(ancestry?.required_for_ops).toEqual(['create_belief', 'update_belief']);
+    expect(ancestry?.predicate).toBe('no_self_ancestry');
+    expect(ancestry?.rejection).toBe('self_ancestry');
+    expect(destiny(POLICY, 'self_ancestry')).toBe('ledger');
+    // The last reserved-but-unbound code became a bound one.
+    expect(POLICY.unbound_rejections).toEqual([]);
   });
 });

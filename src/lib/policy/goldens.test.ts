@@ -6,9 +6,13 @@
  * mechanism: two interpreters, one artifact, one fixture set. Nobody reviews
  * a hand-copied rule for equivalence, because there is no hand-copied rule.
  *
- * A fixture marked `rust_only` depends on CAS or logical-batch semantics that
- * are out of the mock's scope by declaration (D5). It is SKIPPED loudly here,
- * never quietly omitted from the directory.
+ * A fixture marked `rust_only` depends on CAS, support-graph ancestry, or
+ * logical-batch semantics that are out of the mock's scope by declaration
+ * (D5). Its verdict replay is SKIPPED loudly here, never quietly omitted from
+ * the directory — and the assertions below still run over it, because what
+ * they check is the ARTIFACT: that the op declares the code possible, and
+ * that the code declares a destiny. That half of parity does not need a
+ * second interpreter.
  *
  * @see src-tauri/src/policy/goldens.rs
  */
@@ -35,6 +39,16 @@ interface Golden {
    * so it must also be `rust_only`, and the test below proves it is.
    */
   versions?: Record<string, number>;
+  /**
+   * The support graph the preventive anti-self-ancestry walk runs over
+   * (M26.3). Like `versions`, declaring one makes the fixture Rust-only: the
+   * walk reads reducer state the mock has no counterpart for.
+   */
+  ancestry?: {
+    belief_revisions?: Record<string, string>;
+    derived_from?: Record<string, string[]>;
+    lineage?: Record<string, string[]>;
+  };
   proposal: Record<string, unknown>;
   expect: {
     verdict: string;
@@ -122,6 +136,23 @@ describe('the fixture set itself', () => {
     for (const file of cas) {
       expect(load(file).rust_only, `${file} declares versions`).toBe(true);
     }
+  });
+
+  it('marks every self-ancestry fixture rust_only, and still checks their artifact half', () => {
+    // The walk is Rust-only, the BINDING is not: these files are what hold
+    // the shared table to declaring `self_ancestry` possible for the ops that
+    // can produce it, and to routing it at all. Both are asserted below over
+    // every file, skipped or not.
+    const ancestry = files.filter((f) => load(f).ancestry !== undefined);
+    expect(ancestry.length).toBeGreaterThan(0);
+    for (const file of ancestry) {
+      expect(load(file).rust_only, `${file} declares a support graph`).toBe(true);
+    }
+    const refusals = ancestry.filter((f) => load(f).expect.rejection === 'self_ancestry');
+    expect(refusals.length).toBeGreaterThan(0);
+    // And a control, or a gate that refused everything would look identical
+    // to one that works.
+    expect(ancestry.length).toBeGreaterThan(refusals.length);
   });
 
   it('declares a destiny with every rejection', () => {

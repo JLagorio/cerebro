@@ -1,0 +1,75 @@
+{
+  "name": "a-restatement-of-the-bases-own-output-is-refused-too",
+  "why": "One hop further out, because one hop is all it would take to route around a gate that only looked at direct derivation. The offered support was derived from an Observation that was derived from this Belief's own revision — a restatement of a restatement is still the base's own handwriting. The walk is breadth-first over explicit hops with a visited set, so distance buys nothing. Also a create: the gate binds to every op that carries a BeliefBasis, and a brand-new Belief supported by evidence written from a revision of the belief it is being created as is the same circle wearing a new id. rust_only for the same reason as its sibling.",
+  "rust_only": true,
+  "ancestry": {
+    "belief_revisions": {
+      "1e70a5100000000000000000000000b2": "be11ef00000000000000000000000000"
+    },
+    "derived_from": {
+      "0b5e00000000000000000000000000b1": ["1e70a5100000000000000000000000b2"]
+    },
+    "lineage": {
+      "0b5e00000000000000000000000000b2": ["0b5e00000000000000000000000000b1"]
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9d5e1f0000000000000000000000000b",
+    "run_id": "cd5e1f0000000000000000000000000b",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": null
+      }
+    ],
+    "op": {
+      "kind": "create_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "e0000000000000000000000000000001",
+          "aliases": []
+        },
+        "content": "a synthetic belief",
+        "fields": {},
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "0b5e00000000000000000000000000b2",
+              "role": "supports"
+            }
+          ]
+        },
+        "distinctness_reason": "synthetic fixture"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "LOW",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "self_ancestry",
+    "destiny": "ledger"
+  }
+}

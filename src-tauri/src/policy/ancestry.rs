@@ -31,20 +31,26 @@
 //!    reaching every Observation that revision cited, because those are what
 //!    it was built from.
 //!
-//! ## What is NOT wired yet, and why that is safe
+//! ## How it is bound (M26.3b)
 //!
-//! The table does not require `no_self_ancestry` yet: binding it needs
-//! `shared/policy/policy.v2.json` (`format: 2`), which adds the predicate to
-//! the global closed registries and to every belief-basis-changing op. That
-//! artifact is the second half of M26.3 and lands before the proposal tools
-//! are registered on the live MCP server.
+//! `shared/policy/policy.v2.json` (`format: 2`) registers `no_self_ancestry`
+//! in the global closed predicate registry, requires it on every
+//! belief-basis-changing op, and declares the binding once in a
+//! `preventive_ancestry` block. `preconditions::check` dispatches on the op's
+//! `requires` list like every other predicate, so which ops run the walk is
+//! the artifact's answer rather than this module's.
 //!
-//! This ordering is the safe one, and it is the opposite of the usual gap.
-//! `PREDICATE_OWNERS` exists because a predicate the TABLE REQUIRES and
-//! nothing evaluates is a rule that looks like protection. This is an
-//! evaluator with no requirement yet — nothing is currently protected by it,
-//! and nothing currently believes it is. The dangerous order would be
-//! publishing the requirement first and discovering the walk afterwards.
+//! The ORDER mattered and this is the safe half of it. `PREDICATE_OWNERS`
+//! exists because a predicate the table REQUIRES and nothing evaluates is a
+//! rule that looks like protection — so the walk (M26.3a) landed first, with
+//! nothing depending on it, and the requirement second. The dangerous order
+//! would have been publishing the requirement and discovering the walk
+//! afterwards.
+//!
+//! Still not wired: the live MCP proposal tools. Registering them is the rest
+//! of M26.3, and [`table_binding`] is the precondition it must call — a build
+//! pointed at the frozen format-1 table refuses to register, naming the
+//! absent binding.
 
 use std::collections::BTreeSet;
 
@@ -52,6 +58,7 @@ use crate::ledger::reduce::EpistemicState;
 use crate::ledger::schema::{BeliefBasis, ProposalOp, ProposalV1, TypedValue};
 
 use super::preconditions::{PreconditionFailure, PreconditionResult};
+use super::table::{PolicyTable, PreventiveAncestryRule};
 
 /// The predicate name a refusal reports, and the table's binding.
 pub const RULE: &str = "no_self_ancestry";
@@ -59,6 +66,42 @@ pub const RULE: &str = "no_self_ancestry";
 /// closed registry since policy.v1, so this binds a code that already exists
 /// rather than inventing one.
 pub const CODE: &str = "self_ancestry";
+
+/// The op kinds whose payload carries a `BeliefBasis` — the only ones this
+/// walk can ever refuse, and therefore the only ones the table may bind it
+/// to. Binding it to more would be a rule that looks like protection; to
+/// fewer, a hole.
+///
+/// This list is checked against the artifact by a tripwire below, and
+/// [`basis_target`]'s match is exhaustive, so an op variant added later with
+/// a basis in its payload cannot reach the table without passing through
+/// here.
+pub const BASIS_CHANGING_OPS: &[&str] = &["create_belief", "update_belief"];
+
+/// The M26.3 live-registration precondition: does the loaded table actually
+/// BIND this walk?
+///
+/// The frozen format-1 table is a valid table that simply predates the gate,
+/// so a build reading it must refuse to register the proposal tools by
+/// naming the absent binding — not by tripping over an unknown code, which
+/// would be the right outcome for the wrong reason and would stop being true
+/// the moment somebody registered the code.
+pub fn table_binding(table: &PolicyTable) -> Result<&PreventiveAncestryRule, String> {
+    let Some(rule) = &table.preventive_ancestry else {
+        return Err(format!(
+            "the loaded policy table (format {}) binds no {RULE} predicate — live proposal \
+             tools may not be registered against it",
+            table.format
+        ));
+    };
+    if rule.predicate != RULE || rule.rejection != CODE {
+        return Err(format!(
+            "the loaded policy table binds {:?}/{:?}, and this build evaluates {RULE}/{CODE}",
+            rule.predicate, rule.rejection
+        ));
+    }
+    Ok(rule)
+}
 
 /// What the walk found, when it found something.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +114,11 @@ pub struct SelfAncestry {
 /// Which Belief a proposal's basis is being attached to, and what supports
 /// it. Returns `None` for ops that change no belief basis — those cannot
 /// close a loop, and asking them to prove they do not would be noise.
+///
+/// **Exhaustive on purpose, with no wildcard arm.** An op variant added
+/// later that carries a `BeliefBasis` would otherwise fall silently into
+/// `None` and be exempt from a gate written to catch exactly that shape.
+/// This way the compiler asks.
 fn basis_target(proposal: &ProposalV1) -> Option<(&str, &BeliefBasis)> {
     match &proposal.op {
         ProposalOp::CreateBelief {
@@ -79,7 +127,27 @@ fn basis_target(proposal: &ProposalV1) -> Option<(&str, &BeliefBasis)> {
         ProposalOp::UpdateBelief {
             belief_id, basis, ..
         } => Some((belief_id, basis)),
-        _ => None,
+        // No basis in the payload: these move, retire, relabel, or
+        // redistribute what a Belief already rests on, and none of them can
+        // introduce a support Observation.
+        ProposalOp::AppendObservation { .. }
+        | ProposalOp::CacheSource { .. }
+        | ProposalOp::SupersedeBelief { .. }
+        | ProposalOp::PromoteDraft { .. }
+        | ProposalOp::EditRelation { .. }
+        | ProposalOp::ContestBelief { .. }
+        | ProposalOp::ClassifyConflict { .. }
+        | ProposalOp::AddEntityAlias { .. }
+        | ProposalOp::CorrectObservationSubject { .. }
+        | ProposalOp::ConfirmObservationIndependence { .. }
+        | ProposalOp::MergeBeliefsExact { .. }
+        | ProposalOp::MergeEntities { .. }
+        | ProposalOp::SplitBelief { .. }
+        | ProposalOp::TombstoneBelief { .. }
+        | ProposalOp::ArchiveBelief { .. }
+        | ProposalOp::Deprecate { .. }
+        | ProposalOp::MassSupersede { .. }
+        | ProposalOp::RevertProposal { .. } => None,
     }
 }
 
@@ -501,6 +569,50 @@ mod tests {
             alias: "Falcon".into(),
         };
         assert_eq!(no_self_ancestry(&state, &p), Ok(()));
+    }
+
+    #[test]
+    fn the_table_binds_the_walk_to_exactly_the_ops_it_can_refuse() {
+        // THE BINDING TRIPWIRE. `basis_target` is exhaustive, so this list
+        // cannot silently fall behind the op union; this asserts the other
+        // edge — that the artifact and the evaluator agree about where the
+        // gate runs. A table binding one more op would declare protection
+        // the walk never provides; one fewer, a hole.
+        let table = PolicyTable::load().unwrap();
+        let rule = table_binding(&table).expect("the shipped table binds the walk");
+        assert_eq!(rule.required_for_ops, BASIS_CHANGING_OPS);
+        assert_eq!(rule.predicate, RULE);
+        assert_eq!(rule.rejection, CODE);
+    }
+
+    #[test]
+    fn registration_against_the_frozen_v1_table_refuses_by_naming_the_binding() {
+        // The exact refusal the design fixes: v1 is a VALID table that
+        // predates the gate, so the failure must be "nothing binds
+        // no_self_ancestry" and not "unknown code". The distinction matters
+        // because the wrong-reason failure would evaporate the day somebody
+        // registered the code without wiring the walk.
+        let v1 = PolicyTable::parse(crate::policy::table::POLICY_V1_JSON).unwrap();
+        let err = table_binding(&v1).unwrap_err();
+        assert!(err.contains(RULE), "{err}");
+        assert!(!err.contains("unknown"), "{err}");
+    }
+
+    #[test]
+    fn every_bound_op_declares_the_code_the_walk_refuses_with() {
+        // The refusal has to be sayable by the op that produces it, and the
+        // code has to reach the LEDGER — an epistemic refusal routed to the
+        // operational log is invisible to the thing it exists to inform.
+        let table = PolicyTable::load().unwrap();
+        for name in BASIS_CHANGING_OPS {
+            let op = table.op(name).unwrap();
+            assert!(op.requires.iter().any(|p| p == RULE), "{name}");
+            assert!(op.possible_rejections.iter().any(|c| c == CODE), "{name}");
+        }
+        assert_eq!(
+            table.destiny(CODE),
+            Some(crate::policy::table::Destiny::Ledger)
+        );
     }
 
     #[test]

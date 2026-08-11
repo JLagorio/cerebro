@@ -17,9 +17,12 @@
 //! replays them through the state-aware interpreter. The files are authored
 //! once and asserted harder each phase.
 //!
-//! `rust_only: true` marks a fixture whose expectation depends on CAS or
-//! logical-batch semantics that are deliberately out of the mock's scope —
-//! declared, never silently omitted.
+//! `rust_only: true` marks a fixture whose expectation depends on CAS,
+//! ancestry, or logical-batch semantics that are deliberately out of the
+//! mock's scope — declared, never silently omitted. What the TS runner still
+//! asserts over those files is the ARTIFACT: that the op declares the code
+//! possible, and that the code declares a destiny. That is the half parity
+//! is actually about.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -69,6 +72,78 @@ pub struct GoldenExpectation {
     pub review: Option<String>,
 }
 
+/// The support graph a self-ancestry fixture evaluates against (M26.3).
+///
+/// Three explicit hop kinds, exactly the ones `ancestry::no_self_ancestry`
+/// walks — nothing here infers a dependency from similarity or timing. The
+/// reached-revision's-own-basis hop is deliberately NOT expressible from a
+/// fixture: it needs a whole `BeliefState`, and its vectors live in
+/// `ancestry.rs` where the graph can be built in code. These files exist to
+/// pin the BINDING, not to re-litigate the walk.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoldenAncestry {
+    /// `<belief-revision event id>` -> the Belief it is a revision of.
+    #[serde(default)]
+    pub belief_revisions: BTreeMap<String, String>,
+    /// `<observation event id>` -> the belief revisions it was derived FROM.
+    #[serde(default)]
+    pub derived_from: BTreeMap<String, Vec<String>>,
+    /// `<observation event id>` -> its lineage parents.
+    #[serde(default)]
+    pub lineage: BTreeMap<String, Vec<String>>,
+}
+
+impl GoldenAncestry {
+    fn is_empty(&self) -> bool {
+        self.belief_revisions.is_empty() && self.derived_from.is_empty() && self.lineage.is_empty()
+    }
+
+    /// The reducer state this graph describes.
+    fn state(&self) -> crate::ledger::reduce::EpistemicState {
+        use crate::ledger::reduce::{EpistemicState, ObservationState};
+        use crate::ledger::schema::{LineageKind, ObservationKind, SubjectRef};
+
+        let mut state = EpistemicState::default();
+        for (revision_event, belief_id) in &self.belief_revisions {
+            state
+                .belief_revision_events
+                .insert(revision_event.clone(), (belief_id.clone(), 1));
+        }
+        for (observation, revisions) in &self.derived_from {
+            for revision in revisions {
+                state
+                    .derived_belief_sources
+                    .push((observation.clone(), revision.clone()));
+            }
+        }
+        for (observation, parents) in &self.lineage {
+            state.observations.insert(
+                observation.clone(),
+                ObservationState {
+                    event_id: observation.clone(),
+                    seq: 1,
+                    kind: ObservationKind::DerivedContent,
+                    source_id: String::new(),
+                    source_registration_event_id: String::new(),
+                    subject: SubjectRef::None,
+                    effective_entity: None,
+                    effective_resolution_event: None,
+                    authority: None,
+                    assertion_basis: None,
+                    absence: None,
+                    actor: String::new(),
+                    lineage_parents: parents
+                        .iter()
+                        .map(|parent| (LineageKind::DerivedFrom, parent.clone()))
+                        .collect(),
+                },
+            );
+        }
+        state
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Golden {
@@ -86,6 +161,11 @@ pub struct Golden {
     /// and the mark is what says so out loud (M24.5).
     #[serde(default)]
     pub versions: BTreeMap<String, u64>,
+    /// The support graph the preventive anti-self-ancestry walk runs over
+    /// (M26.3). Like `versions`, declaring one makes the fixture `rust_only`:
+    /// the walk reads reducer state the mock has no counterpart for.
+    #[serde(default)]
+    pub ancestry: GoldenAncestry,
     /// A complete `ProposalV1` body.
     pub proposal: serde_json::Value,
     pub expect: GoldenExpectation,
@@ -168,6 +248,39 @@ impl Golden {
         let facts = self
             .facts(table)
             .map_err(|e| format!("{}: {e}", self.name))?;
+
+        // The preventive walk, when the fixture declares a support graph.
+        // It runs before CAS because the ops' sorted `requires` lists put
+        // `no_self_ancestry` ahead of `versions_current` — precedence is the
+        // artifact's here exactly as it is in `preconditions::check`. And it
+        // runs before the table verdict because this refusal does not depend
+        // on risk: reporting an effective risk for a proposal that can never
+        // apply would describe a ladder nobody climbed.
+        if !self.ancestry.is_empty() {
+            let proposal: crate::ledger::schema::ProposalV1 =
+                serde_json::from_value(self.proposal.clone())
+                    .map_err(|e| format!("{}: {e}", self.name))?;
+            let outcome =
+                crate::policy::ancestry::no_self_ancestry(&self.ancestry.state(), &proposal);
+            let code = outcome.as_ref().err().map(|failure| failure.code);
+            if code.map(str::to_string) != self.expect.rejection {
+                return Err(format!(
+                    "{}: expected rejection {:?}, the ancestry walk gave {code:?}",
+                    self.name, self.expect.rejection
+                ));
+            }
+            if let Err(failure) = outcome {
+                return Ok(Verdict::Rejected {
+                    rejection: crate::policy::verdict::Rejection {
+                        code: failure.code.to_string(),
+                        destiny: table
+                            .destiny(failure.code)
+                            .ok_or_else(|| format!("{} has no destiny", failure.code))?,
+                    },
+                    risk: None,
+                });
+            }
+        }
 
         // The state-dependent half, when the fixture declares a world. CAS
         // runs BEFORE the table verdict is reported, because a proposal
@@ -308,10 +421,10 @@ mod tests {
 
     #[test]
     fn a_fixture_that_declares_a_world_declares_itself_rust_only() {
-        // BY DECLARATION, NOT OMISSION. CAS and logical-batch semantics are
-        // out of the mock's scope; a fixture that depends on them says so in
-        // the file, so the TS runner skips it loudly instead of the
-        // directory quietly missing the case.
+        // BY DECLARATION, NOT OMISSION. CAS, ancestry, and logical-batch
+        // semantics are out of the mock's scope; a fixture that depends on
+        // them says so in the file, so the TS runner skips it loudly instead
+        // of the directory quietly missing the case.
         for (file, golden) in load_all().unwrap() {
             if !golden.versions.is_empty() {
                 assert!(
@@ -319,6 +432,32 @@ mod tests {
                     "{file} declares state versions but is not marked rust_only"
                 );
             }
+            if !golden.ancestry.is_empty() {
+                assert!(
+                    golden.rust_only,
+                    "{file} declares a support graph but is not marked rust_only"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_self_ancestry_fixtures_are_present_rather_than_assumed() {
+        // The refusal and its CONTROL. A directory that lost the control
+        // would still pass everything else while a gate that refused every
+        // proposal looked correct.
+        let names: BTreeSet<String> = load_all()
+            .unwrap()
+            .into_iter()
+            .filter(|(_, g)| !g.ancestry.is_empty())
+            .map(|(_, g)| g.name)
+            .collect();
+        for required in [
+            "evidence-derived-from-the-belief-it-would-support-is-refused",
+            "a-restatement-of-the-bases-own-output-is-refused-too",
+            "evidence-derived-from-another-belief-lets-the-verdict-through",
+        ] {
+            assert!(names.contains(required), "the {required} fixture is gone");
         }
     }
 

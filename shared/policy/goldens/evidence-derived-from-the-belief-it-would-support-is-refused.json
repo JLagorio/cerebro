@@ -1,0 +1,65 @@
+{
+  "name": "evidence-derived-from-the-belief-it-would-support-is-refused",
+  "why": "The acceptance-matrix row, and the reason M26 can flip agents on at all. An Observation written FROM revision 1 of this Belief is offered as support for revising it again: nothing has been learned, and the base has read its own handwriting back to itself as a second witness. Refused before the mutation lands, and refused regardless of risk — a LOW-risk auto-applying op is exactly where the loop would be invisible. The walk reads reducer state the mock has no counterpart for, so this fixture is rust_only; what the TS runner still holds is the artifact, which must declare self_ancestry possible for update_belief and route it to the ledger.",
+  "rust_only": true,
+  "ancestry": {
+    "belief_revisions": {
+      "1e70a5100000000000000000000000a1": "be11ef00000000000000000000000000"
+    },
+    "derived_from": {
+      "0b5e00000000000000000000000000a1": ["1e70a5100000000000000000000000a1"]
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9d5e1f0000000000000000000000000a",
+    "run_id": "cd5e1f0000000000000000000000000a",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 1
+      }
+    ],
+    "op": {
+      "kind": "update_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "patch": [],
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "0b5e00000000000000000000000000a1",
+              "role": "supports"
+            }
+          ]
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "LOW",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "self_ancestry",
+    "destiny": "ledger"
+  }
+}

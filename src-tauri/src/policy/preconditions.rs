@@ -59,6 +59,7 @@ pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
     ("exact_equivalence_proven", Some("M24.3")),  // EquivalenceReceipt::validate
     ("high_stakes_route_satisfied", Some("M24.8")),
     ("independence_confirmable", Some("M24.4")), // expand: server-bound proof
+    ("no_self_ancestry", Some("M26.3")),         // ancestry::no_self_ancestry
     ("open_contradictions_addressed", None),     // M27 (contradiction edges)
     ("qualification_roles_present", Some("M24.6")),
     ("revert_current_and_invertible", Some("M24.4")), // expand: revert_not_*
@@ -324,6 +325,10 @@ pub fn check(
         match predicate.as_str() {
             "versions_current" => versions_current(state, proposal)?,
             "basis_refs_valid" => basis_refs_valid(state, proposal)?,
+            // Preventive, and deliberately risk-blind: a LOW-risk
+            // auto-applying update is exactly where a self-supporting loop
+            // would never be seen (M26.3).
+            "no_self_ancestry" => super::ancestry::no_self_ancestry(state, proposal)?,
             "candidate_receipt_current" => candidate_receipt_current(state, proposal)?,
             "qualification_roles_present" => {
                 super::qualification::roles_present(catalog, state, proposal)?
@@ -731,7 +736,7 @@ mod tests {
             PREDICATE_OWNERS.iter().map(|(name, _)| *name).collect();
         assert_eq!(
             declared, owned,
-            "policy.v1.json's predicates and PREDICATE_OWNERS disagree"
+            "the shipped table's predicates and PREDICATE_OWNERS disagree"
         );
         // Every predicate any op requires must be in the registry too.
         for rule in table.ops.values() {
