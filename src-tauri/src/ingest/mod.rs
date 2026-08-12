@@ -22,11 +22,13 @@
 
 pub mod cli;
 pub mod commit;
+pub mod context;
 pub mod independence;
 pub mod outcome;
 pub mod pass;
 pub mod prefilter;
 pub mod prompt;
 pub mod resolver;
+pub mod source;
 pub mod taint;
 pub mod window;
