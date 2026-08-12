@@ -238,6 +238,81 @@ fn ingest_item_state(
     )
 }
 
+/// Ask the base a question, attended (M26.5e).
+///
+/// Assemble what the five intents can find, show it to one run, and hand back
+/// what it answered — or a typed refusal. The refusal is a RESULT, not an
+/// error: `cap_conflict` means accessible counterevidence would not fit and
+/// nothing was synthesized, which is a card the person who asked has to see
+/// rather than a toast to dismiss.
+///
+/// Attended, therefore bounded and never budgeted: the caps bound this one
+/// request, and no daily-run ceiling, token gate, or ambient spend can refuse
+/// a question somebody is waiting on.
+#[tauri::command(async)]
+fn ask_question(
+    app: tauri::AppHandle,
+    vault: String,
+    question: String,
+    aliases: Vec<String>,
+    intended_use: assembly::manifest::QueryIntendedUse,
+) -> Result<assembly::Asked, String> {
+    let vault_path = Path::new(&vault);
+    let config = config_dir(&app)?;
+    let conn = runtime::open_existing(&config)?;
+    let scope = runtime::open_vault(vault_path)
+        .ok_or("this vault is not registered with the runtime database")?;
+    let store_uuid = scope
+        .store_uuid
+        .clone()
+        .ok_or("this vault has no ledger store — there is nothing to ask")?;
+
+    // One read: the projection to select from, the corpus to render from, and
+    // the head both were taken at.
+    let (state, corpus, chain_head) = assembly::ask::read(vault_path, &store_uuid)?;
+    let request = assembly::assemble::Request {
+        store_uuid: &store_uuid,
+        chain_head: &chain_head,
+        question: &question,
+        aliases: &aliases,
+        scope: ledger::schema::Scope::empty(),
+        intended_use,
+        limits: assembly::manifest::Limits::ATTENDED,
+    };
+    let agents = app.state::<agent::AgentState>();
+    let mcp_state = app.state::<mcp::McpState>();
+    let live = assembly::live::Live {
+        app: &app,
+        agents: agents.inner(),
+        mcp: mcp_state.inner(),
+        vault: vault_path,
+        config_dir: config.clone(),
+        data_dir: config,
+        vault_id: scope.vault_id.clone(),
+        store_uuid: store_uuid.clone(),
+        run_id: ledger::new_run_id(),
+    };
+    let context = assembly::ask::Context {
+        vault: vault_path,
+        vault_id: &scope.vault_id,
+        store_uuid: &store_uuid,
+    };
+    Ok(
+        match assembly::ask::ask(
+            &conn,
+            &context,
+            &state,
+            &corpus,
+            &request,
+            &live,
+            chrono::Utc::now(),
+        ) {
+            Ok(outcome) => outcome.into(),
+            Err(refusal) => refusal.into(),
+        },
+    )
+}
+
 /// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
 ///
 /// The supervisor thread starts with the vault and reads this every tick, so
@@ -671,6 +746,7 @@ pub fn run() {
             ambient_ingest_enabled,
             set_ambient_ingest,
             ingest_item_state,
+            ask_question,
             resolve_held_items,
             create_note,
             set_note_title,

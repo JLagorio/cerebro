@@ -374,6 +374,9 @@ import type {
   PipelineMeter,
   PipelineOverview,
   ItemState,
+  Asked,
+  AskRefusal,
+  QueryIntendedUse,
 } from './mockIpc';
 
 export type {
@@ -384,6 +387,9 @@ export type {
   PipelineMeter,
   PipelineOverview,
   ItemState,
+  Asked,
+  AskRefusal,
+  QueryIntendedUse,
 };
 
 /** The pause, the meter, the lanes, recent activity, and every banner — one
@@ -404,6 +410,25 @@ export function ingestItemState(vault: string, path: string): Promise<ItemState 
   return inTauri()
     ? invokeTauri('ingest_item_state', { vault, path })
     : mock.ingestItemState(vault, path);
+}
+
+/**
+ * Ask the base a question, attended (M26.5e).
+ *
+ * The refusal is a RESULT, not a thrown error: `cap_conflict` means accessible
+ * counterevidence would not fit under the caps and nothing was synthesized,
+ * which is a card the person who asked has to see rather than a toast to
+ * dismiss. Read the `state` field.
+ */
+export function askQuestion(
+  vault: string,
+  question: string,
+  aliases: string[],
+  intendedUse: QueryIntendedUse,
+): Promise<Asked> {
+  return inTauri()
+    ? invokeTauri('ask_question', { vault, question, aliases, intendedUse })
+    : mock.askQuestion(vault, question, aliases, intendedUse);
 }
 
 /** Subscription-wide, and persisted: one CLI account, one pause. */

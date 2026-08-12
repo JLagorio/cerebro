@@ -940,6 +940,68 @@ export interface ItemState {
   route: string | null;
 }
 
+/**
+ * What one attended question came back with (M26.5e).
+ *
+ * The manifest and the answer are the Rust types verbatim — deep, closed, and
+ * validated on the Rust side before they ever reach here. They are typed as
+ * `unknown` on purpose: re-declaring `WorkingMemoryManifest` and
+ * `SynthesisAnswer` in TypeScript would be a second definition of a contract
+ * that already has exactly one, and the second one is always the stale one.
+ * A surface that needs a field reads it through a narrow accessor, so the
+ * shape is asserted in one place rather than assumed in ten.
+ */
+export type Asked =
+  | { state: 'answered'; manifest: unknown; answer: unknown }
+  | { state: 'unanswered'; manifest: unknown; detail: string }
+  | { state: 'refused'; code: AskRefusal; detail: string };
+
+/**
+ * Why there is no answer. Closed, and mirrored from `assembly::Asked` — a
+ * surface routes on these, so they are names rather than message text.
+ */
+export type AskRefusal =
+  'cap_conflict' | 'retrieval_unavailable' | 'base_incoherent' | 'assembly_invalid';
+
+/** What a question declares itself to be for. Mirrors `QueryIntendedUse`. */
+export interface QueryIntendedUse {
+  kind:
+    | 'draft_note'
+    | 'reversible_work'
+    | 'operational_decision'
+    | 'production_release'
+    | 'safety_or_compliance';
+  stakes: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  predicate_class: string | null;
+  description: string;
+}
+
+/**
+ * The browser mock refuses rather than inventing an answer (M26.5e).
+ *
+ * An attended question assembles from a real ledger and spends a real CLI run
+ * against the user's own subscription. There is no honest browser version of
+ * either: a mock that returned a plausible answer would be a fabricated
+ * synthesis with a fabricated manifest behind it, and every ref in it would
+ * cite evidence that never existed — which is precisely the failure the whole
+ * manifest apparatus exists to make impossible. `retrieval_unavailable` is
+ * the true answer here, and it is a state the real backend can also reach.
+ */
+export async function askQuestion(
+  _vault: string,
+  _question: string,
+  _aliases: string[],
+  _intendedUse: QueryIntendedUse,
+): Promise<Asked> {
+  return {
+    state: 'refused',
+    code: 'retrieval_unavailable',
+    detail:
+      'This is the browser mock. Asking the base needs a real ledger and a real CLI run, and a ' +
+      'made-up answer would cite evidence that never existed.',
+  };
+}
+
 export async function pipelineOverview(_vault: string): Promise<PipelineOverview> {
   return pipeline;
 }

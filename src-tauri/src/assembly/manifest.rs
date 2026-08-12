@@ -511,6 +511,22 @@ pub struct Limits {
     pub max_evidence_items: u64,
 }
 
+impl Limits {
+    /// What an attended question is bounded by when nobody says otherwise.
+    ///
+    /// **Bounds, not a budget.** These stop one request running away; they are
+    /// not a quota and they never refuse a question because the morning's
+    /// ingest was busy. 256 KiB of claims sits well inside any current model's
+    /// window with room for the rules and the answer; 256 items is already
+    /// more than a person would read; 64 sources bounds a search that has gone
+    /// wandering. A caller with a reason may pass its own.
+    pub const ATTENDED: Limits = Limits {
+        max_sources_per_run: 64,
+        max_context_bytes: 262_144,
+        max_evidence_items: 256,
+    };
+}
+
 /// What the assembly actually used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

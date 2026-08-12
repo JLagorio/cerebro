@@ -5,6 +5,7 @@ const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unk
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 
 import {
+  askQuestion,
   canPickFiles,
   importAttachment,
   ingestItemState,
@@ -113,5 +114,37 @@ describe('ledger status IPC', () => {
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
     await ledgerStatus('/my-vault');
     expect(invokeSpy).toHaveBeenCalledWith('ledger_status', { vault: '/my-vault' });
+  });
+});
+
+describe('asking the base a question (M26.5e)', () => {
+  const use = {
+    kind: 'operational_decision',
+    stakes: 'MEDIUM',
+    predicate_class: null,
+    description: 'whether to hold the release meeting',
+  } as const;
+
+  it('refuses in the browser rather than inventing an answer', async () => {
+    // A made-up answer would carry a made-up manifest, and every ref in it
+    // would cite evidence that never existed — the exact failure the whole
+    // manifest apparatus exists to make impossible.
+    const asked = await askQuestion('/demo-vault', 'Is the cutover on track?', [], use);
+    expect(asked.state).toBe('refused');
+    expect(asked).toMatchObject({ code: 'retrieval_unavailable' });
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+
+  it('passes the question, the claimed spellings, and the use through to Rust', async () => {
+    // The spellings matter: they change what the search reaches, and they are
+    // part of the assembly id on the Rust side.
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await askQuestion('/my-vault', 'Is the cutover on track?', ['Falcon'], use);
+    expect(invokeSpy).toHaveBeenCalledWith('ask_question', {
+      vault: '/my-vault',
+      question: 'Is the cutover on track?',
+      aliases: ['Falcon'],
+      intendedUse: use,
+    });
   });
 });
