@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app_config;
+pub mod assembly;
 pub mod connectors;
 pub mod crash;
 pub mod demo;
