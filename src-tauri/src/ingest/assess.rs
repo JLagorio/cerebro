@@ -95,6 +95,17 @@ impl Assessment {
         ]
     }
 
+    /// Move this item's Observation to the ordinal it actually occupies.
+    ///
+    /// The batch assembler cannot know the layout until it knows which
+    /// assessments are fresh — an item whose receipt is already recorded
+    /// appends nothing and takes no ordinals — and it cannot know THAT until
+    /// the assessment has produced a receipt id. So the ordinal is stamped
+    /// after the fact, like the window key, rather than guessed before.
+    pub fn place(&mut self, observation_ordinal: usize) {
+        self.receipt.observation_event_ids = vec![member_ref(observation_ordinal)];
+    }
+
     /// Stamp the window key, once the caller knows which receipts queued.
     ///
     /// The receipt's own idempotency key does not cover it (M25.3's
@@ -304,7 +315,10 @@ mod tests {
         // two would validate only when the two random ids happened to land in
         // ordinal order.
         let assessment = assess(&scanned("Beta", "beta"), Some(&row("Alpha", "alpha")));
-        assert_eq!(assessment.receipt.observation_event_ids, vec![member_ref(0)]);
+        assert_eq!(
+            assessment.receipt.observation_event_ids,
+            vec![member_ref(0)]
+        );
         assert_eq!(assessment.members().len(), 2);
     }
 

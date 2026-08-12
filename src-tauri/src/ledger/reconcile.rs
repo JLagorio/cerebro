@@ -610,9 +610,9 @@ pub(crate) fn resolve_accept_with(
     // then per file the editorial override (based on CURRENT state) and the
     // assertion+revision+effect members, then the resolution.
     let authority = capture::AuthorityAnswers::default();
-    let (source_id, registration_event, staged_registration) =
-        capture::resolve_registration(&state, &store, "human:owner");
     let mut members: Vec<(String, serde_json::Value)> = Vec::new();
+    let (source_id, registration_event, staged_registration) =
+        capture::resolve_registration(&state, &store, "human:owner", members.len());
     if let Some(member) = staged_registration {
         members.push(member);
     }

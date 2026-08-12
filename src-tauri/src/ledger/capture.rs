@@ -197,10 +197,16 @@ fn common(actor: &str) -> (u64, Option<String>, Option<String>, Actor) {
 
 /// The actor-bound human registration and, when absent, the staged member
 /// carrying its own `source-register-v1:` idempotency key.
+///
+/// `ordinal` is where the caller will place that member. It was a constant
+/// `0` while capture was the only caller and always staged first; M26.4i's
+/// ingest pass can stage two registrations in one batch, so the position is
+/// the caller's to state.
 pub(crate) fn resolve_registration(
     state: &EpistemicState,
     store: &str,
     actor_id: &str,
+    ordinal: usize,
 ) -> (String, String, Option<(String, serde_json::Value)>) {
     let mut registration = SourceRegistration::HumanActor {
         source_key: String::new(),
@@ -232,7 +238,7 @@ pub(crate) fn resolve_registration(
     };
     (
         source_id,
-        member_ref(0),
+        member_ref(ordinal),
         Some((
             schema::KIND_SOURCE_REGISTERED.to_string(),
             serde_json::to_value(&body).expect("registrations serialize"),
@@ -382,9 +388,9 @@ pub(crate) fn capture_structured_with(
     }
 
     // Assemble the one logical batch.
-    let (source_id, registration_event, staged_registration) =
-        resolve_registration(&state, &store, &request.actor_id);
     let mut events: Vec<(String, serde_json::Value)> = Vec::new();
+    let (source_id, registration_event, staged_registration) =
+        resolve_registration(&state, &store, &request.actor_id, events.len());
     if let Some(member) = staged_registration {
         events.push(member);
     }
