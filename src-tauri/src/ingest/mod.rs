@@ -20,6 +20,7 @@
 //! lands on it. A verdict that fell out of a `match` with nowhere to go is
 //! exactly what a closed matrix exists to make impossible.
 
+pub mod assess;
 pub mod cli;
 pub mod commit;
 pub mod context;

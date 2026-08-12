@@ -161,6 +161,16 @@ impl Route {
         }
     }
 
+    /// Does this route require an `m26_batch_key`?
+    ///
+    /// Public because the producer builds a receipt before the window it may
+    /// join is known, and stands a key in to shape-check the rest. Reading
+    /// the table is the point — a producer with its own list of which routes
+    /// need a key is a second copy of this table.
+    pub fn requires_batch_key(self) -> bool {
+        self.batch_key() == Refs::Required
+    }
+
     fn outcome_event(self) -> Refs {
         match self {
             Route::M26Completed | Route::FailedVisible => Refs::Required,
