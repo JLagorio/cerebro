@@ -562,3 +562,84 @@ pub const SCHEMA_V4: &str = "
         ON source_taint_assessments (vault_id, store_uuid)
         WHERE signals <> '';
 ";
+
+/// The M26.5 schema — what one question was shown, and what came of the
+/// discovery it proposed.
+///
+/// **Two tables, two different jobs.** A manifest is a RECEIPT: it says what
+/// an assembly held at a moment, it is content-addressed by `assembly_id`,
+/// and it never changes. A discovery plan run is a LIFECYCLE: it starts
+/// pending and moves, once, toward a terminal state.
+///
+/// **Operational, not ledger**, by the standing when-in-doubt rule. A manifest
+/// is reproducible: the assembler is deterministic, so the same question
+/// against the same `chain_head` re-derives the identical bytes. Losing
+/// app-data loses a cache and a worklist, never a fact about what the base
+/// believes. What a synthesis CONCLUDED is a different matter and lands in the
+/// vault ledger, where it belongs.
+///
+/// **The lifecycle is a CHECK, not a convention.** `completed` and `failed`
+/// require a start, because a plan that finished without starting is a claim
+/// nobody made; `dismissed` may skip it, because dismissing a plan you never
+/// ran is the ordinary case. `terminal_at` is set exactly on the three
+/// terminal states — a stamped time beside a non-terminal state, or a terminal
+/// state with no time, is a row that disagrees with itself.
+///
+/// `manifest_json` holds the whole serialized manifest rather than a
+/// reconstruction. The columns beside it are the ones a surface filters and
+/// sorts by; they are derived from the same value at write time and checked
+/// against it on read, so a query can never disagree with the receipt it is
+/// summarising.
+pub const SCHEMA_V5: &str = "
+    CREATE TABLE working_memory_manifests (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        assembly_id TEXT NOT NULL
+            CHECK (length(assembly_id) = 32 AND assembly_id = lower(assembly_id)),
+        question_hash TEXT NOT NULL
+            CHECK (length(question_hash) = 64 AND question_hash = lower(question_hash)),
+        chain_head TEXT NOT NULL CHECK (chain_head <> ''),
+        assembler_version TEXT NOT NULL CHECK (assembler_version <> ''),
+        intended_use_kind TEXT NOT NULL CHECK (intended_use_kind IN (
+            'draft_note', 'reversible_work', 'operational_decision',
+            'production_release', 'safety_or_compliance'
+        )),
+        stakes TEXT NOT NULL CHECK (stakes IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+        predicate_class TEXT CHECK (predicate_class IS NULL OR predicate_class <> ''),
+        counterevidence_state TEXT NOT NULL
+            CHECK (counterevidence_state IN ('included', 'exhausted', 'blocked')),
+        source_count INTEGER NOT NULL CHECK (source_count >= 0),
+        context_bytes INTEGER NOT NULL CHECK (context_bytes >= 0),
+        evidence_item_count INTEGER NOT NULL CHECK (evidence_item_count >= 0),
+        manifest_json TEXT NOT NULL CHECK (manifest_json <> ''),
+        assembled_at TEXT NOT NULL CHECK (assembled_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, assembly_id)
+    );
+    CREATE INDEX working_memory_by_question
+        ON working_memory_manifests (vault_id, store_uuid, question_hash, assembled_at);
+
+    CREATE TABLE discovery_plan_runs (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        plan_id TEXT NOT NULL
+            CHECK (length(plan_id) = 64 AND plan_id = lower(plan_id)),
+        assembly_id TEXT NOT NULL
+            CHECK (length(assembly_id) = 32 AND assembly_id = lower(assembly_id)),
+        state TEXT NOT NULL
+            CHECK (state IN ('pending', 'started', 'completed', 'dismissed', 'failed')),
+        created_at TEXT NOT NULL CHECK (created_at LIKE '____-__-__T%Z'),
+        started_at TEXT CHECK (started_at IS NULL OR started_at LIKE '____-__-__T%Z'),
+        terminal_at TEXT CHECK (terminal_at IS NULL OR terminal_at LIKE '____-__-__T%Z'),
+        detail TEXT CHECK (detail IS NULL OR detail <> ''),
+        PRIMARY KEY (vault_id, store_uuid, plan_id),
+        CHECK (state <> 'pending' OR (started_at IS NULL AND terminal_at IS NULL)),
+        CHECK (state NOT IN ('started', 'completed', 'failed') OR started_at IS NOT NULL),
+        CHECK (
+            (state IN ('completed', 'dismissed', 'failed') AND terminal_at IS NOT NULL)
+            OR (state IN ('pending', 'started') AND terminal_at IS NULL)
+        )
+    );
+    CREATE INDEX discovery_plan_runs_open
+        ON discovery_plan_runs (vault_id, store_uuid, state, created_at)
+        WHERE state IN ('pending', 'started');
+";

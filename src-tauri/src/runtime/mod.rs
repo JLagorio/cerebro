@@ -78,7 +78,7 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// The schema version this build speaks. M24 established 2 (`operational_log`
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
 /// meter, budget, coverage cache, and settings at 3.
-pub const USER_VERSION: i64 = 4;
+pub const USER_VERSION: i64 = 5;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -186,6 +186,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V4,
         validate: validate_v4,
     },
+    Migration {
+        to: 5,
+        sql: schema::SCHEMA_V5,
+        validate: validate_v5,
+    },
 ];
 
 /// The one table `user_version = 4` promises, checked the same way v3's
@@ -196,6 +201,17 @@ fn validate_v4(conn: &Connection) -> Result<(), String> {
         row.get::<_, i64>(0)
     })
     .map_err(|e| format!("validating source_taint_assessments: {e}"))?;
+    Ok(())
+}
+
+/// The two tables `user_version = 5` promises, checked the same way.
+fn validate_v5(conn: &Connection) -> Result<(), String> {
+    for table in ["working_memory_manifests", "discovery_plan_runs"] {
+        conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|e| format!("validating {table}: {e}"))?;
+    }
     Ok(())
 }
 

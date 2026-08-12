@@ -20,3 +20,4 @@ pub mod answer;
 pub mod assemble;
 pub mod corpus;
 pub mod manifest;
+pub mod store;
