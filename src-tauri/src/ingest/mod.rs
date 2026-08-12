@@ -34,5 +34,6 @@ pub mod prompt;
 pub mod resolver;
 pub mod retrieve;
 pub mod source;
+pub mod spawn;
 pub mod taint;
 pub mod window;
