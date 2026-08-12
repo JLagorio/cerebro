@@ -208,6 +208,35 @@ fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
     runtime::settings::set_global_pause(&conn, paused)
 }
 
+/// Where the ingest scheduler currently holds one item (M26.4j).
+///
+/// The one query the knowledge panel needs after the distillation lanes were
+/// retired: "is the base going to read this note?" used to be answered by
+/// re-deriving a renderer-side queue, which meant the answer existed only for
+/// work the UI itself had remembered to record. It is now the durable
+/// scheduler row, so a note edited in an external editor answers the same
+/// way as one organized in the app.
+///
+/// `None` means the scheduler has never seen this item — a vault that has
+/// not been scanned, or ambient ingest that has never been turned on. That is
+/// a real answer and is rendered as "not queued", never as an error.
+#[tauri::command(async)]
+fn ingest_item_state(
+    app: tauri::AppHandle,
+    vault: String,
+    path: String,
+) -> Result<Option<runtime::surface::ItemState>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = runtime::open_vault(Path::new(&vault))
+        .ok_or("this vault is not registered with the runtime database")?;
+    runtime::surface::item_state(
+        &conn,
+        &scope.vault_id,
+        scope.store_uuid.as_deref().unwrap_or_default(),
+        &path,
+    )
+}
+
 /// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
 ///
 /// The supervisor thread starts with the vault and reads this every tick, so
@@ -640,6 +669,7 @@ pub fn run() {
             set_lane_enabled,
             ambient_ingest_enabled,
             set_ambient_ingest,
+            ingest_item_state,
             resolve_held_items,
             create_note,
             set_note_title,

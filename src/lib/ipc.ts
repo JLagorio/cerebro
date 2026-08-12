@@ -373,6 +373,7 @@ import type {
   PipelineLane,
   PipelineMeter,
   PipelineOverview,
+  ItemState,
 } from './mockIpc';
 
 export type {
@@ -382,6 +383,7 @@ export type {
   PipelineLane,
   PipelineMeter,
   PipelineOverview,
+  ItemState,
 };
 
 /** The pause, the meter, the lanes, recent activity, and every banner — one
@@ -389,6 +391,19 @@ export type {
  * a second earlier. */
 export function pipelineOverview(vault: string): Promise<PipelineOverview> {
   return inTauri() ? invokeTauri('pipeline_overview', { vault }) : mock.pipelineOverview(vault);
+}
+
+/**
+ * Where the ingest scheduler holds one item (M26.4j).
+ *
+ * `null` means the scheduler has never seen it — an unscanned vault, or
+ * ambient ingest that has never been turned on. That is a real answer and
+ * renders as "not queued", never as an error.
+ */
+export function ingestItemState(vault: string, path: string): Promise<ItemState | null> {
+  return inTauri()
+    ? invokeTauri('ingest_item_state', { vault, path })
+    : mock.ingestItemState(vault, path);
 }
 
 /** Subscription-wide, and persisted: one CLI account, one pause. */

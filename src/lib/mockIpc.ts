@@ -935,8 +935,28 @@ if (typeof window !== 'undefined') {
     __seedPipeline;
 }
 
+export interface ItemState {
+  state: string;
+  route: string | null;
+}
+
 export async function pipelineOverview(_vault: string): Promise<PipelineOverview> {
   return pipeline;
+}
+
+/**
+ * Where the scheduler holds one item (M26.4j).
+ *
+ * `null` for everything, and that is the honest mock rather than a gap. The
+ * scheduler is a Rust durable table fed by a Rust tick; simulating it here
+ * would be a second implementation of the thing the parity rules exist to
+ * forbid, and it would let a browser-only test claim a queue state no
+ * database ever held. `null` is exactly what the real backend returns for a
+ * vault whose ambient ingest has never run — which is every vault by
+ * default.
+ */
+export async function ingestItemState(_vault: string, _path: string): Promise<ItemState | null> {
+  return null;
 }
 
 export async function setGlobalPause(paused: boolean): Promise<void> {

@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 import {
   canPickFiles,
   importAttachment,
+  ingestItemState,
   ledgerHead,
   ledgerStatus,
   scanVault,
@@ -74,6 +75,27 @@ describe('ledger head IPC', () => {
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
     await ledgerHead('/my-vault');
     expect(invokeSpy).toHaveBeenCalledWith('ledger_head', { vault: '/my-vault' });
+  });
+});
+
+// M26.4j parity: the command exists on both sides, and the mock's `null` is
+// the SAME answer the real backend gives a vault whose ambient ingest has
+// never run. Simulating a scheduler here would be a second implementation of
+// a durable Rust table — and it would let a browser test claim a queue state
+// no database ever held.
+describe('ingest item state IPC', () => {
+  it('returns null from the mock outside Tauri', async () => {
+    expect(await ingestItemState('/demo-vault', 'records/a.md')).toBeNull();
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+
+  it('invokes ingest_item_state inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await ingestItemState('/my-vault', 'records/a.md');
+    expect(invokeSpy).toHaveBeenCalledWith('ingest_item_state', {
+      vault: '/my-vault',
+      path: 'records/a.md',
+    });
   });
 });
 

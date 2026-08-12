@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobQueue, unlearnableFiled } from './jobs';
+import { jobQueue } from './jobs';
 import { lastFireKey, parseSchedule } from './skills';
 import { listConcepts } from './okf';
 import { makeEntry } from './testHelpers';
@@ -15,7 +15,7 @@ const skill = (title: string, schedule?: string) =>
     snippet: 'instructions',
   });
 
-const EMPTY = { filed: [], attempts: {}, skillRuns: {} };
+const EMPTY = { attempts: {}, skillRuns: {} };
 
 describe('parseSchedule', () => {
   it('parses the four forms, case-insensitively', () => {
@@ -167,7 +167,11 @@ describe('jobQueue', () => {
     expect(jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now })).toEqual([]);
   });
 
-  it('ranks a filed capture first, then scheduled, then maintenance', () => {
+  it("a capture produces no job at all — reading it is the ingest pass's (M26.4j)", () => {
+    // The distillation lanes are gone. Organizing a capture WRITES the note,
+    // and changed bytes are what the Rust ingest tick watches; a renderer
+    // queue that only knew about work the UI had recorded could never see a
+    // note edited in an external editor.
     const entries = [
       skill('Digest', 'daily 09:00'),
       makeEntry({
@@ -177,15 +181,11 @@ describe('jobQueue', () => {
         modifiedAt: '2026-07-31T08:00:00Z',
       }),
     ];
-    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
-      ...EMPTY,
-      filed: ['inbox/capture.md'],
-      now,
-    });
-    expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled']);
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(jobs.map((j) => j.kind)).toEqual(['scheduled']);
   });
 
-  it('orders all four kinds: filed, scheduled, behind, stale', () => {
+  it('orders what is left: scheduled, then the recheck lanes', () => {
     // The full RANK, pinned: mutating any tier's number fails here. The
     // runner takes jobQueue(...)[0], so a wrong order is a wrong next run.
     const entries = [
@@ -219,16 +219,11 @@ describe('jobQueue', () => {
         },
       }),
     ];
-    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
-      ...EMPTY,
-      filed: ['inbox/new.md'],
-      now,
-    });
-    // `behind` no longer appears here: M25.3 moved catching up on edits to a
-    // content-hash diff (`runtime/catchup.rs`), so an mtime that moved is no
-    // longer work. The lane itself survives — it is what that diff dispatches
-    // on — which is why the rank table still names it.
-    expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled', 'stale']);
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    // The full RANK, pinned. `filed` and `behind` are gone with the
+    // distillation lanes (M26.4j) — reading a note is `src-tauri/src/ingest/`
+    // now — and what is left is a standing appointment plus maintenance.
+    expect(jobs.map((j) => j.kind)).toEqual(['scheduled', 'stale']);
   });
 
   it('a scheduled Agent record derives an agent job, ledgered like a skill, and never distils', () => {
@@ -239,9 +234,8 @@ describe('jobQueue', () => {
       snippet: 'instructions',
       properties: { schedule: 'daily 09:00', tools: 'safe' },
     });
-    const due = jobQueue([scout], [], { ...EMPTY, filed: ['records/agents/scout.md'], now });
-    // One job, and it is the RUN — the filed entry is inert because an
-    // agent's body is schema for behavior, exactly like a skill's.
+    const due = jobQueue([scout], [], { ...EMPTY, now });
+    // One job, and it is the RUN.
     expect(due.map((j) => [j.kind, j.runKey])).toEqual([['agent', '2026-07-31 09:00']]);
     // The job names the ledger that gates it, and for an agent that is the
     // fire-key ledger. Recording it anywhere else re-runs the agent forever
@@ -435,12 +429,10 @@ describe('jobQueue', () => {
     expect(after).toEqual([]);
   });
 
-  it('never distils a skill: filed or edited, its body is schema for behavior', () => {
+  it('a skill is never read for material, however a concept cites it', () => {
     const playbook = skill('Playbook');
     const entries = [
       playbook,
-      // A concept already cites the skill with an older stamp, so without the
-      // filter this would derive BOTH a filed and a behind job.
       makeEntry({
         path: 'knowledge/systems/about-playbook.md',
         title: 'About playbook',
@@ -450,39 +442,7 @@ describe('jobQueue', () => {
         },
       }),
     ];
-    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
-      ...EMPTY,
-      filed: [playbook.path],
-      now,
-    });
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
     expect(jobs).toEqual([]);
-  });
-});
-
-describe('unlearnableFiled (PR #5 review: filed skills never dequeue)', () => {
-  it('surfaces filed paths that point at Skill or Agent records, and only those', () => {
-    const entries = [
-      skill('Weekly Review'),
-      makeEntry({
-        path: 'records/agents/scout.md',
-        title: 'Scout',
-        type: 'Agent',
-        snippet: 'instructions',
-      }),
-      makeEntry({ path: 'notes/idea.md', title: 'Idea', snippet: 'a real capture' }),
-    ];
-    // A learnable note stays filed; a path with no entry (deleted note) is
-    // learn.ts's business, not this filter's.
-    const filed = [
-      'records/skills/weekly-review.md',
-      'records/agents/scout.md',
-      'notes/idea.md',
-      'notes/deleted.md',
-    ];
-    expect(unlearnableFiled(entries, filed)).toEqual([
-      'records/skills/weekly-review.md',
-      'records/agents/scout.md',
-    ]);
-    expect(unlearnableFiled(entries, ['notes/idea.md'])).toEqual([]);
   });
 });

@@ -13,13 +13,16 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { learnQueue } from '@/engine/learn';
+import { jobQueue } from '@/engine/jobs';
 import { listConcepts } from '@/engine/okf';
 import { resetMockFs, scanVault } from '@/lib/mockIpc';
 
 const TODAY = '2026-08-08';
+/** Fixed, so a due schedule cannot make this assertion depend on the hour it
+ * is run at. */
+const NOW = new Date(`${TODAY}T09:00:00Z`);
 
-describe('migration leaves the distiller queue cold', () => {
+describe('migration leaves the background queue cold', () => {
   beforeEach(() => {
     resetMockFs();
   });
@@ -29,14 +32,14 @@ describe('migration leaves the distiller queue cold', () => {
     const concepts = listConcepts(entries, TODAY);
 
     // The pre-seeded localStorage learnAttempts ledger: every note recorded
-    // at exactly its current modifiedAt — the distiller has read the world
-    // as it stands. Migration changes no file and no mtime, so this ledger
-    // survives it verbatim.
+    // at exactly its current modifiedAt — the background lanes have answered
+    // the world as it stands. Migration changes no file and no mtime, so this
+    // ledger survives it verbatim.
     const attempts: Record<string, string> = {};
     for (const entry of entries) attempts[entry.path] = entry.modifiedAt;
     for (const concept of concepts) attempts[concept.entry.path] = concept.entry.modifiedAt;
 
-    const queue = learnQueue(entries, concepts, { filed: [], attempts });
+    const queue = jobQueue(entries, concepts, { attempts, skillRuns: {}, now: NOW });
     expect(queue).toEqual([]);
   });
 
@@ -53,7 +56,7 @@ describe('migration leaves the distiller queue cold', () => {
     const stale = concepts.find((c) => c.stale && c.supersededBy === null);
     expect(stale).toBeDefined();
     attempts[stale!.entry.path] = '1999-01-01T00:00:00Z';
-    const queue = learnQueue(entries, concepts, { filed: [], attempts });
+    const queue = jobQueue(entries, concepts, { attempts, skillRuns: {}, now: NOW });
     expect(queue.length).toBeGreaterThan(0);
   });
 });

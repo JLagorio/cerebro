@@ -118,11 +118,12 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       }
       await patchFrontmatter(path, patch);
 
-      // M8.6 — filing is the trigger the M8 plan named and never wired. It
-      // hands the capture to the background distiller rather than distilling
-      // here: this is a keyboard action that should end the moment the write
-      // lands, and the base reading it is a separate, slower thing.
-      useUiStore.getState().fileForLearning(path);
+      // M8.6 named filing as the trigger; M26.4j made the WRITE the trigger
+      // instead. The frontmatter patch above is what the ingest pass sees —
+      // changed bytes on a note the scheduler is watching — so there is
+      // nothing to hand over and no renderer-side list of organized paths to
+      // keep. A note edited any other way is picked up on exactly the same
+      // terms, which the old mechanism could not do.
 
       // Only steer the selection when the note we organized was the one on
       // screen — organizing from a row while reading another must not yank

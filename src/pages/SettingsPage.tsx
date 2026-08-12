@@ -68,7 +68,6 @@ export function SettingsPage() {
   const autoLearn = useUiStore((s) => s.autoLearn);
   const setAutoLearn = useUiStore((s) => s.setAutoLearn);
   const reading = useUiStore((s) => s.runs.find((r) => r.owner === 'job')?.path ?? null);
-  const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const entries = useVaultStore((s) => s.entries);
 
@@ -79,7 +78,6 @@ export function SettingsPage() {
   const pending = useMemo(
     () =>
       jobQueue(entries, listConcepts(entries, todayIso()), {
-        filed,
         attempts,
         // The fire-key ledger is vault-scoped (PR #5 review) — the count
         // must read the same slice of it the runner does.
@@ -89,7 +87,7 @@ export function SettingsPage() {
         // every visit, and a due schedule missing until then costs a label.
         now: new Date(),
       }).length,
-    [attempts, connectors, entries, filed, skillRuns, vaultPath],
+    [attempts, connectors, entries, skillRuns, vaultPath],
   );
 
   const changeVault = async () => {
@@ -233,7 +231,7 @@ export function SettingsPage() {
           </p>
           <SettingRow
             label="Learn on its own"
-            hint="Read filed captures, re-read notes you have edited since the base last read them, and run any skills that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off: the base grows only when you press Learn from this, and schedules do not fire."
+            hint="Recheck concepts that have gone stale or whose type changed, refresh cached sources, and run any skills or agents that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off: schedules do not fire and nothing is rechecked."
             checked={autoLearn}
             onChange={setAutoLearn}
           />

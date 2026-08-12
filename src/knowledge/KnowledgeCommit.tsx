@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { isBeingRead } from '@/agent/runs';
-import { learnQueue } from '@/engine/learn';
 import { commitOf, listConcepts, type CommitState } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
+import { ingestItemState } from '@/lib/ipc';
 import { distillPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
@@ -56,21 +56,37 @@ export function KnowledgeCommit({
   const heading = HEADINGS[commit.state];
   const learned = relativeDay(commit.at, today);
 
-  // Outstanding for THIS note only — the queue is computed here rather than
-  // read from a counter so nothing anywhere holds a running total.
+  // Outstanding for THIS note only, asked by path — never "is the queue
+  // non-empty", which would report every note in the vault as queued the
+  // moment anything was.
+  //
+  // M26.4j: the answer comes from the durable ingest scheduler rather than
+  // from a queue re-derived in the renderer. The old version could only ever
+  // see work the UI itself had recorded, so a note edited in an external
+  // editor never showed as queued no matter how certainly it was. `null` —
+  // an unscanned vault, or ambient ingest never turned on — reads as not
+  // queued, which is true.
   const reading = useUiStore((s) => isBeingRead(s.runs, entry.path));
-  const filed = useUiStore((s) => s.filedForLearning);
-  const attempts = useUiStore((s) => s.learnAttempts);
-  const autoLearn = useUiStore((s) => s.autoLearn);
-  // Asked by path, not by "is the queue non-empty": the queue also carries
-  // stale concepts and every other note's edits, so a length check here would
-  // report every note in the vault as queued the moment anything was.
-  const queued =
-    reading ||
-    (autoLearn &&
-      learnQueue(entries, listConcepts(entries, today), { filed, attempts }).some(
-        (job) => job.path === entry.path,
-      ));
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const [scheduled, setScheduled] = useState(false);
+  useEffect(() => {
+    if (vaultPath === null) return;
+    let live = true;
+    void ingestItemState(vaultPath, entry.path)
+      .then((row) => {
+        if (live) setScheduled(row !== null && row.route === 'm26_queued');
+      })
+      // A scheduler we cannot read is not a scheduler saying "queued". The
+      // chip is an aside on a panel that has already rendered; it never gets
+      // to put an error on the screen.
+      .catch(() => {
+        if (live) setScheduled(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [entry.path, entry.modifiedAt, vaultPath]);
+  const queued = reading || scheduled;
 
   const distill = () => {
     askAgent(distillPrompt(entry.path, entry.title), entry.path);

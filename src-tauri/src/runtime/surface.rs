@@ -112,6 +112,38 @@ pub struct Overview {
 /// small enough that the query is not a scan.
 const ACTIVITY_LIMIT: usize = 50;
 
+/// Where the scheduler holds one item, and which route put it there.
+///
+/// Serialized in snake_case like every other surface type, so the renderer
+/// reads the same spellings the database stores rather than a second
+/// vocabulary that could drift from it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ItemState {
+    pub state: String,
+    /// `None` until the deterministic pass has assessed the item.
+    pub route: Option<String>,
+}
+
+/// One item's scheduler row, or `None` when the scheduler has never seen it.
+///
+/// `None` is a real answer — an unscanned vault, or ambient ingest that has
+/// never been turned on — and the caller renders it as "not queued". An
+/// error would say the question could not be answered, which is a different
+/// thing and would put a broken banner on a working knowledge panel.
+pub fn item_state(
+    conn: &Connection,
+    vault_id: &str,
+    store_uuid: &str,
+    item_key: &str,
+) -> Result<Option<ItemState>, String> {
+    Ok(
+        super::scheduler::get(conn, vault_id, store_uuid, item_key)?.map(|row| ItemState {
+            state: row.state.as_str().to_string(),
+            route: row.route,
+        }),
+    )
+}
+
 pub fn overview(
     conn: &Connection,
     vault_id: &str,

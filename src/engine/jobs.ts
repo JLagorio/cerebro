@@ -2,7 +2,6 @@ import { isAgentEntry } from './agents';
 import type { VaultEvent } from './events';
 import { recordIdentity } from './identity';
 import { SOURCES_DIR } from './ingest';
-import { learnQueue, type LearnQueueInput } from './learn';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
 import { firstMatch, parseTriggers } from './triggers';
 import { resolveTarget } from './wikilink';
@@ -10,21 +9,34 @@ import type { Concept } from './okf';
 import type { Entry } from './types';
 
 /**
- * The background agent's work list (M13.2) — one queue, four reasons.
+ * The background agent's work list (M13.2) — one queue, the reasons that are
+ * left.
  *
- * M8.6 built this for learning; M13 recognizes that a scheduled skill run is
+ * M8.6 built this for learning; M13 recognized that a scheduled skill run is
  * the same shape of thing: derived from vault state rather than stored,
  * drained one at a time by a single runner, and stopped from spinning by a
- * ledger recorded before the run. The learn reasons keep their exact
- * semantics (engine/learn.ts is untouched); this module composes them with
- * the scheduled runs the vault's skills declare.
+ * ledger recorded before the run.
  *
- * Ranking: answering a deliberate filing still comes first; a scheduled run
- * is a standing appointment and goes next; catching up on edits and
- * rechecking stale concepts remain maintenance.
+ * **M26.4j retired the distillation lanes.** `filed` and `behind` are gone,
+ * and so is `engine/learn.ts`: reading a note and extracting concepts is now
+ * `src-tauri/src/ingest/`, driven by a Rust tick against durable scheduler
+ * rows. The two lanes died for different reasons and both are worth stating.
+ * `behind` compared a FILESYSTEM mtime against a frontmatter stamp, so a
+ * `git checkout` flooded the queue; catch-up compares content hashes. `filed`
+ * needed a renderer-side ledger of paths somebody had organized, which meant
+ * a note edited any other way was never re-read — the ingest pass watches the
+ * bytes, so filing is picked up because it WRITES, not because the UI
+ * remembered to say so.
+ *
+ * What is left here is not distillation: scheduled skills, scheduled and
+ * event-triggered agent runs, cached-source refresh, and the concept recheck
+ * lanes (`stale`, `schema`) that M26.6's maintenance pass will take over.
+ *
+ * Ranking: a standing appointment goes first; refresh and rechecks are
+ * maintenance.
  */
 
-export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | 'stale' | 'schema';
+export type JobKind = 'scheduled' | 'agent' | 'refresh' | 'stale' | 'schema';
 
 /**
  * How long an event-triggered agent must wait before another event can fire
@@ -89,7 +101,14 @@ export interface AgentJob {
   ledger: 'attempts' | 'skillRuns';
 }
 
-export interface JobQueueInput extends LearnQueueInput {
+export interface JobQueueInput {
+  /**
+   * path → the run key last attempted. The loop-stopper: a recheck that
+   * decided there was nothing to revise writes nothing, which leaves the
+   * concept exactly as outstanding as it was before. Without this the runner
+   * would pick it up again on the next tick, forever.
+   */
+  attempts: Readonly<Record<string, string>>;
   /** Skill path → fire key last run — the OPEN VAULT's slice of
    * uiStore.skillRuns, which is vault-scoped (PR #5 review). */
   skillRuns: Readonly<Record<string, string>>;
@@ -106,33 +125,10 @@ export interface JobQueueInput extends LearnQueueInput {
   connectors?: boolean;
 }
 
-/**
- * Filed paths that can never produce a job: the entry they point at is a
- * Skill or Agent record, which learning excludes as schema-for-behavior.
- * Surfaced so the runner can drop them from the persisted filed ledger —
- * left alone they read as "filed" forever, because only a learn attempt
- * consumes a filing and these never get one (PR #5 review).
- */
-export function unlearnableFiled(entries: readonly Entry[], filed: readonly string[]): string[] {
-  const byPath = new Map(entries.map((e) => [e.path, e]));
-  return filed.filter((path) => {
-    const entry = byPath.get(path);
-    return entry !== undefined && (isSkillEntry(entry) || isAgentEntry(entry));
-  });
-}
-
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],
-  {
-    filed,
-    attempts,
-    skillRuns,
-    now,
-    connectors = false,
-    events = [],
-    triggerRuns = {},
-  }: JobQueueInput,
+  { attempts, skillRuns, now, connectors = false, events = [], triggerRuns = {} }: JobQueueInput,
 ): AgentJob[] {
   // A cached source past its refresh date becomes a re-fetch (M13.3) —
   // cache_source stamps stale_after for exactly this, and the refreshed
@@ -162,31 +158,6 @@ export function jobQueue(
       });
     }
   }
-  const refreshing = new Set(refresh.map((j) => j.path));
-
-  // Skills and Agents are excluded from learning for the same reason types/
-  // is: their bodies are schema for behavior, not material. Distilling a
-  // playbook yields concepts about the playbook, and then every edit to it
-  // re-queues a re-read forever. The filter lives here rather than in
-  // isLearnable so engine/learn.ts stays untouched by M13.
-  const material = entries.filter(
-    (e) => !isSkillEntry(e) && !isAgentEntry(e) && !refreshing.has(e.path),
-  );
-  // Learn's own `stale` jobs are dropped here and re-derived below with the
-  // schema trigger folded in — a concept due for BOTH reasons must be ONE
-  // job under ONE ledger key, or a no-op recheck ping-pongs between the two
-  // keys forever, one drain at a time. See recheck derivation.
-  const learn: AgentJob[] = learnQueue(material, concepts, { filed, attempts })
-    .filter((j) => j.reason !== 'stale')
-    .map((j) => ({
-      kind: j.reason,
-      path: j.path,
-      key: j.path,
-      title: j.title,
-      runKey: j.modifiedAt,
-      ledger: 'attempts' as const,
-    }));
-
   // Re-synthesis is staleness (M13.5): when a Type doc changes after a
   // concept was generated, every concept `about` records of that type is due
   // a recheck — lazily, one at a time, never as a bulk reprocess. The run
@@ -290,21 +261,19 @@ export function jobQueue(
   }
 
   // Every kind has a DISTINCT rank, and that is load-bearing for the tie-
-  // break below: learn runKeys are ISO timestamps, scheduled runKeys are
+  // break below: recheck runKeys are ISO timestamps, scheduled runKeys are
   // fire keys, and the two formats only ever compare within their own kind.
   // Give two kinds one rank and the sort silently orders by format.
   // Refresh sits before stale on purpose: a concept recheck reads its
   // sources, and rechecking against a copy about to be replaced is wasted.
   const RANK: Record<JobKind, number> = {
-    filed: 0,
-    scheduled: 1,
-    agent: 2,
-    behind: 3,
-    refresh: 4,
-    stale: 5,
-    schema: 6,
+    scheduled: 0,
+    agent: 1,
+    refresh: 2,
+    stale: 3,
+    schema: 4,
   };
-  return [...learn, ...scheduled, ...refresh, ...recheck].sort(
+  return [...scheduled, ...refresh, ...recheck].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||
       b.runKey.localeCompare(a.runKey) ||

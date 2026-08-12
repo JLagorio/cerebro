@@ -4,7 +4,7 @@ import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { diffEntries, type VaultEvent } from '@/engine/events';
-import { jobQueue, unlearnableFiled, type AgentJob } from '@/engine/jobs';
+import { jobQueue, type AgentJob } from '@/engine/jobs';
 import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import type { Entry } from '@/engine/types';
@@ -66,7 +66,6 @@ export function useJobRunner(): void {
   const entries = useVaultStore((s) => s.entries);
   const rescan = useVaultStore((s) => s.rescan);
   const autoLearn = useUiStore((s) => s.autoLearn);
-  const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const skillRuns = useUiStore((s) => s.skillRuns);
   const triggerRuns = useUiStore((s) => s.triggerRuns);
@@ -96,16 +95,6 @@ export function useJobRunner(): void {
     const timer = window.setInterval(() => setNow(new Date()), TICK_MS);
     return () => window.clearInterval(timer);
   }, [hasSchedules]);
-
-  // A filed path that points at a Skill or Agent record can never become a
-  // job — their bodies are schema for behavior, excluded from learning — and
-  // only a learn attempt consumes a filing, so left alone it sits in the
-  // persisted ledger as "filed" forever. Unfiled on sight, which also heals
-  // entries persisted before a capture was (re)typed (PR #5 review).
-  useEffect(() => {
-    const ui = useUiStore.getState();
-    for (const path of unlearnableFiled(entries, filed)) ui.unfileForLearning(path);
-  }, [entries, filed]);
 
   // Scheduled runs whose record could not be READ this session, vault →
   // path → fire key. Vault-scoped like skillRuns and for the same reason
@@ -143,7 +132,6 @@ export function useJobRunner(): void {
     if (!autoLearn || vaultPath === null) return null;
     return (
       jobQueue(entries, listConcepts(entries, today), {
-        filed,
         attempts,
         // The ledger is vault-scoped (PR #5 review): fire keys are calendar
         // values, so a flat map would let the same relative path in another
@@ -162,7 +150,6 @@ export function useJobRunner(): void {
     entries,
     failedReads,
     events,
-    filed,
     now,
     skillRuns,
     today,
