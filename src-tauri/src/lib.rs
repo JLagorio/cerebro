@@ -9,6 +9,7 @@ pub mod git_commands;
 pub mod ingest;
 pub mod knowledge;
 pub mod ledger;
+pub mod maintain;
 pub mod mcp;
 pub mod policy;
 pub mod retrieval;

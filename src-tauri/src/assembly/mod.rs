@@ -47,10 +47,7 @@ pub enum Asked {
         detail: String,
     },
     /// There is no manifest and nothing ran.
-    Refused {
-        code: &'static str,
-        detail: String,
-    },
+    Refused { code: &'static str, detail: String },
 }
 
 impl From<ask::Outcome> for Asked {
