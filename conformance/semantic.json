@@ -1,6 +1,6 @@
 {
   "name": "semantic",
-  "description": "one semantic run per settled window: the derived assessment id that refuses a second opinion, input association, a successor receipt that has to agree with what the run concluded, and the terminal close committed as one batch",
+  "description": "one semantic run per settled window: the derived assessment id that refuses a second opinion, input association, a successor receipt that has to agree with what the run concluded, the terminal close committed as one batch, and a material candidate closed with the dimensions its outcome governs",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -718,6 +718,155 @@
         "members_digest": "40a5bc4f7742968a5c237ad42d7b377d35f010a6bc4d3c2c500f90f911d18fa7",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
+    },
+    {
+      "v": 0,
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "prev": "65522adbae53906fc4539d50416b20bda81c0faad93ed213009653abd56805bf",
+      "hash": "f42f06e45a8d3e386d19cb5962475928d0a0e352ca8a8cc25aabcb0953dcbe06",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "6ac069bdc1d23e743e18e99c7440d6b9",
+        "item_id": "9ab5b6af70442f18694b904b3655fdc9",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "material_candidate",
+        "material_dimensions": [
+          "world_state"
+        ],
+        "independence": "independence_unknown",
+        "route": "m26_queued",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-12",
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "prev": "f42f06e45a8d3e386d19cb5962475928d0a0e352ca8a8cc25aabcb0953dcbe06",
+      "hash": "21457acd040ade0c651428ee9eb38de64726b3a520446cb99ed86321ce0c5ba1",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.semantic_assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0028",
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:m26-ingest"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "semantic_assessment_id": "3d176a138dad7395233d211e26add4e5",
+        "m26_batch_key": "batch-2026-08-12",
+        "input_receipt_ids": [
+          "6ac069bdc1d23e743e18e99c7440d6b9"
+        ],
+        "outcome": "non_material",
+        "disposition": "closed_non_material",
+        "evaluated_dimensions": [
+          "evidence_state",
+          "world_state"
+        ],
+        "material_dimensions": [],
+        "proposal_ids": [],
+        "blocked_reason": null,
+        "explanation": "the run's own words about this window",
+        "content_label": "agent_supplied"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 21,
+      "event_id": "00000000000000000000000000000015",
+      "prev": "21457acd040ade0c651428ee9eb38de64726b3a520446cb99ed86321ce0c5ba1",
+      "hash": "626abfac638267964792a85a80d649943d1d88cf3de982805c921ccb3f16e191",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0028",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "d7e4098ecbfa20c1ee627863fd704ac4",
+        "item_id": "9ab5b6af70442f18694b904b3655fdc9",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "material_candidate",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "m26_completed",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-12",
+        "m26_outcome_event_id": "00000000000000000000000000000014",
+        "supersedes_receipt_id": "6ac069bdc1d23e743e18e99c7440d6b9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 22,
+      "event_id": "00000000000000000000000000000016",
+      "prev": "626abfac638267964792a85a80d649943d1d88cf3de982805c921ccb3f16e191",
+      "hash": "d45ac44ca7b2c46cedcb3784b2ccd660b50937d97d5ee672acf5f763b139c536",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0028",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "00000000000000000000000000000014",
+          "00000000000000000000000000000015"
+        ],
+        "member_count": 2,
+        "members_digest": "9aa5451167c3a48d1955148659cec26e260b54b652e917b2baa8a0e0aa3aaf95",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
     }
   ],
   "expected_state": {
@@ -799,6 +948,8 @@
       "ingest_receipt:16a14fb3c1174bebbb95045316e9bff1": 2,
       "ingest_receipt:498554fd8d09cb79ce8ce1fee50c845d": 1,
       "ingest_receipt:58dce337048656270c49a1b00d6d487e": 1,
+      "ingest_receipt:6ac069bdc1d23e743e18e99c7440d6b9": 2,
+      "ingest_receipt:d7e4098ecbfa20c1ee627863fd704ac4": 1,
       "observation:00000000000000000000000000000002": 1,
       "proposal:5555555555555555555555555555555a": 1,
       "source:c8147897afd510dad9278f297ba49115": 2
@@ -811,6 +962,11 @@
       ],
       [
         "beefbeefbeefbeefbeefbeefbeef0027",
+        "committed",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0028",
         "committed",
         2
       ]
@@ -867,6 +1023,26 @@
         "route": "m26_completed",
         "superseded": false,
         "m26_batch_key": "batch-2026-08-09"
+      },
+      "6ac069bdc1d23e743e18e99c7440d6b9": {
+        "item_id": "9ab5b6af70442f18694b904b3655fdc9",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "route": "m26_queued",
+        "superseded": true,
+        "m26_batch_key": "batch-2026-08-12"
+      },
+      "d7e4098ecbfa20c1ee627863fd704ac4": {
+        "item_id": "9ab5b6af70442f18694b904b3655fdc9",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "route": "m26_completed",
+        "superseded": false,
+        "m26_batch_key": "batch-2026-08-12"
       }
     },
     "semantic_assessments": {
@@ -879,6 +1055,14 @@
         "proposal_ids": [
           "5555555555555555555555555555555a"
         ]
+      },
+      "3d176a138dad7395233d211e26add4e5": {
+        "m26_batch_key": "batch-2026-08-12",
+        "input_receipt_ids": [
+          "6ac069bdc1d23e743e18e99c7440d6b9"
+        ],
+        "outcome": "non_material",
+        "proposal_ids": []
       },
       "9ad266c65a8c5859b1db4c59570b0058": {
         "m26_batch_key": "batch-2026-08-09",

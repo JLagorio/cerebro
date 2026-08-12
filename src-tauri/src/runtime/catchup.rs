@@ -36,6 +36,23 @@ use super::scheduler::{self, SchedulerState};
 /// How often an open vault stamps its heartbeat.
 pub const HEARTBEAT_SECONDS: i64 = 60;
 
+/// One item catch-up could not read, and why.
+///
+/// Named rather than a bare pair: the caller records an ingestion failure per
+/// entry, and a tuple would leave which half is which to the reader.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Unreadable {
+    pub item_key: String,
+    pub detail: String,
+}
+
+/// What one scan of a vault found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scan {
+    pub items: Vec<Scanned>,
+    pub unreadable: Vec<Unreadable>,
+}
+
 /// One item as catch-up found it on disk.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scanned {
@@ -49,8 +66,9 @@ pub struct Scanned {
 pub enum Verdict {
     /// The stored hash matches the bytes on disk. No work, no tokens.
     Unchanged,
-    /// Bytes moved since the scheduler last recorded them.
-    Changed,
+    /// The item needs assessing again. `artifact_changed` separates "the
+    /// bytes moved" from "only the normalizer did".
+    Changed { artifact_changed: bool },
     /// The scheduler has never seen this item.
     New,
     /// The item is held (upgrade baseline or recovery) and only the owner
@@ -60,16 +78,38 @@ pub enum Verdict {
     InFlight,
 }
 
+/// One item catch-up is queuing, and WHY it counts as changed.
+///
+/// The distinction is not cosmetic. An item whose bytes are identical and
+/// whose NORMALIZER moved has not changed; the rules for reading it have. The
+/// prefilter's `no_change` verdict is reachable only when both are still —
+/// so a queue that reported every item as byte-changed would make every
+/// normalizer bump record `non_material_change` receipts for files nobody
+/// touched, which is a wrong answer written to a portable log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Queued {
+    pub item_key: String,
+    /// The bytes on disk differ from the ones the scheduler recorded.
+    pub artifact_changed: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Plan {
     /// Items to move to `pending` — the work the budget gate will bound.
-    pub queue: Vec<String>,
+    pub queue: Vec<Queued>,
     /// Items whose stored row must be created before they can be queued.
     pub unseen: Vec<Scanned>,
     pub unchanged: usize,
     pub held: usize,
     pub in_flight: usize,
     /// Rows for items no longer on disk.
+    ///
+    /// Reported and NOT acted on: this milestone has no deletion path. An
+    /// item_key IS the vault-relative path, so a rename reads as a departure
+    /// plus a brand-new item, and a catch-up that closed departed rows would
+    /// silently retire the history of every file anybody moved. Naming them
+    /// is what makes the gap visible; closing them is a later milestone's
+    /// decision with an owner behind it.
     pub departed: Vec<String>,
 }
 
@@ -79,15 +119,29 @@ impl Plan {
     }
 }
 
-/// Read a vault into the scanned-item list catch-up consumes.
-pub fn scan(vault: &Path) -> Result<Vec<Scanned>, String> {
+/// Read a vault into the scanned-item list catch-up consumes, plus the items
+/// it could not read.
+///
+/// A file we cannot read is not hashed as empty: a fabricated hash would make
+/// it permanently, falsely 'unchanged'. It is also not silently skipped — the
+/// skips come back so the caller can record an ingestion failure against
+/// each. Visible-and-skipped is the contract (`health::Stage::Scan`); a
+/// `continue` that told nobody was the version of it that hid a file from
+/// its own owner.
+pub fn scan(vault: &Path) -> Result<Scan, String> {
     let entries = crate::vault::scan::scan_vault(vault)?;
     let mut items = Vec::with_capacity(entries.len());
+    let mut unreadable = Vec::new();
     for entry in entries {
-        // A file we cannot read is not hashed as empty: a fabricated hash
-        // would make it permanently, falsely 'unchanged'.
-        let Ok(bytes) = std::fs::read(vault.join(&entry.path)) else {
-            continue;
+        let bytes = match std::fs::read(vault.join(&entry.path)) {
+            Ok(bytes) => bytes,
+            Err(detail) => {
+                unreadable.push(Unreadable {
+                    item_key: entry.path.clone(),
+                    detail: detail.to_string(),
+                });
+                continue;
+            }
         };
         items.push(Scanned {
             item_key: entry.path.clone(),
@@ -96,7 +150,8 @@ pub fn scan(vault: &Path) -> Result<Vec<Scanned>, String> {
         });
     }
     items.sort_by(|a, b| a.item_key.cmp(&b.item_key));
-    Ok(items)
+    unreadable.sort();
+    Ok(Scan { items, unreadable })
 }
 
 /// Compare what is on disk against what the scheduler last recorded.
@@ -123,7 +178,10 @@ pub fn plan(
         seen.insert(item.item_key.clone());
         match verdict(conn, vault_id, store_uuid, item)? {
             Verdict::Unchanged => plan.unchanged += 1,
-            Verdict::Changed => plan.queue.push(item.item_key.clone()),
+            Verdict::Changed { artifact_changed } => plan.queue.push(Queued {
+                item_key: item.item_key.clone(),
+                artifact_changed,
+            }),
             Verdict::New => plan.unseen.push(item.clone()),
             Verdict::Held => plan.held += 1,
             Verdict::InFlight => plan.in_flight += 1,
@@ -157,13 +215,14 @@ fn verdict(
     }
     // The whole heuristic, and all of it: same bytes, no work. A normalizer
     // change also counts as changed — an item assessed under different rules
-    // has not been assessed under these.
-    if row.content_hash == item.artifact_hash
-        && row.snapshot.normalizer_version == item.snapshot.normalizer_version
-    {
+    // has not been assessed under these — but it is reported as its own kind
+    // of change, because the artifact did not move and a receipt that said
+    // otherwise would be wrong in the ledger.
+    let artifact_changed = row.content_hash != item.artifact_hash;
+    if !artifact_changed && row.snapshot.normalizer_version == item.snapshot.normalizer_version {
         Ok(Verdict::Unchanged)
     } else {
-        Ok(Verdict::Changed)
+        Ok(Verdict::Changed { artifact_changed })
     }
 }
 
@@ -228,7 +287,8 @@ pub fn apply(
             )?;
             queued += 1;
         }
-        for key in &plan.queue {
+        for entry in &plan.queue {
+            let key = &entry.item_key;
             let Some(item) = by_key.get(key.as_str()) else {
                 continue;
             };
@@ -652,7 +712,13 @@ mod tests {
         let fresh = scanned("b.md", "c", "New");
         let items = vec![after, fresh];
         let plan = plan(&conn, &vault, "store", &items).unwrap();
-        assert_eq!(plan.queue, vec!["a.md".to_string()]);
+        assert_eq!(
+            plan.queue,
+            vec![Queued {
+                item_key: "a.md".into(),
+                artifact_changed: true
+            }]
+        );
         assert_eq!(plan.unseen.len(), 1);
         assert_eq!(apply(&conn, &vault, "store", &items, &plan).unwrap(), 2);
         assert_eq!(
@@ -696,7 +762,16 @@ mod tests {
         store(&conn, &vault, &stored, SchedulerState::Consumed);
         let current = scanned("a.md", "a", "Alpha");
         let plan = plan(&conn, &vault, "store", &[current]).unwrap();
-        assert_eq!(plan.queue, vec!["a.md".to_string()]);
+        assert_eq!(
+            plan.queue,
+            vec![Queued {
+                item_key: "a.md".into(),
+                // THE distinction: the rules for reading it moved and the
+                // file did not. A receipt claiming the artifact changed
+                // would be a wrong answer written to a portable log.
+                artifact_changed: false,
+            }]
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -754,12 +829,45 @@ mod tests {
         let dir = testutil::temp_vault("catchup-scan");
         testutil::write(&dir, "a.md", "---\ntitle: A\n---\nbody\n");
         let first = scan(&dir).unwrap();
+        assert!(first.unreadable.is_empty());
         // Touch it: same bytes, new mtime.
         let path = dir.join("a.md");
         let content = std::fs::read(&path).unwrap();
         std::fs::write(&path, content).unwrap();
         let second = scan(&dir).unwrap();
         assert_eq!(first, second, "a touch is not a change");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_be_read_is_named_rather_than_skipped_in_silence() {
+        // Visible-and-skipped. Hashing it as empty would make it permanently,
+        // falsely 'unchanged'; dropping it quietly would hide a file from its
+        // own owner. The caller records an ingestion failure per name.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = testutil::temp_vault("catchup-unreadable");
+        testutil::write(&dir, "ok.md", "---\ntitle: OK\n---\n");
+        testutil::write(&dir, "locked.md", "---\ntitle: Locked\n---\n");
+        let locked = dir.join("locked.md");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let found = scan(&dir).unwrap();
+        // Running as root defeats the permission bit; the scan is still
+        // correct, so assert the pairing rather than the count.
+        if found.unreadable.is_empty() {
+            assert_eq!(
+                found.items.len(),
+                2,
+                "root read both, which is not a failure"
+            );
+        } else {
+            assert_eq!(found.unreadable.len(), 1);
+            assert_eq!(found.unreadable[0].item_key, "locked.md");
+            assert!(!found.unreadable[0].detail.is_empty(), "and it says why");
+            assert_eq!(found.items.len(), 1, "the rest of the vault proceeds");
+        }
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

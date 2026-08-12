@@ -25,6 +25,7 @@ pub mod cli;
 pub mod commit;
 pub mod context;
 pub mod deterministic;
+pub mod driver;
 pub mod independence;
 pub mod outcome;
 pub mod pass;

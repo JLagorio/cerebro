@@ -3546,12 +3546,83 @@ fn scenario_semantic() -> (&'static str, &'static str, Vec<Frame>) {
         None,
     );
 
+    // --- A MATERIAL CANDIDATE window, closed ---
+    //
+    // The common case, and the one that could not be closed at all until the
+    // successor rule was written down: with no deterministic mapper in this
+    // build every material candidate queues, the schema required a candidate
+    // to name a dimension, and `outcome::close` clears the dimensions by
+    // design because the deterministic finding is already on the receipt
+    // being superseded and the SEMANTIC one is on the outcome. A successor is
+    // governed by its outcome, exactly as its proposal list is — this vector
+    // is what holds the two reducers to that.
+    let item_c = derive_item_id(STORE, &source_id, "records/c.md");
+    let window_c = "batch-2026-08-12";
+    let queued_c_id = derive_receipt_id(
+        STORE,
+        &source_id,
+        &item_c,
+        &"a".repeat(64),
+        "vault-entry-v1",
+        0,
+        Route::M26Queued,
+    );
+    let mut queued_c = queued.clone();
+    queued_c.receipt_id = queued_c_id.clone();
+    queued_c.item_id = item_c.clone();
+    queued_c.m26_batch_key = Some(window_c.into());
+    queued_c.prefilter_verdict = PrefilterVerdict::MaterialCandidate;
+    queued_c.material_dimensions = vec![MaterialDimension::WorldState];
+    b.push_body(KIND_INGEST_ASSESSED, &queued_c);
+
+    let mut closed_c = successor(Route::M26Completed, None);
+    closed_c.item_id = item_c;
+    closed_c.m26_batch_key = Some(window_c.into());
+    closed_c.supersedes_receipt_id = Some(queued_c_id.clone());
+    // It restates the verdict — the same item's story — and NOT the
+    // deterministic finding.
+    closed_c.prefilter_verdict = PrefilterVerdict::MaterialCandidate;
+    closed_c.material_dimensions = vec![];
+    closed_c.receipt_id = derive_receipt_id(
+        STORE,
+        &source_id,
+        &closed_c.item_id,
+        &"a".repeat(64),
+        "vault-entry-v1",
+        0,
+        Route::M26Completed,
+    );
+    closed_c.m26_outcome_event_id = Some(format!("{:032x}", b.frames.len() as u64 + 1));
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0028",
+        vec![
+            (
+                KIND_INGEST_SEMANTIC_ASSESSED.to_string(),
+                serde_json::to_value(semantic_outcome_on(
+                    window_c,
+                    SemanticOutcome::NonMaterial,
+                    vec![queued_c_id],
+                    vec![],
+                    None,
+                ))
+                .unwrap(),
+            ),
+            (
+                KIND_INGEST_ASSESSED.to_string(),
+                serde_json::to_value(&closed_c).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
     (
         "semantic",
         "one semantic run per settled window: the derived assessment id that \
          refuses a second opinion, input association, a successor receipt that \
-         has to agree with what the run concluded, and the terminal close \
-         committed as one batch",
+         has to agree with what the run concluded, the terminal close \
+         committed as one batch, and a material candidate closed with the \
+         dimensions its outcome governs",
         b.frames,
     )
 }

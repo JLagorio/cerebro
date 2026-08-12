@@ -157,6 +157,14 @@ pub struct IngestReceiptState {
     pub superseded: bool,
     /// The window this receipt was parked on, for the `m26_queued` route.
     pub m26_batch_key: Option<String>,
+    /// The three fields a SUCCESSOR receipt has to restate (M26.4d). Indexed
+    /// so the driver can assemble a window from the reducer rather than
+    /// re-reading and re-decoding the raw frames — and so that what it
+    /// restates comes from the receipt it supersedes, not from a vault that
+    /// may have moved on.
+    pub prefilter_verdict: schema::PrefilterVerdict,
+    pub independence: schema::Independence,
+    pub observation_event_ids: Vec<String>,
 }
 
 /// One committed `ingest.semantic_assessed` outcome, reduced (M26.4).
@@ -1451,6 +1459,9 @@ fn apply_ingest_assessed(
             route: body.route,
             superseded: false,
             m26_batch_key: body.m26_batch_key.clone(),
+            prefilter_verdict: body.prefilter_verdict,
+            independence: body.independence,
+            observation_event_ids: body.observation_event_ids.clone(),
         },
     );
     state.ingest_latest.insert(

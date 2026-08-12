@@ -2428,7 +2428,15 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if ((verdict === 'no_change' || verdict === 'non_material_change') && dimensions.length > 0) {
         throw new RefusedError(`verdict ${verdict} names no material dimensions`);
       }
-      if (verdict === 'material_candidate' && dimensions.length === 0) {
+      // A SUCCESSOR is governed by the outcome it names, exactly as its
+      // proposal list is (`m26_completed` allows any count). It restates the
+      // verdict of the receipt it supersedes but not the deterministic
+      // FINDING, which is already on that receipt while the semantic one is
+      // on the outcome. Without this, a `material_candidate` could never be
+      // closed — and with no deterministic mapper in this build, every
+      // material candidate queues, so that is the common case.
+      const governedByOutcome = route === 'm26_completed' || route === 'failed_visible';
+      if (verdict === 'material_candidate' && dimensions.length === 0 && !governedByOutcome) {
         throw new RefusedError('material_candidate must name at least one material dimension');
       }
       if (

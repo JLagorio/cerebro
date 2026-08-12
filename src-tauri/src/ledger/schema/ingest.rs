@@ -304,6 +304,18 @@ impl IngestAssessed {
     /// `material_dimensions` is empty for the two closing verdicts, non-empty
     /// for a material candidate, and may be either for a semantic queue tag —
     /// the deterministic pass lists what it DOES know and escalates the rest.
+    ///
+    /// **A SUCCESSOR is governed by the outcome it names**, exactly as its
+    /// proposal list is (`Route::proposals` returns `Free` for
+    /// `m26_completed`). It restates the verdict of the receipt it supersedes
+    /// — that is what makes it the same item's story — but not the
+    /// deterministic FINDING, which is already recorded on that receipt while
+    /// the semantic one lives on the outcome. Without this, a
+    /// `material_candidate` could never be closed at all: `outcome::close`
+    /// clears the dimensions by design, and the two rules together made every
+    /// window over a material candidate uncloseable. That is the common case
+    /// — with no deterministic mapper in this build, every material candidate
+    /// queues.
     fn validate_dimensions(&self) -> Result<(), String> {
         let mut sorted = self.material_dimensions.clone();
         sorted.sort();
@@ -311,23 +323,22 @@ impl IngestAssessed {
         if sorted != self.material_dimensions {
             return Err("material_dimensions must be sorted and duplicate-free".into());
         }
+        let governed_by_outcome = matches!(self.route, Route::M26Completed | Route::FailedVisible);
         match self.prefilter_verdict {
-            PrefilterVerdict::NoChange | PrefilterVerdict::NonMaterialChange => {
-                if !self.material_dimensions.is_empty() {
-                    return Err(format!(
-                        "verdict {} names no material dimensions",
-                        self.prefilter_verdict.as_str()
-                    ));
-                }
+            PrefilterVerdict::NoChange | PrefilterVerdict::NonMaterialChange
+                if !self.material_dimensions.is_empty() =>
+            {
+                return Err(format!(
+                    "verdict {} names no material dimensions",
+                    self.prefilter_verdict.as_str()
+                ));
             }
-            PrefilterVerdict::MaterialCandidate => {
-                if self.material_dimensions.is_empty() {
-                    return Err(
-                        "material_candidate must name at least one material dimension".into(),
-                    );
-                }
+            PrefilterVerdict::MaterialCandidate
+                if !governed_by_outcome && self.material_dimensions.is_empty() =>
+            {
+                return Err("material_candidate must name at least one material dimension".into());
             }
-            PrefilterVerdict::NeedsSemanticJudgment => {}
+            _ => {}
         }
         // Corroboration is the one dimension that requires a positive record.
         if self

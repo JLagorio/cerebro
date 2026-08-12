@@ -632,6 +632,34 @@ mod tests {
     }
 
     #[test]
+    fn a_material_candidate_window_can_actually_be_closed() {
+        // THE regression. Every queued receipt in this build carries
+        // `material_candidate` — there is no deterministic mapper, so every
+        // material candidate queues — and the schema required a candidate to
+        // name a dimension while `build_successor` clears them by design. The
+        // two rules together made the common case uncloseable, and both
+        // fixtures in this file happened to use `needs_semantic_judgment`.
+        for verdict in [
+            PrefilterVerdict::MaterialCandidate,
+            PrefilterVerdict::NeedsSemanticJudgment,
+        ] {
+            let (plan, mut items) = fixture(1);
+            items[0].prefilter_verdict = verdict;
+            let closure = close(
+                STORE,
+                &plan.window.unwrap(),
+                &items,
+                HEAD,
+                ACTOR,
+                &material(),
+            )
+            .unwrap_or_else(|e| panic!("{}: {e}", verdict.as_str()));
+            assert_eq!(closure.successors[0].prefilter_verdict, verdict);
+            assert!(closure.successors[0].material_dimensions.is_empty());
+        }
+    }
+
+    #[test]
     fn the_semantic_dimensions_stay_on_the_outcome() {
         // A successor restating them would be this pass claiming the
         // deterministic finding, and the deterministic finding is already on
