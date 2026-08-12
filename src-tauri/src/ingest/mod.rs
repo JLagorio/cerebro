@@ -21,6 +21,7 @@
 //! exactly what a closed matrix exists to make impossible.
 
 pub mod cli;
+pub mod commit;
 pub mod independence;
 pub mod outcome;
 pub mod pass;

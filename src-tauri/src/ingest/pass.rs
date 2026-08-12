@@ -27,13 +27,24 @@
 //! Requeuing would be an automatic second spend on work already paid for.
 //! `recovery_held` is the state an owner has to leave, which is the right
 //! answer when the app cannot tell what happened.
+//!
+//! **The ledger writer is a seam, not a parameter, and that is a deadlock
+//! fix.** This function used to take `&mut LedgerWriter`. The only way to get
+//! one is `shadow::with_writer`, which holds a process-global mutex for the
+//! whole closure — so the caller would have held that lock across
+//! `runner.run()`, which blocks on a CLI subprocess, whose `propose_*` and
+//! `commit_proposals` tools open with `shadow::with_writer` on the MCP
+//! thread. Driver holds the lock, CLI waits for MCP, MCP waits for the lock.
+//! Permanent, and unavoidable by discipline: the only path that produces a
+//! MATERIAL outcome is the one that proposes, which is the one that
+//! deadlocks. Taking the writer only at the end, through [`Commit`], means
+//! the lock is never held while a subprocess is running.
 
 use chrono::{DateTime, Utc};
 use rusqlite::Connection;
 
 use crate::agent::usage::Usage;
 use crate::ledger::schema::{BlockedReason, SemanticOutcome};
-use crate::ledger::writer::LedgerWriter;
 use crate::runtime::budget::{GateReason, Reservation};
 use crate::runtime::dispatch::{self, Dispatched, ItemOutcome, RunOutcome};
 use crate::runtime::scheduler::SchedulerState;
@@ -64,6 +75,19 @@ pub struct Report {
 /// The one thing this module cannot test: spawning a CLI and reading it back.
 pub trait Runner {
     fn run(&self, request: &RunRequest) -> Result<Report, String>;
+}
+
+/// Appending the terminal batch.
+///
+/// A seam for the same reason [`Runner`] is, and for one more: the production
+/// implementation takes a process-global lock that the MCP server also takes,
+/// so it MUST NOT be held while a run is in flight. See the module note.
+pub trait Commit {
+    fn append_batch(
+        &self,
+        events: Vec<(String, serde_json::Value)>,
+        operation_key: &str,
+    ) -> Result<(), String>;
 }
 
 /// One residual item, in all three shapes the pass needs it in.
@@ -121,9 +145,9 @@ pub enum Pass {
 ///
 /// `now` is passed rather than read so a test can drive a whole simulated day
 /// without sleeping — the same rule `dispatch::claim` follows.
-pub fn run_once<R: Runner>(
+pub fn run_once<R: Runner, C: Commit>(
     conn: &Connection,
-    writer: &mut LedgerWriter,
+    commit: &C,
     input: &Input,
     runner: &R,
     now: DateTime<Utc>,
@@ -219,7 +243,7 @@ pub fn run_once<R: Runner>(
     // LEDGER FIRST. See the module note: a crash after this leaves terminal
     // receipts recovery can read; a crash before it leaves the queued rows,
     // which is where they started.
-    if let Err(detail) = writer.append_batch(closure.members(), Some(&closure.operation_key)) {
+    if let Err(detail) = commit.append_batch(closure.members(), &closure.operation_key) {
         finalize_held(conn, &lease.run_id, usage, now)?;
         return Err(format!("the closure could not be committed: {detail}"));
     }
@@ -300,6 +324,7 @@ mod tests {
     use crate::ledger::schema::{
         self, Independence, MaterialDimension, PrefilterVerdict, Route, SemanticDisposition,
     };
+    use crate::ledger::writer::LedgerWriter;
     use crate::ledger::{ledger_dir, read_ledger, reduce::reduce, store};
     use crate::runtime::{scheduler, status};
     use crate::vault::testutil;
@@ -415,6 +440,35 @@ mod tests {
             store_uuid,
             source_id,
             registration_event,
+        }
+    }
+
+    /// A `Commit` over the rig's own writer.
+    ///
+    /// Not `ShadowCommit`: arming the process-global shadow writer would make
+    /// these tests fight each other for it. What they need is the REAL
+    /// `append_batch` and the REAL reducer, which this gives; `ShadowCommit`
+    /// itself is three lines whose whole content is "call `with_writer`".
+    struct RigCommit<'a> {
+        writer: RefCell<&'a mut LedgerWriter>,
+    }
+
+    impl Commit for RigCommit<'_> {
+        fn append_batch(
+            &self,
+            events: Vec<(String, serde_json::Value)>,
+            operation_key: &str,
+        ) -> Result<(), String> {
+            self.writer
+                .borrow_mut()
+                .append_batch(events, Some(operation_key))
+                .map(|_| ())
+        }
+    }
+
+    fn committer(writer: &mut LedgerWriter) -> RigCommit<'_> {
+        RigCommit {
+            writer: RefCell::new(writer),
         }
     }
 
@@ -602,7 +656,14 @@ mod tests {
         }];
         let input = input(&rig, vec![], closed);
         let runner = Fake::never();
-        let pass = run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        let pass = run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
         assert_eq!(pass, Pass::NothingToSpend { closed: 1 });
         assert!(runner.calls.borrow().is_empty());
         let runs: i64 = rig
@@ -620,7 +681,14 @@ mod tests {
         let items = vec![item(&mut rig, 1, "the queue drains in 40 minutes")];
         let input = input(&rig, items, vec![]);
         let runner = Fake::new(non_material());
-        let pass = run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        let pass = run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
 
         let Pass::Ran { outcome, .. } = &pass else {
             panic!("expected a run, got {pass:?}");
@@ -655,7 +723,14 @@ mod tests {
         ];
         let input = input(&rig, items, vec![]);
         let runner = Fake::new(non_material());
-        run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
         assert_eq!(runner.calls.borrow().len(), 1);
         for n in 1..=3 {
             assert_eq!(
@@ -675,7 +750,14 @@ mod tests {
         let items = vec![item(&mut rig, 1, "alpha")];
         let input = input(&rig, items, vec![]);
         let runner = Fake::new(Err("the CLI exited without a terminal event".into()));
-        let pass = run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        let pass = run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
 
         let Pass::Ran { outcome, .. } = &pass else {
             panic!("a dead run still closes its window, got {pass:?}");
@@ -707,7 +789,14 @@ mod tests {
         let observation = items[0].receipt.observation_event_ids[0].clone();
         let input = input(&rig, items, vec![]);
         let runner = Fake::new(Err("died".into()));
-        run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
 
         let row = taint::get(
             &rig.conn,
@@ -732,8 +821,14 @@ mod tests {
         let mut input = input(&rig, items, vec![]);
         input.items.pop();
         let runner = Fake::never();
-        let err = run_once(&rig.conn, &mut rig.writer, &input, &runner, now())
-            .expect_err("a residual that is not the window");
+        let err = run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .expect_err("a residual that is not the window");
         assert!(err.contains("not the window the planner derived"), "{err}");
         let runs: i64 = rig
             .conn
@@ -758,9 +853,106 @@ mod tests {
         .unwrap();
         let input = input(&rig, items, vec![]);
         let runner = Fake::never();
-        let pass = run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        let pass = run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
         assert_eq!(pass, Pass::NothingToClaim);
         assert!(runner.calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn the_writer_is_never_taken_while_a_run_is_in_flight() {
+        // THE DEADLOCK REGRESSION, as an ordering property.
+        //
+        // This function used to take `&mut LedgerWriter`. The only source of
+        // one is `shadow::with_writer`, which holds a process-global mutex
+        // for its whole closure — so the caller held that lock across
+        // `runner.run()`, which blocks on a CLI, whose `propose_*` tools open
+        // with the same call on the MCP thread. Driver holds, CLI waits for
+        // MCP, MCP waits for the driver. Permanent.
+        //
+        // It was unavoidable by discipline, too: the only path that reaches a
+        // MATERIAL outcome is the one that proposes, which is the one that
+        // deadlocks. Every test in this file passed, because a fake runner
+        // never calls back into MCP.
+        //
+        // So the property is: the commit happens strictly AFTER the run, and
+        // exactly once. A `Commit` taken before or during is a lock held
+        // across a subprocess.
+        struct Ordered<'a> {
+            log: &'a RefCell<Vec<&'static str>>,
+        }
+        impl Commit for Ordered<'_> {
+            fn append_batch(
+                &self,
+                _: Vec<(String, serde_json::Value)>,
+                _: &str,
+            ) -> Result<(), String> {
+                self.log.borrow_mut().push("commit");
+                Ok(())
+            }
+        }
+        struct Logged<'a> {
+            log: &'a RefCell<Vec<&'static str>>,
+        }
+        impl Runner for Logged<'_> {
+            fn run(&self, _: &RunRequest) -> Result<Report, String> {
+                self.log.borrow_mut().push("run");
+                non_material()
+            }
+        }
+
+        let _lock = status::test_lock();
+        status::clear();
+        let mut rig = rig("pass-ordering");
+        let items = vec![item(&mut rig, 1, "alpha")];
+        let input = input(&rig, items, vec![]);
+        let log = RefCell::new(Vec::new());
+        run_once(
+            &rig.conn,
+            &Ordered { log: &log },
+            &input,
+            &Logged { log: &log },
+            now(),
+        )
+        .unwrap();
+        assert_eq!(log.into_inner(), vec!["run", "commit"]);
+    }
+
+    #[test]
+    fn a_window_whose_closure_cannot_be_committed_holds_its_items() {
+        // The other half: a commit that fails must not consume the items. The
+        // run is paid for and undescribable, so it is held for an owner.
+        struct Refuses;
+        impl Commit for Refuses {
+            fn append_batch(
+                &self,
+                _: Vec<(String, serde_json::Value)>,
+                _: &str,
+            ) -> Result<(), String> {
+                Err("no ledger writer is armed for this vault".into())
+            }
+        }
+
+        let _lock = status::test_lock();
+        status::clear();
+        let mut rig = rig("pass-commit-refused");
+        let items = vec![item(&mut rig, 1, "alpha")];
+        let input = input(&rig, items, vec![]);
+        let runner = Fake::new(non_material());
+        let err = run_once(&rig.conn, &Refuses, &input, &runner, now())
+            .expect_err("an uncommittable closure");
+        assert!(err.contains("could not be committed"), "{err}");
+        assert_eq!(
+            state_of("records/1.md", &rig),
+            SchedulerState::RecoveryHeld,
+            "held, not consumed and not requeued"
+        );
     }
 
     #[test]
@@ -771,7 +963,14 @@ mod tests {
         let items = vec![item(&mut rig, 1, "the queue drains in 40 minutes")];
         let input = input(&rig, items, vec![]);
         let runner = Fake::new(non_material());
-        run_once(&rig.conn, &mut rig.writer, &input, &runner, now()).unwrap();
+        run_once(
+            &rig.conn,
+            &committer(&mut rig.writer),
+            &input,
+            &runner,
+            now(),
+        )
+        .unwrap();
 
         let calls = runner.calls.borrow();
         let request = &calls[0];
