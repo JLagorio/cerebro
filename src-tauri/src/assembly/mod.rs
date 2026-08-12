@@ -17,7 +17,11 @@
 //! two mean opposite things to the person who asked.
 
 pub mod answer;
+pub mod ask;
 pub mod assemble;
 pub mod corpus;
+pub(crate) mod fixture;
+pub mod live;
 pub mod manifest;
+pub mod prompt;
 pub mod store;

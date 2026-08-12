@@ -773,7 +773,7 @@ impl SynthesisAnswer {
     }
 
     /// Every `EvidenceRef` anywhere in the answer.
-    fn evidence_refs(&self) -> impl Iterator<Item = &EvidenceRef> {
+    pub fn evidence_refs(&self) -> impl Iterator<Item = &EvidenceRef> {
         let cited = self
             .observations
             .iter()
@@ -837,7 +837,7 @@ impl SynthesisAnswer {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::assembly::manifest::tests as fixture;
     use crate::ledger::schema::IntendedUseKind;
@@ -954,6 +954,58 @@ mod tests {
             working_memory_manifest_id: "asm-1".into(),
             content_label: ContentLabel::AgentSupplied,
         }
+    }
+
+    /// A complete, valid answer for a REAL manifest — the shape a run has to
+    /// produce. Shared with `mcp.rs`'s submit tests so the server and the
+    /// validator are exercised against one definition of "correct" rather than
+    /// two that could drift.
+    pub(crate) fn valid_for(
+        manifest: &crate::assembly::manifest::WorkingMemoryManifest,
+    ) -> SynthesisAnswer {
+        let item = manifest
+            .items
+            .first()
+            .expect("a manifest with at least one item");
+        let reference = item_ref(item.item_id());
+        let mut answer = answer(manifest.intended_use.stakes);
+        answer.working_memory_manifest_id = manifest.assembly_id.clone();
+        answer.evidence_sufficiency.intended_use = manifest.intended_use.clone();
+        answer.evidence_sufficiency.basis_refs = vec![reference.clone()];
+        answer.observations = vec![cited(
+            "what the evidence says",
+            StatementLabel::Observation,
+            vec![reference.clone()],
+        )];
+        answer.basis = vec![cited(
+            "why that follows",
+            StatementLabel::Observation,
+            vec![reference.clone()],
+        )];
+        answer.current_answer = statement(
+            "the answer, in one sentence",
+            StatementLabel::Conclusion,
+            vec![reference.clone()],
+        );
+        let basis = DimensionBasisRef::ManifestItem {
+            item_id: item.item_id().to_string(),
+        };
+        let dimensions = &mut answer.retrieval_adequacy.dimensions;
+        for dimension in [
+            &mut dimensions.source_availability,
+            &mut dimensions.source_health,
+            &mut dimensions.scope_coverage,
+            &mut dimensions.temporal_suitability,
+            &mut dimensions.authority_coverage,
+            &mut dimensions.firsthandness,
+            &mut dimensions.retrieval_breadth,
+            &mut dimensions.contradiction_search,
+            &mut dimensions.lineage_independence,
+            &mut dimensions.stakes,
+        ] {
+            dimension.basis_refs = vec![basis.clone()];
+        }
+        answer
     }
 
     fn next_source() -> NextSource {

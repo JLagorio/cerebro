@@ -238,6 +238,82 @@ pub(crate) fn test_report_window(run_id: &str, result: crate::ingest::outcome::R
     }
 }
 
+/// One run's open question (M26.5e).
+///
+/// The attended twin of `WindowSession`: the app opens the question before
+/// spawning and takes the answer after, and the run answers through
+/// `submit_answer`. The manifest is held HERE rather than passed through the
+/// model, for the reason every derived fact is held server-side — an answer
+/// validated against a manifest the run supplied would be an answer validated
+/// against itself.
+#[derive(Debug, Clone, PartialEq)]
+struct QuestionSession {
+    manifest: Box<crate::assembly::manifest::WorkingMemoryManifest>,
+    answer: Option<Box<crate::assembly::answer::SynthesisAnswer>>,
+}
+
+fn questions() -> &'static Mutex<BTreeMap<String, QuestionSession>> {
+    static QUESTIONS: OnceLock<Mutex<BTreeMap<String, QuestionSession>>> = OnceLock::new();
+    QUESTIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Declare that this run is answering this assembly. Without it,
+/// `submit_answer` has nothing to answer and refuses.
+pub(crate) fn open_question(
+    run_id: &str,
+    manifest: &crate::assembly::manifest::WorkingMemoryManifest,
+) {
+    if let Ok(mut map) = questions().lock() {
+        map.insert(
+            run_id.to_string(),
+            QuestionSession {
+                manifest: Box::new(manifest.clone()),
+                answer: None,
+            },
+        );
+    }
+}
+
+/// Take what the run answered and close its question. `None` means it never
+/// answered — which is a run that produced nothing, never a guessed answer.
+pub(crate) fn take_answer(run_id: &str) -> Option<crate::assembly::answer::SynthesisAnswer> {
+    let mut map = questions().lock().ok()?;
+    map.remove(run_id)
+        .and_then(|session| session.answer)
+        .map(|answer| *answer)
+}
+
+/// Test-only: the manifest a question was opened with, and the answer path
+/// the tool takes — so `assembly::ask`'s tests drive the REAL registry rather
+/// than a second one that could disagree with it.
+#[cfg(test)]
+pub(crate) fn test_open_manifest(
+    run_id: &str,
+) -> Option<crate::assembly::manifest::WorkingMemoryManifest> {
+    let map = questions().lock().ok()?;
+    map.get(run_id).map(|session| (*session.manifest).clone())
+}
+
+#[cfg(test)]
+pub(crate) fn test_submit_answer(
+    run_id: &str,
+    answer: crate::assembly::answer::SynthesisAnswer,
+) -> Result<(), String> {
+    let args: Map<String, Value> = serde_json::from_value(
+        json!({ "answer": serde_json::to_value(&answer).map_err(|e| e.to_string())? }),
+    )
+    .map_err(|e| e.to_string())?;
+    tool_submit_answer(
+        &args,
+        &RunGrant {
+            actor: crate::assembly::ask::ACTOR.to_string(),
+            run_id: run_id.to_string(),
+            scope: Some(vec![]),
+        },
+    )
+    .map(|_| ())
+}
+
 fn record_submission(run_id: &str, proposal_id: &str) {
     if let Ok(mut map) = windows().lock() {
         if let Some(session) = map.get_mut(run_id) {
@@ -517,6 +593,18 @@ fn base_tools() -> Vec<Value> {
                 "material_dimensions": { "type": "array", "items": { "type": "string", "enum": ["world_state", "belief_state", "evidence_state", "attention"] }, "description": "Which of those moved. A subset of evaluated_dimensions." },
                 "blocked_reason": { "type": "string", "enum": ["batch_input_incomplete", "policy_dependency_unavailable", "runtime_unavailable", "semantic_validation_failed", "source_access_lost"], "description": "Required when outcome is undetermined" }
             }), &["outcome", "explanation"])
+        }),
+        json!({
+            // A literal, like every other entry: `base_tools` is scraped by
+            // the TS parity test (`src/engine/tools.test.ts`), and a name
+            // behind a constant is a name that test cannot see. The constant
+            // is still the one truth — `the_submit_tool_the_prompt_names_is_the_one_served`
+            // asserts the two agree.
+            "name": "submit_answer",
+            "description": "Attended synthesis only: submit the nine-part answer to the question this run was given, once. It is checked against the working-memory manifest the app assembled — every ref must name an item that manifest held, and the intended use must come back unchanged. A refusal names what to fix.",
+            "inputSchema": schema(json!({
+                "answer": { "type": "object", "description": "The SynthesisAnswer object, in the shape the prompt printed" }
+            }), &["answer"])
         }),
         json!({
             "name": "list_inbox",
@@ -965,6 +1053,7 @@ fn call_tool(
         "cache_source" => tool_cache_source(&vault, args, actor),
         "propose_organize" => tool_propose_organize(app, args),
         "report_window_outcome" => tool_report_window_outcome(args, grant),
+        name if name == crate::assembly::prompt::SUBMIT_TOOL => tool_submit_answer(args, grant),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
         // The proposal surface. Gated twice: the switch decides whether the
@@ -1791,6 +1880,53 @@ fn tool_cache_source(
 /// Refused when the run has no open window: a chat turn has nothing to report
 /// about, and a background run whose window the driver never opened is a
 /// caller confused about what it is doing.
+/// The attended answer, submitted once and checked against what was assembled.
+///
+/// **Every check is server-side, and the manifest is the server's.** The run
+/// cannot tell us which manifest to check against, cannot widen what counts as
+/// a valid ref, and cannot lower the stakes it was given — those are the three
+/// ways an answer could be made to validate against itself.
+///
+/// **A refusal is an answer to the model, not a transport failure.**
+/// `call_tool` turns an `Err` here into readable `isError` content, which is
+/// the point: a model that cited an item this assembly never held should be
+/// told exactly that and given the chance to fix it.
+fn tool_submit_answer(args: &Map<String, Value>, grant: &RunGrant) -> Result<Value, String> {
+    use crate::assembly::answer::SynthesisAnswer;
+
+    let mut map = questions().lock().map_err(|_| "question lock poisoned")?;
+    let session = map
+        .get_mut(&grant.run_id)
+        .ok_or("this run has no open question, so there is nothing to submit an answer for")?;
+    if session.answer.is_some() {
+        return Err(
+            "this question has already been answered. One run, one answer — say \
+                    everything in the first one."
+                .to_string(),
+        );
+    }
+
+    let raw = args
+        .get("answer")
+        .cloned()
+        .ok_or("answer is required: the nine-part object the prompt printed the shape of")?;
+    let answer: SynthesisAnswer = serde_json::from_value(raw).map_err(|e| {
+        format!(
+            "answer: {e}. The shape is the one in the prompt — every part is required, and the \
+             field names are exact."
+        )
+    })?;
+    answer.validate_against(&session.manifest)?;
+
+    let cited = answer.evidence_refs().count();
+    session.answer = Some(Box::new(answer));
+    typed_result(json!({
+        "accepted": true,
+        "working_memory_manifest_id": session.manifest.assembly_id,
+        "distinct_refs_cited": cited,
+    }))
+}
+
 fn tool_report_window_outcome(
     args: &Map<String, Value>,
     grant: &RunGrant,
@@ -2499,6 +2635,10 @@ mod tests {
                 "report_window_outcome",
                 "records a run's own verdict in memory; writes no file and no event",
             ),
+            (
+                "submit_answer",
+                "records a run's own answer in memory; writes no file and no event",
+            ),
         ]
         .into_iter()
         .collect();
@@ -2523,6 +2663,130 @@ mod tests {
                 "{name} is served, is not scope-checked, and declares no exemption"
             );
         }
+    }
+
+    /// One assembled question, opened for a run the way the app opens it.
+    fn open_a_question(run_id: &str) -> crate::assembly::manifest::WorkingMemoryManifest {
+        use crate::assembly::fixture;
+        let assembly = fixture::assembled(&fixture::request(fixture::shipping(), fixture::wide()));
+        open_question(run_id, &assembly.manifest);
+        assembly.manifest
+    }
+
+    fn grant_for(run_id: &str) -> RunGrant {
+        RunGrant {
+            actor: "agent:m26-synthesis".into(),
+            run_id: run_id.to_string(),
+            scope: None,
+        }
+    }
+
+    fn submit(
+        grant: &RunGrant,
+        answer: &crate::assembly::answer::SynthesisAnswer,
+    ) -> Result<Value, String> {
+        let args: Map<String, Value> = serde_json::from_value(json!({
+            "answer": serde_json::to_value(answer).unwrap()
+        }))
+        .unwrap();
+        tool_submit_answer(&args, grant)
+    }
+
+    #[test]
+    fn a_run_with_no_open_question_has_nothing_to_answer() {
+        // The registry is what makes the manifest the SERVER's. A run that
+        // could answer without one could hand us the manifest to check itself
+        // against.
+        let grant = grant_for(&run_id_of("mcp-answer-unopened"));
+        let answer = {
+            use crate::assembly::fixture;
+            let assembly =
+                fixture::assembled(&fixture::request(fixture::shipping(), fixture::wide()));
+            crate::assembly::answer::tests::valid_for(&assembly.manifest)
+        };
+        let refusal = submit(&grant, &answer).expect_err("no open question");
+        assert!(refusal.contains("no open question"), "{refusal}");
+    }
+
+    #[test]
+    fn a_valid_answer_is_accepted_once_and_taken_by_the_app() {
+        let run = run_id_of("mcp-answer-happy");
+        let manifest = open_a_question(&run);
+        let grant = grant_for(&run);
+        let answer = crate::assembly::answer::tests::valid_for(&manifest);
+
+        submit(&grant, &answer).expect("a complete answer is accepted");
+        let second = submit(&grant, &answer).expect_err("one run, one answer");
+        assert!(second.contains("already been answered"), "{second}");
+
+        let taken = take_answer(&run).expect("the app takes it");
+        assert_eq!(taken.working_memory_manifest_id, manifest.assembly_id);
+        assert!(take_answer(&run).is_none(), "taking closes the question");
+    }
+
+    #[test]
+    fn an_answer_citing_what_the_assembly_never_held_is_refused_readably() {
+        // And it reaches the model as content it can act on, not as a
+        // transport error it cannot see.
+        let run = run_id_of("mcp-answer-bad-ref");
+        let manifest = open_a_question(&run);
+        let grant = grant_for(&run);
+        let mut answer = crate::assembly::answer::tests::valid_for(&manifest);
+        let invented = crate::assembly::answer::EvidenceRef::ManifestItem {
+            item_id: "an-item-nobody-assembled".into(),
+        };
+        answer.basis[0].statement.basis_refs = vec![invented.clone()];
+        answer.basis[0].citation_refs = vec![invented.clone()];
+        answer.current_answer.basis_refs = vec![invented];
+
+        let refusal = submit(&grant, &answer).expect_err("the ref resolves to nothing");
+        assert!(refusal.contains("never held"), "{refusal}");
+        assert!(
+            take_answer(&run).is_none(),
+            "a refused answer is not recorded"
+        );
+    }
+
+    #[test]
+    fn a_run_cannot_lower_the_stakes_it_was_given() {
+        let run = run_id_of("mcp-answer-stakes");
+        let manifest = open_a_question(&run);
+        let grant = grant_for(&run);
+        let mut answer = crate::assembly::answer::tests::valid_for(&manifest);
+        answer.evidence_sufficiency.intended_use.stakes = crate::ledger::schema::Risk::Low;
+        let refusal = submit(&grant, &answer).expect_err("the use is fixed before retrieval");
+        assert!(refusal.contains("cannot weaken"), "{refusal}");
+        take_answer(&run);
+    }
+
+    #[test]
+    fn a_malformed_answer_is_told_the_shape_rather_than_a_parser_error_alone() {
+        let run = run_id_of("mcp-answer-malformed");
+        open_a_question(&run);
+        let grant = grant_for(&run);
+        let args: Map<String, Value> =
+            serde_json::from_value(json!({ "answer": { "observations": [] } })).unwrap();
+        let refusal = tool_submit_answer(&args, &grant).expect_err("not an answer");
+        assert!(refusal.contains("field names are exact"), "{refusal}");
+        take_answer(&run);
+    }
+
+    #[test]
+    fn the_submit_tool_the_prompt_names_is_the_one_served() {
+        // `base_tools` must spell the name literally so the TS parity test can
+        // scrape it; this is what stops that literal drifting from the
+        // constant the prompt tells the model to call and the dispatcher
+        // routes on.
+        let served: Vec<&str> = tool_catalog(true)
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .map(|name| Box::leak(name.to_string().into_boxed_str()) as &str)
+            .collect();
+        assert!(
+            served.contains(&crate::assembly::prompt::SUBMIT_TOOL),
+            "the prompt names {} and the server serves {served:?}",
+            crate::assembly::prompt::SUBMIT_TOOL
+        );
     }
 
     #[test]
