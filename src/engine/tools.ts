@@ -141,7 +141,25 @@ const PROPOSAL_TOOLSET: Toolset = {
 // policy would have no way to grant or withhold the proposal surface.
 TOOLSETS.push(PROPOSAL_TOOLSET);
 
-export const ALL_TOOLS: ToolSpec[] = TOOLSETS.flatMap((set) => set.tools);
+/**
+ * Tools the server serves that a person never picks (M26.4h).
+ *
+ * `report_window_outcome` belongs to the ingest driver's own runs: it is
+ * refused unless the driver opened a window for that run, so putting it in a
+ * picker would offer a checkbox that does nothing for every agent a person
+ * can build. It is still in `ALL_TOOLS`, because the catalog parity test
+ * scrapes the Rust server's `base_tools()` and a tool served on one side and
+ * absent on the other is exactly the drift that test exists to catch.
+ */
+const UNPICKABLE_TOOLS: ToolSpec[] = [
+  {
+    name: 'report_window_outcome',
+    summary: 'Background ingest: report what this change-window concluded',
+    writes: false,
+  },
+];
+
+export const ALL_TOOLS: ToolSpec[] = [...TOOLSETS.flatMap((set) => set.tools), ...UNPICKABLE_TOOLS];
 
 export function toolSpec(name: string): ToolSpec | undefined {
   return ALL_TOOLS.find((t) => t.name === name);

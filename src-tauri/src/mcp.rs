@@ -184,6 +184,68 @@ fn forget_attempts(run_id: &str) {
     }
 }
 
+/// One run's ingest window, while it is open (M26.4h).
+///
+/// The driver opens it before spawning and takes the report after; the run
+/// reports through `report_window_outcome`. Held server-side for the reason
+/// every other derived fact is: the run does not get to tell us what it
+/// submitted, because the server already knows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct WindowSession {
+    batch_key: String,
+    /// Proposal ids THIS server accepted from this run. Never caller-supplied
+    /// — a run that could name its own list could attribute another run's
+    /// work to its window.
+    submitted: std::collections::BTreeSet<String>,
+    report: Option<crate::ingest::outcome::RunResult>,
+}
+
+fn windows() -> &'static Mutex<BTreeMap<String, WindowSession>> {
+    static WINDOWS: OnceLock<Mutex<BTreeMap<String, WindowSession>>> = OnceLock::new();
+    WINDOWS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Declare that this run is assessing this window. Without it,
+/// `report_window_outcome` has nothing to report about and refuses.
+pub(crate) fn open_window(run_id: &str, batch_key: &str) {
+    if let Ok(mut map) = windows().lock() {
+        map.insert(
+            run_id.to_string(),
+            WindowSession {
+                batch_key: batch_key.to_string(),
+                ..Default::default()
+            },
+        );
+    }
+}
+
+/// Take what the run reported and close its window. `None` means it never
+/// reported — which is a BLOCKED window, never a guessed "nothing material".
+pub(crate) fn take_window_report(run_id: &str) -> Option<crate::ingest::outcome::RunResult> {
+    let mut map = windows().lock().ok()?;
+    map.remove(run_id).and_then(|session| session.report)
+}
+
+/// Test-only: record a report the way the tool does, so `ingest::cli`'s
+/// tests exercise the REAL registry rather than a second one that could
+/// disagree with it.
+#[cfg(test)]
+pub(crate) fn test_report_window(run_id: &str, result: crate::ingest::outcome::RunResult) {
+    if let Ok(mut map) = windows().lock() {
+        if let Some(session) = map.get_mut(run_id) {
+            session.report = Some(result);
+        }
+    }
+}
+
+fn record_submission(run_id: &str, proposal_id: &str) {
+    if let Ok(mut map) = windows().lock() {
+        if let Some(session) = map.get_mut(run_id) {
+            session.submitted.insert(proposal_id.to_string());
+        }
+    }
+}
+
 /// What identifies "the same piece of work" across an adjustment.
 ///
 /// The op and its targets, NOT the payload — because a legitimate retry
@@ -444,6 +506,17 @@ fn base_tools() -> Vec<Value> {
             "inputSchema": schema(json!({
                 "path": { "type": "string", "description": "Vault-relative path, e.g. records/risks/r-1.md" }
             }), &["path"])
+        }),
+        json!({
+            "name": "report_window_outcome",
+            "description": "Background ingest only: report what you concluded about this run's change-window, once, at the end. `material` requires that you actually proposed something; `undetermined` names one blocked_reason. Say which of the four dimensions you evaluated.",
+            "inputSchema": schema(json!({
+                "outcome": { "type": "string", "enum": ["material", "non_material", "undetermined"], "description": "What you concluded about the window" },
+                "explanation": { "type": "string", "description": "In your own words, why" },
+                "evaluated_dimensions": { "type": "array", "items": { "type": "string", "enum": ["world_state", "belief_state", "evidence_state", "attention"] }, "description": "Which of the four you actually considered" },
+                "material_dimensions": { "type": "array", "items": { "type": "string", "enum": ["world_state", "belief_state", "evidence_state", "attention"] }, "description": "Which of those moved. A subset of evaluated_dimensions." },
+                "blocked_reason": { "type": "string", "enum": ["batch_input_incomplete", "policy_dependency_unavailable", "runtime_unavailable", "semantic_validation_failed", "source_access_lost"], "description": "Required when outcome is undetermined" }
+            }), &["outcome", "explanation"])
         }),
         json!({
             "name": "list_inbox",
@@ -891,6 +964,7 @@ fn call_tool(
         "write_concept" => tool_write_concept(&vault, args, actor),
         "cache_source" => tool_cache_source(&vault, args, actor),
         "propose_organize" => tool_propose_organize(app, args),
+        "report_window_outcome" => tool_report_window_outcome(args, grant),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
         // The proposal surface. Gated twice: the switch decides whether the
@@ -1142,6 +1216,9 @@ fn tool_propose(
                 if let Ok(mut map) = attempts().lock() {
                     map.remove(&key);
                 }
+                // The server's own record of what it accepted, for the
+                // window report. Never assembled from what the caller says.
+                record_submission(&run_id, &id);
                 Ok(json!({ "outcome": "submitted", "proposal_id": id }))
             }
             // A typed refusal is an ANSWER, not a transport failure: it names
@@ -1704,6 +1781,96 @@ fn tool_cache_source(
     )))
 }
 
+/// `report_window_outcome` (M26.4h) — what one ingest run concluded.
+///
+/// **The proposal list is the server's, not the caller's.** Everything else
+/// here is a judgment only the run can make; which proposals it actually got
+/// accepted is a fact this server already holds, and a run that could name
+/// its own list could attribute another run's work to its window.
+///
+/// Refused when the run has no open window: a chat turn has nothing to report
+/// about, and a background run whose window the driver never opened is a
+/// caller confused about what it is doing.
+fn tool_report_window_outcome(
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    use crate::ingest::outcome::RunResult;
+    use crate::ledger::schema::{BlockedReason, MaterialDimension};
+
+    let mut map = windows().lock().map_err(|_| "window lock poisoned")?;
+    let session = map.get_mut(&grant.run_id).ok_or(
+        "this run has no open ingest window, so there is nothing to report an outcome for",
+    )?;
+    if session.report.is_some() {
+        return Err(
+            "this window has already been reported. One run, one disposition — say everything              in the first report."
+                .to_string(),
+        );
+    }
+
+    let dimensions = |field: &str| -> Result<Vec<MaterialDimension>, String> {
+        let raw = args.get(field).cloned().unwrap_or(json!([]));
+        let mut parsed: Vec<MaterialDimension> =
+            serde_json::from_value(raw).map_err(|e| format!("{field}: {e}"))?;
+        parsed.sort();
+        parsed.dedup();
+        Ok(parsed)
+    };
+    let explanation = arg_str(args, "explanation")
+        .ok_or("explanation is required: say in your own words what you concluded")?;
+    let evaluated = dimensions("evaluated_dimensions")?;
+    let material = dimensions("material_dimensions")?;
+
+    let outcome = arg_str(args, "outcome")
+        .ok_or("outcome is required: material, non_material, or undetermined")?;
+    let result = match outcome.as_str() {
+        "material" => {
+            let proposal_ids: Vec<String> = session.submitted.iter().cloned().collect();
+            if proposal_ids.is_empty() {
+                return Err(
+                    "you reported `material` and this server accepted no proposals from this                      run. Either propose the change, or report what actually happened."
+                        .to_string(),
+                );
+            }
+            RunResult::Material {
+                proposal_ids,
+                evaluated_dimensions: evaluated,
+                material_dimensions: material,
+                explanation,
+            }
+        }
+        "non_material" => RunResult::NonMaterial {
+            evaluated_dimensions: evaluated,
+            explanation,
+        },
+        "undetermined" => {
+            let reason: BlockedReason = serde_json::from_value(
+                args.get("blocked_reason")
+                    .cloned()
+                    .ok_or("an undetermined window names one blocked_reason")?,
+            )
+            .map_err(|e| format!("blocked_reason: {e}"))?;
+            RunResult::Blocked {
+                reason,
+                evaluated_dimensions: evaluated,
+                explanation,
+            }
+        }
+        other => {
+            return Err(format!(
+                "{other:?} is not an outcome. It is material, non_material, or undetermined."
+            ))
+        }
+    };
+
+    let batch_key = session.batch_key.clone();
+    session.report = Some(result);
+    Ok(text_result(format!(
+        "Recorded. Window {batch_key} is closed as {outcome}; nothing more is needed from you."
+    )))
+}
+
 fn tool_propose_organize(app: &AppHandle, args: &Map<String, Value>) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("propose_organize needs a path")?;
     let mut payload = Map::new();
@@ -1986,6 +2153,161 @@ mod tests {
         forget_attempts("survivor-run");
     }
 
+    // --- report_window_outcome (M26.4h) --------------------------------
+
+    fn reporting_grant(run: &str) -> RunGrant {
+        let mut grant = RunGrant::unrestricted("agent:m26-ingest");
+        grant.run_id = run.to_string();
+        grant
+    }
+
+    fn report(run: &str, body: Value) -> Result<Value, String> {
+        let args: Map<String, Value> = serde_json::from_value(body).unwrap();
+        tool_report_window_outcome(&args, &reporting_grant(run))
+    }
+
+    #[test]
+    fn a_run_with_no_open_window_has_nothing_to_report() {
+        // A chat turn calling this is confused, and so is a background run
+        // whose window the driver never opened.
+        let err = report(
+            "report-no-window",
+            json!({ "outcome": "non_material", "explanation": "nothing moved" }),
+        )
+        .expect_err("no window");
+        assert!(err.contains("no open ingest window"), "{err}");
+    }
+
+    #[test]
+    fn a_window_is_reported_once() {
+        open_window("report-twice", "window-1");
+        report(
+            "report-twice",
+            json!({ "outcome": "non_material", "explanation": "a heading was renamed" }),
+        )
+        .unwrap();
+        let err = report(
+            "report-twice",
+            json!({ "outcome": "non_material", "explanation": "actually, also this" }),
+        )
+        .expect_err("a second disposition");
+        assert!(err.contains("already been reported"), "{err}");
+        take_window_report("report-twice");
+    }
+
+    #[test]
+    fn material_with_nothing_proposed_is_refused_rather_than_recorded() {
+        // The run says it found something material and this server accepted
+        // no proposals from it. One of those two statements is wrong, and
+        // the run is the one that can say which.
+        open_window("report-empty-material", "window-1");
+        let err = report(
+            "report-empty-material",
+            json!({
+                "outcome": "material",
+                "explanation": "the cutover slipped",
+                "evaluated_dimensions": ["world_state"],
+                "material_dimensions": ["world_state"],
+            }),
+        )
+        .expect_err("material with no proposals");
+        assert!(err.contains("accepted no proposals"), "{err}");
+        take_window_report("report-empty-material");
+    }
+
+    #[test]
+    fn the_proposal_list_is_the_servers_and_the_caller_cannot_name_it() {
+        // A run that could name its own list could attribute another run's
+        // work to its window. So the argument is ignored entirely.
+        let run = "report-server-list";
+        open_window(run, "window-1");
+        record_submission(run, "1111111111111111111111111111111a");
+        report(
+            run,
+            json!({
+                "outcome": "material",
+                "explanation": "a second independent source",
+                "evaluated_dimensions": ["evidence_state"],
+                "material_dimensions": ["evidence_state"],
+                "proposal_ids": ["9999999999999999999999999999999z"],
+            }),
+        )
+        .unwrap();
+
+        let crate::ingest::outcome::RunResult::Material { proposal_ids, .. } =
+            take_window_report(run).expect("the report")
+        else {
+            panic!("expected a material outcome");
+        };
+        assert_eq!(proposal_ids, vec!["1111111111111111111111111111111a"]);
+    }
+
+    #[test]
+    fn an_undetermined_window_names_one_reason() {
+        let run = "report-blocked";
+        open_window(run, "window-1");
+        let err = report(
+            run,
+            json!({ "outcome": "undetermined", "explanation": "the sources went away" }),
+        )
+        .expect_err("blocked with no reason");
+        assert!(err.contains("names one blocked_reason"), "{err}");
+
+        report(
+            run,
+            json!({
+                "outcome": "undetermined",
+                "explanation": "the sources went away",
+                "blocked_reason": "source_access_lost",
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            take_window_report(run),
+            Some(crate::ingest::outcome::RunResult::Blocked { .. })
+        ));
+    }
+
+    #[test]
+    fn an_outcome_outside_the_closed_set_is_refused() {
+        let run = "report-invented";
+        open_window(run, "window-1");
+        let err = report(
+            run,
+            json!({ "outcome": "probably_fine", "explanation": "eh" }),
+        )
+        .expect_err("an invented outcome");
+        assert!(err.contains("is not an outcome"), "{err}");
+        take_window_report(run);
+    }
+
+    #[test]
+    fn a_run_that_never_reports_leaves_no_verdict_to_guess_from() {
+        // The driver reads `None` and closes the window BLOCKED. It must
+        // never read silence as "nothing material" — that is the difference
+        // between a window nobody assessed and one assessed as quiet.
+        open_window("report-silent", "window-1");
+        assert!(take_window_report("report-silent").is_none());
+    }
+
+    #[test]
+    fn taking_a_report_closes_the_window() {
+        let run = "report-closes";
+        open_window(run, "window-1");
+        report(
+            run,
+            json!({ "outcome": "non_material", "explanation": "nothing moved" }),
+        )
+        .unwrap();
+        assert!(take_window_report(run).is_some());
+        // And it is gone, so a late call has nothing to report about.
+        assert!(report(
+            run,
+            json!({ "outcome": "non_material", "explanation": "late" })
+        )
+        .is_err());
+    }
+
     fn actor_of(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<String> {
         resolve_grant(presented, base, runs).map(|g| g.actor)
     }
@@ -2173,6 +2495,10 @@ mod tests {
             ("open_note", "moves the UI, changes nothing on disk"),
             ("navigate", "moves the UI, changes nothing on disk"),
             ("propose_organize", "shows a card; the user decides"),
+            (
+                "report_window_outcome",
+                "records a run's own verdict in memory; writes no file and no event",
+            ),
         ]
         .into_iter()
         .collect();

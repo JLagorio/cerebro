@@ -470,11 +470,15 @@ mod tests {
     #[test]
     fn the_surface_is_off_until_it_is_switched_on() {
         // REGISTRATION IS NOT ACTIVATION. The switch defaults off, so a
-        // fresh install serves the same twelve tools it always did, and
-        // M26.9 has something real to flip.
+        // fresh install serves only the base catalog, and M26.9 has something
+        // real to flip. Thirteen since M26.4h added `report_window_outcome`,
+        // which is not a proposal tool and not gated by the switch: a run
+        // must be able to say a window concluded nothing whether or not it
+        // could have proposed anything.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 12, "{base:?}");
+        assert_eq!(base.len(), 13, "{base:?}");
+        assert!(base.contains("report_window_outcome"));
         assert!(base.is_disjoint(&expected(&table)));
         assert!(!base.contains(crate::mcp::COMMIT_TOOL));
         // `propose_organize` predates this namespace and is NOT a policy op.
