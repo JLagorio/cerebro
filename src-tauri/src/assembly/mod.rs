@@ -17,4 +17,6 @@
 //! two mean opposite things to the person who asked.
 
 pub mod answer;
+pub mod assemble;
+pub mod corpus;
 pub mod manifest;
