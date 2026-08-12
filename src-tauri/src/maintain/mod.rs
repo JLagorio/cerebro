@@ -16,3 +16,5 @@
 //! registry, and pretending they were here would mean a pass that speculates.
 
 pub mod candidates;
+pub mod pass;
+pub mod prompt;

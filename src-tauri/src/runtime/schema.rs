@@ -643,3 +643,35 @@ pub const SCHEMA_V5: &str = "
         ON discovery_plan_runs (vault_id, store_uuid, state, created_at)
         WHERE state IN ('pending', 'started');
 ";
+
+/// The M26.6 schema — what the maintenance pass has already said.
+///
+/// **The key IS the content.** A finding's id is a hash of what it found —
+/// the kind, the subject, and the exact belief ids — so re-surfacing the same
+/// key means nothing about the base changed. That is what stops a pass
+/// proposing the same merge every tick without needing a clock to decide how
+/// long "recently" is. When the underlying beliefs change, the key changes,
+/// and the finding comes back on its own.
+///
+/// `chain_head` records what the base looked like when it was first said, so a
+/// reviewer can re-run the finders at that head and see the same thing.
+///
+/// Operational, not ledger: every row is re-derivable by replaying to
+/// `chain_head` and running `maintain::candidates::find`. Losing app-data
+/// loses a "we already mentioned this", not a fact about the world.
+pub const SCHEMA_V6: &str = "
+    CREATE TABLE maintenance_findings (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        finding_key TEXT NOT NULL
+            CHECK (length(finding_key) = 64 AND finding_key = lower(finding_key)),
+        kind TEXT NOT NULL CHECK (kind IN ('exact_merge', 'compress', 'attention')),
+        subject_id TEXT NOT NULL CHECK (subject_id <> ''),
+        detail TEXT NOT NULL CHECK (detail <> ''),
+        chain_head TEXT NOT NULL CHECK (chain_head <> ''),
+        surfaced_at TEXT NOT NULL CHECK (surfaced_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, finding_key)
+    );
+    CREATE INDEX maintenance_findings_by_kind
+        ON maintenance_findings (vault_id, store_uuid, kind, surfaced_at);
+";
