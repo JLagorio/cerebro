@@ -705,6 +705,15 @@ pub fn sweep_run_configs(config_dir: &Path) {
 
 /// Spawn a run and return its RUN ID — the tag every event it emits carries,
 /// and the id `AgentState::stop` reports back when this child is killed.
+///
+/// `done` is the run-completion signal (M26.4i). Until it existed, the only
+/// thing that knew a run was over was this reader thread, and the only thing
+/// it did about it was emit a UI event — so a Rust caller that wanted to spend
+/// one run and then act on what it concluded had nothing to wait on. The
+/// receiver blocks on `recv()`, NOT `recv_timeout`: the elapsed watchdog is
+/// what bounds a run, and it sets the `aborted` flag this send reads. A
+/// caller that timed out on its own would report an outcome the run never
+/// had, and would leave a child alive behind it.
 pub fn stream(
     app: AppHandle,
     state: &AgentState,
@@ -712,6 +721,7 @@ pub fn stream(
     req: AgentRequest,
     config_dir: &Path,
     meter: Option<meter::Meter>,
+    done: Option<std::sync::mpsc::SyncSender<meter::RunEnd>>,
 ) -> Result<u64, String> {
     let binary = find_binary().ok_or(
         "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
@@ -835,17 +845,22 @@ pub fn stream(
         // listener that reacts to `Done` by asking for the next dispatch must
         // see this run's tokens already debited, or the budget it is gated on
         // is one run out of date.
+        let was_aborted = aborted.load(std::sync::atomic::Ordering::Relaxed);
         if let Some(meter) = &meter {
-            meter::finish(
-                meter,
-                &tally,
-                aborted.load(std::sync::atomic::Ordering::Relaxed),
-                chrono::Utc::now(),
-            );
+            meter::finish(meter, &tally, was_aborted, chrono::Utc::now());
         }
         // Reap BEFORE the terminal Done, so anything that reacts to Done by
         // starting the next run already sees the slot free.
         reaper.finish(run);
+        // And before the signal, for the same reason: a supervisor that
+        // reacts by claiming the next window must not be refused by a
+        // concurrency cap this run has already left.
+        if let Some(done) = done {
+            let (outcome, usage) = tally.outcome(was_aborted);
+            // A dropped receiver is not an error. The run happened either
+            // way, and whatever it recorded is already recorded.
+            let _ = done.send(meter::RunEnd { outcome, usage });
+        }
         let _ = app.emit(
             AGENT_EVENT,
             TaggedEvent {

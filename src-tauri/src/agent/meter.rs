@@ -35,6 +35,17 @@ pub enum Mode {
     /// The background. Metered AND budgeted; holds a reservation and the one
     /// ambient lease, both released at finalization.
     Ambient,
+    /// The background, with a supervisor that claimed the lease and will
+    /// finalize it itself — M26.4's ingest driver, which lands items by
+    /// ROUTE rather than by success or failure.
+    ///
+    /// `finish` records everything else and stops short of
+    /// `dispatch::finalize`, because the run's outcome is not the item's
+    /// destiny: a window that ran cleanly and concluded "nothing material"
+    /// consumes its items, and one that was BLOCKED holds them visibly.
+    /// Finalizing here as well would be refused outright — the second call
+    /// finds no running row — after the first had already decided wrongly.
+    Supervised,
 }
 
 /// Everything the reader thread needs to close a run's books.
@@ -51,6 +62,20 @@ pub struct Meter {
     pub started_at: DateTime<Utc>,
     /// Seconds after which an ambient run is aborted. `None` for attended.
     pub elapsed_limit_seconds: Option<u64>,
+}
+
+/// How a run ended, sent to whoever is waiting on it.
+///
+/// The run-completion signal `agent::stream` never had. Before this, the only
+/// thing that knew a run was over was the reader thread, and the only thing it
+/// did about it was emit a UI event — so a Rust caller that wanted to spend
+/// one run and then act on the result had no way to wait for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunEnd {
+    pub outcome: RunOutcome,
+    /// `None` means the run ended without saying what it spent. It is not
+    /// zero — M25 treats missing usage as an unknown day, never a free one.
+    pub usage: Option<Usage>,
 }
 
 /// What the stream said, accumulated as it is read.
@@ -144,6 +169,8 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
     }
 
     let result = match meter.mode {
+        // The supervisor holds the lease and knows the route. See `Mode`.
+        Mode::Supervised => return,
         Mode::Attended => dispatch::meter_attended(
             &conn,
             &meter.run_id,
@@ -338,6 +365,92 @@ mod tests {
             .unwrap();
         assert_eq!(mode, "attended");
         assert_eq!(output, 42);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_supervised_run_is_left_for_its_supervisor_to_finalize() {
+        // The route decides where the items land, not whether the CLI exited
+        // cleanly: a window that ran and concluded "nothing material"
+        // consumes its items, and a BLOCKED one holds them visibly. If the
+        // meter finalized here too, it would decide first and wrongly, and
+        // the supervisor's call would then be refused for finding no running
+        // row — the run's tokens recorded against the wrong destiny.
+        let dir = crate::vault::testutil::temp_vault("meter-supervised");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        crate::runtime::scheduler::put(
+            &conn,
+            &vault,
+            "store",
+            &crate::runtime::scheduler::Row {
+                item_key: "records/a.md".into(),
+                source_id: None,
+                content_hash: "a".repeat(64),
+                snapshot: crate::runtime::normalize::snapshot(
+                    &crate::vault::entry::Entry::empty_for_test("records/a.md"),
+                ),
+                event_cursor: None,
+                route: None,
+                state: crate::runtime::scheduler::SchedulerState::Pending,
+            },
+        )
+        .unwrap();
+        let dispatch::Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "behind",
+            crate::runtime::budget::Reservation {
+                total_tokens: 20_000,
+                output_tokens: 4_000,
+            },
+            &["records/a.md".to_string()],
+            Utc::now(),
+        )
+        .unwrap() else {
+            panic!("expected a lease");
+        };
+
+        let mut tally = Tally::default();
+        tally.observe(&result(json!({ "output_tokens": 42 }), false, "ok"));
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: lease.run_id.clone(),
+                mode: Mode::Supervised,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+            },
+            &tally,
+            false,
+            Utc::now(),
+        );
+
+        let outcome: String = conn
+            .query_row(
+                "SELECT outcome FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(outcome, "running", "still the supervisor's to close");
+        // And the supervisor's call succeeds, which it could not have done
+        // if the meter had already closed the books.
+        dispatch::finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::Succeeded,
+            tally.outcome(false).1,
+            ItemOutcome::Land(crate::runtime::scheduler::SchedulerState::Consumed),
+            Utc::now(),
+        )
+        .unwrap();
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

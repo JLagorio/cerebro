@@ -30,6 +30,11 @@ pub struct Session {
     /// knows this run as — not the dispatch lease's id, which the server
     /// never sees.
     pub mcp_token: String,
+    /// The dispatch lease's id, which is what the METER names. Two ids for
+    /// one run, and they answer different questions: the token says who is
+    /// asking, the run id says whose budget it comes out of.
+    pub run_id: String,
+    pub elapsed_limit_seconds: u64,
     pub prompt: String,
     pub prompt_version: &'static str,
 }
@@ -60,6 +65,8 @@ where
 
         let spawned = (self.spawn)(&Session {
             mcp_token: token,
+            run_id: request.run_id.clone(),
+            elapsed_limit_seconds: request.elapsed_limit_seconds,
             prompt: request.prompt.clone(),
             prompt_version: request.prompt_version,
         });
@@ -103,6 +110,7 @@ mod tests {
     fn request(batch_key: &str) -> RunRequest {
         RunRequest {
             run_id: "dispatch-lease-run".into(),
+            elapsed_limit_seconds: 600,
             batch_key: batch_key.into(),
             prompt: "the rendered window".into(),
             prompt_version: "m26-ingest-v1",

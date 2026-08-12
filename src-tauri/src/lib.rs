@@ -504,6 +504,9 @@ fn run_agent(
         request,
         &dir,
         Some(meter),
+        // Nothing in the app waits on an attended run: the panel follows the
+        // event stream, and the person is watching it.
+        None,
     )
 }
 

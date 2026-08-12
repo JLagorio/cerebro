@@ -57,7 +57,14 @@ use super::window::{self, Assessed};
 /// What the pass hands to the thing that actually spends money.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRequest {
+    /// The DURABLE run id the dispatch lease minted. The runner spawns
+    /// against it, so the run row the meter and the supervisor both name is
+    /// the same row.
     pub run_id: String,
+    /// Seconds after which the elapsed watchdog aborts this run. Carried
+    /// rather than looked up because the supervisor waits on the run with a
+    /// blocking `recv()`, and the watchdog is the only thing that bounds it.
+    pub elapsed_limit_seconds: u64,
     pub batch_key: String,
     pub prompt: String,
     pub prompt_version: &'static str,
@@ -207,6 +214,7 @@ pub fn run_once<R: Runner, C: Commit>(
 
     let report = runner.run(&RunRequest {
         run_id: lease.run_id.clone(),
+        elapsed_limit_seconds: lease.elapsed_limit_seconds,
         batch_key: planned.batch_key.clone(),
         prompt: rendered.text,
         prompt_version: rendered.prompt_version,
