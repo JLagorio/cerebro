@@ -670,6 +670,38 @@ impl WorkingMemoryManifest {
         Ok(())
     }
 
+    /// Every direct assertion / belief-revision ref this manifest PINNED.
+    ///
+    /// An answer may cite an item by `item_id` or by naming the underlying
+    /// event; either way the thing it names has to be one this assembly
+    /// actually held, and this is that set.
+    pub fn pinned_refs(&self) -> BTreeSet<super::answer::EvidenceRef> {
+        use super::answer::EvidenceRef;
+        let mut pinned = BTreeSet::new();
+        for item in &self.items {
+            match item {
+                ManifestItem::Assertion {
+                    assertion_event_id, ..
+                } => {
+                    pinned.insert(EvidenceRef::Assertion {
+                        assertion_event_id: assertion_event_id.clone(),
+                    });
+                }
+                ManifestItem::BeliefRevision {
+                    belief_id,
+                    belief_revision_event_id,
+                    ..
+                } => {
+                    pinned.insert(EvidenceRef::BeliefRevision {
+                        belief_id: belief_id.clone(),
+                        belief_revision_event_id: belief_revision_event_id.clone(),
+                    });
+                }
+            }
+        }
+        pinned
+    }
+
     /// The counted union across items AND attempts — so a manifest cannot
     /// inflate its source count with a source no item rests on, nor hide one
     /// an attempt reached.
@@ -804,11 +836,16 @@ pub(crate) mod tests {
     /// A manifest that satisfies every intent from one item — the smallest
     /// thing that validates, which every test below perturbs.
     pub(crate) fn manifest() -> WorkingMemoryManifest {
+        manifest_for(Risk::Medium)
+    }
+
+    /// The same manifest at whatever stakes the caller's question carried.
+    pub(crate) fn manifest_for(stakes: Risk) -> WorkingMemoryManifest {
         let item = assertion("i-1", &Intent::ALL);
         WorkingMemoryManifest {
             assembly_id: "asm-1".into(),
             question_hash: SHA.into(),
-            intended_use: use_for(Risk::Medium),
+            intended_use: use_for(stakes),
             limits: Limits {
                 max_sources_per_run: 10,
                 max_context_bytes: 10_000,
