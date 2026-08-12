@@ -101,7 +101,7 @@ pub fn query_fingerprint(query: &Query) -> String {
 /// structurally cannot have — it matches the corpus's NAMES against the
 /// query's prose, where BM25 matches the query's words against the corpus's
 /// prose.
-fn entities_named_in(state: &EpistemicState, content: &str) -> BTreeSet<String> {
+pub(crate) fn entities_named_in(state: &EpistemicState, content: &str) -> BTreeSet<String> {
     let tokens: Vec<String> = crate::search::tokenize(content)
         .iter()
         .map(|token| normalize_alias_v1(token))
