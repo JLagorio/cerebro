@@ -208,6 +208,25 @@ fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
     runtime::settings::set_global_pause(&conn, paused)
 }
 
+/// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
+///
+/// The supervisor thread starts with the vault and reads this every tick, so
+/// turning it on takes effect at the next tick rather than at the next
+/// launch, and turning it off stops the spending without stopping the app.
+#[tauri::command(async)]
+fn ambient_ingest_enabled(app: tauri::AppHandle, vault: String) -> Result<bool, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    Ok(ingest::ambient::enabled(&conn, &vault_id))
+}
+
+#[tauri::command(async)]
+fn set_ambient_ingest(app: tauri::AppHandle, vault: String, enabled: bool) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    ingest::ambient::set_enabled(&conn, &vault_id, enabled)
+}
+
 /// One lane, for one vault. Lanes are per-vault by design: a person may want
 /// scheduled agents in their work vault and nothing at all in their journal.
 #[tauri::command(async)]
@@ -563,6 +582,7 @@ fn ledger_status(app: tauri::AppHandle, vault: String) -> ledger::shadow::Ledger
 fn start_watcher(
     app: tauri::AppHandle,
     state: tauri::State<'_, WatcherState>,
+    ambient: tauri::State<'_, ingest::ambient::AmbientState>,
     vault: String,
 ) -> Result<(), String> {
     let vault_path = PathBuf::from(&vault);
@@ -584,6 +604,10 @@ fn start_watcher(
         // which folder it belongs to. Failing here is degraded, not fatal,
         // for the same reason the line above is.
         let _ = runtime::open_vault(&vault_path);
+        // M26.4i: the ambient ingest supervisor. It reads its own switch,
+        // which defaults OFF — starting the loop is not the same as
+        // enabling the work, and nothing here turns it on.
+        ingest::ambient::start(&app, ambient.inner(), &vault_path, &dir);
     }
     vault::watcher::start(app, state.inner(), vault_path)
 }
@@ -595,6 +619,7 @@ pub fn run() {
         .manage(WatcherState::default())
         .manage(agent::AgentState::default())
         .manage(mcp::McpState::default())
+        .manage(ingest::ambient::AmbientState::default())
         .invoke_handler(tauri::generate_handler![
             pick_vault,
             open_demo_vault,
@@ -613,6 +638,8 @@ pub fn run() {
             pipeline_overview,
             set_global_pause,
             set_lane_enabled,
+            ambient_ingest_enabled,
+            set_ambient_ingest,
             resolve_held_items,
             create_note,
             set_note_title,
