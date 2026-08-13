@@ -7,12 +7,23 @@
 //! grants. All three are properties of the process, and the renderer is not
 //! the process.
 //!
-//! **OFF unless the owner turns it on.** [`ENABLED`] defaults to false and
-//! nothing here flips it. Wiring the spine is this milestone's job; deciding
-//! that an app may start spawning CLI runs against somebody's subscription
-//! without being asked is not, and a default that spends money is not a
-//! default. The metering, the budget gate and the surfaces all exist first —
-//! which was the point of doing them first.
+//! **The SPENDING half is off unless the owner turns it on.** [`ENABLED`]
+//! defaults to false and gates ingest and maintenance: an app may not start
+//! spawning CLI runs against somebody's subscription without being asked, and
+//! a default that spends money is not a default. The metering, the budget
+//! gate and the surfaces all exist first — which was the point of doing them
+//! first.
+//!
+//! **The DETERMINISTIC half is always on** (M26.9's flip): conflict
+//! detection, the attention primitives, convergence, and the Source Monitor
+//! run for every open vault. The argument for asking permission was about a
+//! subscription, and none of these touches one — they spawn nothing, hold no
+//! lease, and no budget gate can defer them. What they do cost is disk, and
+//! that is bounded by the base's own size.
+//!
+//! **The pause governs both.** Somebody who pressed pause meant "stop", not
+//! "stop the expensive half"; a deterministic phase that kept appending under
+//! a pause would be the app arguing with a control the owner just used.
 //!
 //! **Its own connection, never the sink's.** `runtime::sink::with_sink`
 //! holds a process-global mutex, and the MCP server takes it to record
@@ -168,13 +179,34 @@ fn sleep_until(stop: &AtomicBool, total: Duration) -> bool {
 fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), String> {
     let conn = crate::runtime::open_existing(config_dir)?;
     let vault_id = crate::runtime::scope::register(&conn, vault)?;
+
+    // The pause governs EVERYTHING (M26.9). Somebody who pressed pause meant
+    // "stop", not "stop the expensive half" — and a deterministic phase that
+    // kept appending to the ledger under a pause would be the app arguing
+    // with a control the owner just used.
+    if crate::runtime::settings::global_pause(&conn) {
+        return Ok(());
+    }
+    let Some(store_uuid) = crate::ledger::store::load(&crate::ledger::ledger_dir(vault))
+        .map_err(|e| format!("store: {e}"))?
+        .map(|store| store.store_id)
+    else {
+        // No ledger store, so nothing to ingest into and nothing to read.
+        // Not an error: a vault that has never been armed is an ordinary
+        // vault, and the supervisor now ticks over every open one.
+        return Ok(());
+    };
+
+    // The deterministic phases run FIRST and unconditionally (M26.9's flip).
+    // They spawn nothing, spend nothing, and cannot be deferred by a budget
+    // gate; the argument for asking permission was always about somebody's
+    // subscription, and these do not touch it.
+    deterministic(&conn, vault, &vault_id, &store_uuid)?;
+
+    // Everything below spends. It stays behind the owner's switch.
     if !enabled(&conn, &vault_id) {
         return Ok(());
     }
-    let store_uuid = crate::ledger::store::load(&crate::ledger::ledger_dir(vault))
-        .map_err(|e| format!("store: {e}"))?
-        .ok_or("this vault has no ledger store — nothing to ingest into")?
-        .store_id;
 
     let agents = app.state::<crate::agent::AgentState>();
     let mcp = app.state::<crate::mcp::McpState>();
@@ -201,10 +233,15 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         // has something to decide.
         eprintln!("ambient ingest: skipped ({reason:?})");
     }
-    // One read and one fold for everything downstream of ingest. Both passes
-    // below want the base as it stands AFTER this tick's commits, and reading
-    // the ledger twice to get the same answer twice is a cost paid on every
-    // tick of every open vault.
+    // The maintenance pass rides the SAME switch and the same tick, AFTER
+    // ingest. Two reasons for the order: reading what changed is what makes
+    // the base worth maintaining, and the one ambient lease is better spent
+    // on new bytes than on tidying when both have work. It gets no default of
+    // its own — `ambient.ingest_enabled` is off until asked, and maintenance
+    // should not be the thing that starts spending somebody's subscription.
+    //
+    // Its fold is taken here rather than reusing the deterministic pass's,
+    // because ingest committed in between and maintenance must see that.
     let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
         .map_err(|e| format!("ledger: {e}"))?;
     let chain_head = read
@@ -213,33 +250,61 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         .map(|frame| frame.event_id.clone())
         .unwrap_or_else(|| format!("genesis:{store_uuid}"));
     let state = crate::ledger::reduce::reduce(&read.frames, &store_uuid);
+    maintain(
+        app,
+        &conn,
+        vault,
+        config_dir,
+        &vault_id,
+        &store_uuid,
+        &state,
+        &chain_head,
+    )
+}
 
-    // Conflict detection first, and not because it is more important: it is
-    // FREE. It spawns nothing, spends nothing, and cannot be deferred by a
-    // budget gate, so running it ahead of the pass that competes for the one
-    // ambient lease means a base whose lease is exhausted still gets its
-    // comparisons. M26.9 lifts it out of this switch entirely — a
-    // deterministic phase is always on — and until then it rides the owner's
-    // switch rather than writing to a vault nobody asked it to touch.
-    detect_conflicts(vault, &store_uuid, &state);
+/// The phases that need no permission (M26.9).
+///
+/// **These are on for every open vault, and the reasoning is the same one
+/// that kept the LLM phases off.** A default that spends money is not a
+/// default — and none of these spends any. They spawn no subprocess, hold no
+/// lease, and cannot be deferred by a budget gate. What they do cost is disk:
+/// conflict detection appends to the vault ledger, and the other three write
+/// app-data. That is the honest price of a base that notices things, and it
+/// is bounded by the base's own size rather than by a subscription.
+///
+/// Every one is reported and none is fatal. A base that could not compute its
+/// attention signals is a base that still wants its comparisons; a supervisor
+/// that returned early on the first failure would take the others down with
+/// it for the rest of the session.
+fn deterministic(
+    conn: &rusqlite::Connection,
+    vault: &Path,
+    vault_id: &str,
+    store_uuid: &str,
+) -> Result<(), String> {
+    // One read and one fold for the three phases that need the base.
+    let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
+        .map_err(|e| format!("ledger: {e}"))?;
+    let chain_head = read
+        .frames
+        .last()
+        .map(|frame| frame.event_id.clone())
+        .unwrap_or_else(|| format!("genesis:{store_uuid}"));
+    let state = crate::ledger::reduce::reduce(&read.frames, store_uuid);
 
-    // The attention primitives, on the same free footing and computed AFTER
-    // detection so the comparison counts include this tick's. Nothing reads
-    // these yet — M27's lanes will — and computing them now is what makes the
-    // lanes a query rather than a scan when they arrive.
-    if let Err(detail) = record_attention(&conn, &vault_id, &store_uuid, &chain_head, &state) {
+    // Detection first, so the comparison counts the attention pass reads
+    // include this tick's.
+    detect_conflicts(vault, store_uuid, &state);
+
+    if let Err(detail) = record_attention(conn, vault_id, store_uuid, &chain_head, &state) {
         eprintln!("attention signals: {detail}");
     }
-
-    // Scheduled convergence. Deterministic and free like the two above, and
-    // it reuses the frames already in hand rather than re-reading them.
-    if let Err(detail) = converge(&conn, &vault_id, &store_uuid, &read.frames) {
+    if let Err(detail) = converge(conn, vault_id, store_uuid, &read.frames) {
         eprintln!("convergence: {detail}");
     }
-
-    // The Source Monitor, last, and also free. It reads files rather than the
-    // ledger, so it neither needs this tick's fold nor invalidates it.
-    match crate::monitor::pass::run(&conn, vault, &vault_id, chrono::Utc::now()) {
+    // The Source Monitor reads files rather than the ledger, so it neither
+    // needs the fold above nor invalidates it.
+    match crate::monitor::pass::run(conn, vault, vault_id, chrono::Utc::now()) {
         Ok((observed, unreadable)) => {
             if !observed.changed.is_empty() || !observed.due.is_empty() || unreadable > 0 {
                 eprintln!(
@@ -251,23 +316,7 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         }
         Err(detail) => eprintln!("source monitor: {detail}"),
     }
-
-    // The maintenance pass rides the SAME switch and the same tick, AFTER
-    // ingest. Two reasons for the order: reading what changed is what makes
-    // the base worth maintaining, and the one ambient lease is better spent
-    // on new bytes than on tidying when both have work. It gets no default of
-    // its own — `ambient.ingest_enabled` is off until asked, and maintenance
-    // should not be the thing that starts spending somebody's subscription.
-    maintain(
-        app,
-        &conn,
-        vault,
-        config_dir,
-        &vault_id,
-        &store_uuid,
-        &state,
-        &chain_head,
-    )
+    Ok(())
 }
 
 /// One scheduled convergence run, from wherever the last one stopped.
@@ -450,6 +499,51 @@ mod tests {
         let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
         set_enabled(&conn, &vault, true).unwrap();
         conn.execute("DROP TABLE settings", []).unwrap();
+        assert!(!enabled(&conn, &vault));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A vault with one belief resting on one assertion, and a second belief
+    /// that disagrees with it — enough for the deterministic phases to have
+    /// something to find.
+    fn armed(label: &str) -> (std::path::PathBuf, rusqlite::Connection, String) {
+        let dir = testutil::temp_vault(label);
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        (dir, conn, vault)
+    }
+
+    #[test]
+    fn the_deterministic_phases_do_not_wait_for_the_spending_switch() {
+        // M26.9's flip. `deterministic` is the function the tick calls before
+        // it looks at `ambient.ingest_enabled` at all, so a vault that has
+        // never been enabled still gets its attention signals.
+        let (dir, conn, vault) = armed("ambient-flip");
+        assert!(!enabled(&conn, &vault), "the spending switch stays off");
+        let store = crate::ledger::store::load_or_mint(&crate::ledger::ledger_dir(&dir))
+            .unwrap()
+            .store_id;
+        deterministic(&conn, &dir, &vault, &store).unwrap();
+        // Nothing in the vault, so nothing to say — but the pass RAN, which
+        // is what an empty read proves rather than an error.
+        assert!(crate::attention::store::read(&conn, &vault, &store)
+            .unwrap()
+            .is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_vault_with_no_ledger_store_is_an_ordinary_vault() {
+        // The supervisor now ticks over every open vault, so "never armed"
+        // has to be a quiet no-op rather than an error on every tick.
+        let dir = testutil::temp_vault("ambient-unarmed");
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        assert!(crate::ledger::store::load(&crate::ledger::ledger_dir(&dir))
+            .unwrap()
+            .is_none());
         assert!(!enabled(&conn, &vault));
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
