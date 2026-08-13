@@ -201,6 +201,68 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         // has something to decide.
         eprintln!("ambient ingest: skipped ({reason:?})");
     }
+    // The maintenance pass rides the SAME switch and the same tick, AFTER
+    // ingest. Two reasons for the order: reading what changed is what makes
+    // the base worth maintaining, and the one ambient lease is better spent
+    // on new bytes than on tidying when both have work. It gets no default of
+    // its own — `ambient.ingest_enabled` is off until asked, and maintenance
+    // should not be the thing that starts spending somebody's subscription.
+    maintain(app, &conn, vault, config_dir, &vault_id, &store_uuid)
+}
+
+/// One maintenance attempt, on the same tick as ingest.
+///
+/// Reported and never fatal, like the ingest half: a pass that could not run
+/// is a condition to say out loud, and a supervisor that exited on it would
+/// stop maintaining for the rest of the session without telling anyone.
+fn maintain(
+    app: &AppHandle,
+    conn: &rusqlite::Connection,
+    vault: &Path,
+    config_dir: &Path,
+    vault_id: &str,
+    store_uuid: &str,
+) -> Result<(), String> {
+    let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
+        .map_err(|e| format!("ledger: {e}"))?;
+    let chain_head = read
+        .frames
+        .last()
+        .map(|frame| frame.event_id.clone())
+        .unwrap_or_else(|| format!("genesis:{store_uuid}"));
+    let state = crate::ledger::reduce::reduce(&read.frames, store_uuid);
+
+    let context = crate::maintain::pass::Context {
+        vault_id,
+        store_uuid,
+        chain_head: &chain_head,
+    };
+    // The elapsed limit the lease will be issued under. Read from the shipped
+    // defaults rather than invented here: the watchdog and the lease must
+    // agree, or a run is killed before or after the thing that owns it.
+    let elapsed = crate::runtime::budget::shipped_defaults()?.max_run_elapsed_seconds;
+    let agents = app.state::<crate::agent::AgentState>();
+    let mcp = app.state::<crate::mcp::McpState>();
+    let live = crate::maintain::live::Live {
+        app,
+        agents: agents.inner(),
+        mcp: mcp.inner(),
+        vault,
+        config_dir: config_dir.to_path_buf(),
+        data_dir: config_dir.to_path_buf(),
+        vault_id: vault_id.to_string(),
+        store_uuid: store_uuid.to_string(),
+        elapsed_limit_seconds: elapsed,
+    };
+    match crate::maintain::schedule::attempt(conn, &context, &state, &live, chrono::Utc::now())? {
+        crate::maintain::schedule::Scheduled::Deferred(reasons) => {
+            eprintln!("maintenance: deferred ({reasons:?})");
+        }
+        crate::maintain::schedule::Scheduled::NothingNew => {}
+        crate::maintain::schedule::Scheduled::Ran { said, .. } => {
+            eprintln!("maintenance: said {said} finding(s)");
+        }
+    }
     Ok(())
 }
 

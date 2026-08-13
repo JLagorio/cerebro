@@ -62,8 +62,13 @@ pub enum Tick {
 /// What one run needs from the outside world. Injected for the reason
 /// `ingest::cli` and `assembly::ask` inject theirs: the interesting failures
 /// do not need a real subprocess to reproduce.
+///
+/// `run_id` is the DISPATCH lease's id, handed in rather than held by the
+/// runner: the lease is claimed by [`super::schedule`] after the runner is
+/// built, so a runner that carried its own id would carry the wrong one — and
+/// the meter would book a real run's tokens against a row nobody owns.
 pub trait Runner {
-    fn run(&self, prompt: &str) -> Result<(), String>;
+    fn run(&self, run_id: &str, prompt: &str) -> Result<(), String>;
 }
 
 pub struct Context<'a> {
@@ -78,6 +83,7 @@ pub fn tick<R: Runner>(
     context: &Context<'_>,
     state: &EpistemicState,
     runner: &R,
+    run_id: &str,
     now: DateTime<Utc>,
 ) -> Result<Tick, String> {
     let all = keyed(context.store_uuid, &candidates::find(state));
@@ -95,7 +101,7 @@ pub fn tick<R: Runner>(
         return Ok(Tick::NothingNew);
     }
 
-    runner.run(&super::prompt::render(&fresh).text)?;
+    runner.run(run_id, &super::prompt::render(&fresh).text)?;
     // Recorded AFTER the run, so a run that could not start is one the pass
     // will try again. Recording first would silence a finding nobody ever
     // heard.
@@ -201,7 +207,11 @@ impl Detail for Attention {
     }
 }
 
-fn said_before(conn: &Connection, context: &Context<'_>, key: &str) -> Result<bool, String> {
+pub(crate) fn said_before(
+    conn: &Connection,
+    context: &Context<'_>,
+    key: &str,
+) -> Result<bool, String> {
     let found: Option<i64> = conn
         .query_row(
             "SELECT 1 FROM maintenance_findings \
@@ -249,6 +259,7 @@ mod tests {
 
     const STORE: &str = "cafebabecafebabecafebabecafebabe";
     const HEAD: &str = "90000000000000000000000000000001";
+    const LEASE: &str = "a0000000000000000000000000000001";
 
     fn now() -> DateTime<Utc> {
         "2026-08-12T09:00:00Z".parse().unwrap()
@@ -293,7 +304,7 @@ mod tests {
     }
 
     impl Runner for Spy {
-        fn run(&self, prompt: &str) -> Result<(), String> {
+        fn run(&self, _: &str, prompt: &str) -> Result<(), String> {
             self.prompts.borrow_mut().push(prompt.to_string());
             Ok(())
         }
@@ -302,7 +313,7 @@ mod tests {
     struct Broken;
 
     impl Runner for Broken {
-        fn run(&self, _: &str) -> Result<(), String> {
+        fn run(&self, _: &str, _: &str) -> Result<(), String> {
             Err("the CLI would not start".into())
         }
     }
@@ -313,7 +324,15 @@ mod tests {
         let state = fixture::state();
         let spy = Spy::default();
 
-        let first = tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
+        let first = tick(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &spy,
+            LEASE,
+            now(),
+        )
+        .unwrap();
         let Tick::Ran { said, already_said } = first else {
             panic!("the fixture has findings");
         };
@@ -321,7 +340,15 @@ mod tests {
         assert_eq!(already_said, 0);
 
         // Same base, same findings, nothing new to say — and no second run.
-        let second = tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
+        let second = tick(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &spy,
+            LEASE,
+            now(),
+        )
+        .unwrap();
         assert_eq!(second, Tick::NothingNew);
         assert_eq!(spy.prompts.borrow().len(), 1, "it did not spend twice");
     }
@@ -333,15 +360,39 @@ mod tests {
         let harness = Harness::open("maintain-changed");
         let mut state = fixture::state();
         let spy = Spy::default();
-        tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
+        tick(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &spy,
+            LEASE,
+            now(),
+        )
+        .unwrap();
         assert_eq!(
-            tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap(),
+            tick(
+                &harness.conn,
+                &harness.context(),
+                &state,
+                &spy,
+                LEASE,
+                now()
+            )
+            .unwrap(),
             Tick::NothingNew
         );
 
         // Promote the unsupported belief: a new signal, so a new key.
         state.beliefs.get_mut(fixture::B_TWO).unwrap().qualification = Qualification::Qualified;
-        let again = tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
+        let again = tick(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &spy,
+            LEASE,
+            now(),
+        )
+        .unwrap();
         let Tick::Ran { said, already_said } = again else {
             panic!("the changed belief is a new finding");
         };
@@ -356,8 +407,15 @@ mod tests {
         // a finding nobody ever heard.
         let harness = Harness::open("maintain-broken");
         let state = fixture::state();
-        tick(&harness.conn, &harness.context(), &state, &Broken, now())
-            .expect_err("the runner failed");
+        tick(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &Broken,
+            LEASE,
+            now(),
+        )
+        .expect_err("the runner failed");
         let count: i64 = harness
             .conn
             .query_row("SELECT count(*) FROM maintenance_findings", [], |row| {
@@ -368,7 +426,15 @@ mod tests {
 
         let spy = Spy::default();
         assert!(matches!(
-            tick(&harness.conn, &harness.context(), &state, &spy, now()).unwrap(),
+            tick(
+                &harness.conn,
+                &harness.context(),
+                &state,
+                &spy,
+                LEASE,
+                now()
+            )
+            .unwrap(),
             Tick::Ran { .. }
         ));
     }
@@ -382,6 +448,7 @@ mod tests {
             &harness.context(),
             &EpistemicState::default(),
             &spy,
+            LEASE,
             now(),
         )
         .unwrap();
