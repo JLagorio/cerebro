@@ -13,6 +13,7 @@ pub mod knowledge;
 pub mod ledger;
 pub mod maintain;
 pub mod mcp;
+pub mod monitor;
 pub mod policy;
 pub mod retrieval;
 pub mod roots;

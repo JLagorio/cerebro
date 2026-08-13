@@ -231,6 +231,21 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         eprintln!("attention signals: {detail}");
     }
 
+    // The Source Monitor, last, and also free. It reads files rather than the
+    // ledger, so it neither needs this tick's fold nor invalidates it.
+    match crate::monitor::pass::run(&conn, vault, &vault_id, chrono::Utc::now()) {
+        Ok((observed, unreadable)) => {
+            if !observed.changed.is_empty() || !observed.due.is_empty() || unreadable > 0 {
+                eprintln!(
+                    "source monitor: {} changed, {} due for refetch, {unreadable} unreadable",
+                    observed.changed.len(),
+                    observed.due.len()
+                );
+            }
+        }
+        Err(detail) => eprintln!("source monitor: {detail}"),
+    }
+
     // The maintenance pass rides the SAME switch and the same tick, AFTER
     // ingest. Two reasons for the order: reading what changed is what makes
     // the base worth maintaining, and the one ambient lease is better spent

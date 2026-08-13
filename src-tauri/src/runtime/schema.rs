@@ -725,3 +725,38 @@ pub const SCHEMA_V7: &str = "
     CREATE INDEX attention_signals_by_entity
         ON attention_signals (vault_id, store_uuid, entity_id);
 ";
+
+/// The M26.7d schema — what the Source Monitor last saw of each cached copy.
+///
+/// **Vault-scoped, not store-scoped, and that is deliberate.** A cached copy
+/// is a FILE. Its identity is its path in the vault, and it means the same
+/// thing whichever ledger store the vault is currently keeping — so a
+/// `store_uuid` column here would imply a distinction that does not exist and
+/// would silently split one file's history in two if a vault were ever
+/// re-storied.
+///
+/// `content_hash` is the source's own content, with the fetch bookkeeping
+/// removed (see `monitor::sources`). `last_changed_at` moves only when that
+/// hash moves — a refetch that brought back identical bytes updates
+/// `last_checked_at` and nothing else, which is exactly the outcome the hash
+/// exists to make visible.
+pub const SCHEMA_V8: &str = "
+    CREATE TABLE source_monitor_state (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        item_key TEXT NOT NULL CHECK (item_key <> ''),
+        source_id TEXT NOT NULL CHECK (source_id <> ''),
+        source_kind TEXT CHECK (source_kind IS NULL OR source_kind <> ''),
+        source_url TEXT CHECK (source_url IS NULL OR source_url <> ''),
+        monitor_version TEXT NOT NULL CHECK (monitor_version <> ''),
+        content_hash TEXT NOT NULL
+            CHECK (length(content_hash) = 64 AND content_hash = lower(content_hash)),
+        fetched_at TEXT CHECK (fetched_at IS NULL OR fetched_at <> ''),
+        stale_after TEXT CHECK (stale_after IS NULL OR length(stale_after) = 10),
+        first_seen_at TEXT NOT NULL CHECK (first_seen_at LIKE '____-__-__T%Z'),
+        last_checked_at TEXT NOT NULL CHECK (last_checked_at LIKE '____-__-__T%Z'),
+        last_changed_at TEXT NOT NULL CHECK (last_changed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, item_key)
+    );
+    CREATE INDEX source_monitor_by_source
+        ON source_monitor_state (vault_id, source_id);
+";
