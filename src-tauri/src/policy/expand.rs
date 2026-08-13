@@ -75,6 +75,15 @@ pub struct ExpansionContext<'a> {
     /// for exactly the case they exist for.
     pub staged_beliefs: std::collections::BTreeSet<String>,
     pub staged_entities: std::collections::BTreeSet<String>,
+    /// The open contradiction edges this proposal says it addressed (M27.4).
+    ///
+    /// It rides the CONTEXT rather than being read off the op, because the
+    /// op does not carry it: addressing lives in `basis`, which is about the
+    /// proposal rather than about the mutation. By the time expansion runs,
+    /// `open_contradictions_addressed` has already proven every entry names
+    /// an open edge over a Belief this op touches — so this list is a fact
+    /// about the world, not a claim still to be checked.
+    pub addressed_contradictions: Vec<schema::AddressedContradiction>,
 }
 
 impl ExpansionContext<'_> {
@@ -355,6 +364,87 @@ impl<'a> Plan<'a> {
         )?;
         self.touches(TargetClass::Relation, relation_id);
         Ok(ordinal)
+    }
+
+    /// Close every contradiction edge this proposal addressed (M27.4).
+    ///
+    /// **There is no caller-authored close path, and this is why.** A close
+    /// is emitted here, beside the mutation that addressed the edge, naming
+    /// that mutation by its symbolic ordinal — so the two commit as one batch
+    /// and the reducer can insist that a close travels with something. A tool
+    /// that could append a close on its own would let an edge be retired by
+    /// saying so.
+    ///
+    /// The mutation is the op's FIRST member. That holds for all five ops the
+    /// table binds this rule to — supersede, mass supersede, both merges, and
+    /// split all lead with the mutation and follow it with consequences — and
+    /// an op that arrived without one would be an op with nothing to address
+    /// the contradiction WITH, which the empty check below refuses rather
+    /// than papers over.
+    fn close_addressed_contradictions(
+        &mut self,
+        ctx: &ExpansionContext,
+    ) -> Result<(), ExpandError> {
+        let addressed = &ctx.addressed_contradictions;
+        if addressed.is_empty() {
+            return Ok(());
+        }
+        if self.members.is_empty() {
+            return Err(refuse(
+                "schema_invalid",
+                "a proposal that addresses a contradiction expanded to no mutation — there would                  be nothing for the close to name",
+            ));
+        }
+        let mutation = crate::ledger::writer::member_ref(ctx.base_ordinal);
+        for entry in addressed {
+            let Some(edge) = ctx.state.contradiction_edges.get(&entry.edge_id) else {
+                // Unreachable behind the precondition, which refuses an
+                // unknown edge as `contradiction_edge_stale` before the
+                // expansion runs. Refusing rather than skipping keeps that
+                // true if the two ever drift.
+                return Err(refuse(
+                    "invalid_reference",
+                    format!("addressed edge {} does not exist", entry.edge_id),
+                ));
+            };
+            let (schema_v, batch_id, key, actor) = common(&ctx.actor);
+            self.push(
+                schema::KIND_CONTRADICTION_CLOSED,
+                &schema::ContradictionClosed {
+                    schema: schema_v,
+                    batch_id,
+                    idempotency_key: key,
+                    actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    edge_id: entry.edge_id.clone(),
+                    comparison_id: entry.comparison_id.clone(),
+                    // COPIED from the edge, never re-described from the
+                    // proposal: the close says which edge closed, and a
+                    // caller's second opinion about its endpoints would be a
+                    // second chance to close the wrong one.
+                    left_belief_id: edge.left_belief_id.clone(),
+                    right_belief_id: edge.right_belief_id.clone(),
+                    addressed_by_event_id: mutation.clone(),
+                    evidence_event_ids: entry.evidence_refs.clone(),
+                    disposition: match entry.disposition {
+                        schema::ContradictionDisposition::ResolvedWithEvidence => {
+                            schema::CloseDisposition::ResolvedWithEvidence
+                        }
+                        schema::ContradictionDisposition::SupersededWithAddressing => {
+                            schema::CloseDisposition::SupersededWithAddressing
+                        }
+                    },
+                },
+            )?;
+            // The comparison and both endpoint Beliefs advance through the
+            // close, exactly as the version matrix says.
+            self.touches(TargetClass::Comparison, &entry.comparison_id);
+            self.touches(TargetClass::Belief, &edge.left_belief_id);
+            self.touches(TargetClass::Belief, &edge.right_belief_id);
+        }
+        Ok(())
     }
 
     fn revised_member(
@@ -1248,6 +1338,7 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
             ));
         }
     }
+    plan.close_addressed_contradictions(ctx)?;
     Ok(plan.finish())
 }
 
@@ -1332,6 +1423,7 @@ mod tests {
             proposal_id: A.into(),
             staged_beliefs: Default::default(),
             staged_entities: Default::default(),
+            addressed_contradictions: Vec::new(),
         }
     }
 

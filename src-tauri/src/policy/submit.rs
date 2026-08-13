@@ -505,6 +505,52 @@ mod tests {
     }
 
     #[test]
+    fn registration_against_the_frozen_v2_table_refuses_and_says_why() {
+        // The M27.4 negative control, and the exact shape of "the gate is not
+        // live yet": a format-2 table is VALID and simply has
+        // `contradiction_edges` unavailable, which is what M24 through M26
+        // shipped. Registration must refuse by naming that capability —
+        // serving the merge and supersede tools against it would mean a
+        // surface that can retire a contradiction with nothing evaluating
+        // whether anybody addressed it.
+        let v2 = PolicyTable::parse(crate::policy::table::POLICY_V2_JSON).unwrap();
+        let error = crate::mcp::proposal_tools(&v2).unwrap_err();
+        assert!(error.contains("contradiction_edges"), "{error}");
+        assert!(!error.contains("unknown"), "{error}");
+        // And for the right reason: v2 binds the predicate on every op it
+        // needs to, so the refusal cannot be coming from a missing binding.
+        let table = PolicyTable::load().unwrap();
+        for op in &table.contradiction_addressing.required_for_ops {
+            assert!(
+                v2.op(op)
+                    .unwrap()
+                    .requires
+                    .iter()
+                    .any(|p| p == "open_contradictions_addressed"),
+                "{op} does not bind the rule in v2, so the refusal proves nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn registration_refuses_a_live_table_that_stopped_requiring_addressing() {
+        // Defence in depth, the same shape as the create-surface check: a
+        // future table could keep the capability available and quietly drop
+        // the rule from one op, which is the version of this hole that would
+        // be hardest to see.
+        let mut raw: serde_json::Value =
+            serde_json::from_str(crate::policy::table::POLICY_JSON).unwrap();
+        raw["ops"]["merge_entities"]["requires"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p.as_str() != Some("open_contradictions_addressed"));
+        let table = PolicyTable::parse(&raw.to_string()).unwrap();
+        let error = crate::mcp::proposal_tools(&table).unwrap_err();
+        assert!(error.contains("merge_entities"), "{error}");
+        assert!(error.contains("open_contradictions_addressed"), "{error}");
+    }
+
+    #[test]
     fn registration_refuses_a_table_that_stopped_demanding_a_search() {
         // The other half of the gate. A create is the one mutation with no
         // target to compare against, so a live create surface on a table

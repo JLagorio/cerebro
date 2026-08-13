@@ -1,5 +1,5 @@
-//! `shared/policy/policy.v2.json` — the declarative mutation-governance
-//! table (M24.1, format 2 at M26.3).
+//! `shared/policy/policy.v3.json` — the declarative mutation-governance
+//! table (M24.1, format 2 at M26.3, format 3 at M27.4).
 //!
 //! **The rule this module exists to enforce: policy is DATA.** Every risk
 //! assignment, legal transition, required predicate, rejection destiny, and
@@ -21,18 +21,18 @@ use serde::{Deserialize, Serialize};
 
 /// The one artifact. `include_str!` binds it at compile time so a shipped
 /// binary can never disagree with the tree it was built from.
-pub const POLICY_JSON: &str = include_str!("../../../shared/policy/policy.v2.json");
+pub const POLICY_JSON: &str = include_str!("../../../shared/policy/policy.v3.json");
 
 /// Repo-relative location, for the test that proves both languages read the
 /// same path.
-pub const POLICY_PATH: &str = "shared/policy/policy.v2.json";
+pub const POLICY_PATH: &str = "shared/policy/policy.v3.json";
 
 /// The committed SHA-256 of the table's bytes. Rust and TS each hash what
 /// they actually loaded and compare against THIS file — which is the only
 /// way two processes in two languages assert the same bytes rather than
 /// each asserting self-consistency. Regenerate deliberately after a table
 /// edit (see `write_policy_digest`).
-pub const POLICY_DIGEST_PATH: &str = "shared/policy/policy.v2.sha256";
+pub const POLICY_DIGEST_PATH: &str = "shared/policy/policy.v3.sha256";
 
 /// The FROZEN format-1 artifact (M24). It is kept compiled in for one
 /// reason: it is the negative control that proves the M26.3 live-registration
@@ -47,13 +47,28 @@ pub const POLICY_V1_JSON: &str = include_str!("../../../shared/policy/policy.v1.
 pub const POLICY_V1_PATH: &str = "shared/policy/policy.v1.json";
 pub const POLICY_V1_DIGEST_PATH: &str = "shared/policy/policy.v1.sha256";
 
+/// The FROZEN format-2 artifact (M26.3), kept for the same reason v1 is, and
+/// pointed at a different gate.
+///
+/// v2 is a valid table that simply has `contradiction_edges` UNAVAILABLE —
+/// which is what the whole of M24 through M26 shipped, and what "the gate is
+/// not live yet" looked like in data. M27.4's activation must refuse against
+/// it by naming the unavailable capability, not by tripping over an unknown
+/// code, and only the real bytes can prove that.
+///
+/// Nothing edits these bytes either. Policy changes land in `POLICY_JSON`.
+pub const POLICY_V2_JSON: &str = include_str!("../../../shared/policy/policy.v2.json");
+pub const POLICY_V2_PATH: &str = "shared/policy/policy.v2.json";
+pub const POLICY_V2_DIGEST_PATH: &str = "shared/policy/policy.v2.sha256";
+
 /// The format this build SHIPS.
-pub const FORMAT: u64 = 2;
+pub const FORMAT: u64 = 3;
 
 /// Every format this build can READ. A published artifact is history: format
-/// 1 was the whole of M24 and M25, and refusing to parse it would mean the
-/// only way to demonstrate what format 2 added is a fixture nobody committed.
-pub const SUPPORTED_FORMATS: &[u64] = &[1, 2];
+/// 1 was the whole of M24 and M25, format 2 the whole of M26, and refusing to
+/// parse either would mean the only way to demonstrate what the next format
+/// added is a fixture nobody committed.
+pub const SUPPORTED_FORMATS: &[u64] = &[1, 2, 3];
 
 /// Risk is a PERSISTED vocabulary — a Proposal declares one and
 /// `proposal.applied` records the effective one — so it is defined once in

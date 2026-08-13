@@ -792,6 +792,51 @@ fn registration_gate(table: &crate::policy::table::PolicyTable) -> Result<(), St
             ));
         }
     }
+
+    // 3. The contradiction-preservation gate is LIVE (M27.4). Every op that
+    //    can compress a disagreement away requires the rule, can report both
+    //    of its codes, and — the part only an artifact can say — the
+    //    capability is available. A format-2 table is a valid table that
+    //    simply has it unavailable, which is what M24 through M26 shipped;
+    //    registering the merge and supersede surfaces against one now would
+    //    serve tools that can retire a contradiction with nothing evaluating
+    //    whether they addressed it.
+    let addressing = &table.contradiction_addressing;
+    let capability = table
+        .capabilities
+        .get(&addressing.capability)
+        .ok_or_else(|| format!("the table has no {} capability", addressing.capability))?;
+    if !capability.available {
+        return Err(format!(
+            "{} is unavailable in this table — the contradiction-preservation gate cannot be \
+             registered against a table that predates it, because every op it protects would be \
+             served with the rule switched off",
+            addressing.capability
+        ));
+    }
+    for op in &addressing.required_for_ops {
+        let rule = table.op(op).ok_or_else(|| {
+            format!("the addressing rule names {op}, which the table has no row for")
+        })?;
+        if !rule
+            .requires
+            .iter()
+            .any(|p| p == "open_contradictions_addressed")
+        {
+            return Err(format!(
+                "{op} can compress a contradiction away and does not require \
+                 open_contradictions_addressed"
+            ));
+        }
+        for code in [&addressing.omitted_rejection, &addressing.stale_rejection] {
+            if !rule.possible_rejections.iter().any(|c| c == code) {
+                return Err(format!(
+                    "{op} cannot report {code} — the preservation rule would refuse under a code \
+                     the op never declared"
+                ));
+            }
+        }
+    }
     Ok(())
 }
 

@@ -60,7 +60,7 @@ pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
     ("high_stakes_route_satisfied", Some("M24.8")),
     ("independence_confirmable", Some("M24.4")), // expand: server-bound proof
     ("no_self_ancestry", Some("M26.3")),         // ancestry::no_self_ancestry
-    ("open_contradictions_addressed", None),     // M27 (contradiction edges)
+    ("open_contradictions_addressed", Some("M27.4")),
     ("qualification_roles_present", Some("M24.6")),
     ("revert_current_and_invertible", Some("M24.4")), // expand: revert_not_*
     ("silence_transition_allowed", Some("M24.1")),    // the table's silence stage
@@ -152,6 +152,11 @@ fn target_set_bound(
         proposal_id: proposal.proposal_id.clone(),
         staged_beliefs: binding.staged_beliefs.clone(),
         staged_entities: binding.staged_entities.clone(),
+        // The write set this binds against MUST include the closes: their
+        // comparison and endpoint Beliefs are CAS targets, and a target set
+        // that omitted them would let a merge run against an edge whose
+        // Belief moved underneath it.
+        addressed_contradictions: proposal.basis.addressed_contradictions.clone(),
     };
     // A plan that cannot be built writes nothing, so there is nothing to
     // bind. The refusal stays owned by the layer where expansion is
@@ -489,6 +494,7 @@ pub fn check(
             // that "structurally valid but unverified" cannot be quietly
             // turned into a rejection at one call site and a queue at
             // another.
+            "open_contradictions_addressed" => open_contradictions_addressed(state, proposal)?,
             "high_stakes_route_satisfied" => {
                 if let super::coverage::HighStakes::Refuse(failure) =
                     super::coverage::high_stakes(table, state, proposal)
@@ -499,6 +505,169 @@ pub fn check(
             // Everything else is evaluated elsewhere or owned by a later
             // phase; `PREDICATE_OWNERS` is where that is written down.
             _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// **The contradiction-preservation gate** (M27.4, D12/§8).
+///
+/// A merge, a supersede, or a split can make a disagreement disappear without
+/// anybody deciding anything about it — the two claims stop being two, and the
+/// question of which was right stops being asked. This is the rule that says a
+/// contradiction may only be compressed away DELIBERATELY: the proposal names
+/// every open edge over the Beliefs it touches, says what it did about each,
+/// and cites the evidence it did it with.
+///
+/// **It fires only after the pipeline has failed to resolve the claims
+/// apart.** An edge exists exactly when M27.3's gauntlet ran the pair through
+/// subject, scope, time, and stage and none of them separated it. That is what
+/// stops this gate from firing on stage lag, which is the failure that would
+/// make the whole surface something the owner learns to click through.
+///
+/// **An unclassified live `contradicts` relation counts as an open edge**, and
+/// cannot be addressed at all — it has no edge id to name. The only discharge
+/// is to let the backfill classify it, which is exactly the point: a
+/// declaration nobody has looked at yet is not a declaration anybody may
+/// compress away. This counts EVERY unclassified live declaration rather than
+/// only the migrated ones the design names; the reducer does not keep the
+/// relation's authoring actor, and widening a preservation rule is the safe
+/// direction to be wrong in.
+fn open_contradictions_addressed(
+    state: &EpistemicState,
+    proposal: &ProposalV1,
+) -> PreconditionResult {
+    use crate::ledger::schema::TargetClass;
+
+    let refuse = |code: &'static str, expected: TypedValue, actual: TypedValue| {
+        Box::new(PreconditionFailure {
+            code,
+            rule: "open_contradictions_addressed",
+            expected,
+            actual,
+        })
+    };
+    let beliefs: std::collections::BTreeSet<&str> = proposal
+        .targets
+        .iter()
+        .filter(|target| target.target_class == TargetClass::Belief)
+        .map(|target| target.target_id.as_str())
+        .collect();
+    if beliefs.is_empty() {
+        return Ok(());
+    }
+
+    // 1. Live declarations nobody has classified. Checked FIRST, because a
+    //    proposal cannot satisfy this one by adding an entry and a card that
+    //    said "address these edges" while hiding an unaddressable obligation
+    //    would send its reader in circles.
+    let classified_relations: std::collections::BTreeSet<&str> = state
+        .comparisons
+        .values()
+        .filter(|comparison| {
+            state
+                .conflict_classifications
+                .contains_key(&comparison.comparison_id)
+        })
+        .filter_map(|comparison| match &comparison.origin {
+            crate::ledger::reduce::ComparisonOrigin::Declared {
+                source_relation_event_id,
+                ..
+            } => Some(source_relation_event_id.as_str()),
+            crate::ledger::reduce::ComparisonOrigin::Detected { .. } => None,
+        })
+        .collect();
+    let unclassified: Vec<&str> = state
+        .relations
+        .values()
+        .filter(|relation| {
+            relation.live
+                && relation.relation == crate::ledger::schema::RelationKind::Contradicts
+                && (beliefs.contains(relation.from.as_str())
+                    || beliefs.contains(relation.to.as_str()))
+                && !classified_relations.contains(relation.last_add_event_id.as_str())
+        })
+        .map(|relation| relation.relation_id.as_str())
+        .collect();
+    if let Some(relation_id) = unclassified.first() {
+        return Err(refuse(
+            "contradiction_preservation_required",
+            TypedValue::string(
+                "every declared contradiction over these Beliefs classified before one of them \
+                 is compressed away",
+            ),
+            TypedValue::string(&format!(
+                "relation {relation_id} declares a contradiction nothing has classified — it \
+                 cannot be addressed by id because it has no edge yet, and the backfill is what \
+                 gives it one"
+            )),
+        ));
+    }
+
+    // 2. The open edges themselves.
+    let required: std::collections::BTreeMap<&str, &str> = state
+        .contradiction_edges
+        .values()
+        .filter(|edge| edge.closed.is_none())
+        .filter(|edge| {
+            beliefs.contains(edge.left_belief_id.as_str())
+                || beliefs.contains(edge.right_belief_id.as_str())
+        })
+        .map(|edge| (edge.edge_id.as_str(), edge.comparison_id.as_str()))
+        .collect();
+    let addressed: std::collections::BTreeMap<
+        &str,
+        &crate::ledger::schema::AddressedContradiction,
+    > = proposal
+        .basis
+        .addressed_contradictions
+        .iter()
+        .map(|entry| (entry.edge_id.as_str(), entry))
+        .collect();
+
+    let list = |ids: Vec<&str>| TypedValue::Array {
+        value: ids.into_iter().map(TypedValue::string).collect(),
+    };
+    let missing: Vec<&str> = required
+        .keys()
+        .filter(|edge_id| !addressed.contains_key(*edge_id))
+        .copied()
+        .collect();
+    if !missing.is_empty() {
+        return Err(refuse(
+            "contradiction_preservation_required",
+            list(required.keys().copied().collect()),
+            list(addressed.keys().copied().collect()),
+        ));
+    }
+
+    // 3. Every entry has to be about an edge this op is actually compressing,
+    //    and about the comparison that edge came from. An entry for anything
+    //    else would make the interpreter close an edge nothing addressed.
+    for (edge_id, entry) in &addressed {
+        let Some(comparison_id) = required.get(edge_id) else {
+            let known = state.contradiction_edges.get(*edge_id);
+            return Err(refuse(
+                "contradiction_edge_stale",
+                list(required.keys().copied().collect()),
+                TypedValue::string(&match known {
+                    Some(edge) if edge.closed.is_some() => format!(
+                        "edge {edge_id} is already closed — it was addressed once, and a close \
+                         does not happen twice"
+                    ),
+                    Some(_) => {
+                        format!("edge {edge_id} is open over Beliefs this proposal does not touch")
+                    }
+                    None => format!("edge {edge_id} does not exist"),
+                }),
+            ));
+        };
+        if &entry.comparison_id != comparison_id {
+            return Err(refuse(
+                "contradiction_edge_stale",
+                TypedValue::string(comparison_id),
+                TypedValue::string(&entry.comparison_id),
+            ));
         }
     }
     Ok(())
@@ -1169,5 +1338,189 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted, names);
+    }
+
+    // --- M27.4: the contradiction-preservation gate -------------------------
+
+    const EDGE: &str = "ed9eed9eed9eed9eed9eed9eed9eed9e";
+    const COMPARISON: &str = "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0";
+    const EVIDENCE: &str = "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5";
+    const OTHER_BELIEF: &str = "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3";
+
+    /// A world holding one OPEN edge between belief A and belief B3.
+    fn world_with_open_edge() -> EpistemicState {
+        use crate::ledger::reduce::ContradictionEdgeRow;
+        let mut state = world_with_belief(false);
+        state.contradiction_edges.insert(
+            EDGE.into(),
+            ContradictionEdgeRow {
+                edge_id: EDGE.into(),
+                comparison_id: COMPARISON.into(),
+                kind: crate::ledger::schema::EdgeKind::GenuineDirect,
+                left_belief_id: A.into(),
+                right_belief_id: OTHER_BELIEF.into(),
+                opened_event_id: "9".repeat(32),
+                classified_event_id: "8".repeat(32),
+                closed: None,
+            },
+        );
+        state
+    }
+
+    fn superseding(addressed: Vec<crate::ledger::schema::AddressedContradiction>) -> ProposalV1 {
+        let mut proposal = with_targets(vec![crate::ledger::schema::ProposalTarget {
+            target_class: crate::ledger::schema::TargetClass::Belief,
+            target_id: A.into(),
+            expected_version: Some(1),
+        }]);
+        if !addressed.is_empty() {
+            proposal.basis.evidence_refs = vec![EVIDENCE.into()];
+        }
+        proposal.basis.addressed_contradictions = addressed;
+        proposal
+    }
+
+    fn entry(edge_id: &str, comparison_id: &str) -> crate::ledger::schema::AddressedContradiction {
+        crate::ledger::schema::AddressedContradiction {
+            edge_id: edge_id.into(),
+            comparison_id: comparison_id.into(),
+            disposition: crate::ledger::schema::ContradictionDisposition::ResolvedWithEvidence,
+            evidence_refs: vec![EVIDENCE.into()],
+        }
+    }
+
+    #[test]
+    fn compressing_a_belief_with_an_open_edge_needs_the_edge_named() {
+        // The whole rule in one case: a merge or supersede can make a
+        // disagreement stop existing without anybody deciding which side was
+        // right, and this is what makes that deliberate.
+        let state = world_with_open_edge();
+        let failure = open_contradictions_addressed(&state, &superseding(vec![])).unwrap_err();
+        assert_eq!(failure.code, "contradiction_preservation_required");
+        assert_eq!(failure.rule, "open_contradictions_addressed");
+        assert_eq!(
+            failure.expected,
+            TypedValue::Array {
+                value: vec![TypedValue::string(EDGE)]
+            }
+        );
+        assert_eq!(failure.actual, TypedValue::Array { value: vec![] });
+
+        // Named, and it passes.
+        open_contradictions_addressed(&state, &superseding(vec![entry(EDGE, COMPARISON)])).unwrap();
+    }
+
+    #[test]
+    fn an_edge_over_beliefs_this_op_does_not_touch_is_not_this_ops_problem() {
+        // The crying-wolf guard for the GATE: requiring every open edge in
+        // the base would make every merge anywhere impossible, and the rule
+        // would be routed around rather than obeyed.
+        let mut state = world_with_open_edge();
+        let edge = state.contradiction_edges.get_mut(EDGE).unwrap();
+        edge.left_belief_id = OTHER_BELIEF.into();
+        edge.right_belief_id = "b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4".into();
+        open_contradictions_addressed(&state, &superseding(vec![])).unwrap();
+    }
+
+    #[test]
+    fn a_closed_edge_cannot_be_addressed_again_and_a_wrong_comparison_is_stale() {
+        let mut state = world_with_open_edge();
+        state.contradiction_edges.get_mut(EDGE).unwrap().closed =
+            Some(crate::ledger::reduce::EdgeClosure {
+                event_id: "7".repeat(32),
+                addressed_by_event_id: "6".repeat(32),
+                disposition: crate::ledger::schema::CloseDisposition::ResolvedWithEvidence,
+                evidence_event_ids: vec![EVIDENCE.into()],
+            });
+        let failure =
+            open_contradictions_addressed(&state, &superseding(vec![entry(EDGE, COMPARISON)]))
+                .unwrap_err();
+        assert_eq!(failure.code, "contradiction_edge_stale");
+
+        // An entry naming the right edge and the wrong comparison: the pair
+        // has to be the one the edge came from, or the close would be filed
+        // against a comparison nobody classified.
+        let open = world_with_open_edge();
+        let failure =
+            open_contradictions_addressed(&open, &superseding(vec![entry(EDGE, &"f".repeat(32))]))
+                .unwrap_err();
+        assert_eq!(failure.code, "contradiction_edge_stale");
+    }
+
+    #[test]
+    fn an_unclassified_declaration_blocks_and_cannot_be_addressed_by_id() {
+        // The M27.3d dependency, enforced: a `contradicts` relation nobody
+        // has classified has no edge id, so there is nothing to name — and
+        // the only discharge is to let the backfill classify it. Anything
+        // else would let a merge compress away a declaration nobody has
+        // looked at.
+        use crate::ledger::reduce::RelationState;
+        let mut state = world_with_belief(false);
+        state.relations.insert(
+            "r1".into(),
+            RelationState {
+                relation_id: "r1".into(),
+                from: A.into(),
+                to: OTHER_BELIEF.into(),
+                relation: crate::ledger::schema::RelationKind::Contradicts,
+                live: true,
+                last_add_event_id: "5".repeat(32),
+                last_event_id: "5".repeat(32),
+            },
+        );
+        let failure = open_contradictions_addressed(&state, &superseding(vec![])).unwrap_err();
+        assert_eq!(failure.code, "contradiction_preservation_required");
+        let TypedValue::String { value } = &failure.actual else {
+            panic!("the card names the relation");
+        };
+        assert!(value.contains("r1"), "{value}");
+
+        // Classified: the comparison exists and carries a verdict, so the
+        // declaration is no longer an unaddressable obligation.
+        state.comparisons.insert(
+            COMPARISON.into(),
+            crate::ledger::reduce::ComparisonRow {
+                comparison_id: COMPARISON.into(),
+                event_id: "4".repeat(32),
+                left: crate::ledger::schema::ConflictEndpoint::DeclaredRelation {
+                    endpoint: declared_endpoint(A),
+                },
+                right: crate::ledger::schema::ConflictEndpoint::DeclaredRelation {
+                    endpoint: declared_endpoint(OTHER_BELIEF),
+                },
+                origin: crate::ledger::reduce::ComparisonOrigin::Declared {
+                    source_relation_event_id: "5".repeat(32),
+                    rule_version: "contradiction-backfill-v1".into(),
+                },
+            },
+        );
+        state.conflict_classifications.insert(
+            COMPARISON.into(),
+            crate::ledger::reduce::ClassificationRow {
+                comparison_id: COMPARISON.into(),
+                event_id: "3".repeat(32),
+                outcome: crate::ledger::schema::ConflictOutcome::ResolvedByStage,
+                classification: crate::ledger::schema::Classification::Deterministic {
+                    rule_version: "contradiction-backfill-v1".into(),
+                },
+                reason_codes: vec![crate::ledger::schema::ConflictReasonCode::StageDisjoint],
+                evidence_event_ids: vec![],
+            },
+        );
+        open_contradictions_addressed(&state, &superseding(vec![])).unwrap();
+    }
+
+    fn declared_endpoint(belief_id: &str) -> crate::ledger::schema::DeclaredRelationEndpoint {
+        crate::ledger::schema::DeclaredRelationEndpoint {
+            relation_event_id: "5".repeat(32),
+            belief_id: belief_id.into(),
+            belief_revision_event_id: "1".repeat(32),
+            relation_origin: crate::ledger::schema::RelationOrigin::LegacyMigration,
+            subject_id: "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1".into(),
+            content_hash: "a".repeat(64),
+            scope: crate::ledger::schema::KnownScope::Unknown,
+            state_stage: crate::ledger::schema::KnownStage::Unknown,
+            valid_time: crate::ledger::schema::KnownValidTime::Unknown,
+        }
     }
 }

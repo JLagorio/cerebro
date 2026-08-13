@@ -1062,6 +1062,7 @@ fn apply_with_decisions(
             proposal_id: proposal.proposal_id.clone(),
             staged_beliefs: staged_beliefs.clone(),
             staged_entities: staged_entities.clone(),
+            addressed_contradictions: proposal.basis.addressed_contradictions.clone(),
         };
         let expansion = expand(&proposal.op, &ctx).map_err(|e| expand_error(table, e))?;
         // AFTER its own expansion: a create must not see itself staged, or

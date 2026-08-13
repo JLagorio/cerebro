@@ -1,6 +1,6 @@
 /**
- * `shared/policy/policy.v2.json` — the declarative mutation-governance table,
- * TS side (M24.1, format 2 at M26.3).
+ * `shared/policy/policy.v3.json` — the declarative mutation-governance table,
+ * TS side (M24.1, format 2 at M26.3, format 3 at M27.4).
  *
  * This is the SAME FILE the Rust core compiles in with `include_str!`, imported
  * verbatim by vite. Nothing here restates a rule: no op name, risk, threshold,
@@ -17,21 +17,22 @@
  * @see src-tauri/src/policy/table.rs — the Rust loader, kind for kind.
  */
 
-import rawTable from '../../../shared/policy/policy.v2.json';
+import rawTable from '../../../shared/policy/policy.v3.json';
 
-export const POLICY_PATH = 'shared/policy/policy.v2.json';
-export const POLICY_DIGEST_PATH = 'shared/policy/policy.v2.sha256';
+export const POLICY_PATH = 'shared/policy/policy.v3.json';
+export const POLICY_DIGEST_PATH = 'shared/policy/policy.v3.sha256';
 
 /** The format this build ships. */
-export const FORMAT = 2;
+export const FORMAT = 3;
 
 /**
  * Every format this loader can READ. A published artifact is history: format 1
- * was the whole of M24 and M25, and the Rust core still parses it as the
- * negative control for the M26.3 registration gate. The two loaders accept the
- * same set, or "which tables are readable" would be a rule with two answers.
+ * was the whole of M24 and M25, format 2 the whole of M26, and the Rust core
+ * still parses both as the negative controls for its registration gates. The
+ * two loaders accept the same set, or "which tables are readable" would be a
+ * rule with two answers.
  */
-export const SUPPORTED_FORMATS = [1, 2];
+export const SUPPORTED_FORMATS = [1, 2, 3];
 
 export type Risk = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type Destiny = 'ledger' | 'operational';
