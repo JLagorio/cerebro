@@ -924,3 +924,42 @@ pub const SCHEMA_V9: &str = "
         ON source_taint_assessments (vault_id, store_uuid)
         WHERE verdict = 'suspected_instructional_content';
 ";
+
+/// The M26.8 schema — scheduled convergence output, disposable by design.
+///
+/// **This table is a cache, and the schema says so.** A convergence output is
+/// a READING of the ledger between two sequence numbers, not a claim about
+/// the world: there is no ledger event, no cross-run identity, no
+/// user-editable projection, and deleting a row causes recomputation and
+/// nothing else. §31's earned-persistence trigger is what a narrative object
+/// would have to pass, and a scheduled background summary does not pass it.
+///
+/// `output_content_hash` is over the same canonical bytes stored in
+/// `output_json`, so a re-run that found the identical answer is recognizable
+/// as a repeat rather than stored twice.
+///
+/// `superseded_by_run_id` is a pointer, not a lifecycle: a newer run for an
+/// overlapping window marks the older one so a surface can render the latest
+/// without a max-by-date query racing an insert. The row stays readable.
+pub const SCHEMA_V10: &str = "
+    CREATE TABLE convergence_runs (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        run_id TEXT NOT NULL CHECK (run_id <> ''),
+        from_seq INTEGER NOT NULL CHECK (from_seq >= 0),
+        to_seq INTEGER NOT NULL CHECK (to_seq >= from_seq),
+        trigger TEXT NOT NULL CHECK (trigger IN ('scheduled', 'on_demand')),
+        schema_version TEXT NOT NULL CHECK (schema_version <> ''),
+        output_content_hash TEXT NOT NULL
+            CHECK (length(output_content_hash) = 64
+                   AND output_content_hash = lower(output_content_hash)),
+        output_json TEXT NOT NULL CHECK (output_json <> ''),
+        generated_at TEXT NOT NULL CHECK (generated_at LIKE '____-__-__T%Z'),
+        superseded_by_run_id TEXT
+            CHECK (superseded_by_run_id IS NULL OR superseded_by_run_id <> run_id),
+        PRIMARY KEY (vault_id, store_uuid, run_id)
+    );
+    CREATE INDEX convergence_runs_latest
+        ON convergence_runs (vault_id, store_uuid, generated_at)
+        WHERE superseded_by_run_id IS NULL;
+";

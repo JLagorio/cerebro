@@ -80,7 +80,6 @@ pub fn compute(state: &EpistemicState, as_of: chrono::DateTime<chrono::Utc>) -> 
         }
         let revision = belief.current();
         let mut sources: BTreeSet<&str> = BTreeSet::new();
-        let mut newest: Option<&str> = None;
         let mut assertions = 0u32;
         if let BeliefBasis::Linked { links } = &revision.basis {
             for link in links {
@@ -91,19 +90,9 @@ pub fn compute(state: &EpistemicState, as_of: chrono::DateTime<chrono::Utc>) -> 
                 if let Some(observation) = state.observations.get(&link.observation_event_id) {
                     sources.insert(observation.source_id.as_str());
                 }
-                if let Some(facet) = state.assertion_facets.get(&link.observation_event_id) {
-                    newest = Some(match newest {
-                        // A plain string comparison would be wrong for stamps
-                        // in different offsets; these are the store's own
-                        // frame stamps, which are always UTC `Z`, so the
-                        // comparison is exact. Anything else would be a bug
-                        // in the writer, not a case to guess at here.
-                        Some(current) if current >= facet.recorded_at.as_str() => current,
-                        _ => facet.recorded_at.as_str(),
-                    });
-                }
             }
         }
+        let newest = newest_evidence(state, belief);
         let (coverage_assessments, open_coverage_gaps) = coverage_for(state, &belief.entity_id);
 
         out.push(Signals {
@@ -121,6 +110,37 @@ pub fn compute(state: &EpistemicState, as_of: chrono::DateTime<chrono::Utc>) -> 
         });
     }
     out
+}
+
+/// The newest `recorded_at` behind one belief's CURRENT revision, or `None`
+/// when nothing supports it.
+///
+/// Shared with `convergence::diff`, which asks the same question of two
+/// states rather than one. Not a policy — a maximum — but a maximum both
+/// sides have to take the same way: a plain string comparison would be wrong
+/// for stamps in different offsets, and these are the store's own frame
+/// stamps, which are always UTC `Z`. Anything else is a bug in the writer,
+/// not a case to guess at here.
+pub fn newest_evidence<'a>(
+    state: &'a EpistemicState,
+    belief: &crate::ledger::reduce::BeliefState,
+) -> Option<&'a str> {
+    let BeliefBasis::Linked { links } = &belief.current().basis else {
+        return None;
+    };
+    let mut newest: Option<&str> = None;
+    for link in links {
+        if !matches!(link.role, BasisRole::Supports | BasisRole::Opposes) {
+            continue;
+        }
+        if let Some(facet) = state.assertion_facets.get(&link.observation_event_id) {
+            newest = Some(match newest {
+                Some(current) if current >= facet.recorded_at.as_str() => current,
+                _ => facet.recorded_at.as_str(),
+            });
+        }
+    }
+    newest
 }
 
 /// Seconds between a recorded stamp and `as_of`, floored at zero.

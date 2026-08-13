@@ -231,6 +231,12 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         eprintln!("attention signals: {detail}");
     }
 
+    // Scheduled convergence. Deterministic and free like the two above, and
+    // it reuses the frames already in hand rather than re-reading them.
+    if let Err(detail) = converge(&conn, &vault_id, &store_uuid, &read.frames) {
+        eprintln!("convergence: {detail}");
+    }
+
     // The Source Monitor, last, and also free. It reads files rather than the
     // ledger, so it neither needs this tick's fold nor invalidates it.
     match crate::monitor::pass::run(&conn, vault, &vault_id, chrono::Utc::now()) {
@@ -262,6 +268,40 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         &state,
         &chain_head,
     )
+}
+
+/// One scheduled convergence run, from wherever the last one stopped.
+///
+/// It re-folds the ledger twice, which is the expensive thing on this tick —
+/// so it runs only when the head has actually moved. A base nobody is writing
+/// to should not pay for a daily re-read of itself, and the window helper is
+/// where that decision lives rather than here.
+fn converge(
+    conn: &rusqlite::Connection,
+    vault_id: &str,
+    store_uuid: &str,
+    frames: &[crate::ledger::frame::Frame],
+) -> Result<(), String> {
+    let Some(head_seq) = frames.last().map(|frame| frame.seq) else {
+        return Ok(());
+    };
+    let last = crate::convergence::store::latest(conn, vault_id, store_uuid)?.map(|run| run.to_seq);
+    let Some(window) = crate::convergence::next_window(last, head_seq) else {
+        return Ok(());
+    };
+    let output = crate::convergence::over(frames, store_uuid, window)?;
+    let now = chrono::Utc::now();
+    let run_id = format!("convergence-{}-{}", window.from_seq, window.to_seq);
+    crate::convergence::store::record(
+        conn,
+        vault_id,
+        store_uuid,
+        &run_id,
+        crate::convergence::store::Trigger::Scheduled,
+        &output,
+        now,
+    )?;
+    Ok(())
 }
 
 /// Recompute and store the attention primitives.

@@ -4,6 +4,7 @@ pub mod assembly;
 pub mod attention;
 pub mod conflict;
 pub mod connectors;
+pub mod convergence;
 pub mod crash;
 pub mod demo;
 pub mod git;
@@ -315,6 +316,51 @@ fn ask_question(
             Err(refusal) => refusal.into(),
         },
     )
+}
+
+/// "How did our model change?", on demand (M26.8c).
+///
+/// **Attended means returned, not narrated.** The design's word is that
+/// on-demand convergence is "returned as an attended answer" while scheduled
+/// convergence is ambient and stored — the contrast is who gets the result,
+/// not whether a model wrote it. So this hands back the computed diff
+/// directly. Spending tokens to have a model re-say a deterministic
+/// difference would be paying for prose about arithmetic, and the day-one
+/// sections are all M26-computable by construction.
+///
+/// `from_seq` omitted means "since the last stored run", which is the
+/// question a person actually asks; an explicit window is for a surface that
+/// wants to look further back.
+#[tauri::command(async)]
+fn converge(
+    app: tauri::AppHandle,
+    vault: String,
+    from_seq: Option<u64>,
+) -> Result<convergence::diff::Output, String> {
+    let vault_path = Path::new(&vault);
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = runtime::open_vault(vault_path)
+        .ok_or("this vault is not registered with the runtime database")?;
+    let store_uuid = scope
+        .store_uuid
+        .clone()
+        .ok_or("this vault has no ledger store — there is nothing to compare")?;
+
+    let read = ledger::read_ledger(&ledger::ledger_dir(vault_path)).map_err(|e| e.to_string())?;
+    let head_seq = read.frames.last().map(|frame| frame.seq).unwrap_or(0);
+    let from_seq = match from_seq {
+        Some(explicit) => explicit,
+        None => convergence::store::latest(&conn, &scope.vault_id, &store_uuid)?
+            .map(|run| run.to_seq)
+            .unwrap_or(0),
+    };
+    // A window with nothing in it is a real answer — "nothing has changed
+    // since you last looked" — so it is computed rather than refused.
+    let window = convergence::diff::Window {
+        from_seq: from_seq.min(head_seq),
+        to_seq: head_seq,
+    };
+    convergence::over(&read.frames, &store_uuid, window)
 }
 
 /// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
@@ -751,6 +797,7 @@ pub fn run() {
             set_ambient_ingest,
             ingest_item_state,
             ask_question,
+            converge,
             resolve_held_items,
             create_note,
             set_note_title,
