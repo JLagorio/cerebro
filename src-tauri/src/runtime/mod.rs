@@ -44,6 +44,7 @@ pub mod import;
 pub mod normalize;
 pub mod operational;
 pub mod parked;
+pub mod projection;
 pub mod recovery;
 pub mod scheduler;
 pub mod schema;

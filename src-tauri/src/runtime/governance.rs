@@ -559,6 +559,106 @@ mod tests {
     }
 
     #[test]
+    fn a_wrong_unit_is_refused_by_the_table_even_when_the_writer_is_bypassed() {
+        // `record_costs` derives the unit, so this is the case where somebody
+        // later writes SQL by hand. The table is the last line, and it holds.
+        let conn = conn();
+        let detail = conn
+            .execute(
+                "INSERT INTO run_cost_components (
+                     vault_id, store_uuid, run_id, component, unit, model_id, quantity,
+                     recorded_at
+                 ) VALUES (?1, ?2, ?3, 'output_tokens', 'bytes', 'm', 1,
+                           '2026-08-12T12:00:00.000Z')",
+                params![VAULT, STORE, RUN],
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(detail.contains("CHECK"), "{detail}");
+    }
+
+    #[test]
+    fn a_model_accounting_row_without_a_model_is_refused_by_the_table() {
+        let conn = conn();
+        let detail = conn
+            .execute(
+                "INSERT INTO run_cost_components (
+                     vault_id, store_uuid, run_id, component, unit, model_id, quantity,
+                     recorded_at
+                 ) VALUES (?1, ?2, ?3, 'output_tokens', 'tokens', NULL, 1,
+                           '2026-08-12T12:00:00.000Z')",
+                params![VAULT, STORE, RUN],
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(detail.contains("CHECK"), "{detail}");
+    }
+
+    #[test]
+    fn two_vaults_spending_under_one_run_id_do_not_share_rows() {
+        // M28's windows are per-vault. A `run_id` collision across vaults —
+        // which a caller minting ids per-vault can absolutely produce — must
+        // not merge two vaults' accounting into one.
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO vault_registry (vault_id, path) VALUES ('vault-2', '/tmp/w')",
+            [],
+        )
+        .unwrap();
+        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), now()).unwrap();
+        let detail = record_costs(&conn, "vault-2", STORE, RUN, "m", &full(), now()).unwrap_err();
+        assert!(
+            detail.to_lowercase().contains("unique"),
+            "the design's unique (run_id, component) is GLOBAL, so a shared run id across \
+             vaults is refused rather than silently merged: {detail}"
+        );
+        assert_eq!(costs(&conn, VAULT, STORE, RUN).unwrap().len(), 10);
+        assert!(costs(&conn, "vault-2", STORE, RUN).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_rows_survive_closing_and_reopening_the_database() {
+        // "Reproducible from persisted rows alone" is a claim about a file,
+        // not about a connection.
+        // The REAL schema, not the permissive stub the other tests use: a
+        // restart claim is about a file, and the file has the live
+        // constraints on it (`vault_id` is 32 hex here, not "vault-1").
+        let real_vault = "a".repeat(32);
+        let dir = crate::vault::testutil::temp_vault("governance-restart");
+        {
+            let conn = crate::runtime::open(&dir).expect("a runtime db");
+            conn.execute(
+                "INSERT INTO vault_registry (vault_id, vault_path, first_seen_at) \
+                 VALUES (?1, '/tmp/governance-restart', '2026-08-12T12:00:00.000Z')",
+                params![real_vault],
+            )
+            .expect("register");
+            record_costs(&conn, &real_vault, STORE, RUN, "m", &full(), now()).unwrap();
+            record_attempt(
+                &conn,
+                &real_vault,
+                STORE,
+                &context(),
+                &Attempt::Ineligible {
+                    reason: Ineligible::SubjectNone,
+                },
+                now(),
+            )
+            .unwrap();
+        }
+        let conn = crate::runtime::open_existing(&dir).expect("reopened");
+        assert_eq!(costs(&conn, &real_vault, STORE, RUN).unwrap().len(), 10);
+        let attempts: i64 = conn
+            .query_row("SELECT count(*) FROM resolver_outcomes", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(attempts, 1);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn an_assembly_row_round_trips() {
         let conn = conn();
         let metrics = AssemblyMetrics {
