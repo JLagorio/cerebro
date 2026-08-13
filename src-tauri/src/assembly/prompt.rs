@@ -114,6 +114,11 @@ Rules that are not negotiable:
 /// Derived from the CONTENT, which is what makes the fence unforgeable: to
 /// embed the closing marker an item would have to contain the hash of itself
 /// containing that hash.
+#[cfg(test)]
+pub(crate) fn fence_nonce_for_test(assembly_id: &str, item_id: &str, content: &str) -> String {
+    fence_nonce(assembly_id, item_id, content)
+}
+
 fn fence_nonce(assembly_id: &str, item_id: &str, content: &str) -> String {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"cerebro-evidence-fence-v1");

@@ -7,6 +7,8 @@ pub mod connectors;
 pub mod convergence;
 pub mod crash;
 pub mod demo;
+#[cfg(test)]
+mod eval;
 pub mod git;
 pub mod git_commands;
 pub mod ingest;
