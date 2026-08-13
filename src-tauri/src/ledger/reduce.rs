@@ -181,6 +181,24 @@ pub struct SemanticAssessmentRow {
     pub proposal_ids: Vec<String>,
 }
 
+/// One detected comparison, reduced (M26.7).
+///
+/// It says a pair needs classifying and nothing else — there is no outcome
+/// field here because M26 has no outcomes to record. M27 adds classification
+/// and edges against this `comparison_id`, which is why the row keeps the
+/// endpoints rather than just their ids: a classification has to be checked
+/// against the exact tuple the comparison was minted from.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComparisonRow {
+    pub comparison_id: String,
+    /// The event that created it — one, always, because a second is refused.
+    pub event_id: String,
+    pub left: schema::ConflictCandidateEndpointV1,
+    pub right: schema::ConflictCandidateEndpointV1,
+    pub reason_codes: Vec<schema::ConflictCandidateReason>,
+    pub detector_version: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevisionState {
     pub revision: u64,
@@ -604,6 +622,11 @@ pub struct EpistemicState {
     /// Event id → assessment id. A successor receipt names the EVENT, and
     /// has to be checked against what that event concluded.
     pub semantic_by_event: BTreeMap<String, String>,
+    /// M26.7's detected comparisons, keyed by `comparison_id` — the pairs
+    /// that need classifying. Portable, because M27's classifications and
+    /// contradiction edges target these ids: losing the runtime DB must not
+    /// erase which pairs were already handed over.
+    pub comparisons: BTreeMap<String, ComparisonRow>,
 }
 
 impl EpistemicState {
@@ -903,6 +926,9 @@ fn apply(
         EventBody::CoverageAssessed(b) => apply_coverage_assessed(state, frame, b, staged),
         EventBody::CoverageGap(b) => apply_coverage_gap(state, frame, b, staged),
         EventBody::CoverageRestored(b) => apply_coverage_restored(state, frame, b, staged),
+        EventBody::ConflictCandidateDetected(b) => {
+            apply_conflict_candidate(state, frame, b, staged)
+        }
     }
 }
 
@@ -1616,6 +1642,156 @@ fn apply_ingest_semantic_assessed(
     // version would invent a concurrency question that has no answer. Neither
     // the receipts it read nor the proposals it carries advance either —
     // being mentioned by history is not a state change.
+    Ok(())
+}
+
+/// `conflict.candidate_detected` (M26.7) — a pair put forward for
+/// classification.
+///
+/// Every check here is about ANCHORING. The body already proved it is
+/// internally honest (the id follows from the endpoints, the stage follows
+/// from the scope); what this cannot know on its own is whether the things it
+/// pins exist. The design's phrase is "committed assertion/basis/revision
+/// references", and those are three distinct facts:
+///
+/// - the ASSERTION was really recorded,
+/// - the REVISION really belongs to the Belief the endpoint names,
+/// - and that revision's BASIS really used that assertion.
+///
+/// The third is the one that matters. Without it an endpoint could pin any
+/// assertion to any belief, mint a stable `comparison_id` for a pair that
+/// never had anything to do with each other, and hand M27 a contradiction to
+/// classify between two claims that were never in the same conversation.
+///
+/// Unlike the semantic assessment above, this DOES have a version effect: the
+/// comparison is a CAS target because M27 proposes against it, and a
+/// classification arriving against a comparison that moved underneath it is a
+/// concurrency question with a real answer.
+fn apply_conflict_candidate(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ConflictCandidateDetected,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if let Some(existing) = state.comparisons.get(&body.comparison_id) {
+        return Err(refused(format!(
+            "comparison {} was already detected by event {} — an exact retry is deduplicated at \
+             the door by its idempotency key, so a second event reaching the reducer is a \
+             duplicate append, not a retry",
+            body.comparison_id, existing.event_id
+        )));
+    }
+    for (side, endpoint) in [("left", &body.left), ("right", &body.right)] {
+        anchor_conflict_endpoint(state, staged, side, endpoint)?;
+    }
+
+    state.comparisons.insert(
+        body.comparison_id.clone(),
+        ComparisonRow {
+            comparison_id: body.comparison_id.clone(),
+            event_id: frame.event_id.clone(),
+            left: body.left.clone(),
+            right: body.right.clone(),
+            reason_codes: body.reason_codes.clone(),
+            detector_version: body.detector_version.clone(),
+        },
+    );
+    // The first and only creation: expected version was null, and it lands at
+    // v1. Nothing else in M26 advances it — a comparison has no second state
+    // until M27 classifies one.
+    state.create_version("comparison", &body.comparison_id, &frame.event_id);
+    Ok(())
+}
+
+/// The three references one endpoint has to earn.
+fn anchor_conflict_endpoint(
+    state: &EpistemicState,
+    staged: &Staged,
+    side: &str,
+    endpoint: &schema::ConflictCandidateEndpointV1,
+) -> Result<(), Refusal> {
+    for (name, id) in [
+        ("assertion_event_id", &endpoint.assertion_event_id),
+        (
+            "belief_revision_event_id",
+            &endpoint.belief_revision_event_id,
+        ),
+    ] {
+        if staged.contains(id) {
+            return Err(refused(format!(
+                "{side}.{name} pins a STAGED event — a comparison is about what the store \
+                 already holds, not about what this batch is still trying to write"
+            )));
+        }
+    }
+    if !state
+        .observations
+        .contains_key(&endpoint.assertion_event_id)
+    {
+        return Err(refused(format!(
+            "{side}.assertion_event_id {} names no committed observation",
+            endpoint.assertion_event_id
+        )));
+    }
+    let belief = state.beliefs.get(&endpoint.belief_id).ok_or_else(|| {
+        refused(format!(
+            "{side}.belief_id {} does not exist",
+            endpoint.belief_id
+        ))
+    })?;
+    if belief.entity_id != endpoint.subject_id {
+        return Err(refused(format!(
+            "{side}.subject_id {} is not the entity belief {} is about ({})",
+            endpoint.subject_id, endpoint.belief_id, belief.entity_id
+        )));
+    }
+    let (revision_belief, _) = state
+        .belief_revision_events
+        .get(&endpoint.belief_revision_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "{side}.belief_revision_event_id {} names no committed revision",
+                endpoint.belief_revision_event_id
+            ))
+        })?;
+    if revision_belief != &endpoint.belief_id {
+        return Err(refused(format!(
+            "{side}.belief_revision_event_id belongs to belief {revision_belief}, not to {}",
+            endpoint.belief_id
+        )));
+    }
+    // A refusal rather than an `expect`: the index and the belief's own
+    // revisions are written together and cannot disagree today, but the
+    // reducer's contract is that it never panics, and "cannot happen" is a
+    // poor reason to be the one place that does.
+    let revision = belief
+        .revisions
+        .iter()
+        .find(|r| r.event_id == endpoint.belief_revision_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "{side}.belief_revision_event_id is indexed but absent from belief {}",
+                endpoint.belief_id
+            ))
+        })?;
+    // Any basis ROLE counts. `supports` is the obvious case, but a revision
+    // that recorded an assertion as `opposes` weighed it too — and a pair
+    // where one side already logged the other as counterevidence is the most
+    // worth classifying, not the least.
+    let used = match &revision.basis {
+        schema::BeliefBasis::Unsupported { .. } => false,
+        schema::BeliefBasis::Linked { links } => links
+            .iter()
+            .any(|link| link.observation_event_id == endpoint.assertion_event_id),
+    };
+    if !used {
+        return Err(refused(format!(
+            "{side} pins assertion {} to a revision whose basis never named it — an endpoint \
+             is a claim that this Belief rested on this evidence, and a comparison built from \
+             one that did not is a disagreement between two things that never met",
+            endpoint.assertion_event_id
+        )));
+    }
     Ok(())
 }
 
@@ -3717,6 +3893,44 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                     "input_receipt_ids": a.input_receipt_ids,
                     "outcome": a.outcome.as_str(),
                     "proposal_ids": a.proposal_ids,
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M26.7: the pairs handed to M27 for classification. In the vector
+        // contract because the handoff is the point — a rebuild after runtime
+        // DB loss has to land on the same comparisons at the same versions,
+        // or the app quietly forgets which disagreements it already noticed.
+        //
+        // The endpoints are summarized to their four pinned ids. The full
+        // tuples live in the reducer row (M27 checks classifications against
+        // them), but a vector that repeated every scope and value digest
+        // would be asserting the schema round-trip a second time, in a file
+        // where a hand edit reads as a semantic change.
+        "comparisons": state
+            .comparisons
+            .values()
+            .map(|c| (
+                c.comparison_id.clone(),
+                serde_json::json!({
+                    "detected_by": c.event_id,
+                    "detector_version": c.detector_version,
+                    "left": [
+                        c.left.assertion_event_id.clone(),
+                        c.left.belief_id.clone(),
+                        c.left.belief_revision_event_id.clone(),
+                        c.left.subject_id.clone(),
+                    ],
+                    "right": [
+                        c.right.assertion_event_id.clone(),
+                        c.right.belief_id.clone(),
+                        c.right.belief_revision_event_id.clone(),
+                        c.right.subject_id.clone(),
+                    ],
+                    "reason_codes": c
+                        .reason_codes
+                        .iter()
+                        .map(|r| r.as_str())
+                        .collect::<Vec<_>>(),
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),

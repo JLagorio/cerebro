@@ -16,7 +16,15 @@
  */
 
 import type { Json } from './ids';
-import { canonicalJson, deriveRelationId, deriveSourceId, deriveSourceKey } from './ids';
+import {
+  canonicalJson,
+  compareUtf8,
+  deriveComparisonId,
+  deriveRelationId,
+  deriveSourceId,
+  deriveSourceKey,
+  orderedEndpoints,
+} from './ids';
 import { normalizeAliasV1 } from './normalize';
 
 export class SchemaError extends Error {}
@@ -891,6 +899,33 @@ const FACT_VARIANTS: {
 /** A runtime failure may affect processing; it never speaks for the source. */
 const RUNTIME_AFFECTABLE = ['scope_accessible', 'index_current', 'retrieval_attempted'];
 
+/**
+ * M26.7's conflict-candidate endpoint. Declared in Rust field order, because
+ * the round-trip gate compares bytes and a reordered rebuild reads as a
+ * non-canonical body rather than as a TS bug.
+ */
+function canonConflictEndpoint(v: Json | undefined, side: string): JsonObject {
+  const e = asObject(v, side);
+  const validTime = asObject(e.valid_time, `${side}.valid_time`);
+  return {
+    assertion_event_id: asString(e.assertion_event_id, `${side}.assertion_event_id`),
+    belief_id: asString(e.belief_id, `${side}.belief_id`),
+    belief_revision_event_id: asString(
+      e.belief_revision_event_id,
+      `${side}.belief_revision_event_id`,
+    ),
+    subject_id: asString(e.subject_id, `${side}.subject_id`),
+    predicate: asString(e.predicate, `${side}.predicate`),
+    value_hash: asString(e.value_hash, `${side}.value_hash`),
+    scope: canonScopeObject(e.scope),
+    state_stage: oneOf(e.state_stage, STATE_STAGES, `${side}.state_stage`),
+    valid_time: {
+      from: asStringOrNull(validTime.from, `${side}.valid_time.from`),
+      to: asStringOrNull(validTime.to, `${side}.valid_time.to`),
+    },
+  };
+}
+
 function canonScopeObject(v: Json | undefined): JsonObject {
   const scope = asObject(v, 'scope');
   return {
@@ -1461,6 +1496,16 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     explanation: asString(obj.explanation, 'explanation'),
     content_label: oneOf(obj.content_label, CONTENT_LABELS, 'content_label'),
   }),
+  'conflict.candidate_detected': (obj) => ({
+    ...canonCommon(obj),
+    comparison_id: asString(obj.comparison_id, 'comparison_id'),
+    left: canonConflictEndpoint(obj.left, 'left'),
+    right: canonConflictEndpoint(obj.right, 'right'),
+    detector_version: asString(obj.detector_version, 'detector_version'),
+    reason_codes: asArray(obj.reason_codes, 'reason_codes').map((r) =>
+      oneOf(r, CONFLICT_CANDIDATE_REASONS, 'reason code'),
+    ),
+  }),
 };
 
 export interface Decoded {
@@ -1493,6 +1538,17 @@ export function decodeBody(kind: string, body: Json): Decoded | null {
 const AUTHORITIES = ['trusted_human_capture', 'registered_direct_artifact', 'agent_inferred'];
 const ASSERTION_BASES = ['firsthand', 'responsible_owner', 'reported', 'inferred', 'unknown'];
 const STAGES = ['planned', 'approved', 'implemented', 'validated', 'deployed', 'shipping'];
+/** `scope.stage` made total (M26.7) — "unknown" is a member, not an absence. */
+const STATE_STAGES = [...STAGES, 'unknown'];
+/** Declared in string-sorted order, the same as the Rust enum. */
+const CONFLICT_CANDIDATE_REASONS = [
+  'declared_contradicts_relation',
+  'incompatible_value_hash',
+  'overlapping_scope',
+  'overlapping_valid_time',
+  'same_subject_predicate',
+  'stage_requires_classification',
+];
 const SUBJECT_ROLES = ['project_owner', 'team_member', 'adjacent', 'unknown'];
 
 /** Assertion fields: canonical rebuild for the flattened payload unions. */
@@ -2571,6 +2627,47 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       break;
     }
+    case 'conflict.candidate_detected': {
+      if (!isId128(body.comparison_id)) {
+        throw new RefusedError('comparison_id must be a 128-bit hex id');
+      }
+      if ((body.detector_version as string) === '') {
+        throw new RefusedError('detector_version must be non-empty');
+      }
+      validateConflictEndpoint(body.left as JsonObject, 'left');
+      validateConflictEndpoint(body.right as JsonObject, 'right');
+      const reasons = body.reason_codes as string[];
+      if (reasons.length === 0) {
+        throw new RefusedError(
+          'reason_codes must name at least one reason — a candidate that cannot say why it ' +
+            'was raised is not a signal',
+        );
+      }
+      if (!reasons.every((r, i) => i === 0 || compareUtf8(reasons[i - 1], r) < 0)) {
+        throw new RefusedError('reason_codes must be sorted and duplicate-free');
+      }
+      const [first, second] = orderedEndpoints(body.left as Json, body.right as Json);
+      if (first === second) {
+        throw new RefusedError(
+          'left and right are the same endpoint — a claim does not need classifying against ' +
+            'itself',
+        );
+      }
+      if (canonicalJson(body.left as Json) !== first) {
+        throw new RefusedError(
+          'left must be the lexicographically-first endpoint — the body is a function of the ' +
+            'pair, so an exact retry is exactly a retry',
+        );
+      }
+      const derived = deriveComparisonId(body.left as Json, body.right as Json);
+      if (derived !== body.comparison_id) {
+        throw new RefusedError(
+          `comparison_id ${String(body.comparison_id)} does not follow from these endpoints ` +
+            `(expected ${derived})`,
+        );
+      }
+      break;
+    }
     case 'coverage.fact_recorded': {
       for (const [name, id] of [
         ['fact_id', body.fact_id],
@@ -2856,6 +2953,51 @@ function sortedUniqueIds(ids: string[], what: string): void {
   }
   if ([...seen].sort().join('|') !== ids.join('|')) {
     throw new RefusedError(`${what}: not sorted`);
+  }
+}
+
+/**
+ * One conflict-candidate endpoint (M26.7). The stage check is the one worth
+ * reading: `state_stage` is a denormalization of `scope.stage`, and this is
+ * what stops it becoming a second opinion about it.
+ */
+function validateConflictEndpoint(endpoint: JsonObject, side: string): void {
+  for (const name of [
+    'assertion_event_id',
+    'belief_id',
+    'belief_revision_event_id',
+    'subject_id',
+  ]) {
+    if (!isId128(endpoint[name])) {
+      throw new RefusedError(`${side}.${name} is not a 128-bit hex id`);
+    }
+  }
+  if ((endpoint.predicate as string) === '') {
+    throw new RefusedError(`${side}.predicate must be non-empty`);
+  }
+  if (!isSha256(endpoint.value_hash)) {
+    throw new RefusedError(`${side}.value_hash is not a sha256 digest`);
+  }
+  const scope = endpoint.scope as JsonObject;
+  const expected = scope.stage === null ? 'unknown' : (scope.stage as string);
+  if (endpoint.state_stage !== expected) {
+    throw new RefusedError(
+      `${side}.state_stage is ${String(endpoint.state_stage)}, but its own scope says ` +
+        `${expected} — the stage is a denormalization of the scope, never a second opinion ` +
+        'about it',
+    );
+  }
+  const validTime = endpoint.valid_time as JsonObject;
+  for (const name of ['from', 'to']) {
+    const stamp = validTime[name];
+    if (stamp !== null && !isRfc3339(stamp as string)) {
+      throw new RefusedError(`${side}.valid_time.${name} ${JSON.stringify(stamp)} is not RFC3339`);
+    }
+  }
+  const from = validTime.from as string | null;
+  const to = validTime.to as string | null;
+  if (from !== null && to !== null && from > to) {
+    throw new RefusedError(`${side}.valid_time ends before it starts`);
   }
 }
 

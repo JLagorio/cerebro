@@ -1073,6 +1073,7 @@
         "proposal_ids": []
       }
     },
+    "comparisons": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

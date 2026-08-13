@@ -4064,6 +4064,208 @@ fn scenario_coverage() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// One endpoint over the conformance fixture's shapes.
+fn endpoint(
+    assertion_event: &str,
+    belief_id: &str,
+    revision_event: &str,
+    subject: &str,
+) -> ConflictCandidateEndpointV1 {
+    ConflictCandidateEndpointV1 {
+        assertion_event_id: assertion_event.into(),
+        belief_id: belief_id.into(),
+        belief_revision_event_id: revision_event.into(),
+        subject_id: subject.into(),
+        predicate: "status".into(),
+        value_hash: derive_value_hash(&TypedValue::string("active")).unwrap(),
+        scope: Scope::empty(),
+        state_stage: StateStage::Unknown,
+        valid_time: ValidInterval {
+            from: None,
+            to: None,
+        },
+    }
+}
+
+/// One candidate, with its endpoints put in the order the id sorted them —
+/// which is what a real detector does, because the body is a function of the
+/// pair rather than of the order they were found in.
+fn candidate(
+    left: ConflictCandidateEndpointV1,
+    right: ConflictCandidateEndpointV1,
+    reason_codes: Vec<ConflictCandidateReason>,
+) -> ConflictCandidateDetected {
+    let (first, _) = ordered_endpoints(&left, &right).unwrap();
+    let (left, right) = if serde_json::to_string(&left).unwrap() == first {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let (schema, batch_id, idempotency_key, actor) = common("system:conflict-detector");
+    ConflictCandidateDetected {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        comparison_id: derive_comparison_id(&left, &right).unwrap(),
+        left,
+        right,
+        detector_version: "conflict-detector-v1".into(),
+        reason_codes,
+    }
+}
+
+/// `conflict.candidate_detected` — the pairs handed to M27 (M26.7).
+///
+/// The first event to create a `comparison`, which is why this vector's job
+/// is mostly to prove what a comparison may be MADE of. An endpoint claims
+/// three things — an assertion was recorded, a Belief revision exists, and
+/// that revision's basis used that assertion — and the last is the one worth
+/// a vector: without it, any assertion could be pinned to any Belief and the
+/// resulting `comparison_id` would be perfectly stable and completely
+/// meaningless.
+///
+/// The duplicate vector is the deduplication half. An exact retry never
+/// reaches the reducer — the writer's idempotency key returns the existing
+/// receipt — so a second `conflict.candidate_detected` arriving here is a
+/// duplicate append and is refused, and the comparison stays at v1.
+fn scenario_conflict() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let josef = human_registration("human:josef");
+    let josef_reg = b.push_body(KIND_SOURCE_REGISTERED, &josef);
+    let subject = SubjectRef::Resolved {
+        entity_id: ENTITY.into(),
+        aliases: vec!["Acme Corp".into()],
+    };
+
+    let one = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject.clone(),
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        ),
+    );
+    let two = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject.clone(),
+            vec![],
+            human_payload(AssertionBasis::Reported),
+        ),
+    );
+    // A third assertion nothing ever rests a Belief on — the counterexample
+    // the "basis never named it" refusal needs.
+    let orphan = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject,
+            vec![],
+            human_payload(AssertionBasis::Inferred),
+        ),
+    );
+
+    let linked = |observation: &str| BeliefBasis::Linked {
+        links: vec![BasisLink {
+            observation_event_id: observation.to_string(),
+            role: BasisRole::Supports,
+        }],
+    };
+    let first = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, linked(&one)),
+    );
+    let second = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY, linked(&two)),
+    );
+
+    let left = endpoint(&one, BELIEF, &first, ENTITY);
+    let right = endpoint(&two, BELIEF_B, &second, ENTITY);
+    let detected = candidate(
+        left.clone(),
+        right.clone(),
+        vec![
+            ConflictCandidateReason::IncompatibleValueHash,
+            ConflictCandidateReason::SameSubjectPredicate,
+        ],
+    );
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &detected);
+
+    // A second event for the same pair. The comparison stays at v1.
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &detected);
+
+    // An id that does not follow from the endpoints it summarizes — refused
+    // structurally, before any state is consulted.
+    let mut forged = detected.clone();
+    forged.comparison_id = "0".repeat(32);
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &forged);
+
+    // An assertion the store never recorded.
+    b.push_body(
+        KIND_CONFLICT_CANDIDATE_DETECTED,
+        &candidate(
+            endpoint(&"9".repeat(32), BELIEF, &first, ENTITY),
+            right.clone(),
+            vec![ConflictCandidateReason::SameSubjectPredicate],
+        ),
+    );
+
+    // A revision that belongs to the other Belief.
+    b.push_body(
+        KIND_CONFLICT_CANDIDATE_DETECTED,
+        &candidate(
+            endpoint(&one, BELIEF, &second, ENTITY),
+            right.clone(),
+            vec![ConflictCandidateReason::SameSubjectPredicate],
+        ),
+    );
+
+    // A subject that is not the entity the Belief is about.
+    b.push_body(
+        KIND_CONFLICT_CANDIDATE_DETECTED,
+        &candidate(
+            endpoint(&one, BELIEF, &first, ENTITY_B),
+            right.clone(),
+            vec![ConflictCandidateReason::SameSubjectPredicate],
+        ),
+    );
+
+    // The load-bearing one: a real assertion, a real revision, and a basis
+    // that never named it.
+    b.push_body(
+        KIND_CONFLICT_CANDIDATE_DETECTED,
+        &candidate(
+            endpoint(&orphan, BELIEF, &first, ENTITY),
+            right,
+            vec![ConflictCandidateReason::SameSubjectPredicate],
+        ),
+    );
+
+    (
+        "conflict",
+        "detected comparisons: the pair created at v1, the duplicate append that leaves it \
+         there, a forged id, and every endpoint that cannot earn its assertion, revision, \
+         subject, or basis reference",
+        b.frames,
+    )
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -4090,6 +4292,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_ingest(),
         scenario_semantic(),
         scenario_coverage(),
+        scenario_conflict(),
     ]
 }
 

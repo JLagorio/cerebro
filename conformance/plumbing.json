@@ -168,6 +168,7 @@
     "coverage_gaps": {},
     "ingest_receipts": {},
     "semantic_assessments": {},
+    "comparisons": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

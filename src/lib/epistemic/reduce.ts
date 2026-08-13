@@ -224,6 +224,16 @@ export interface SemanticAssessmentRow {
   proposalIds: string[];
 }
 
+/** One detected comparison (M26.7) — a pair that needs classifying. */
+export interface ComparisonRow {
+  comparisonId: string;
+  eventId: string;
+  left: JsonObject;
+  right: JsonObject;
+  reasonCodes: string[];
+  detectorVersion: string;
+}
+
 export interface EpistemicState {
   sources: Map<string, SourceState>;
   sourceKeys: Map<string, string>;
@@ -255,6 +265,12 @@ export interface EpistemicState {
   semanticAssessments: Map<string, SemanticAssessmentRow>;
   /** Event id → assessment id: a successor receipt names the EVENT. */
   semanticByEvent: Map<string, string>;
+  /**
+   * M26.7's detected comparisons, keyed by comparison id. Portable, because
+   * M27 targets these ids: losing the runtime DB must not erase which
+   * disagreements the app already noticed.
+   */
+  comparisons: Map<string, ComparisonRow>;
   /** M25.4's coverage record — facts, assessments, and gaps, uncollapsed. */
   coverageFacts: Map<string, CoverageFactRow>;
   coverageAssessments: Map<string, CoverageAssessmentRow>;
@@ -292,6 +308,7 @@ function emptyState(): EpistemicState {
     ingestReceipts: new Map(),
     semanticAssessments: new Map(),
     semanticByEvent: new Map(),
+    comparisons: new Map(),
     coverageFacts: new Map(),
     coverageAssessments: new Map(),
     coverageGaps: new Map(),
@@ -549,6 +566,8 @@ function apply(
       return applyCoverageGap(state, frame, body, staged);
     case 'coverage.restored':
       return applyCoverageRestored(state, frame, body, staged);
+    case 'conflict.candidate_detected':
+      return applyConflictCandidate(state, frame, body, staged);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -753,6 +772,120 @@ function applyIngestSemanticAssessed(
     proposalIds: body.proposal_ids as string[],
   });
   state.semanticByEvent.set(frame.event_id, assessmentId);
+}
+
+/**
+ * `conflict.candidate_detected` (M26.7) — a pair put forward for
+ * classification.
+ *
+ * Every check is about ANCHORING. The body already proved it is internally
+ * honest; what it cannot know alone is whether the things it pins exist. An
+ * endpoint claims three references — the assertion was recorded, the revision
+ * belongs to the Belief named, and that revision's basis used the assertion —
+ * and the third is the one that matters: without it, any assertion could be
+ * pinned to any Belief and the resulting comparison id would be perfectly
+ * stable and completely meaningless.
+ *
+ * Unlike the semantic assessment, this DOES create a version: the comparison
+ * is a CAS target because M27 proposes against it.
+ */
+function applyConflictCandidate(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const comparisonId = body.comparison_id as string;
+  const existing = state.comparisons.get(comparisonId);
+  if (existing !== undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} was already detected by event ${existing.eventId} — an ` +
+        'exact retry is deduplicated at the door by its idempotency key, so a second event ' +
+        'reaching the reducer is a duplicate append, not a retry',
+    );
+  }
+  for (const [side, endpoint] of [
+    ['left', body.left as JsonObject],
+    ['right', body.right as JsonObject],
+  ] as [string, JsonObject][]) {
+    anchorConflictEndpoint(state, staged, side, endpoint);
+  }
+  state.comparisons.set(comparisonId, {
+    comparisonId,
+    eventId: frame.event_id,
+    left: body.left as JsonObject,
+    right: body.right as JsonObject,
+    reasonCodes: body.reason_codes as string[],
+    detectorVersion: body.detector_version as string,
+  });
+  createVersion(state, 'comparison', comparisonId, frame.event_id);
+}
+
+/** The three references one endpoint has to earn. */
+function anchorConflictEndpoint(
+  state: EpistemicState,
+  staged: Set<string>,
+  side: string,
+  endpoint: JsonObject,
+): void {
+  const assertionId = endpoint.assertion_event_id as string;
+  const beliefId = endpoint.belief_id as string;
+  const revisionId = endpoint.belief_revision_event_id as string;
+  for (const [name, id] of [
+    ['assertion_event_id', assertionId],
+    ['belief_revision_event_id', revisionId],
+  ] as [string, string][]) {
+    if (staged.has(id)) {
+      throw new RefusedError(
+        `${side}.${name} pins a STAGED event — a comparison is about what the store already ` +
+          'holds, not about what this batch is still trying to write',
+      );
+    }
+  }
+  if (!state.observations.has(assertionId)) {
+    throw new RefusedError(
+      `${side}.assertion_event_id ${assertionId} names no committed observation`,
+    );
+  }
+  const belief = state.beliefs.get(beliefId);
+  if (belief === undefined) {
+    throw new RefusedError(`${side}.belief_id ${beliefId} does not exist`);
+  }
+  if (belief.entityId !== endpoint.subject_id) {
+    throw new RefusedError(
+      `${side}.subject_id ${String(endpoint.subject_id)} is not the entity belief ${beliefId} ` +
+        `is about (${belief.entityId})`,
+    );
+  }
+  const indexed = state.beliefRevisionEvents.get(revisionId);
+  if (indexed === undefined) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id ${revisionId} names no committed revision`,
+    );
+  }
+  if (indexed[0] !== beliefId) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id belongs to belief ${indexed[0]}, not to ${beliefId}`,
+    );
+  }
+  const revision = belief.revisions.find((r) => r.eventId === revisionId);
+  if (revision === undefined) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id is indexed but absent from belief ${beliefId}`,
+    );
+  }
+  // Any basis ROLE counts: a revision that recorded an assertion as `opposes`
+  // weighed it too, and a pair where one side already logged the other as
+  // counterevidence is the most worth classifying, not the least.
+  const links = (revision.basis.links ?? []) as JsonObject[];
+  const used = links.some((link) => link.observation_event_id === assertionId);
+  if (!used) {
+    throw new RefusedError(
+      `${side} pins assertion ${assertionId} to a revision whose basis never named it — an ` +
+        'endpoint is a claim that this Belief rested on this evidence, and a comparison built ' +
+        'from one that did not is a disagreement between two things that never met',
+    );
+  }
 }
 
 // --- M25.4 coverage ---------------------------------------------------------
@@ -2342,6 +2475,29 @@ export function vectorState(state: EpistemicState): Json {
           input_receipt_ids: a.inputReceiptIds,
           outcome: a.outcome,
           proposal_ids: a.proposalIds,
+        };
+      }
+      return out;
+    })(),
+    comparisons: (() => {
+      const out: JsonObject = {};
+      for (const [, c] of sorted([...state.comparisons.entries()])) {
+        out[c.comparisonId] = {
+          detected_by: c.eventId,
+          detector_version: c.detectorVersion,
+          left: [
+            c.left.assertion_event_id,
+            c.left.belief_id,
+            c.left.belief_revision_event_id,
+            c.left.subject_id,
+          ] as Json[],
+          right: [
+            c.right.assertion_event_id,
+            c.right.belief_id,
+            c.right.belief_revision_event_id,
+            c.right.subject_id,
+          ] as Json[],
+          reason_codes: c.reasonCodes,
         };
       }
       return out;

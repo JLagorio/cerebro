@@ -23,6 +23,7 @@
 
 pub mod batch;
 pub mod belief;
+pub mod conflict;
 pub mod coverage;
 pub mod entity_merge;
 pub mod independence;
@@ -49,6 +50,10 @@ pub use batch::BatchCommitted;
 pub use belief::{
     derive_relation_id, BasisLink, BasisRole, BeliefAttested, BeliefBasis, BeliefCreated,
     BeliefRelation, BeliefRevised, EntityAliasAdded, PatchOp, RelationAction, RelationKind,
+};
+pub use conflict::{
+    derive_comparison_id, derive_conflict_candidate_key, derive_value_hash, ordered_endpoints,
+    ConflictCandidateDetected, ConflictCandidateEndpointV1, ConflictCandidateReason, StateStage,
 };
 pub use coverage::{
     AccessResult, ConnectionResult, CoverageAssessed, CoverageFactRecorded, CoverageGap,
@@ -163,6 +168,13 @@ pub const KIND_COVERAGE_RESTORED: &str = "coverage.restored";
 // run, and this says what that run concluded. Processing history on both
 // sides of the seam — neither is evidence (see `semantic.rs`).
 pub const KIND_INGEST_SEMANTIC_ASSESSED: &str = "ingest.semantic_assessed";
+
+// The M26.7 addition, and the one M27 was waiting for.
+// `conflict.candidate_detected` is the deterministic signal that a pair needs
+// CLASSIFYING; the classification vocabulary itself is M27's. It is the first
+// event to create a `comparison` CAS target, which is why the target class
+// has existed since M24 with nothing creating one.
+pub const KIND_CONFLICT_CANDIDATE_DETECTED: &str = "conflict.candidate_detected";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -340,6 +352,7 @@ pub enum EventBody {
     CoverageGap(Box<CoverageGap>),
     CoverageRestored(Box<CoverageRestored>),
     IngestSemanticAssessed(Box<IngestSemanticAssessed>),
+    ConflictCandidateDetected(Box<ConflictCandidateDetected>),
 }
 
 impl EventBody {
@@ -377,6 +390,7 @@ impl EventBody {
             EventBody::CoverageGap(_) => KIND_COVERAGE_GAP,
             EventBody::CoverageRestored(_) => KIND_COVERAGE_RESTORED,
             EventBody::IngestSemanticAssessed(_) => KIND_INGEST_SEMANTIC_ASSESSED,
+            EventBody::ConflictCandidateDetected(_) => KIND_CONFLICT_CANDIDATE_DETECTED,
         }
     }
 
@@ -414,6 +428,7 @@ impl EventBody {
             EventBody::CoverageGap(b) => b.batch_id.as_deref(),
             EventBody::CoverageRestored(b) => b.batch_id.as_deref(),
             EventBody::IngestSemanticAssessed(b) => b.batch_id.as_deref(),
+            EventBody::ConflictCandidateDetected(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -451,6 +466,7 @@ impl EventBody {
             EventBody::CoverageGap(b) => b.idempotency_key.as_deref(),
             EventBody::CoverageRestored(b) => b.idempotency_key.as_deref(),
             EventBody::IngestSemanticAssessed(b) => b.idempotency_key.as_deref(),
+            EventBody::ConflictCandidateDetected(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -492,6 +508,7 @@ impl EventBody {
             EventBody::CoverageGap(b) => b.validate(),
             EventBody::CoverageRestored(b) => b.validate(),
             EventBody::IngestSemanticAssessed(b) => b.validate(),
+            EventBody::ConflictCandidateDetected(b) => b.validate(),
         }
     }
 
@@ -530,6 +547,7 @@ impl EventBody {
             EventBody::CoverageGap(b) => serde_json::to_value(b),
             EventBody::CoverageRestored(b) => serde_json::to_value(b),
             EventBody::IngestSemanticAssessed(b) => serde_json::to_value(b),
+            EventBody::ConflictCandidateDetected(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -616,6 +634,9 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_COVERAGE_RESTORED => EventBody::CoverageRestored(Box::new(gate(kind, body)?)),
         KIND_INGEST_SEMANTIC_ASSESSED => {
             EventBody::IngestSemanticAssessed(Box::new(gate(kind, body)?))
+        }
+        KIND_CONFLICT_CANDIDATE_DETECTED => {
+            EventBody::ConflictCandidateDetected(Box::new(gate(kind, body)?))
         }
         other => {
             return Err(format!(
