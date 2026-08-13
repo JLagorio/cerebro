@@ -182,12 +182,22 @@ pub struct SemanticAssessmentRow {
 }
 
 /// What one assertion said, in the shape a comparison endpoint needs
-/// (M26.7). The value is a DIGEST: the detector compares claims without ever
-/// holding one.
+/// (M26.7). The DETECTOR compares digests: it decides which pairs are worth
+/// classifying without ever holding a claim.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssertionFacet {
     pub predicate: String,
     pub value_hash: String,
+    /// The typed value itself (M27.3c). The GAUNTLET needs it, and only for
+    /// the one deterministic incompatibility rule there is: two booleans or
+    /// two numbers under one predicate, one scope, one stage, and one valid
+    /// time cannot both hold. Everything else — two strings, two lists — is a
+    /// question about meaning, which is exactly what a deterministic rule may
+    /// not answer, so the gauntlet hands it to review instead.
+    ///
+    /// A digest cannot serve: `sha256("AMD") != sha256("AMD Corp")` says the
+    /// bytes differ, never that the claims do.
+    pub value: schema::TypedValue,
     pub scope: schema::Scope,
     pub valid_time: schema::ValidInterval,
     /// When the STORE learned it — the frame's own stamp. This is what
@@ -3143,6 +3153,7 @@ fn apply_observation(
                 AssertionFacet {
                     predicate: assertion.predicate.clone(),
                     value_hash,
+                    value: assertion.value.clone(),
                     scope: assertion.scope.clone(),
                     valid_time: schema::ValidInterval {
                         from: body.valid_from.clone(),

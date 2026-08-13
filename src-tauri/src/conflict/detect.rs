@@ -101,7 +101,7 @@ fn sightings(state: &EpistemicState) -> Vec<Sighting> {
 /// Do two scope qualifiers leave room for each other? An unset qualifier
 /// applies everywhere, so it overlaps anything; two set ones overlap only
 /// when they match.
-fn qualifiers_overlap(a: &Scope, b: &Scope) -> bool {
+pub(crate) fn qualifiers_overlap(a: &Scope, b: &Scope) -> bool {
     [
         (&a.revision, &b.revision),
         (&a.environment, &b.environment),
@@ -114,7 +114,7 @@ fn qualifiers_overlap(a: &Scope, b: &Scope) -> bool {
     })
 }
 
-fn stages_overlap(a: &Scope, b: &Scope) -> bool {
+pub(crate) fn stages_overlap(a: &Scope, b: &Scope) -> bool {
     match (a.stage, b.stage) {
         (Some(left), Some(right)) => left == right,
         _ => true,
@@ -133,7 +133,7 @@ fn instant(stamp: &Option<String>) -> Option<chrono::DateTime<chrono::FixedOffse
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
 }
 
-fn valid_times_overlap(a: &ValidInterval, b: &ValidInterval) -> bool {
+pub(crate) fn valid_times_overlap(a: &ValidInterval, b: &ValidInterval) -> bool {
     let (a_from, a_to) = (instant(&a.from), instant(&a.to));
     let (b_from, b_to) = (instant(&b.from), instant(&b.to));
     let starts_before_other_ends = match (a_from, b_to) {
@@ -310,6 +310,7 @@ pub(crate) mod fixture {
         AssertionFacet {
             predicate: predicate.into(),
             value_hash: derive_value_hash(&TypedValue::string(value)).unwrap(),
+            value: TypedValue::string(value),
             scope,
             valid_time: interval(None, None),
             recorded_at: "2026-08-11T12:00:00.000Z".into(),

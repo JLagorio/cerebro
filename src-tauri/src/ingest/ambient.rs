@@ -295,6 +295,12 @@ fn deterministic(
     // Detection first, so the comparison counts the attention pass reads
     // include this tick's.
     detect_conflicts(vault, store_uuid, &state);
+    // Then the gauntlet, on the same fold — so what it classifies is what the
+    // base already held. Comparisons this tick just appended are deliberately
+    // left for the next one: re-folding the ledger to catch them would double
+    // the cost of every tick to save one interval on a signal nobody is
+    // waiting on, and the classification is idempotent either way.
+    classify_conflicts(vault, store_uuid, &state, chrono::Utc::now());
     // Then the freshness scheduler, on the same fold. It appends only
     // crossings the base has not already recorded, and the crossing's own
     // stamp comes from pinned evidence rather than from now — so a laptop
@@ -399,6 +405,40 @@ fn detect_conflicts(vault: &Path, store_uuid: &str, state: &crate::ledger::reduc
     }
     for (comparison, detail) in &emitted.failed {
         eprintln!("conflict detection: {comparison} could not be recorded — {detail}");
+    }
+}
+
+/// Run D12's gauntlet over every committed comparison nobody has classified.
+///
+/// The overwhelmingly common outcome is a RESOLUTION — "we almost called this
+/// a contradiction, and here is why we did not" — which is quiet by design
+/// and still worth recording: it is what stops the same pair being
+/// re-litigated on every tick.
+///
+/// `as_of` is passed IN for the reason the freshness scheduler's is: the
+/// gauntlet is a pure function of state and that stamp, which is supplied
+/// display content and never ordering (D3).
+fn classify_conflicts(
+    vault: &Path,
+    store_uuid: &str,
+    state: &crate::ledger::reduce::EpistemicState,
+    as_of: chrono::DateTime<chrono::Utc>,
+) {
+    if state.comparisons.is_empty() {
+        return;
+    }
+    let committer = crate::ingest::commit::ShadowCommit::new(vault);
+    let classified_at = as_of.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let emitted = crate::conflict::resolve::emit(state, store_uuid, &classified_at, &committer);
+    if emitted.resolved > 0 || emitted.opened > 0 {
+        eprintln!(
+            "conflict gauntlet: {} resolved apart, {} contradiction edge(s) opened, {} waiting \
+             on review",
+            emitted.resolved, emitted.opened, emitted.needs_semantics
+        );
+    }
+    for (comparison, detail) in &emitted.failed {
+        eprintln!("conflict gauntlet: {comparison} could not be classified — {detail}");
     }
 }
 

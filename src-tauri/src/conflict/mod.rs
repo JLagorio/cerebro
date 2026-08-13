@@ -1,10 +1,16 @@
-//! Potential conflicts as a deterministic signal (M26.7).
+//! Conflict, in three deterministic halves (M26.7, M27.3).
 //!
-//! Two halves and a hard line between them. [`detect`] is a pure function of
-//! reducer state that finds pairs worth classifying; [`emit`] appends each
-//! one exactly once. Neither half decides that anything disagrees — M27 owns
-//! classification, and this module exists so that M27 has committed,
-//! rebuildable input instead of a scan it has to redo.
+//! [`detect`] is a pure function of reducer state that finds pairs worth
+//! classifying; [`emit`] appends each one exactly once. Neither decides that
+//! anything disagrees — they exist so the gauntlet has committed, rebuildable
+//! input instead of a scan it has to redo.
+//!
+//! [`resolve`] is the gauntlet: it runs the committed pairs through D12's
+//! typed gates and, overwhelmingly, resolves them APART. What survives every
+//! gate is either a structural value incompatibility — the only deterministic
+//! contradiction there is — or a question about meaning, which it refuses to
+//! answer and leaves for review.
 
 pub mod detect;
 pub mod emit;
+pub mod resolve;

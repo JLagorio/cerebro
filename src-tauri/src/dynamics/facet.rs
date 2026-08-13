@@ -171,6 +171,7 @@ pub(crate) mod tests {
         AssertionFacet {
             predicate: predicate.into(),
             value_hash: derive_value_hash(&TypedValue::string(predicate)).unwrap(),
+            value: TypedValue::string(predicate),
             scope: Scope {
                 stage,
                 ..Scope::empty()

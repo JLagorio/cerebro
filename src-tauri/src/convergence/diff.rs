@@ -408,6 +408,7 @@ mod tests {
         AssertionFacet {
             predicate: "cutover_status".into(),
             value_hash: derive_value_hash(&TypedValue::string("on track")).unwrap(),
+            value: TypedValue::string("on track"),
             scope: Scope::empty(),
             valid_time: ValidInterval {
                 from: None,

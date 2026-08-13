@@ -692,6 +692,7 @@ mod tests {
                 AssertionFacet {
                     predicate: "ships_with".into(),
                     value_hash: "0".repeat(64),
+                    value: crate::ledger::schema::TypedValue::string("nvidia"),
                     scope: Scope::empty(),
                     valid_time: ValidInterval {
                         from: None,
