@@ -34,34 +34,15 @@ use std::collections::BTreeMap;
 use crate::ledger::reduce::EpistemicState;
 use crate::ledger::sha256_hex;
 
-use super::facet::{BeliefFacetKey, Facet};
+use super::facet::Facet;
+
+// `Freshness` is a wire value — the `from`/`to` of every transition — so it
+// belongs to the ledger schema and is re-exported here rather than declared
+// twice. The RULES that decide it are this module's, and they are data.
+pub use crate::ledger::schema::{BeliefFacetKey, Freshness};
 
 const FRESHNESS_JSON: &str = include_str!("../../../shared/policy/freshness.v1.json");
 const FRESHNESS_DIGEST: &str = include_str!("../../../shared/policy/freshness.v1.sha256");
-
-/// One of the three axes' values (D9). Closed, and `unknown` is a member
-/// rather than an absence.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Freshness {
-    Fresh,
-    Stale,
-    Unknown,
-}
-
-impl Freshness {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Freshness::Fresh => "fresh",
-            Freshness::Stale => "stale",
-            Freshness::Unknown => "unknown",
-        }
-    }
-
-    pub const ALL: [Freshness; 3] = [Freshness::Fresh, Freshness::Stale, Freshness::Unknown];
-}
 
 /// Which recorded time a rule measures from. Closed: a fourth basis is an
 /// artifact change plus a code change, which is the point.

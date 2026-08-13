@@ -33,84 +33,12 @@ use std::collections::BTreeSet;
 use crate::ledger::reduce::{BeliefState, EpistemicState};
 use crate::ledger::schema::{BasisRole, BeliefBasis, StateStage};
 
-/// The predicate half of a facet key, as a tagged value.
-///
-/// `Unknown` is a member rather than a `None`, for the reason
-/// [`StateStage::Unknown`] is: "no predicate was recorded" and "the predicate
-/// is `ci_status`" are different keys, and a nullable field makes a reader
-/// decide which one an absent value meant.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum FacetPredicate {
-    Known { value: String },
-    Unknown,
-}
-
-impl FacetPredicate {
-    /// The predicate string, when there is one. Rules match on this; a facet
-    /// with no predicate matches no rule, which is why freshness for it is
-    /// `unknown` rather than a guess.
-    pub fn value(&self) -> Option<&str> {
-        match self {
-            FacetPredicate::Known { value } => Some(value.as_str()),
-            FacetPredicate::Unknown => None,
-        }
-    }
-
-    pub fn validate(&self) -> Result<(), String> {
-        match self {
-            FacetPredicate::Known { value } if value.is_empty() => Err(
-                "predicate.known carries an empty value — an empty string is the unknown \
-                 variant mis-spelled"
-                    .into(),
-            ),
-            _ => Ok(()),
-        }
-    }
-}
-
-/// What one set of axes is about: a pinned belief revision, and the
-/// `(predicate, stage)` pair within it.
-///
-/// The revision is PINNED, not "current". That is what makes a facet's
-/// history stable: a freshness transition recorded against revision 3 stays
-/// true about revision 3 after revision 4 lands, and the `shipping BOM —
-/// revision-bound` rule of §45 needs no column of its own because the key
-/// already binds it.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BeliefFacetKey {
-    pub belief_id: String,
-    pub belief_revision_event_id: String,
-    pub predicate: FacetPredicate,
-    pub state_stage: StateStage,
-}
-
-impl BeliefFacetKey {
-    pub fn validate(&self) -> Result<(), String> {
-        for (name, id) in [
-            ("belief_id", &self.belief_id),
-            ("belief_revision_event_id", &self.belief_revision_event_id),
-        ] {
-            if !crate::ledger::schema::is_id128(id) {
-                return Err(format!("facet.{name} is not a 128-bit hex id"));
-            }
-        }
-        self.predicate.validate()
-    }
-
-    /// The facet's own 128-bit id — a domain-separated digest over the
-    /// canonical key, in the shape every other derived id here takes.
-    ///
-    /// It exists so reducer state can be keyed by a facet without a composite
-    /// map key that the two implementations would have to spell the same way.
-    pub fn facet_id(&self) -> String {
-        let canonical = serde_json::to_string(self).expect("a closed struct of strings and enums");
-        crate::ledger::schema::sha256_first128(
-            format!("cerebro-belief-facet-v1\0{canonical}").as_bytes(),
-        )
-    }
-}
+// The KEY itself belongs to the ledger schema, not here: it is a field of the
+// `freshness.transitioned` body, and a wire shape defined beside its
+// derivation is a wire shape one refactor away from being defined twice.
+// What this module owns is the WALK — which facets a revision has — and that
+// is Rust-only for the reason the module doc gives.
+pub use crate::ledger::schema::{BeliefFacetKey, FacetPredicate};
 
 /// One derived facet: its key, and the assertion events that produced it.
 ///
@@ -446,9 +374,9 @@ pub(crate) mod tests {
             },
             state_stage: StateStage::Unknown,
         };
-        assert!(key.validate().unwrap_err().contains("mis-spelled"));
+        assert!(key.validate("facet").unwrap_err().contains("mis-spelled"));
         key.predicate = FacetPredicate::Unknown;
-        key.validate().unwrap();
+        key.validate("facet").unwrap();
     }
 
     #[test]

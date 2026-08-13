@@ -20,6 +20,7 @@ import {
   canonicalJson,
   compareUtf8,
   deriveComparisonId,
+  deriveFreshnessDedupeKey,
   deriveRelationId,
   deriveSourceId,
   deriveSourceKey,
@@ -1506,7 +1507,42 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
       oneOf(r, CONFLICT_CANDIDATE_REASONS, 'reason code'),
     ),
   }),
+  'freshness.transitioned': (obj) => ({
+    ...canonCommon(obj),
+    facet: canonBeliefFacetKey(obj.facet),
+    from: oneOf(obj.from, FRESHNESS_VALUES, 'from'),
+    to: oneOf(obj.to, FRESHNESS_VALUES, 'to'),
+    effective_at: asString(obj.effective_at, 'effective_at'),
+    rule_version: asString(obj.rule_version, 'rule_version'),
+    dedupe_key: asString(obj.dedupe_key, 'dedupe_key'),
+  }),
 };
+
+/**
+ * The facet key, rebuilt in the Rust struct's declaration order (M27.1).
+ *
+ * `predicate` is a TAGGED union rather than a nullable string, for the reason
+ * `state_stage` is total: "no predicate was recorded" and "the predicate is
+ * `ci_status`" are different keys, and a null makes a reader decide which one
+ * an absence meant.
+ */
+function canonBeliefFacetKey(v: Json | undefined): JsonObject {
+  const facet = asObject(v, 'facet');
+  const predicate = asObject(facet.predicate, 'facet.predicate');
+  const kind = oneOf(predicate.kind, ['known', 'unknown'], 'facet.predicate.kind');
+  return {
+    belief_id: asString(facet.belief_id, 'facet.belief_id'),
+    belief_revision_event_id: asString(
+      facet.belief_revision_event_id,
+      'facet.belief_revision_event_id',
+    ),
+    predicate:
+      kind === 'known'
+        ? { kind, value: asString(predicate.value, 'facet.predicate.value') }
+        : { kind },
+    state_stage: oneOf(facet.state_stage, STATE_STAGES, 'facet.state_stage'),
+  };
+}
 
 export interface Decoded {
   kind: string;
@@ -1550,6 +1586,8 @@ const CONFLICT_CANDIDATE_REASONS = [
   'stage_requires_classification',
 ];
 const SUBJECT_ROLES = ['project_owner', 'team_member', 'adjacent', 'unknown'];
+/** D9's freshness axis (M27.1) — `unknown` is a member, not an absence. */
+const FRESHNESS_VALUES = ['fresh', 'stale', 'unknown'];
 
 /** Assertion fields: canonical rebuild for the flattened payload unions. */
 function canonAssertionFields(obj: JsonObject): JsonObject {
@@ -2663,6 +2701,51 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (derived !== body.comparison_id) {
         throw new RefusedError(
           `comparison_id ${String(body.comparison_id)} does not follow from these endpoints ` +
+            `(expected ${derived})`,
+        );
+      }
+      break;
+    }
+    case 'freshness.transitioned': {
+      const facet = body.facet as JsonObject;
+      for (const [name, id] of [
+        ['belief_id', facet.belief_id],
+        ['belief_revision_event_id', facet.belief_revision_event_id],
+      ] as [string, Json][]) {
+        if (!isId128(id)) throw new RefusedError(`facet.${name} is not a 128-bit hex id`);
+      }
+      const predicate = facet.predicate as JsonObject;
+      if (predicate.kind === 'known' && predicate.value === '') {
+        throw new RefusedError(
+          'facet.predicate.known carries an empty value — an empty string is the unknown ' +
+            'variant mis-spelled',
+        );
+      }
+      if (body.from === body.to) {
+        throw new RefusedError(
+          `from and to are both ${String(body.to)} — a transition that changed nothing is not ` +
+            'a transition, and recording one would put a crossing in history that never happened',
+        );
+      }
+      if (!isRfc3339(body.effective_at as string)) {
+        throw new RefusedError(`effective_at ${JSON.stringify(body.effective_at)} is not RFC3339`);
+      }
+      if ((body.rule_version as string) === '') {
+        throw new RefusedError(
+          'rule_version must be non-empty — a transition nobody can read against the rules ' +
+            'that produced it is unreadable history',
+        );
+      }
+      const derived = deriveFreshnessDedupeKey(
+        facet.belief_revision_event_id as string,
+        facet.predicate as Json,
+        facet.state_stage as string,
+        body.effective_at as string,
+        body.rule_version as string,
+      );
+      if (derived !== body.dedupe_key) {
+        throw new RefusedError(
+          `dedupe_key ${String(body.dedupe_key)} does not follow from this transition ` +
             `(expected ${derived})`,
         );
       }

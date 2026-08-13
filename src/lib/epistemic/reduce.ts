@@ -6,7 +6,7 @@
  */
 
 import type { Json } from './ids';
-import { attestedContentHash, canonicalJson } from './ids';
+import { attestedContentHash, beliefFacetId, canonicalJson } from './ids';
 import { sha256Hex } from '../sha256';
 import { normalizeAliasV1 } from './normalize';
 import { project } from './project';
@@ -234,6 +234,26 @@ export interface ComparisonRow {
   detectorVersion: string;
 }
 
+/**
+ * One facet's recorded freshness, folded from its transitions (M27.1).
+ *
+ * `folded` is the idempotency ledger the design's append_once semantics need:
+ * the timer and launch catch-up both emit every DUE transition, so the same
+ * `dedupe_key` arriving twice must change nothing at all — including
+ * versions. It is deliberately not projected into the vector state; what a
+ * vector proves about a duplicate is the observable consequence.
+ */
+export interface FreshnessRow {
+  facetId: string;
+  facet: JsonObject;
+  state: string;
+  effectiveAt: string;
+  ruleVersion: string;
+  eventId: string;
+  /** dedupe key -> [event, from, to]. */
+  folded: Map<string, [string, string, string]>;
+}
+
 export interface EpistemicState {
   sources: Map<string, SourceState>;
   sourceKeys: Map<string, string>;
@@ -271,6 +291,12 @@ export interface EpistemicState {
    * disagreements the app already noticed.
    */
   comparisons: Map<string, ComparisonRow>;
+  /**
+   * M27.1's recorded freshness crossings, keyed by facet id. Portable
+   * epistemic history: a rebuild that lost these would forget when a claim
+   * stopped being current.
+   */
+  freshness: Map<string, FreshnessRow>;
   /** M25.4's coverage record — facts, assessments, and gaps, uncollapsed. */
   coverageFacts: Map<string, CoverageFactRow>;
   coverageAssessments: Map<string, CoverageAssessmentRow>;
@@ -309,6 +335,7 @@ function emptyState(): EpistemicState {
     semanticAssessments: new Map(),
     semanticByEvent: new Map(),
     comparisons: new Map(),
+    freshness: new Map(),
     coverageFacts: new Map(),
     coverageAssessments: new Map(),
     coverageGaps: new Map(),
@@ -568,6 +595,8 @@ function apply(
       return applyCoverageRestored(state, frame, body, staged);
     case 'conflict.candidate_detected':
       return applyConflictCandidate(state, frame, body, staged);
+    case 'freshness.transitioned':
+      return applyFreshnessTransitioned(state, frame, body, staged);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -819,6 +848,103 @@ function applyConflictCandidate(
     detectorVersion: body.detector_version as string,
   });
   createVersion(state, 'comparison', comparisonId, frame.event_id);
+}
+
+/**
+ * `freshness.transitioned` (M27.1) — one facet crossing a boundary.
+ *
+ * The reducer FOLDS and derives nothing. Freshness is a pure function of
+ * pinned evidence, a versioned rule, and an explicit `as_of`; re-deriving it
+ * here would need the rules artifact, every assertion's predicate, and a
+ * clock, and this reducer has none of the three.
+ *
+ * Three checks, and the interesting one is the third:
+ *
+ * 1. the facet's revision is committed and belongs to the belief it names;
+ * 2. a repeated `dedupe_key` carrying the SAME transition is an idempotent
+ *    no-op — nothing moves, no version advances — because the timer and
+ *    launch catch-up both emit every due transition and either may win. A
+ *    repeated key carrying a DIFFERENT `from`/`to` is a hard conflict: those
+ *    two fields are the only content the key does not cover;
+ * 3. continuity — `from` must equal what the facet's last transition said it
+ *    became. A facet with no history is checked against nothing, because the
+ *    initial state is derived and the reducer is precisely what does not
+ *    derive.
+ *
+ * There is deliberately NO monotonicity check on `effective_at`: a facet goes
+ * stale at `anchor + duration` and becomes fresh again AT the newer anchor,
+ * so a retroactively-stamped source can legitimately order those backwards.
+ */
+function applyFreshnessTransitioned(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const facet = body.facet as JsonObject;
+  const beliefId = facet.belief_id as string;
+  const revisionId = facet.belief_revision_event_id as string;
+  if (staged.has(revisionId)) {
+    throw new RefusedError(
+      'facet.belief_revision_event_id pins a STAGED event — a freshness transition is about ' +
+        'what the store already holds, not about what this batch is still writing',
+    );
+  }
+  const belief = state.beliefs.get(beliefId);
+  if (belief === undefined) {
+    throw new RefusedError(`facet.belief_id ${beliefId} does not exist`);
+  }
+  if (belief.tombstonedBy !== null) {
+    throw new RefusedError(
+      `belief ${beliefId} is tombstoned — a tombstone is terminal, and a claim nobody may act ` +
+        'on does not go stale',
+    );
+  }
+  const indexed = state.beliefRevisionEvents.get(revisionId);
+  if (indexed === undefined) {
+    throw new RefusedError(
+      `facet.belief_revision_event_id ${revisionId} names no committed revision`,
+    );
+  }
+  if (indexed[0] !== beliefId) {
+    throw new RefusedError(
+      `facet.belief_revision_event_id belongs to belief ${indexed[0]}, not to ${beliefId}`,
+    );
+  }
+
+  const facetId = beliefFacetId(facet as Json);
+  const from = body.from as string;
+  const to = body.to as string;
+  const dedupeKey = body.dedupe_key as string;
+  const row = state.freshness.get(facetId);
+  const folded = row === undefined ? new Map<string, [string, string, string]>() : row.folded;
+  const seen = folded.get(dedupeKey);
+  if (seen !== undefined) {
+    if (seen[1] === from && seen[2] === to) return;
+    throw new RefusedError(
+      `dedupe key ${dedupeKey} was already folded by event ${seen[0]} as ${seen[1]}→${seen[2]}, ` +
+        `and this event says ${from}→${to} — the key covers the transition that was DUE, so a ` +
+        'disagreement about what happened is two producers disagreeing, not a retry',
+    );
+  }
+  if (row !== undefined && row.state !== from) {
+    throw new RefusedError(
+      `this facet is ${row.state} (event ${row.eventId}), and the transition says it was ` +
+        `${from} — a chain whose links do not meet is not a history`,
+    );
+  }
+
+  folded.set(dedupeKey, [frame.event_id, from, to]);
+  state.freshness.set(facetId, {
+    facetId,
+    facet,
+    state: to,
+    effectiveAt: body.effective_at as string,
+    ruleVersion: body.rule_version as string,
+    eventId: frame.event_id,
+    folded,
+  });
+  bumpVersion(state, 'belief', beliefId, frame.event_id);
 }
 
 /** The three references one endpoint has to earn. */
@@ -2498,6 +2624,23 @@ export function vectorState(state: EpistemicState): Json {
             c.right.subject_id,
           ] as Json[],
           reason_codes: c.reasonCodes,
+        };
+      }
+      return out;
+    })(),
+    freshness: (() => {
+      const out: JsonObject = {};
+      for (const [, f] of sorted([...state.freshness.entries()])) {
+        const predicate = f.facet.predicate as JsonObject;
+        out[f.facetId] = {
+          belief_id: f.facet.belief_id,
+          belief_revision_event_id: f.facet.belief_revision_event_id,
+          predicate: predicate.kind === 'known' ? (predicate.value as string) : null,
+          state_stage: f.facet.state_stage,
+          state: f.state,
+          effective_at: f.effectiveAt,
+          rule_version: f.ruleVersion,
+          transitioned_by: f.eventId,
         };
       }
       return out;

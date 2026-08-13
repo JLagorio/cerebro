@@ -217,6 +217,29 @@ pub struct ComparisonRow {
     pub detector_version: String,
 }
 
+/// One facet's recorded freshness, folded from its transitions (M27.1).
+///
+/// `folded` is the idempotency ledger the design's append_once semantics
+/// need: the timer and launch catch-up both emit every DUE transition, so the
+/// same `dedupe_key` arriving twice must change nothing at all — including
+/// versions. It is deliberately not projected into the conformance vectors;
+/// what a vector proves is the observable consequence (the row did not move
+/// and no version advanced), which is exactly what a wrong implementation
+/// would get wrong.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FreshnessRow {
+    pub facet_id: String,
+    pub facet: schema::BeliefFacetKey,
+    /// What the latest folded transition says this facet IS.
+    pub state: schema::Freshness,
+    pub effective_at: String,
+    pub rule_version: String,
+    /// The transition that put it in this state.
+    pub event_id: String,
+    /// dedupe key -> (event, from, to).
+    pub folded: BTreeMap<String, (String, schema::Freshness, schema::Freshness)>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevisionState {
     pub revision: u64,
@@ -649,6 +672,12 @@ pub struct EpistemicState {
     /// contradiction edges target these ids: losing the runtime DB must not
     /// erase which pairs were already handed over.
     pub comparisons: BTreeMap<String, ComparisonRow>,
+    /// M27.1's recorded freshness crossings, keyed by
+    /// [`schema::BeliefFacetKey::facet_id`]. In the vector contract because
+    /// the crossing is portable epistemic history: a rebuild that lost these
+    /// would forget when a claim stopped being current, and both reducers
+    /// have to agree that an exact retry changed nothing.
+    pub freshness: BTreeMap<String, FreshnessRow>,
     /// Producer-side index (deliberately OUTSIDE the vector contract, like
     /// `assertion_facets`): belief-revision event → the frame stamp the store
     /// wrote it under. M27.1's `belief_revision_time` freshness basis reads
@@ -965,6 +994,9 @@ fn apply(
         EventBody::CoverageRestored(b) => apply_coverage_restored(state, frame, b, staged),
         EventBody::ConflictCandidateDetected(b) => {
             apply_conflict_candidate(state, frame, b, staged)
+        }
+        EventBody::FreshnessTransitioned(b) => {
+            apply_freshness_transitioned(state, frame, b, staged)
         }
     }
 }
@@ -1829,6 +1861,136 @@ fn anchor_conflict_endpoint(
             endpoint.assertion_event_id
         )));
     }
+    Ok(())
+}
+
+// --- M27.1 freshness --------------------------------------------------------
+
+/// `freshness.transitioned` (M27.1) — one facet crossing a boundary.
+///
+/// The reducer FOLDS and derives nothing. Freshness is a pure function of
+/// pinned evidence, a versioned rule, and an explicit `as_of`; re-deriving it
+/// here would need the rules artifact, every assertion's predicate, and a
+/// clock, and the TypeScript reducer has none of the three.
+///
+/// Three checks, and the interesting one is the third:
+///
+/// 1. the facet's revision is committed and belongs to the belief it names —
+///    the same anchoring a comparison endpoint earns;
+/// 2. a repeated `dedupe_key` carrying the SAME transition is an idempotent
+///    no-op (nothing moves, no version advances), because the timer and launch
+///    catch-up both emit every due transition and either may win. A repeated
+///    key carrying a DIFFERENT `from`/`to` is a hard conflict: those two
+///    fields are the only content the key does not cover, so a disagreement
+///    about them is two producers disagreeing about what happened;
+/// 3. continuity — `from` must equal what the facet's last transition said it
+///    became. A facet with no history is checked against nothing, because
+///    there is nothing to check against: the initial state is derived, and the
+///    reducer is precisely the thing that does not derive.
+///
+/// There is deliberately NO monotonicity check on `effective_at`. A facet goes
+/// stale at `anchor + duration` and becomes fresh again AT the newer anchor,
+/// so a source that stamps evidence retroactively can legitimately make
+/// "became fresh" earlier than "went stale". Enforcing an order would mean
+/// reaching for the wall clock, which is the one thing this event exists to
+/// avoid.
+fn apply_freshness_transitioned(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::FreshnessTransitioned,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    let facet = &body.facet;
+    if staged.contains(&facet.belief_revision_event_id) {
+        return Err(refused(
+            "facet.belief_revision_event_id pins a STAGED event — a freshness transition is \
+             about what the store already holds, not about what this batch is still writing",
+        ));
+    }
+    let belief = state.beliefs.get(&facet.belief_id).ok_or_else(|| {
+        refused(format!(
+            "facet.belief_id {} does not exist",
+            facet.belief_id
+        ))
+    })?;
+    if belief.tombstoned_by.is_some() {
+        return Err(refused(format!(
+            "belief {} is tombstoned — a tombstone is terminal, and a claim nobody may act on \
+             does not go stale",
+            facet.belief_id
+        )));
+    }
+    let (revision_belief, _) = state
+        .belief_revision_events
+        .get(&facet.belief_revision_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "facet.belief_revision_event_id {} names no committed revision",
+                facet.belief_revision_event_id
+            ))
+        })?;
+    if revision_belief != &facet.belief_id {
+        return Err(refused(format!(
+            "facet.belief_revision_event_id belongs to belief {revision_belief}, not to {}",
+            facet.belief_id
+        )));
+    }
+
+    let facet_id = facet.facet_id();
+    if let Some(row) = state.freshness.get(&facet_id) {
+        if let Some((event_id, from, to)) = row.folded.get(&body.dedupe_key) {
+            if *from == body.from && *to == body.to {
+                // The retry the design asks for: the timer and launch
+                // catch-up computed the same due transition, and the second
+                // one changes nothing at all.
+                return Ok(());
+            }
+            return Err(refused(format!(
+                "dedupe key {} was already folded by event {event_id} as {}→{}, and this event \
+                 says {}→{} — the key covers the transition that was DUE, so a disagreement \
+                 about what happened is two producers disagreeing, not a retry",
+                body.dedupe_key,
+                from.as_str(),
+                to.as_str(),
+                body.from.as_str(),
+                body.to.as_str()
+            )));
+        }
+        if row.state != body.from {
+            return Err(refused(format!(
+                "this facet is {} (event {}), and the transition says it was {} — a chain whose \
+                 links do not meet is not a history",
+                row.state.as_str(),
+                row.event_id,
+                body.from.as_str()
+            )));
+        }
+    }
+
+    let mut folded = state
+        .freshness
+        .get(&facet_id)
+        .map(|row| row.folded.clone())
+        .unwrap_or_default();
+    folded.insert(
+        body.dedupe_key.clone(),
+        (frame.event_id.clone(), body.from, body.to),
+    );
+    state.freshness.insert(
+        facet_id.clone(),
+        FreshnessRow {
+            facet_id,
+            facet: facet.clone(),
+            state: body.to,
+            effective_at: body.effective_at.clone(),
+            rule_version: body.rule_version.clone(),
+            event_id: frame.event_id.clone(),
+            folded,
+        },
+    );
+    // The matrix M22 declared and M27 extends: a freshness transition
+    // increments the facet's Belief once, and touches nothing else.
+    state.bump_version("belief", &facet.belief_id, &frame.event_id);
     Ok(())
 }
 
@@ -4001,6 +4163,32 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                         .iter()
                         .map(|r| r.as_str())
                         .collect::<Vec<_>>(),
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M27.1: recorded freshness crossings, keyed by facet id. In the
+        // vector contract because the crossing is portable history and both
+        // reducers have to land on the same one — including agreeing that an
+        // exact retry moved nothing.
+        //
+        // `folded` is NOT projected: it is idempotency bookkeeping, and what
+        // a vector proves about a duplicate is the observable consequence
+        // (this row unchanged, no version advanced, no refusal), which is
+        // exactly what a wrong implementation gets wrong.
+        "freshness": state
+            .freshness
+            .values()
+            .map(|f| (
+                f.facet_id.clone(),
+                serde_json::json!({
+                    "belief_id": f.facet.belief_id,
+                    "belief_revision_event_id": f.facet.belief_revision_event_id,
+                    "predicate": f.facet.predicate.value(),
+                    "state_stage": f.facet.state_stage.as_str(),
+                    "state": f.state.as_str(),
+                    "effective_at": f.effective_at,
+                    "rule_version": f.rule_version,
+                    "transitioned_by": f.event_id,
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),

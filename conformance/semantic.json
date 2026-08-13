@@ -1074,6 +1074,7 @@
       }
     },
     "comparisons": {},
+    "freshness": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

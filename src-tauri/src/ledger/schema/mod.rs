@@ -26,6 +26,7 @@ pub mod belief;
 pub mod conflict;
 pub mod coverage;
 pub mod entity_merge;
+pub mod freshness;
 pub mod independence;
 pub mod ingest;
 pub mod lifecycle;
@@ -63,6 +64,10 @@ pub use coverage::{
     ACTOR_VAULT_INDEXER,
 };
 pub use entity_merge::{derive_plan_id, EntityMerged, EntityReassignmentPlan, LiveAlias};
+pub use freshness::{
+    derive_freshness_dedupe_key, derive_freshness_transition_key, BeliefFacetKey, FacetPredicate,
+    Freshness, FreshnessTransitioned,
+};
 pub use independence::{IndependenceProof, IndependenceRecorded};
 pub use ingest::{
     derive_item_id, derive_receipt_id, Independence, IngestAssessed, MaterialDimension,
@@ -175,6 +180,12 @@ pub const KIND_INGEST_SEMANTIC_ASSESSED: &str = "ingest.semantic_assessed";
 // event to create a `comparison` CAS target, which is why the target class
 // has existed since M24 with nothing creating one.
 pub const KIND_CONFLICT_CANDIDATE_DETECTED: &str = "conflict.candidate_detected";
+
+// The M27 additions. `freshness.transitioned` is the first: a CROSSING
+// recorded, never a clock read. Freshness itself is derived (D9); this event
+// is how the moment it changed enters portable history, so a surface can say
+// when and a rebuild lands on the same bytes.
+pub const KIND_FRESHNESS_TRANSITIONED: &str = "freshness.transitioned";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -353,6 +364,7 @@ pub enum EventBody {
     CoverageRestored(Box<CoverageRestored>),
     IngestSemanticAssessed(Box<IngestSemanticAssessed>),
     ConflictCandidateDetected(Box<ConflictCandidateDetected>),
+    FreshnessTransitioned(Box<FreshnessTransitioned>),
 }
 
 impl EventBody {
@@ -391,6 +403,7 @@ impl EventBody {
             EventBody::CoverageRestored(_) => KIND_COVERAGE_RESTORED,
             EventBody::IngestSemanticAssessed(_) => KIND_INGEST_SEMANTIC_ASSESSED,
             EventBody::ConflictCandidateDetected(_) => KIND_CONFLICT_CANDIDATE_DETECTED,
+            EventBody::FreshnessTransitioned(_) => KIND_FRESHNESS_TRANSITIONED,
         }
     }
 
@@ -429,6 +442,7 @@ impl EventBody {
             EventBody::CoverageRestored(b) => b.batch_id.as_deref(),
             EventBody::IngestSemanticAssessed(b) => b.batch_id.as_deref(),
             EventBody::ConflictCandidateDetected(b) => b.batch_id.as_deref(),
+            EventBody::FreshnessTransitioned(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -467,6 +481,7 @@ impl EventBody {
             EventBody::CoverageRestored(b) => b.idempotency_key.as_deref(),
             EventBody::IngestSemanticAssessed(b) => b.idempotency_key.as_deref(),
             EventBody::ConflictCandidateDetected(b) => b.idempotency_key.as_deref(),
+            EventBody::FreshnessTransitioned(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -509,6 +524,7 @@ impl EventBody {
             EventBody::CoverageRestored(b) => b.validate(),
             EventBody::IngestSemanticAssessed(b) => b.validate(),
             EventBody::ConflictCandidateDetected(b) => b.validate(),
+            EventBody::FreshnessTransitioned(b) => b.validate(),
         }
     }
 
@@ -548,6 +564,7 @@ impl EventBody {
             EventBody::CoverageRestored(b) => serde_json::to_value(b),
             EventBody::IngestSemanticAssessed(b) => serde_json::to_value(b),
             EventBody::ConflictCandidateDetected(b) => serde_json::to_value(b),
+            EventBody::FreshnessTransitioned(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -637,6 +654,9 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         }
         KIND_CONFLICT_CANDIDATE_DETECTED => {
             EventBody::ConflictCandidateDetected(Box::new(gate(kind, body)?))
+        }
+        KIND_FRESHNESS_TRANSITIONED => {
+            EventBody::FreshnessTransitioned(Box::new(gate(kind, body)?))
         }
         other => {
             return Err(format!(

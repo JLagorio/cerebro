@@ -75,3 +75,41 @@ export function deriveComparisonId(left: Json, right: Json): string {
 export function deriveValueHash(value: Json): string {
   return sha256Hex(`cerebro-conflict-value-v1\0${canonicalJson(value)}`);
 }
+
+/**
+ * A belief facet's own id (M27.1) — the digest of its canonical key.
+ *
+ * The key's field order is the Rust struct's declaration order, which is
+ * what the canonical body carries; passing the body's own `facet` object
+ * through unchanged is therefore exact, and rebuilding it field by field
+ * here would be a second chance to disagree about the order.
+ */
+export function beliefFacetId(facet: Json): string {
+  return sha256Hex(`cerebro-belief-facet-v1\0${canonicalJson(facet)}`).slice(0, 32);
+}
+
+/**
+ * The five fields the design names — revision, predicate, stage,
+ * `effective_at`, `rule_version` — and deliberately NOT `from`/`to`.
+ *
+ * The key identifies the transition a rule and a body of evidence make DUE,
+ * so two producers computing it independently arrive at the same key; a
+ * disagreement about what the transition WAS stays visible as a conflict
+ * instead of being deduplicated away.
+ */
+export function deriveFreshnessDedupeKey(
+  beliefRevisionEventId: string,
+  predicate: Json,
+  stateStage: string,
+  effectiveAt: string,
+  ruleVersion: string,
+): string {
+  const tuple = canonicalJson([
+    beliefRevisionEventId,
+    predicate,
+    stateStage,
+    effectiveAt,
+    ruleVersion,
+  ]);
+  return sha256Hex(`cerebro-freshness-dedupe-v1\0${tuple}`).slice(0, 32);
+}

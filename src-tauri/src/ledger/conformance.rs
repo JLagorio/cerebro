@@ -4266,6 +4266,229 @@ fn scenario_conflict() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// One `freshness.transitioned` body over a facet.
+fn transition(
+    belief_id: &str,
+    revision_event: &str,
+    predicate: FacetPredicate,
+    state_stage: StateStage,
+    from: Freshness,
+    to: Freshness,
+    effective_at: &str,
+) -> FreshnessTransitioned {
+    let (schema, batch_id, idempotency_key, actor) = common("system:freshness");
+    let rule_version = "freshness-v1".to_string();
+    let dedupe_key = derive_freshness_dedupe_key(
+        revision_event,
+        &predicate,
+        state_stage,
+        effective_at,
+        &rule_version,
+    )
+    .unwrap();
+    FreshnessTransitioned {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        facet: BeliefFacetKey {
+            belief_id: belief_id.into(),
+            belief_revision_event_id: revision_event.into(),
+            predicate,
+            state_stage,
+        },
+        from,
+        to,
+        effective_at: effective_at.into(),
+        rule_version,
+        dedupe_key,
+    }
+}
+
+/// `freshness.transitioned` — the crossing, recorded (M27.1).
+///
+/// The three properties that need a cross-language vector rather than a Rust
+/// test, because a TypeScript reducer can get each of them wrong in a way
+/// that looks right:
+///
+/// - **an exact retry changes NOTHING**, including the Belief version. The
+///   timer and launch catch-up both emit every due transition, so this is the
+///   ordinary case rather than an edge; an implementation that refused it
+///   would fill a real ledger with anomalies, and one that re-applied it
+///   would double-count every version.
+/// - **the same dedupe key with a different `from`/`to` is a hard conflict.**
+///   Those two fields are the only content the key does not cover, so a
+///   disagreement about them is two producers disagreeing about what
+///   happened — the one thing deduplication must not hide.
+/// - **continuity**: a transition claiming to start from a state the facet
+///   was not in is refused. The reducer does not derive freshness, so this
+///   chain is the only thing keeping the recorded history honest.
+///
+/// A second facet on the SAME revision, at a different stage, proves the key
+/// is the facet and not the belief: two rows, two independent histories, one
+/// revision.
+fn scenario_freshness() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let josef = human_registration("human:josef");
+    let josef_reg = b.push_body(KIND_SOURCE_REGISTERED, &josef);
+    let subject = SubjectRef::Resolved {
+        entity_id: ENTITY.into(),
+        aliases: vec!["Acme Corp".into()],
+    };
+    let assertion = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject,
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        ),
+    );
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(
+            BELIEF,
+            ENTITY,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: assertion,
+                    role: BasisRole::Supports,
+                }],
+            },
+        ),
+    );
+
+    let ci = FacetPredicate::Known {
+        value: "ci_status".into(),
+    };
+    let went_stale = transition(
+        BELIEF,
+        &created,
+        ci.clone(),
+        StateStage::Implemented,
+        Freshness::Fresh,
+        Freshness::Stale,
+        "2026-08-12T09:00:00.000Z",
+    );
+    // Belief v1 -> v2.
+    b.push_body(KIND_FRESHNESS_TRANSITIONED, &went_stale);
+
+    // The retry the design asks for: identical bytes, no effect at all. The
+    // Belief stays at v2 and there is no refusal.
+    b.push_body(KIND_FRESHNESS_TRANSITIONED, &went_stale);
+
+    // The same key, a different story. Refused: dedupe covers what was DUE,
+    // never what happened.
+    let mut disagreeing = went_stale.clone();
+    disagreeing.from = Freshness::Unknown;
+    b.push_body(KIND_FRESHNESS_TRANSITIONED, &disagreeing);
+
+    // Continuity: this facet is stale, and a transition that says it was
+    // fresh does not meet the chain.
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &created,
+            ci.clone(),
+            StateStage::Implemented,
+            Freshness::Fresh,
+            Freshness::Unknown,
+            "2026-08-13T09:00:00.000Z",
+        ),
+    );
+
+    // Newer evidence, so the same facet is fresh again — AT the new anchor,
+    // which is EARLIER than the boundary it went stale on. Deliberate: a
+    // retroactively-stamped source can do exactly this, and a monotonicity
+    // rule would have to read the wall clock to forbid it.
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &created,
+            ci,
+            StateStage::Implemented,
+            Freshness::Stale,
+            Freshness::Fresh,
+            "2026-08-12T08:00:00.000Z",
+        ),
+    );
+
+    // A second facet on the SAME revision: different stage, own history.
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &created,
+            FacetPredicate::Known {
+                value: "ci_status".into(),
+            },
+            StateStage::Shipping,
+            Freshness::Fresh,
+            Freshness::Stale,
+            "2026-08-12T09:00:00.000Z",
+        ),
+    );
+
+    // A revision that belongs to no Belief at all.
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &"9".repeat(32),
+            FacetPredicate::Unknown,
+            StateStage::Unknown,
+            Freshness::Fresh,
+            Freshness::Stale,
+            "2026-08-12T09:00:00.000Z",
+        ),
+    );
+
+    // A transition that changed nothing — refused structurally, before state
+    // is consulted at all.
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &created,
+            FacetPredicate::Unknown,
+            StateStage::Unknown,
+            Freshness::Stale,
+            Freshness::Stale,
+            "2026-08-12T09:00:00.000Z",
+        ),
+    );
+
+    // A dedupe key that does not follow from the body it summarizes.
+    let mut forged = transition(
+        BELIEF,
+        &created,
+        FacetPredicate::Unknown,
+        StateStage::Unknown,
+        Freshness::Fresh,
+        Freshness::Stale,
+        "2026-08-12T09:00:00.000Z",
+    );
+    forged.dedupe_key = "0".repeat(32);
+    b.push_body(KIND_FRESHNESS_TRANSITIONED, &forged);
+
+    (
+        "freshness",
+        "recorded freshness crossings: one facet going stale and coming back at an earlier \
+         effective time, the exact retry that changes nothing, the same dedupe key telling a \
+         different story, a broken chain, a second facet on the same revision, and every \
+         structural refusal",
+        b.frames,
+    )
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -4293,6 +4516,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_semantic(),
         scenario_coverage(),
         scenario_conflict(),
+        scenario_freshness(),
     ]
 }
 
@@ -4494,6 +4718,12 @@ fn the_vector_suite_covers_every_kind() {
         KIND_COVERAGE_RESTORED,
         // M26.
         KIND_INGEST_SEMANTIC_ASSESSED,
+        // M26.7 — `conflict.json` has exercised this since it shipped; the
+        // list had simply not been extended, which is the same quiet drift
+        // the M24 note above records.
+        KIND_CONFLICT_CANDIDATE_DETECTED,
+        // M27.
+        KIND_FRESHNESS_TRANSITIONED,
     ] {
         assert!(kinds.contains(kind), "no vector exercises {kind}");
     }

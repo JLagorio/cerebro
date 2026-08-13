@@ -625,6 +625,7 @@
     "ingest_receipts": {},
     "semantic_assessments": {},
     "comparisons": {},
+    "freshness": {},
     "reconciliation": {
       "open": false,
       "divergences": {},
