@@ -69,6 +69,18 @@ fn decode(raw: &str) -> Vec<String> {
     raw.split(',').map(str::to_string).collect()
 }
 
+/// The stored verdict (M26.7e). Derived from the signal list here and tied to
+/// it by a CHECK in the table, so "we looked and found nothing" and "we never
+/// looked" can never be the same row — the difference that a NULL-free
+/// `signals` column alone could not express.
+fn verdict(encoded: &str) -> &'static str {
+    if encoded.is_empty() {
+        "no_signal"
+    } else {
+        "suspected_instructional_content"
+    }
+}
+
 /// Record one assessment against one Observation.
 ///
 /// Idempotent for identical bytes, and an error for the same key with a
@@ -101,13 +113,15 @@ pub fn record(
     }
     conn.execute(
         "INSERT INTO source_taint_assessments \
-         (vault_id, store_uuid, observation_event_id, classifier_version, signals, assessed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         (vault_id, store_uuid, observation_event_id, classifier_version, verdict, signals, \
+          assessed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         rusqlite::params![
             vault_id,
             store_uuid,
             observation_event_id,
             assessment.classifier_version,
+            verdict(&encoded),
             encoded,
             now
         ],
@@ -127,6 +141,9 @@ pub fn get(
         "SELECT signals, assessed_at FROM source_taint_assessments \
          WHERE vault_id = ?1 AND store_uuid = ?2 AND observation_event_id = ?3 \
            AND classifier_version = ?4",
+        // `verdict` is not read back: it is derived from `signals` and the
+        // table's CHECK is what guarantees they agree. Reading both would be
+        // a second chance for this module to disagree with itself.
         rusqlite::params![
             vault_id,
             store_uuid,
@@ -154,7 +171,8 @@ pub fn get(
 pub fn suspected_count(conn: &Connection, vault_id: &str, store_uuid: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT count(DISTINCT observation_event_id) FROM source_taint_assessments \
-         WHERE vault_id = ?1 AND store_uuid = ?2 AND signals <> ''",
+         WHERE vault_id = ?1 AND store_uuid = ?2 \
+           AND verdict = 'suspected_instructional_content'",
         rusqlite::params![vault_id, store_uuid],
         |row| row.get(0),
     )
@@ -271,7 +289,7 @@ mod tests {
         let (_dir, conn, vault) = fixture("taint-downgrade");
         conn.execute(
             "INSERT INTO source_taint_assessments VALUES (?1, ?2, ?3, 'taint-v9', \
-             'something_v9_invented', ?4)",
+             'suspected_instructional_content', 'something_v9_invented', ?4)",
             rusqlite::params![vault, STORE, OBS, NOW],
         )
         .unwrap();

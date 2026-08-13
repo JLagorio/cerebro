@@ -760,3 +760,167 @@ pub const SCHEMA_V8: &str = "
     CREATE INDEX source_monitor_by_source
         ON source_monitor_state (vault_id, source_id);
 ";
+
+/// The M26.7e schema — the governance rows M28's windows are reproducible
+/// from.
+///
+/// **These exist so later promotions are argued from records rather than from
+/// anecdotes.** Nothing reads them yet; that is the point. A decision about
+/// whether the resolver is good enough to run unattended, or whether a pass
+/// costs what it claims, has to be answerable from rows that were already
+/// being written when nobody was looking.
+///
+/// **`run_cost_components` is one row per component, not one wide row.** The
+/// unit belongs to the component and the component list is closed, so a CHECK
+/// can enforce the pairing — a wide row would have ten nullable columns and
+/// no way to tell "zero" from "we did not measure". Zero is a valid quantity
+/// here; absence is not, which is exactly why a successful belief-affecting
+/// synthesis writes all ten.
+///
+/// **`resolver_outcomes` is a flat union with CHECKs**, mirroring the tagged
+/// union in `ingest::resolver`. Flat because SQL has no sum type; checked
+/// because the invariants are the whole value of the record. An attached row
+/// must name what it attached to; a parked row must not.
+///
+/// **`source_taint_assessments` is rebuilt to carry an explicit verdict.** It
+/// has held `signals` since M25, and "suspected" was derivable from the list
+/// being non-empty — in Rust, by a method. The design wants that invariant
+/// structural, so the verdict is a column and a CHECK ties it to the list.
+/// The signal SPELLINGS stay as `ingest::taint` writes them: they name the
+/// same five heuristics as the design's list, and renaming them would break
+/// the downgrade contract (`Signal::parse` returns `None` for a name a build
+/// does not know) for nothing.
+pub const SCHEMA_V9: &str = "
+    CREATE TABLE resolver_outcomes (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        attempt_id TEXT NOT NULL CHECK (attempt_id <> ''),
+        run_id TEXT NOT NULL CHECK (run_id <> ''),
+        ingest_item_id TEXT NOT NULL CHECK (ingest_item_id <> ''),
+        artifact_id TEXT NOT NULL CHECK (artifact_id <> ''),
+        assertion_event_id TEXT
+            CHECK (assertion_event_id IS NULL OR length(assertion_event_id) = 32),
+        assertion_candidate_hash TEXT NOT NULL
+            CHECK (length(assertion_candidate_hash) = 64),
+        eligible INTEGER NOT NULL CHECK (eligible IN (0, 1)),
+        ineligible_reason TEXT CHECK (ineligible_reason IS NULL OR ineligible_reason IN (
+            'subject_none', 'malformed_subject', 'non_assertion_observation',
+            'missing_assertion_event', 'already_attached'
+        )),
+        outcome TEXT NOT NULL CHECK (outcome IN (
+            'ineligible', 'exact_id', 'known_alias', 'explicit_relation',
+            'normalized_match', 'unresolved', 'claim_granularity_blocked',
+            'conflicting_attachment'
+        )),
+        attachment_state TEXT CHECK (attachment_state IS NULL
+                                     OR attachment_state IN ('attached', 'parked')),
+        chosen_entity_id TEXT CHECK (chosen_entity_id IS NULL OR length(chosen_entity_id) = 32),
+        prior_entity_id TEXT CHECK (prior_entity_id IS NULL OR length(prior_entity_id) = 32),
+        prior_resolution_event_id TEXT
+            CHECK (prior_resolution_event_id IS NULL OR length(prior_resolution_event_id) = 32),
+        target_count INTEGER CHECK (target_count IS NULL OR target_count >= 1),
+        candidate_count INTEGER CHECK (candidate_count IS NULL OR candidate_count >= 0),
+        normalized_mention_hashes TEXT,
+        candidate_entity_ids TEXT,
+        reason_codes TEXT NOT NULL,
+        attempted_at TEXT NOT NULL CHECK (attempted_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, attempt_id),
+        -- An ineligible attempt never reached an outcome, and an eligible one
+        -- always did. The two halves cannot borrow each other's columns.
+        CHECK ((eligible = 0) = (outcome = 'ineligible')),
+        CHECK ((eligible = 0) = (ineligible_reason IS NOT NULL)),
+        CHECK ((eligible = 1) = (attachment_state IS NOT NULL)),
+        CHECK ((eligible = 1) = (target_count IS NOT NULL)),
+        -- Attaching means naming what you attached to; parking means not.
+        CHECK (attachment_state IS NOT 'attached' OR chosen_entity_id IS NOT NULL),
+        CHECK (outcome <> 'conflicting_attachment'
+               OR (prior_entity_id IS NOT NULL AND prior_resolution_event_id IS NOT NULL))
+    );
+    CREATE INDEX resolver_outcomes_by_outcome
+        ON resolver_outcomes (vault_id, store_uuid, outcome, attempted_at);
+
+    CREATE TABLE run_cost_components (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        run_id TEXT NOT NULL CHECK (run_id <> ''),
+        component TEXT NOT NULL CHECK (component IN (
+            'uncached_input_tokens', 'cache_read_tokens', 'cache_write_tokens',
+            'output_tokens', 'retrieval_calls', 'tool_calls',
+            'selected_context_bytes', 'selected_context_tokens',
+            'prompt_template_bytes', 'prompt_template_tokens'
+        )),
+        unit TEXT NOT NULL CHECK (unit IN ('tokens', 'calls', 'bytes')),
+        model_id TEXT CHECK (model_id IS NULL OR model_id <> ''),
+        quantity INTEGER NOT NULL CHECK (quantity >= 0),
+        observed_cost_micros INTEGER
+            CHECK (observed_cost_micros IS NULL OR observed_cost_micros >= 0),
+        pricing_snapshot_id TEXT
+            CHECK (pricing_snapshot_id IS NULL OR pricing_snapshot_id <> ''),
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, run_id, component),
+        -- The unit belongs to the component, not to the caller.
+        CHECK (
+            (component IN ('uncached_input_tokens', 'cache_read_tokens',
+                           'cache_write_tokens', 'output_tokens',
+                           'selected_context_tokens', 'prompt_template_tokens')
+             AND unit = 'tokens')
+            OR (component IN ('retrieval_calls', 'tool_calls') AND unit = 'calls')
+            OR (component IN ('selected_context_bytes', 'prompt_template_bytes')
+                AND unit = 'bytes')
+        ),
+        -- Model accounting needs a model. The call, context, and template
+        -- rows are measurements of what we did, not of what a model charged.
+        CHECK (component NOT IN ('uncached_input_tokens', 'cache_read_tokens',
+                                 'cache_write_tokens', 'output_tokens')
+               OR model_id IS NOT NULL)
+    );
+    CREATE UNIQUE INDEX run_cost_components_once
+        ON run_cost_components (run_id, component);
+
+    CREATE TABLE assembly_metrics (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        run_id TEXT NOT NULL CHECK (run_id <> ''),
+        manifest_id TEXT NOT NULL
+            CHECK (length(manifest_id) = 32 AND manifest_id = lower(manifest_id)),
+        intended_stakes TEXT NOT NULL
+            CHECK (intended_stakes IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+        source_count INTEGER NOT NULL CHECK (source_count >= 0),
+        evidence_item_count INTEGER NOT NULL CHECK (evidence_item_count >= 0),
+        context_bytes INTEGER NOT NULL CHECK (context_bytes >= 0),
+        retrieval_query_count INTEGER NOT NULL CHECK (retrieval_query_count >= 0),
+        blocked_intent_count INTEGER NOT NULL CHECK (blocked_intent_count >= 0),
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, run_id, manifest_id)
+    );
+
+    -- The taint table, rebuilt with an explicit verdict. SQLite cannot add a
+    -- CHECK to a live table, and the invariant is worth a rebuild: `signals`
+    -- alone made 'we looked and found nothing' and 'we never looked' the same
+    -- row.
+    ALTER TABLE source_taint_assessments RENAME TO source_taint_assessments_v4;
+    CREATE TABLE source_taint_assessments (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        observation_event_id TEXT NOT NULL,
+        classifier_version TEXT NOT NULL,
+        verdict TEXT NOT NULL
+            CHECK (verdict IN ('no_signal', 'suspected_instructional_content')),
+        signals TEXT NOT NULL,
+        assessed_at TEXT NOT NULL CHECK (assessed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, observation_event_id, classifier_version),
+        CHECK ((verdict = 'no_signal') = (signals = ''))
+    );
+    INSERT INTO source_taint_assessments
+        (vault_id, store_uuid, observation_event_id, classifier_version,
+         verdict, signals, assessed_at)
+        SELECT vault_id, store_uuid, observation_event_id, classifier_version,
+               CASE WHEN signals = '' THEN 'no_signal'
+                    ELSE 'suspected_instructional_content' END,
+               signals, assessed_at
+        FROM source_taint_assessments_v4;
+    DROP TABLE source_taint_assessments_v4;
+    CREATE INDEX source_taint_suspected
+        ON source_taint_assessments (vault_id, store_uuid)
+        WHERE verdict = 'suspected_instructional_content';
+";

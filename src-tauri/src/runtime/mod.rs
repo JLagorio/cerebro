@@ -38,6 +38,7 @@
 pub mod budget;
 pub mod catchup;
 pub mod dispatch;
+pub mod governance;
 pub mod health;
 pub mod import;
 pub mod normalize;
@@ -78,7 +79,7 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// The schema version this build speaks. M24 established 2 (`operational_log`
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
 /// meter, budget, coverage cache, and settings at 3.
-pub const USER_VERSION: i64 = 8;
+pub const USER_VERSION: i64 = 9;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -206,7 +207,44 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V8,
         validate: validate_v8,
     },
+    Migration {
+        to: 9,
+        sql: schema::SCHEMA_V9,
+        validate: validate_v9,
+    },
 ];
+
+/// The four tables `user_version = 9` promises. `source_taint_assessments` is
+/// among them because v9 REBUILDS it — a migration that renamed the old table
+/// and failed to repopulate the new one would otherwise pass unnoticed until
+/// the first read.
+fn validate_v9(conn: &Connection) -> Result<(), String> {
+    for table in [
+        "resolver_outcomes",
+        "run_cost_components",
+        "assembly_metrics",
+        "source_taint_assessments",
+    ] {
+        conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|e| format!("validating {table}: {e}"))?;
+    }
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE name = 'source_taint_assessments_v4'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(|e| format!("checking for the old taint table: {e}"))
+    .and_then(|left| {
+        if left == 0 {
+            Ok(())
+        } else {
+            Err("the v4 taint table survived its own migration".to_string())
+        }
+    })?;
+    Ok(())
+}
 
 /// The one table `user_version = 8` promises, checked the same way.
 fn validate_v8(conn: &Connection) -> Result<(), String> {
