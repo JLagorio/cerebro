@@ -301,6 +301,11 @@ fn deterministic(
     // the cost of every tick to save one interval on a signal nobody is
     // waiting on, and the classification is idempotent either way.
     classify_conflicts(vault, store_uuid, &state, chrono::Utc::now());
+    // Then the legacy sweep, which is a different question about a different
+    // input: declarations nobody ever backed with evidence. It is idempotent
+    // and skips itself entirely on a base with no live `contradicts`
+    // relation, which is most of them.
+    backfill_declarations(vault, store_uuid, &read.frames, &state, chrono::Utc::now());
     // Then the freshness scheduler, on the same fold. It appends only
     // crossings the base has not already recorded, and the crossing's own
     // stamp comes from pinned evidence rather than from now — so a laptop
@@ -439,6 +444,50 @@ fn classify_conflicts(
     }
     for (comparison, detail) in &emitted.failed {
         eprintln!("conflict gauntlet: {comparison} could not be classified — {detail}");
+    }
+}
+
+/// Classify every declared `contradicts` relation the base still holds.
+///
+/// Nothing may be gated on classification until this has run over the whole
+/// pre-activation prefix, so its checkpoint is what M27.4's gate and M27.6's
+/// lanes will read before they trust an empty edge set.
+///
+/// It walks FRAMES, which the tick already has in hand, because "the revision
+/// current at the relation event" is a question about position and the
+/// reducer keeps no event-to-position index.
+fn backfill_declarations(
+    vault: &Path,
+    store_uuid: &str,
+    frames: &[crate::ledger::frame::Frame],
+    state: &crate::ledger::reduce::EpistemicState,
+    as_of: chrono::DateTime<chrono::Utc>,
+) {
+    let any_declared = state.relations.values().any(|relation| {
+        relation.live && relation.relation == crate::ledger::schema::RelationKind::Contradicts
+    });
+    if !any_declared {
+        return;
+    }
+    let committer = crate::ingest::commit::ShadowCommit::new(vault);
+    let appender = crate::conflict::emit::ShadowAppend::new(vault);
+    let classified_at = as_of.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let ran = crate::conflict::backfill::run(
+        frames,
+        state,
+        store_uuid,
+        &classified_at,
+        &committer,
+        &appender,
+    );
+    if ran.classified > 0 {
+        eprintln!(
+            "contradiction backfill: {} declaration(s) classified, {} already done",
+            ran.classified, ran.already_done
+        );
+    }
+    for (subject, detail) in &ran.failed {
+        eprintln!("contradiction backfill: {subject} — {detail}");
     }
 }
 

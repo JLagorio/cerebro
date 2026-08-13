@@ -10,7 +10,13 @@
 //! gate is either a structural value incompatibility — the only deterministic
 //! contradiction there is — or a question about meaning, which it refuses to
 //! answer and leaves for review.
+//!
+//! [`backfill`] is the one-time sweep that gives the same treatment to
+//! declarations nobody ever backed with evidence — the `contradicts`
+//! relations a migration inherited or a person typed before any of this
+//! existed. Nothing may be gated on classification until it has run.
 
+pub mod backfill;
 pub mod detect;
 pub mod emit;
 pub mod resolve;
