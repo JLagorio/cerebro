@@ -28,15 +28,9 @@ use std::collections::BTreeSet;
 
 use crate::ledger::reduce::CoverageAssessment;
 use crate::ledger::reduce::EpistemicState;
-use crate::ledger::schema::{
-    AbsenceRecord, AssertionBasis, AuthorityProvenance, ObservationKind, ProposalOp, ProposalV1,
-    SubjectRef, TypedValue,
-};
+use crate::ledger::schema::{AbsenceRecord, ProposalOp, ProposalV1, SubjectRef, TypedValue};
 
-use super::authority::{
-    AuthorityRoute, Criterion, RouteBasis, RouteCapability, RouteObservationKind,
-    RouteRegistrationKind,
-};
+use super::authority::AuthorityRoute;
 use super::preconditions::PreconditionFailure;
 use super::table::PolicyTable;
 
@@ -141,103 +135,6 @@ fn subject_of(state: &EpistemicState, proposal: &ProposalV1) -> Option<String> {
             .get(belief_id)
             .map(|belief| belief.entity_id.clone()),
         _ => None,
-    }
-}
-
-/// Does this Observation satisfy this criterion?
-///
-/// Every leg is read from the ledger, never from the proposal: an agent's
-/// claim that its own assertion is firsthand is a claim, and D11 is the rule
-/// that it never becomes proof.
-fn satisfies(state: &EpistemicState, observation_id: &str, criterion: &Criterion) -> bool {
-    let Some(observation) = state.observations.get(observation_id) else {
-        return false;
-    };
-    let kind = match observation.kind {
-        ObservationKind::HumanAssertion => RouteObservationKind::HumanAssertion,
-        ObservationKind::ExtractedAssertion => RouteObservationKind::ExtractedAssertion,
-        _ => return false,
-    };
-    let capability = match observation.authority {
-        Some(AuthorityProvenance::TrustedHumanCapture) => RouteCapability::HumanAssertion,
-        Some(AuthorityProvenance::RegisteredDirectArtifact) => {
-            RouteCapability::DirectSystemArtifact
-        }
-        // `agent_inferred` carries no authority capability at all — that is
-        // the whole of D11 in one arm.
-        _ => return false,
-    };
-    // The route artifact names three registration kinds; `cerebro_runtime`
-    // and `legacy_reference` are not among them, and an observation from one
-    // therefore carries no route authority at all.
-    let registration = state
-        .sources
-        .get(&observation.source_id)
-        .and_then(|source| match source.registration.kind_str() {
-            "builtin" => Some(RouteRegistrationKind::Builtin),
-            "connector" => Some(RouteRegistrationKind::Connector),
-            "human_actor" => Some(RouteRegistrationKind::HumanActor),
-            _ => None,
-        });
-
-    match criterion {
-        Criterion::DirectArtifact {
-            observation_kind,
-            registration_kinds,
-            authority_capability,
-            require_source_artifact_hash,
-            require_raw_pointer,
-        } => {
-            if kind != *observation_kind || capability != *authority_capability {
-                return false;
-            }
-            if !registration.is_some_and(|r| registration_kinds.contains(&r)) {
-                return false;
-            }
-            // THE OTHER M25 EDGE. A cached artifact's hash and raw pointer
-            // are written by `cache_source`, which nothing reduces into
-            // source state yet. Unconfirmable is not confirmed.
-            if *require_source_artifact_hash || *require_raw_pointer {
-                return false;
-            }
-            true
-        }
-        Criterion::ResponsibleOwnerFirsthand {
-            observation_kind,
-            registration_kind,
-            authority_capability,
-            relationship_roles,
-            assertion_bases,
-        }
-        | Criterion::FirsthandObserver {
-            observation_kind,
-            registration_kind,
-            authority_capability,
-            relationship_roles,
-            assertion_bases,
-        } => {
-            if kind != *observation_kind || capability != *authority_capability {
-                return false;
-            }
-            if registration != Some(*registration_kind) {
-                return false;
-            }
-            let basis = match observation.assertion_basis {
-                Some(AssertionBasis::Firsthand) => RouteBasis::Firsthand,
-                Some(AssertionBasis::ResponsibleOwner) => RouteBasis::ResponsibleOwner,
-                Some(AssertionBasis::Reported) => RouteBasis::Reported,
-                Some(AssertionBasis::Inferred) => RouteBasis::Inferred,
-                Some(AssertionBasis::Unknown) | None => RouteBasis::Unknown,
-            };
-            if !assertion_bases.contains(&basis) {
-                return false;
-            }
-            // THE M25 EDGE. A relationship role is a property of the
-            // registered source, and no source registration carries one yet.
-            // Unverifiable is not verified: the criterion does not match, the
-            // proposal queues, and a human decides.
-            relationship_roles.is_empty()
-        }
     }
 }
 
@@ -366,7 +263,7 @@ pub fn high_stakes(
             route
                 .criteria
                 .iter()
-                .any(|criterion| satisfies(state, reference, criterion))
+                .any(|criterion| super::authority::satisfies(state, reference, criterion))
         });
         match matched {
             None => return HighStakes::Queue(queue),

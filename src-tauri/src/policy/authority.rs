@@ -437,6 +437,191 @@ impl AuthorityRoutesV1 {
     }
 }
 
+/// Does this Observation satisfy this criterion? (M27.2b)
+///
+/// **Every leg is read from the ledger, never from the proposal.** An agent's
+/// claim that its own assertion is firsthand is a claim, and D11 is the rule
+/// that it never becomes proof. The order matters: registration first, then
+/// derived provenance, and only THEN the payload's own tags — because
+/// `relationship_to_subject.role` is trustworthy exactly when the store has
+/// already established that this actor is the registered human the source is
+/// bound to. On an `agent_inferred` observation the identical field proves
+/// nothing, and the arms below never reach it.
+///
+/// **This is the ONE evaluator.** M24's high-stakes rule
+/// ([`super::coverage::high_stakes`]) called a private copy of it until M27.2;
+/// two readings of one artifact are two rules, and they drift on exactly the
+/// criteria nobody exercises.
+///
+/// **The two M25 edges are closed here, and it is a behaviour change worth
+/// naming.** They read:
+///
+/// - *"a cached artifact's hash and raw pointer are written by `cache_source`,
+///   which nothing reduces into source state yet"* — true of SOURCE state, and
+///   beside the point: both fields are required, non-optional members of
+///   `ExtractedAssertionPayload`, on the Observation itself. M27.2 indexes them
+///   in `assertion_facets` and the criterion checks them there.
+/// - *"a relationship role is a property of the registered source, and no
+///   source registration carries one yet"* — the role is a property of the
+///   ASSERTION, and its trustworthiness is a property of the registration. The
+///   design says so exactly: a human route requires the trusted registration,
+///   the bound actor, AND an `m22 human_assertion` whose
+///   `relationship_to_subject.role` is permitted.
+///
+/// Until this closed, no Observation could satisfy any route, so
+/// `authoritative_for_predicate_stage` was underivable and every high-stakes
+/// proposal queued regardless of its evidence. "Unverifiable is not verified"
+/// was the right answer while the facts were genuinely absent; they are not.
+pub fn satisfies(
+    state: &crate::ledger::reduce::EpistemicState,
+    observation_id: &str,
+    criterion: &Criterion,
+) -> bool {
+    use crate::ledger::schema::{
+        AssertionBasis, AuthorityProvenance, ObservationKind, SubjectRole,
+    };
+
+    let Some(observation) = state.observations.get(observation_id) else {
+        return false;
+    };
+    let kind = match observation.kind {
+        ObservationKind::HumanAssertion => RouteObservationKind::HumanAssertion,
+        ObservationKind::ExtractedAssertion => RouteObservationKind::ExtractedAssertion,
+        _ => return false,
+    };
+    let capability = match observation.authority {
+        Some(AuthorityProvenance::TrustedHumanCapture) => RouteCapability::HumanAssertion,
+        Some(AuthorityProvenance::RegisteredDirectArtifact) => {
+            RouteCapability::DirectSystemArtifact
+        }
+        // `agent_inferred` carries no authority capability at all — that is
+        // the whole of D11 in one arm.
+        _ => return false,
+    };
+    // The route artifact names three registration kinds; `cerebro_runtime` and
+    // `legacy_reference` are not among them, and an Observation from one
+    // therefore carries no route authority whatever its payload says. A
+    // runtime cache row with no ledger registration lands here as `None`.
+    let Some(source) = state.sources.get(&observation.source_id) else {
+        return false;
+    };
+    // The registration the OBSERVATION pinned has to be the one this source
+    // actually holds. A mismatch means the assertion is quoting a registration
+    // that was not in force for it.
+    if source.registration_event_id != observation.source_registration_event_id {
+        return false;
+    }
+    // The REGISTRATION's own capability, checked separately from the
+    // provenance derived off it. `derive_authority` grants
+    // `registered_direct_artifact` only to a `direct_system_artifact`
+    // registration today, so this is belt and braces — and the design names it
+    // as its own requirement precisely so a later loosening of that derivation
+    // cannot quietly hand a `content_only` builtin an authority route. A test
+    // drives exactly that state.
+    let registered_capability = match source.registration.capability() {
+        crate::ledger::schema::AuthorityCapability::HumanAssertion => {
+            Some(RouteCapability::HumanAssertion)
+        }
+        crate::ledger::schema::AuthorityCapability::DirectSystemArtifact => {
+            Some(RouteCapability::DirectSystemArtifact)
+        }
+        // `content_only` is not a route capability at all.
+        _ => None,
+    };
+    if registered_capability != Some(capability) {
+        return false;
+    }
+    let registration = match source.registration.kind_str() {
+        "builtin" => Some(RouteRegistrationKind::Builtin),
+        "connector" => Some(RouteRegistrationKind::Connector),
+        "human_actor" => Some(RouteRegistrationKind::HumanActor),
+        _ => None,
+    };
+    let facet = state.assertion_facets.get(observation_id);
+
+    match criterion {
+        Criterion::DirectArtifact {
+            observation_kind,
+            registration_kinds,
+            authority_capability,
+            require_source_artifact_hash,
+            require_raw_pointer,
+        } => {
+            if kind != *observation_kind || capability != *authority_capability {
+                return false;
+            }
+            if !registration.is_some_and(|r| registration_kinds.contains(&r)) {
+                return false;
+            }
+            let Some(facet) = facet else { return false };
+            // Checkable AGAINST the artifact rather than against a label. An
+            // empty string is an absent hash spelled differently.
+            let present =
+                |value: &Option<String>| value.as_deref().is_some_and(|text| !text.is_empty());
+            if *require_source_artifact_hash && !present(&facet.source_artifact_hash) {
+                return false;
+            }
+            if *require_raw_pointer && !present(&facet.raw_pointer) {
+                return false;
+            }
+            true
+        }
+        Criterion::ResponsibleOwnerFirsthand {
+            observation_kind,
+            registration_kind,
+            authority_capability,
+            relationship_roles,
+            assertion_bases,
+        }
+        | Criterion::FirsthandObserver {
+            observation_kind,
+            registration_kind,
+            authority_capability,
+            relationship_roles,
+            assertion_bases,
+        } => {
+            if kind != *observation_kind || capability != *authority_capability {
+                return false;
+            }
+            if registration != Some(*registration_kind) {
+                return false;
+            }
+            // The bound actor, explicitly. `trusted_human_capture` already
+            // implies it (`derive_authority` grants that provenance only when
+            // the actor IS the registered one), and the design names it as a
+            // separate requirement — so it is checked separately rather than
+            // inherited from a derivation somebody could later loosen.
+            let bound = match &source.registration {
+                crate::ledger::schema::SourceRegistration::HumanActor { actor_id, .. } => {
+                    actor_id.as_str()
+                }
+                _ => return false,
+            };
+            if bound != observation.actor {
+                return false;
+            }
+            let basis = match observation.assertion_basis {
+                Some(AssertionBasis::Firsthand) => RouteBasis::Firsthand,
+                Some(AssertionBasis::ResponsibleOwner) => RouteBasis::ResponsibleOwner,
+                Some(AssertionBasis::Reported) => RouteBasis::Reported,
+                Some(AssertionBasis::Inferred) => RouteBasis::Inferred,
+                Some(AssertionBasis::Unknown) | None => RouteBasis::Unknown,
+            };
+            if !assertion_bases.contains(&basis) {
+                return false;
+            }
+            let Some(facet) = facet else { return false };
+            let role = match facet.relationship_role {
+                SubjectRole::ProjectOwner => RouteRole::ProjectOwner,
+                SubjectRole::TeamMember => RouteRole::TeamMember,
+                SubjectRole::Adjacent => RouteRole::Adjacent,
+                SubjectRole::Unknown => RouteRole::Unknown,
+            };
+            relationship_roles.contains(&role)
+        }
+    }
+}
+
 /// Every artifact this build can resolve pinned refs against.
 pub fn resolvable() -> Result<Vec<AuthorityRoutesV1>, String> {
     RESOLVABLE_ARTIFACTS
@@ -448,6 +633,264 @@ pub fn resolvable() -> Result<Vec<AuthorityRoutesV1>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ledger::reduce::{AssertionFacet, EpistemicState, ObservationState, SourceState};
+    use crate::ledger::schema::{
+        AssertionBasis, AuthorityProvenance, ObservationKind, Scope, SourceRegistration,
+        SubjectRef, SubjectRole, ValidInterval,
+    };
+
+    const OBS: &str = "20000000000000000000000000000001";
+    const SOURCE: &str = "50000000000000000000000000000001";
+    const REG: &str = "60000000000000000000000000000001";
+    const ENTITY: &str = "e0000000000000000000000000000001";
+
+    struct Fixture {
+        state: EpistemicState,
+    }
+
+    impl Fixture {
+        /// One registered source, one observation, one indexed assertion.
+        fn new(
+            registration: SourceRegistration,
+            kind: ObservationKind,
+            authority: AuthorityProvenance,
+            actor: &str,
+        ) -> Fixture {
+            let mut state = EpistemicState::default();
+            state.sources.insert(
+                SOURCE.into(),
+                SourceState {
+                    source_id: SOURCE.into(),
+                    registration_event_id: REG.into(),
+                    registration,
+                    canonical: String::new(),
+                },
+            );
+            state.observations.insert(
+                OBS.into(),
+                ObservationState {
+                    event_id: OBS.into(),
+                    seq: 1,
+                    kind,
+                    source_id: SOURCE.into(),
+                    source_registration_event_id: REG.into(),
+                    subject: SubjectRef::Resolved {
+                        entity_id: ENTITY.into(),
+                        aliases: vec![],
+                    },
+                    effective_entity: Some(ENTITY.into()),
+                    effective_resolution_event: None,
+                    authority: Some(authority),
+                    assertion_basis: Some(AssertionBasis::Firsthand),
+                    absence: None,
+                    actor: actor.into(),
+                    lineage_parents: vec![],
+                },
+            );
+            state.assertion_facets.insert(
+                OBS.into(),
+                AssertionFacet {
+                    predicate: "ships_with".into(),
+                    value_hash: "0".repeat(64),
+                    scope: Scope::empty(),
+                    valid_time: ValidInterval {
+                        from: None,
+                        to: None,
+                    },
+                    recorded_at: "2026-08-01T00:00:00.000Z".into(),
+                    observed_at: None,
+                    relationship_role: SubjectRole::Unknown,
+                    source_artifact_hash: None,
+                    raw_pointer: None,
+                },
+            );
+            Fixture { state }
+        }
+
+        fn direct_artifact() -> Fixture {
+            let mut fixture = Fixture::new(
+                crate::ledger::schema::source::tests::registration("connector"),
+                ObservationKind::ExtractedAssertion,
+                AuthorityProvenance::RegisteredDirectArtifact,
+                "system:connector",
+            );
+            let facet = fixture.state.assertion_facets.get_mut(OBS).unwrap();
+            facet.source_artifact_hash = Some("a".repeat(64));
+            facet.raw_pointer = Some("github://acme/repo/blob/main/bom.yml#L3".into());
+            fixture
+        }
+
+        fn human(role: SubjectRole, basis: AssertionBasis) -> Fixture {
+            let mut fixture = Fixture::new(
+                crate::ledger::schema::source::tests::registration("human_actor"),
+                ObservationKind::HumanAssertion,
+                AuthorityProvenance::TrustedHumanCapture,
+                "human:josef",
+            );
+            fixture
+                .state
+                .observations
+                .get_mut(OBS)
+                .unwrap()
+                .assertion_basis = Some(basis);
+            fixture
+                .state
+                .assertion_facets
+                .get_mut(OBS)
+                .unwrap()
+                .relationship_role = role;
+            fixture
+        }
+
+        fn matches(&self, route_id: &str) -> bool {
+            let artifact = AuthorityRoutesV1::load().unwrap();
+            let route = artifact
+                .routes
+                .iter()
+                .find(|route| route.authority_route_id == route_id)
+                .expect("a route by that id");
+            route
+                .criteria
+                .iter()
+                .any(|criterion| satisfies(&self.state, OBS, criterion))
+        }
+    }
+
+    #[test]
+    fn a_direct_production_artifact_can_be_authoritative_without_human_authorship() {
+        // The acceptance row. Until M27.2b closed the M25 edge, nothing could
+        // satisfy any route, so this returned false for the wrong reason.
+        assert!(Fixture::direct_artifact().matches("route.observable_machine_state"));
+    }
+
+    #[test]
+    fn a_direct_artifact_without_its_hash_or_pointer_satisfies_nothing() {
+        // What makes the claim checkable AGAINST the artifact rather than
+        // against a label. An empty string is an absent hash spelled
+        // differently, and both spellings fail.
+        for (hash, pointer) in [
+            (None, Some("ptr".to_string())),
+            (Some("a".repeat(64)), None),
+            (Some(String::new()), Some("ptr".to_string())),
+            (Some("a".repeat(64)), Some(String::new())),
+        ] {
+            let fixture = Fixture::direct_artifact();
+            let mut fixture = fixture;
+            let facet = fixture.state.assertion_facets.get_mut(OBS).unwrap();
+            facet.source_artifact_hash = hash.clone();
+            facet.raw_pointer = pointer.clone();
+            assert!(
+                !fixture.matches("route.observable_machine_state"),
+                "hash {hash:?} pointer {pointer:?} should not match"
+            );
+        }
+    }
+
+    #[test]
+    fn a_responsible_owner_firsthand_human_can_be_authoritative_for_intent() {
+        assert!(
+            Fixture::human(SubjectRole::ProjectOwner, AssertionBasis::ResponsibleOwner)
+                .matches("route.intent_rationale")
+        );
+    }
+
+    #[test]
+    fn a_team_member_takes_the_observer_route_and_not_the_owner_one() {
+        // Both criteria live on `route.intent_rationale`; only the observer
+        // one admits a team member, and only for a firsthand basis.
+        let member = Fixture::human(SubjectRole::TeamMember, AssertionBasis::Firsthand);
+        assert!(member.matches("route.intent_rationale"));
+        // `route.committed_organizational_state` carries only the
+        // responsible-owner criterion, which a team member never satisfies.
+        assert!(!member.matches("route.committed_organizational_state"));
+    }
+
+    #[test]
+    fn an_adjacent_role_satisfies_no_human_route() {
+        assert!(
+            !Fixture::human(SubjectRole::Adjacent, AssertionBasis::Firsthand)
+                .matches("route.intent_rationale")
+        );
+    }
+
+    #[test]
+    fn an_unknown_role_proves_nothing_and_neither_does_a_reported_basis() {
+        assert!(
+            !Fixture::human(SubjectRole::Unknown, AssertionBasis::Firsthand)
+                .matches("route.intent_rationale")
+        );
+        assert!(
+            !Fixture::human(SubjectRole::ProjectOwner, AssertionBasis::Reported)
+                .matches("route.intent_rationale")
+        );
+    }
+
+    #[test]
+    fn a_payload_claiming_ownership_over_agent_inferred_content_satisfies_nothing() {
+        // D11 in one test: the identical `relationship_to_subject.role` that
+        // carries a trusted human capture proves nothing here, because the
+        // arms never reach it — the provenance is checked first.
+        let mut fixture = Fixture::new(
+            crate::ledger::schema::source::tests::registration("human_actor"),
+            ObservationKind::HumanAssertion,
+            AuthorityProvenance::AgentInferred,
+            "agent:sneaky",
+        );
+        fixture
+            .state
+            .assertion_facets
+            .get_mut(OBS)
+            .unwrap()
+            .relationship_role = SubjectRole::ProjectOwner;
+        assert!(!fixture.matches("route.intent_rationale"));
+    }
+
+    #[test]
+    fn an_assertion_quoting_a_registration_this_source_does_not_hold_satisfies_nothing() {
+        let mut fixture = Fixture::direct_artifact();
+        fixture
+            .state
+            .observations
+            .get_mut(OBS)
+            .unwrap()
+            .source_registration_event_id = "9".repeat(32);
+        assert!(!fixture.matches("route.observable_machine_state"));
+    }
+
+    #[test]
+    fn a_content_only_or_legacy_registration_can_never_carry_a_route() {
+        for kind in ["builtin", "cerebro_runtime", "legacy_reference"] {
+            let mut fixture = Fixture::new(
+                crate::ledger::schema::source::tests::registration(kind),
+                ObservationKind::ExtractedAssertion,
+                AuthorityProvenance::RegisteredDirectArtifact,
+                "system:whatever",
+            );
+            let facet = fixture.state.assertion_facets.get_mut(OBS).unwrap();
+            facet.source_artifact_hash = Some("a".repeat(64));
+            facet.raw_pointer = Some("ptr".into());
+            assert!(
+                !fixture.matches("route.observable_machine_state"),
+                "{kind} must carry no route authority"
+            );
+        }
+    }
+
+    #[test]
+    fn a_human_route_needs_the_registrations_own_bound_actor() {
+        let mut fixture = Fixture::human(SubjectRole::ProjectOwner, AssertionBasis::Firsthand);
+        fixture.state.observations.get_mut(OBS).unwrap().actor = "human:someone-else".into();
+        assert!(!fixture.matches("route.intent_rationale"));
+    }
+
+    #[test]
+    fn an_observation_with_no_indexed_assertion_satisfies_nothing() {
+        // A snapshot or a system event supports a belief and asserts no
+        // predicate; there is nothing for a route to read.
+        let mut fixture = Fixture::direct_artifact();
+        fixture.state.assertion_facets.remove(OBS);
+        assert!(!fixture.matches("route.observable_machine_state"));
+    }
 
     fn repo(rel: &str) -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

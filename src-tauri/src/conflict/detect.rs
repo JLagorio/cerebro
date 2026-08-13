@@ -314,6 +314,9 @@ pub(crate) mod fixture {
             valid_time: interval(None, None),
             recorded_at: "2026-08-11T12:00:00.000Z".into(),
             observed_at: None,
+            relationship_role: crate::ledger::schema::SubjectRole::Unknown,
+            source_artifact_hash: None,
+            raw_pointer: None,
         }
     }
 

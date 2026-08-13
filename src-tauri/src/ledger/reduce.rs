@@ -197,6 +197,24 @@ pub struct AssertionFacet {
     /// When the SOURCE says it happened. Labeled, never trusted for ordering
     /// (D3), and carried so a surface can show it without a second read.
     pub observed_at: Option<String>,
+    /// The claimed relationship of the asserter to the subject (M27.2).
+    ///
+    /// A CLAIM, and never proof on its own — D11's whole point. It becomes
+    /// usable only inside [`crate::policy::authority::satisfies`], which
+    /// reaches it after the registration has already established
+    /// `trusted_human_capture`, i.e. after the store has verified that this
+    /// actor is the registered human this source is bound to. On an
+    /// `agent_inferred` observation the same field proves nothing at all.
+    pub relationship_role: schema::SubjectRole,
+    /// D7 content addressing over the captured artifact, and the pointer back
+    /// into it. Present exactly for an extracted assertion; `None` for a human
+    /// one, which has no artifact.
+    ///
+    /// These are what make a direct-artifact route checkable AGAINST the
+    /// artifact rather than against a label, which is why the route criterion
+    /// requires both.
+    pub source_artifact_hash: Option<String>,
+    pub raw_pointer: Option<String>,
 }
 
 /// One detected comparison, reduced (M26.7).
@@ -2470,6 +2488,13 @@ fn apply_observation(
     // agree on, and a second sorted key is a second chance to disagree.
     if let Some(assertion) = payload.assertion() {
         if let Ok(value_hash) = schema::derive_value_hash(&assertion.value) {
+            let (source_artifact_hash, raw_pointer) = match &payload {
+                ObservationPayload::ExtractedAssertion(extracted) => (
+                    Some(extracted.source_artifact_hash.clone()),
+                    Some(extracted.raw_pointer.clone()),
+                ),
+                _ => (None, None),
+            };
             state.assertion_facets.insert(
                 frame.event_id.clone(),
                 AssertionFacet {
@@ -2482,6 +2507,9 @@ fn apply_observation(
                     },
                     recorded_at: frame.ingested_at.clone(),
                     observed_at: body.occurred_at.clone(),
+                    relationship_role: assertion.relationship_to_subject.role,
+                    source_artifact_hash,
+                    raw_pointer,
                 },
             );
         }

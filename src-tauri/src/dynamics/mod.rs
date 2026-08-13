@@ -23,6 +23,7 @@
 //! when it was asked, about a ledger whose contents had not moved, and the
 //! byte-identical-replay requirement would be unmeetable by construction.
 
+pub mod coverage;
 pub mod facet;
 pub mod freshness;
 pub mod review;

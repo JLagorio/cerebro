@@ -181,6 +181,9 @@ pub(crate) mod tests {
             },
             recorded_at: recorded_at.into(),
             observed_at: None,
+            relationship_role: crate::ledger::schema::SubjectRole::Unknown,
+            source_artifact_hash: None,
+            raw_pointer: None,
         }
     }
 

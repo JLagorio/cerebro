@@ -248,6 +248,9 @@ mod tests {
             },
             recorded_at: recorded_at.into(),
             observed_at: Some("1999-01-01T00:00:00.000Z".into()),
+            relationship_role: crate::ledger::schema::SubjectRole::Unknown,
+            source_artifact_hash: None,
+            raw_pointer: None,
         }
     }
 
