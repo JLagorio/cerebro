@@ -201,28 +201,10 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         // has something to decide.
         eprintln!("ambient ingest: skipped ({reason:?})");
     }
-    // The maintenance pass rides the SAME switch and the same tick, AFTER
-    // ingest. Two reasons for the order: reading what changed is what makes
-    // the base worth maintaining, and the one ambient lease is better spent
-    // on new bytes than on tidying when both have work. It gets no default of
-    // its own — `ambient.ingest_enabled` is off until asked, and maintenance
-    // should not be the thing that starts spending somebody's subscription.
-    maintain(app, &conn, vault, config_dir, &vault_id, &store_uuid)
-}
-
-/// One maintenance attempt, on the same tick as ingest.
-///
-/// Reported and never fatal, like the ingest half: a pass that could not run
-/// is a condition to say out loud, and a supervisor that exited on it would
-/// stop maintaining for the rest of the session without telling anyone.
-fn maintain(
-    app: &AppHandle,
-    conn: &rusqlite::Connection,
-    vault: &Path,
-    config_dir: &Path,
-    vault_id: &str,
-    store_uuid: &str,
-) -> Result<(), String> {
+    // One read and one fold for everything downstream of ingest. Both passes
+    // below want the base as it stands AFTER this tick's commits, and reading
+    // the ledger twice to get the same answer twice is a cost paid on every
+    // tick of every open vault.
     let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
         .map_err(|e| format!("ledger: {e}"))?;
     let chain_head = read
@@ -230,12 +212,82 @@ fn maintain(
         .last()
         .map(|frame| frame.event_id.clone())
         .unwrap_or_else(|| format!("genesis:{store_uuid}"));
-    let state = crate::ledger::reduce::reduce(&read.frames, store_uuid);
+    let state = crate::ledger::reduce::reduce(&read.frames, &store_uuid);
 
+    // Conflict detection first, and not because it is more important: it is
+    // FREE. It spawns nothing, spends nothing, and cannot be deferred by a
+    // budget gate, so running it ahead of the pass that competes for the one
+    // ambient lease means a base whose lease is exhausted still gets its
+    // comparisons. M26.9 lifts it out of this switch entirely — a
+    // deterministic phase is always on — and until then it rides the owner's
+    // switch rather than writing to a vault nobody asked it to touch.
+    detect_conflicts(vault, &store_uuid, &state);
+
+    // The maintenance pass rides the SAME switch and the same tick, AFTER
+    // ingest. Two reasons for the order: reading what changed is what makes
+    // the base worth maintaining, and the one ambient lease is better spent
+    // on new bytes than on tidying when both have work. It gets no default of
+    // its own — `ambient.ingest_enabled` is off until asked, and maintenance
+    // should not be the thing that starts spending somebody's subscription.
+    maintain(
+        app,
+        &conn,
+        vault,
+        config_dir,
+        &vault_id,
+        &store_uuid,
+        &state,
+        &chain_head,
+    )
+}
+
+/// One deterministic detection pass.
+///
+/// Reported and never fatal. The only failure it can have is a writer that
+/// is not armed, and the honest response to that is to say so and find the
+/// same pairs again next tick — the detector is a pure function of the base,
+/// so nothing is lost by not having written.
+fn detect_conflicts(vault: &Path, store_uuid: &str, state: &crate::ledger::reduce::EpistemicState) {
+    let candidates = crate::conflict::detect::find(state);
+    if candidates.is_empty() {
+        return;
+    }
+    let appender = crate::conflict::emit::ShadowAppend::new(vault);
+    let emitted = crate::conflict::emit::emit(state, store_uuid, &candidates, &appender);
+    if emitted.appended > 0 {
+        eprintln!(
+            "conflict detection: {} new comparison(s), {} already known",
+            emitted.appended, emitted.already_known
+        );
+    }
+    for (comparison, detail) in &emitted.failed {
+        eprintln!("conflict detection: {comparison} could not be recorded — {detail}");
+    }
+}
+
+/// One maintenance attempt, on the same tick as ingest.
+///
+/// Reported and never fatal, like the ingest half: a pass that could not run
+/// is a condition to say out loud, and a supervisor that exited on it would
+/// stop maintaining for the rest of the session without telling anyone.
+#[allow(clippy::too_many_arguments)] // A supervisor seam: every one is a
+                                     // distinct identity the pass needs, and
+                                     // bundling them into a struct nothing
+                                     // else builds would hide that.
+fn maintain(
+    app: &AppHandle,
+    conn: &rusqlite::Connection,
+    vault: &Path,
+    config_dir: &Path,
+    vault_id: &str,
+    store_uuid: &str,
+    state: &crate::ledger::reduce::EpistemicState,
+    chain_head: &str,
+) -> Result<(), String> {
     let context = crate::maintain::pass::Context {
         vault_id,
         store_uuid,
-        chain_head: &chain_head,
+        chain_head,
     };
     // The elapsed limit the lease will be issued under. Read from the shipped
     // defaults rather than invented here: the watchdog and the lease must
@@ -254,7 +306,7 @@ fn maintain(
         store_uuid: store_uuid.to_string(),
         elapsed_limit_seconds: elapsed,
     };
-    match crate::maintain::schedule::attempt(conn, &context, &state, &live, chrono::Utc::now())? {
+    match crate::maintain::schedule::attempt(conn, &context, state, &live, chrono::Utc::now())? {
         crate::maintain::schedule::Scheduled::Deferred(reasons) => {
             eprintln!("maintenance: deferred ({reasons:?})");
         }

@@ -181,6 +181,17 @@ pub struct SemanticAssessmentRow {
     pub proposal_ids: Vec<String>,
 }
 
+/// What one assertion said, in the shape a comparison endpoint needs
+/// (M26.7). The value is a DIGEST: the detector compares claims without ever
+/// holding one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssertionFacet {
+    pub predicate: String,
+    pub value_hash: String,
+    pub scope: schema::Scope,
+    pub valid_time: schema::ValidInterval,
+}
+
 /// One detected comparison, reduced (M26.7).
 ///
 /// It says a pair needs classifying and nothing else — there is no outcome
@@ -596,6 +607,10 @@ pub struct EpistemicState {
     /// extracted-assertion event → its extracted_text, for the M23.7
     /// out-of-band correction carve-out.
     pub extracted_texts: BTreeMap<String, String>,
+    /// Producer-side index (also outside the vector contract): assertion
+    /// event → the facets M26.7's conflict detector compares. Derived
+    /// entirely from bytes both reducers already agree on.
+    pub assertion_facets: BTreeMap<String, AssertionFacet>,
     /// M25.4's coverage assessments, keyed by `assessment_id` — what M24's
     /// high-stakes and absence rules resolve their `coverage_refs` against.
     pub coverage_assessments: BTreeMap<String, CoverageAssessment>,
@@ -2262,6 +2277,28 @@ fn apply_observation(
         state
             .extracted_texts
             .insert(frame.event_id.clone(), extracted.extracted_text.clone());
+    }
+
+    // The facets M26.7's detector compares. Indexed here because this is the
+    // only place the parsed assertion is in hand, and outside the vector
+    // contract for the same reason `extracted_texts` is: nothing reads it as
+    // state, it derives entirely from bytes both implementations already
+    // agree on, and a second sorted key is a second chance to disagree.
+    if let Some(assertion) = payload.assertion() {
+        if let Ok(value_hash) = schema::derive_value_hash(&assertion.value) {
+            state.assertion_facets.insert(
+                frame.event_id.clone(),
+                AssertionFacet {
+                    predicate: assertion.predicate.clone(),
+                    value_hash,
+                    scope: assertion.scope.clone(),
+                    valid_time: schema::ValidInterval {
+                        from: body.valid_from.clone(),
+                        to: body.valid_to.clone(),
+                    },
+                },
+            );
+        }
     }
 
     // Derived-content Belief inputs: earlier COMMITTED creation/revision

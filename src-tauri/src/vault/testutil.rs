@@ -5,11 +5,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Create a unique empty directory to use as a vault root. Callers remove it
+/// Create a unique EMPTY directory to use as a vault root. Callers remove it
 /// with `std::fs::remove_dir_all` at the end of each test.
+///
+/// The name is unique within a process, never across processes: a run that
+/// was killed leaves its directories behind, and the OS reuses process ids.
+/// A test that then found a stale ledger under its own path failed with a
+/// completely convincing message about foreign writers — so the stale
+/// directory is removed rather than adopted. `create_dir_all` on its own is
+/// the bug, because it succeeds on a directory that is already full.
 pub fn temp_vault(label: &str) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("cerebro-test-{label}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create temp vault");
     dir
 }
