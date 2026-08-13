@@ -544,6 +544,19 @@ pub struct ResolutionRow {
 pub struct IndependenceRow {
     pub event_id: String,
     pub proof_kind: String,
+    /// The proof WHOLE (M27.2c). The row used to keep only the kind, which
+    /// was enough while nothing read it; M27's Support axis has to show which
+    /// rules a corroboration was proved under — `rule_version` for the two
+    /// deterministic proofs, the proposal and decision for the human one —
+    /// and re-deriving that from the ledger at render time would mean a
+    /// second walk that could disagree with this one.
+    ///
+    /// Not projected into the conformance vectors: the vector's triple
+    /// `[left, right, proof_kind]` already pins which pairs are proven and
+    /// how, and the refs inside the proof are checked by the reducer at fold
+    /// time in both languages. What TypeScript would gain is a copy of bytes
+    /// it never reads.
+    pub proof: schema::IndependenceProof,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3000,10 +3013,47 @@ fn apply_independence(
             }
             "independent_system_artifact"
         }
-        IndependenceProof::HumanConfirmed { .. } => {
-            return Err(refused(
-                "human_confirmed independence is reserved until M24",
-            ))
+        IndependenceProof::HumanConfirmed {
+            proposal_id,
+            decision_event_id,
+            ..
+        } => {
+            // M27.2c makes this real. It was refused with "reserved until
+            // M24" long after M24 shipped — the producer
+            // (`expand::ConfirmObservationIndependence`) has been
+            // server-binding all four fields since then, and the only thing
+            // missing was this check.
+            //
+            // The proposal is checked for its APPROVAL, not for
+            // `state == Applied`: mutation members fold BEFORE
+            // `proposal.applied` in the same batch, so demanding the applied
+            // state here would refuse the very batch that applies it. The
+            // approval is what the proof claims — a human confirmed this pair
+            // — and it is already committed by the time this event folds.
+            let proposal = state.proposals.get(proposal_id).ok_or_else(|| {
+                refused(format!(
+                    "human_confirmed independence names proposal {proposal_id}, which is not                      committed"
+                ))
+            })?;
+            match &proposal.decision {
+                Some((event_id, schema::Decision::Approve)) if event_id == decision_event_id => {}
+                Some((event_id, decision)) => {
+                    return Err(refused(format!(
+                        "human_confirmed independence pins decision {decision_event_id}, and                          proposal {proposal_id} was decided {decision:?} at {event_id} — a proof                          that a human confirmed this pair has to name the approval that did"
+                    )))
+                }
+                None => {
+                    return Err(refused(format!(
+                        "human_confirmed independence names proposal {proposal_id}, which nobody                          has decided — silence is not confirmation"
+                    )))
+                }
+            }
+            if proposal.queued_risk.is_none() {
+                return Err(refused(format!(
+                    "proposal {proposal_id} was never put to a person — an auto-applied                      confirmation confirms nothing"
+                )));
+            }
+            "human_confirmed"
         }
     };
 
@@ -3012,6 +3062,7 @@ fn apply_independence(
         IndependenceRow {
             event_id: frame.event_id.clone(),
             proof_kind: proof_kind.to_string(),
+            proof: body.proof.clone(),
         },
     );
     state.bump_version("observation", &left.event_id, &frame.event_id);

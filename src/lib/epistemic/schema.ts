@@ -2074,8 +2074,18 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       ) {
         throw new RefusedError('proof registration refs must be event ids');
       }
+      // `human_confirmed` used to be refused here outright, on a premise
+      // that stopped being true when M24 shipped. M27.2c moves the decision
+      // to the reducer, where the proposal it names can actually be checked
+      // — a structural stage has no state to check it against.
       if (proof.kind === 'human_confirmed') {
-        throw new RefusedError('human_confirmed independence is reserved until M24');
+        for (const [name, id] of [
+          ['proposal_id', proof.proposal_id],
+          ['decision_event_id', proof.decision_event_id],
+        ] as [string, Json][]) {
+          if (!isId128(id)) throw new RefusedError(`${name} must be a 128-bit hex id`);
+        }
+        break;
       }
       if ((proof.rule_version as string).length === 0) {
         throw new RefusedError('independence proof needs a non-empty rule_version');

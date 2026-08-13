@@ -1177,6 +1177,207 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
         KIND_INDEPENDENCE_RECORDED,
         &independence_body(&sib_a, &solo_b, artifact(&direct_a_reg, &direct_b_reg)),
     );
+
+    // --- `human_confirmed` (M27.2c) ------------------------------------
+    //
+    // Refused since M22 on a premise — "reserved until M24" — that stopped
+    // being true when M24 shipped. The producer has been server-binding all
+    // four of its fields since then; what was missing was the state check,
+    // and a state check is exactly what needs a cross-language vector.
+    //
+    // The approval is what is checked, NOT `state == applied`: mutation
+    // members fold BEFORE `proposal.applied` in the same batch, so demanding
+    // the applied state would refuse the very batch that applies it.
+    let confirmed = |proposal: &str, decision: &str| IndependenceProof::HumanConfirmed {
+        left_source_registration_event_id: direct_a_reg.clone(),
+        right_source_registration_event_id: direct_b_reg.clone(),
+        proposal_id: proposal.into(),
+        decision_event_id: decision.into(),
+    };
+    let confirm_proposal = "cccc0000cccc0000cccc0000cccc0001";
+    let confirm_decision = "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0";
+
+    // A proposal nobody submitted. Named ids are not confirmation.
+    //
+    // Two extractions off two DIFFERENT snapshots, so their ancestries are
+    // disjoint and the reducer's `known_same_lineage` guard is not what
+    // refuses them — the human-confirmation check is.
+    let snap_a = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::SourceSnapshot,
+            &direct_a,
+            &direct_a_reg,
+            "agent:run-1",
+            SubjectRef::None,
+            vec![],
+            snapshot_payload(),
+        ),
+    );
+    let snap_b = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::SourceSnapshot,
+            &direct_b,
+            &direct_b_reg,
+            "agent:run-1",
+            SubjectRef::None,
+            vec![],
+            snapshot_payload(),
+        ),
+    );
+    let orphan_a = extract(
+        &mut b,
+        &direct_a,
+        &direct_a_reg,
+        vec![LineageEdge {
+            edge: LineageKind::DerivedFrom,
+            parent_observation_event_id: snap_a,
+        }],
+    );
+    let orphan_b = extract(
+        &mut b,
+        &direct_b,
+        &direct_b_reg,
+        vec![LineageEdge {
+            edge: LineageKind::DerivedFrom,
+            parent_observation_event_id: snap_b,
+        }],
+    );
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &orphan_b,
+            confirmed(confirm_proposal, confirm_decision),
+        ),
+    );
+
+    // Submitted and queued, but undecided. Silence is not confirmation.
+    let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &schema::ProposalSubmitted {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal: Box::new(schema::ProposalV1 {
+                schema: schema::PROPOSAL_SCHEMA,
+                proposal_id: confirm_proposal.into(),
+                run_id: "4444444444444444444444444444444a".into(),
+                targets: vec![
+                    schema::ProposalTarget {
+                        target_id: orphan_a.clone(),
+                        target_class: schema::TargetClass::Observation,
+                        expected_version: None,
+                    },
+                    schema::ProposalTarget {
+                        target_id: orphan_b.clone(),
+                        target_class: schema::TargetClass::Observation,
+                        expected_version: None,
+                    },
+                ],
+                op: schema::ProposalOp::ConfirmObservationIndependence {
+                    left_observation_event_id: orphan_a.clone(),
+                    right_observation_event_id: orphan_b.clone(),
+                    basis_event_ids: vec![orphan_a.clone(), orphan_b.clone()],
+                    reason: "two systems, two domains, one claim".into(),
+                },
+                intended_use: schema::IntendedUse {
+                    kind: schema::IntendedUseKind::ReversibleWork,
+                    stakes: schema::Risk::Low,
+                    predicate_class: None,
+                },
+                basis: schema::ProposalBasis {
+                    transition_cause: schema::TransitionCause::Maintenance,
+                    evidence_refs: vec![],
+                    coverage_refs: vec![],
+                    authority_refs: vec![],
+                    authority_route_refs: vec![],
+                    addressed_contradictions: vec![],
+                    absence_claim: false,
+                },
+                declared_risk: schema::Risk::High,
+                reason: "two systems, two domains, one claim".into(),
+                candidate_search_receipt: None,
+            }),
+        },
+    );
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &orphan_b,
+            confirmed(confirm_proposal, confirm_decision),
+        ),
+    );
+
+    // Queued at HIGH — a person was actually asked — and approved.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_PROPOSAL_QUEUED,
+        &schema::ProposalQueued {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: confirm_proposal.into(),
+            commit_set_id: "5e75e75e75e75e75e75e75e75e75e75e".into(),
+            member_proposal_ids: vec![confirm_proposal.into()],
+            effective_risk: schema::Risk::High,
+            policy_version: 1,
+            target_versions: vec![],
+            queued_at: STAMP.into(),
+            queued_for: vec![],
+        },
+    );
+    let (schema_v, batch_id, idempotency_key, actor) = common("human:josef");
+    b.push_body(
+        schema::KIND_PROPOSAL_DECISION_RECORDED,
+        &schema::ProposalDecisionRecorded {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            decision_id: confirm_decision.into(),
+            proposal_id: confirm_proposal.into(),
+            decision: schema::Decision::Approve,
+            reviewer: "human:josef".into(),
+            decided_at: STAMP.into(),
+            reason: None,
+            reviewed_target_versions: vec![],
+        },
+    );
+    // The approval names a DIFFERENT decision event: refused, because a
+    // proof that a human confirmed this pair has to name the approval that
+    // did.
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &orphan_b,
+            confirmed(confirm_proposal, "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"),
+        ),
+    );
+    // And the one that works.
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &orphan_b,
+            confirmed(confirm_proposal, confirm_decision),
+        ),
+    );
     // Same domain on both ends.
     let solo_a2 = extract(
         &mut b,

@@ -99,25 +99,25 @@ impl IndependenceRecorded {
                 decision_event_id,
                 ..
             } => {
-                // M25.5 revisits the M22 note that said this waits for M24.
-                // M24 shipped, and the refusal STAYS — for a different and
-                // better reason. Everything checkable from the body alone is
-                // checked here: two real refs, distinct from each other. What
-                // makes `human_confirmed` true is that a specific HIGH
-                // proposal was APPROVED by a person, and that is reducer
-                // state, not body shape. Until the reducer joins those two
-                // refs to an approved decision, accepting the body would let
-                // any caller mint corroboration by naming two ids.
+                // M22 said "wait for M24"; M25.5 kept the refusal for a
+                // better reason — accepting the body would let any caller
+                // mint corroboration by naming two ids, because what makes
+                // `human_confirmed` TRUE is that a specific proposal was
+                // approved by a person, and that is reducer state rather than
+                // body shape.
+                //
+                // M27.2c builds that reducer join, so the blanket refusal
+                // lifts and this stage keeps only what a body can answer for
+                // itself: two real refs. `apply_independence` does the rest —
+                // the proposal must be committed, its decision must be an
+                // APPROVAL, that approval must be the one named here, and the
+                // proposal must have been put to a person at all.
                 if !is_id128(proposal_id) || !is_id128(decision_event_id) {
                     return Err(
                         "human_confirmed independence pins a proposal and a decision by id".into(),
                     );
                 }
-                Err(
-                    "human_confirmed independence is produced by the M24 approval path and \
-                     validated against the approved decision it names; no caller may assert it"
-                        .into(),
-                )
+                Ok(())
             }
         }
     }
@@ -184,14 +184,27 @@ mod tests {
     }
 
     #[test]
-    fn human_confirmed_is_never_asserted_by_a_caller() {
-        let reserved = event(IndependenceProof::HumanConfirmed {
+    fn a_human_confirmed_body_answers_only_for_its_own_shape() {
+        // M27.2c: what a caller CANNOT do here is name two ids that are not
+        // ids. Whether the proposal was really approved is reducer state, and
+        // `apply_independence` is where a caller's claim about it dies.
+        let well_formed = event(IndependenceProof::HumanConfirmed {
             left_source_registration_event_id: ID_C.into(),
             right_source_registration_event_id: ID_D.into(),
             proposal_id: ID_A.into(),
             decision_event_id: ID_B.into(),
         });
-        let err = reserved.validate().unwrap_err();
-        assert!(err.contains("no caller may assert it"), "{err}");
+        well_formed.validate().unwrap();
+
+        let forged = event(IndependenceProof::HumanConfirmed {
+            left_source_registration_event_id: ID_C.into(),
+            right_source_registration_event_id: ID_D.into(),
+            proposal_id: "not-an-id".into(),
+            decision_event_id: ID_B.into(),
+        });
+        assert!(forged
+            .validate()
+            .unwrap_err()
+            .contains("pins a proposal and a decision by id"));
     }
 }

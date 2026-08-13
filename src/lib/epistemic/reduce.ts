@@ -1840,7 +1840,41 @@ function applyIndependence(state: EpistemicState, frame: VectorFrame, body: Json
   if (state.independence.has(pair)) throw new RefusedError('pair already recorded');
 
   let proofKind: string;
-  if (proof.kind === 'distinct_firsthand_origin') {
+  if (proof.kind === 'human_confirmed') {
+    // M27.2c. Checked for its APPROVAL, not for `state === 'applied'`:
+    // mutation members fold BEFORE `proposal.applied` in the same batch, so
+    // demanding the applied state would refuse the very batch that applies
+    // it. The approval is what the proof claims — a human confirmed this pair
+    // — and it is already committed by the time this folds.
+    const proposalId = proof.proposal_id as string;
+    const proposal = state.proposals.get(proposalId);
+    if (proposal === undefined) {
+      throw new RefusedError(
+        `human_confirmed independence names proposal ${proposalId}, which is not committed`,
+      );
+    }
+    if (proposal.decision === null) {
+      throw new RefusedError(
+        `human_confirmed independence names proposal ${proposalId}, which nobody has decided ` +
+          '— silence is not confirmation',
+      );
+    }
+    const [decisionEvent, decision] = proposal.decision;
+    if (decision !== 'approve' || decisionEvent !== proof.decision_event_id) {
+      throw new RefusedError(
+        `human_confirmed independence pins decision ${String(proof.decision_event_id)}, and ` +
+          `proposal ${proposalId} was decided ${decision} at ${decisionEvent} — a proof that a ` +
+          'human confirmed this pair has to name the approval that did',
+      );
+    }
+    if (proposal.queuedRisk === null) {
+      throw new RefusedError(
+        `proposal ${proposalId} was never put to a person — an auto-applied confirmation ` +
+          'confirms nothing',
+      );
+    }
+    proofKind = 'human_confirmed';
+  } else if (proof.kind === 'distinct_firsthand_origin') {
     for (const endpoint of [left, right]) {
       if (endpoint.authority !== 'trusted_human_capture') {
         throw new RefusedError('distinct_firsthand_origin requires trusted human captures');
