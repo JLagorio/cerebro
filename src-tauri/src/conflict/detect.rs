@@ -312,6 +312,8 @@ pub(crate) mod fixture {
             value_hash: derive_value_hash(&TypedValue::string(value)).unwrap(),
             scope,
             valid_time: interval(None, None),
+            recorded_at: "2026-08-11T12:00:00.000Z".into(),
+            observed_at: None,
         }
     }
 

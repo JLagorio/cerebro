@@ -190,6 +190,13 @@ pub struct AssertionFacet {
     pub value_hash: String,
     pub scope: schema::Scope,
     pub valid_time: schema::ValidInterval,
+    /// When the STORE learned it — the frame's own stamp. This is what
+    /// staleness is measured against, because it is the only time here the
+    /// store wrote itself.
+    pub recorded_at: String,
+    /// When the SOURCE says it happened. Labeled, never trusted for ordering
+    /// (D3), and carried so a surface can show it without a second read.
+    pub observed_at: Option<String>,
 }
 
 /// One detected comparison, reduced (M26.7).
@@ -2296,6 +2303,8 @@ fn apply_observation(
                         from: body.valid_from.clone(),
                         to: body.valid_to.clone(),
                     },
+                    recorded_at: frame.ingested_at.clone(),
+                    observed_at: body.occurred_at.clone(),
                 },
             );
         }

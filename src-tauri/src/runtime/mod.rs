@@ -78,7 +78,7 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// The schema version this build speaks. M24 established 2 (`operational_log`
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
 /// meter, budget, coverage cache, and settings at 3.
-pub const USER_VERSION: i64 = 6;
+pub const USER_VERSION: i64 = 7;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -196,7 +196,21 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V6,
         validate: validate_v6,
     },
+    Migration {
+        to: 7,
+        sql: schema::SCHEMA_V7,
+        validate: validate_v7,
+    },
 ];
+
+/// The one table `user_version = 7` promises, checked the same way.
+fn validate_v7(conn: &Connection) -> Result<(), String> {
+    conn.query_row("SELECT count(*) FROM attention_signals", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map_err(|e| format!("validating attention_signals: {e}"))?;
+    Ok(())
+}
 
 /// The one table `user_version = 4` promises, checked the same way v3's
 /// twenty are: a `CREATE TABLE` that parsed is not the same claim as a table

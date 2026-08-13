@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod app_config;
 pub mod assembly;
+pub mod attention;
 pub mod conflict;
 pub mod connectors;
 pub mod crash;

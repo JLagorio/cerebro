@@ -675,3 +675,53 @@ pub const SCHEMA_V6: &str = "
     CREATE INDEX maintenance_findings_by_kind
         ON maintenance_findings (vault_id, store_uuid, kind, surfaced_at);
 ";
+
+/// The M26.7 schema — the attention primitives, stored and unranked.
+///
+/// **Schema-disjoint from everything epistemic, on purpose.** This is the
+/// firewall M27's lanes inherit: an attention row may be recomputed, deleted,
+/// or ignored, and no belief changes. Nothing in the vault references it, and
+/// nothing here references a vault table — the only keys are ids the ledger
+/// already minted.
+///
+/// **Every row is a REPLACEMENT, keyed by belief.** These signals describe the
+/// base as it stands, so a history of them is a history of the computation
+/// rather than of the base — and the base already keeps its own history, in
+/// the place that is tamper-evident. `computed_at` and `chain_head` say what
+/// the row was computed from, so a stale row announces itself.
+///
+/// **There is no priority column, and that is the design.** Ranking belongs
+/// to the layer that has to justify itself to a person; a number stored here
+/// would make the decision invisibly, one migration ahead of the surface that
+/// was supposed to make it.
+pub const SCHEMA_V7: &str = "
+    CREATE TABLE attention_signals (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        belief_id TEXT NOT NULL
+            CHECK (length(belief_id) = 32 AND belief_id = lower(belief_id)),
+        entity_id TEXT NOT NULL
+            CHECK (length(entity_id) = 32 AND entity_id = lower(entity_id)),
+        revision_event_id TEXT NOT NULL CHECK (revision_event_id <> ''),
+        signals_version TEXT NOT NULL CHECK (signals_version <> ''),
+        supporting_assertions INTEGER NOT NULL CHECK (supporting_assertions >= 0),
+        distinct_sources INTEGER NOT NULL CHECK (distinct_sources >= 0),
+        newest_evidence_at TEXT
+            CHECK (newest_evidence_at IS NULL OR newest_evidence_at LIKE '____-__-__T%Z'),
+        evidence_age_seconds INTEGER CHECK (evidence_age_seconds IS NULL
+                                            OR evidence_age_seconds >= 0),
+        coverage_assessments INTEGER NOT NULL CHECK (coverage_assessments >= 0),
+        open_coverage_gaps INTEGER NOT NULL CHECK (open_coverage_gaps >= 0),
+        declared_contradictions INTEGER NOT NULL CHECK (declared_contradictions >= 0),
+        open_comparisons INTEGER NOT NULL CHECK (open_comparisons >= 0),
+        chain_head TEXT NOT NULL CHECK (chain_head <> ''),
+        computed_at TEXT NOT NULL CHECK (computed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, belief_id),
+        -- An age without a stamp, or a stamp without an age, is a row that
+        -- disagrees with itself. Both absent means an unsupported revision,
+        -- which is a real state and not a missing one.
+        CHECK ((newest_evidence_at IS NULL) = (evidence_age_seconds IS NULL))
+    );
+    CREATE INDEX attention_signals_by_entity
+        ON attention_signals (vault_id, store_uuid, entity_id);
+";

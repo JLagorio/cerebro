@@ -223,6 +223,14 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
     // switch rather than writing to a vault nobody asked it to touch.
     detect_conflicts(vault, &store_uuid, &state);
 
+    // The attention primitives, on the same free footing and computed AFTER
+    // detection so the comparison counts include this tick's. Nothing reads
+    // these yet — M27's lanes will — and computing them now is what makes the
+    // lanes a query rather than a scan when they arrive.
+    if let Err(detail) = record_attention(&conn, &vault_id, &store_uuid, &chain_head, &state) {
+        eprintln!("attention signals: {detail}");
+    }
+
     // The maintenance pass rides the SAME switch and the same tick, AFTER
     // ingest. Two reasons for the order: reading what changed is what makes
     // the base worth maintaining, and the one ambient lease is better spent
@@ -239,6 +247,26 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
         &state,
         &chain_head,
     )
+}
+
+/// Recompute and store the attention primitives.
+///
+/// The state passed in was folded BEFORE this tick's detection appended
+/// anything, so the comparison counts here are one tick behind. That is the
+/// honest trade: re-reading and re-folding the whole ledger to pick up a
+/// handful of comparisons would double the cost of every tick of every open
+/// vault, and these rows are recomputed from scratch on the next one.
+fn record_attention(
+    conn: &rusqlite::Connection,
+    vault_id: &str,
+    store_uuid: &str,
+    chain_head: &str,
+    state: &crate::ledger::reduce::EpistemicState,
+) -> Result<(), String> {
+    let now = chrono::Utc::now();
+    let signals = crate::attention::signals::compute(state, now);
+    crate::attention::store::record(conn, vault_id, store_uuid, chain_head, &signals, now)?;
+    Ok(())
 }
 
 /// One deterministic detection pass.
