@@ -2,8 +2,9 @@
 //! extensions.
 //!
 //! PUBLIC-SURFACE TRIPWIRE (code-review check): this module exposes
-//! `LedgerWriter::{open, append, append_once, append_batch, head}`,
-//! `Committed`, `ExistingOrCommitted`, `BatchReceipt`, `member_ref`,
+//! `LedgerWriter::{open, append, append_once, append_batch,
+//! append_batch_planned, head}`, `Committed`, `ExistingOrCommitted`,
+//! `BatchReceipt`, `BatchIds`, `BatchPlan`, `PlannedMember`, `member_ref`,
 //! `batch_self_ref`, `operation_digest`, `existing_writer_id`, and
 //! `writer_id` — and nothing else. (`operation_digest` is exposed READ-ONLY,
 //! for M24.4's stored revert plan: an inverse has to name the forward plan
@@ -106,6 +107,69 @@ pub fn batch_self_ref() -> String {
 
 const MEMBER_REF_PREFIX: &str = "cerebro-batch-member:";
 const BATCH_SELF_REF: &str = "cerebro-batch-self";
+
+/// One member of a batch: the event kind and its schema-v1 body.
+pub type PlannedMember = (String, serde_json::Value);
+
+/// A batch as a function of the ids it will carry — see `BatchIds` for why
+/// a plan is a function rather than a list.
+pub type BatchPlan<'a> = &'a dyn Fn(&BatchIds) -> Result<Vec<PlannedMember>, String>;
+
+/// The ids one batch will carry, handed to a plan builder BEFORE anything is
+/// written (M27.4b).
+///
+/// `member_ref` covers the ordinary case: a body that NAMES a sibling can
+/// carry a placeholder and let the writer substitute it. What a placeholder
+/// cannot cover is a body that carries a value DERIVED from a sibling id —
+/// a hash. Substitution replaces strings; it cannot re-hash what was
+/// computed from them. A declared conflict comparison is exactly that: its
+/// id is `sha256(relation_event_id ‖ endpoints)`, and the relation event is
+/// a member of the same batch.
+///
+/// So the plan becomes a FUNCTION of these ids, evaluated twice: once over
+/// the symbolic ids (`member_ref(0)`, `batch_self_ref()`), which is what the
+/// operation digest hashes, and once over the physical ids, which is what
+/// gets written. The symbolic pass is why a retry still replays — see
+/// `append_batch_planned`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchIds {
+    /// One id per member, by ordinal.
+    pub members: Vec<String>,
+    /// The batch's own id — what `batch_self_ref` stands in for.
+    pub batch_id: String,
+}
+
+impl BatchIds {
+    /// The ids as they exist before preallocation: every reference symbolic.
+    fn symbolic(member_count: usize) -> Self {
+        BatchIds {
+            members: (0..member_count).map(member_ref).collect(),
+            batch_id: batch_self_ref(),
+        }
+    }
+
+    fn physical(member_count: usize) -> Self {
+        BatchIds {
+            members: (0..member_count).map(|_| new_id128()).collect(),
+            batch_id: new_id128(),
+        }
+    }
+
+    /// The id of one member. Out of range is the caller's arithmetic being
+    /// wrong about its own plan, so it is an error rather than a fallback:
+    /// a silently symbolic id would derive a hash nobody can resolve.
+    pub fn member(&self, ordinal: usize) -> Result<&str, String> {
+        self.members
+            .get(ordinal)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                format!(
+                    "batch member {ordinal} is out of range — this plan has {} members",
+                    self.members.len()
+                )
+            })
+    }
+}
 
 /// An idempotency key claimed by a committed solo event or batch member.
 #[derive(Debug, Clone)]
@@ -447,7 +511,44 @@ impl LedgerWriter {
         if events.is_empty() {
             return Err("a batch with no members is not a batch".to_string());
         }
-        let op_digest = operation_digest(&events)?;
+        let count = events.len();
+        self.append_batch_planned(count, &|_ids| Ok(events.clone()), operation_key)
+    }
+
+    /// Append a logical batch whose bodies are a FUNCTION of the ids the
+    /// batch will carry (M27.4b) — the door for a body holding a value
+    /// DERIVED from a sibling event id, which `member_ref` substitution
+    /// cannot produce (see `BatchIds`).
+    ///
+    /// `plan` is evaluated over the SYMBOLIC ids to get the operation
+    /// digest, and again over the preallocated physical ids to get the bytes.
+    /// That split is what keeps idempotency honest: the digest is a fact
+    /// about the operation, not about the ids a particular attempt drew, so
+    /// a retry after a lost acknowledgement still replays.
+    ///
+    /// Which makes `plan` a load-bearing contract: it must be a pure
+    /// function of the ids it is given. A plan that read a clock, drained a
+    /// captured buffer, or branched on id CONTENT would write bytes the
+    /// digest never described. The two checks below refuse exactly that
+    /// rather than trusting the caller.
+    pub fn append_batch_planned(
+        &mut self,
+        member_count: usize,
+        plan: BatchPlan<'_>,
+        operation_key: Option<&str>,
+    ) -> Result<BatchReceipt, String> {
+        if member_count == 0 {
+            return Err("a batch with no members is not a batch".to_string());
+        }
+        let symbolic = plan(&BatchIds::symbolic(member_count))?;
+        if symbolic.len() != member_count {
+            return Err(format!(
+                "the plan promised {member_count} members and produced {} — the count is what \
+                 preallocation reserves, so the two cannot disagree",
+                symbolic.len()
+            ));
+        }
+        let op_digest = operation_digest(&symbolic)?;
         if let Some(key) = operation_key {
             if key.is_empty() {
                 return Err("operation key must be non-empty when supplied".to_string());
@@ -470,10 +571,38 @@ impl LedgerWriter {
             }
         }
 
-        // Preallocate one fresh batch id and every member event id, then
-        // stamp and validate every member BEFORE any disk write.
-        let batch_id = new_id128();
-        let member_ids: Vec<String> = events.iter().map(|_| new_id128()).collect();
+        // Preallocate one fresh batch id and every member event id, build the
+        // plan over them, then stamp and validate every member BEFORE any
+        // disk write.
+        let ids = BatchIds::physical(member_count);
+        let events = plan(&ids)?;
+        // Two invariants, both about the plan being the function it claims
+        // to be. The digest was taken over the symbolic pass; these are what
+        // make it a description of the bytes about to be written.
+        if events.len() != symbolic.len()
+            || events
+                .iter()
+                .zip(&symbolic)
+                .any(|((written, _), (described, _))| written != described)
+        {
+            return Err(
+                "the plan's SHAPE changed between the symbolic and physical passes — a batch's \
+                 members are a function of the operation, never of the ids it happened to draw"
+                    .to_string(),
+            );
+        }
+        if operation_digest(&plan(&BatchIds::symbolic(member_count))?)? != op_digest {
+            return Err(
+                "the plan is not a pure function of its ids — two symbolic passes disagreed, so \
+                 the operation digest describes no particular bytes and an idempotent retry \
+                 would replay something that was never written"
+                    .to_string(),
+            );
+        }
+        let BatchIds {
+            members: member_ids,
+            batch_id,
+        } = ids;
         let mut stamped: Vec<(String, serde_json::Value)> = Vec::with_capacity(events.len());
         for (ordinal, (kind, body)) in events.into_iter().enumerate() {
             if kind == schema::KIND_BATCH_COMMITTED {
@@ -1279,6 +1408,133 @@ mod tests {
 
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
         assert_eq!(read.records, 3, "one batch, however many retries");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// A plan whose second member carries a value DERIVED from the first
+    /// member's event id — the case `member_ref` cannot express, because
+    /// substitution replaces a string and cannot re-hash what was computed
+    /// from it.
+    fn plan_deriving_from_member_zero(
+        ids: &BatchIds,
+    ) -> Result<Vec<(String, serde_json::Value)>, String> {
+        let mut belief = schema_tests::belief_created();
+        belief.content = format!("derived from {}", sha256_hex(ids.member(0)?.as_bytes()));
+        belief.basis = schema_mod::BeliefBasis::Linked {
+            links: vec![schema_mod::BasisLink {
+                observation_event_id: ids.member(0)?.to_string(),
+                role: schema_mod::BasisRole::Supports,
+            }],
+        };
+        Ok(vec![
+            observation_member(),
+            (
+                schema_mod::KIND_BELIEF_CREATED.to_string(),
+                serde_json::to_value(&belief).unwrap(),
+            ),
+        ])
+    }
+
+    #[test]
+    fn a_planned_batch_writes_physical_ids_and_still_replays_symbolically() {
+        let vault = testutil::temp_vault("writer-batch-planned");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let receipt = writer
+            .append_batch_planned(2, &plan_deriving_from_member_zero, Some("op:declare-1"))
+            .unwrap();
+        assert!(!receipt.replayed);
+
+        // The bytes on disk hold a hash of the REAL member id, which is the
+        // whole reason this door exists.
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 3);
+        assert_eq!(
+            read.frames[1].body["content"],
+            serde_json::json!(format!(
+                "derived from {}",
+                sha256_hex(receipt.members[0].event_id.as_bytes())
+            ))
+        );
+
+        // ...and the retry replays anyway. The digest was taken over the
+        // SYMBOLIC pass, so it describes the operation rather than the ids
+        // this attempt happened to draw. A digest over the written bytes
+        // would refuse this as a different plan and commit the batch twice.
+        let replay = writer
+            .append_batch_planned(2, &plan_deriving_from_member_zero, Some("op:declare-1"))
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.members, receipt.members);
+
+        // Across a reopen too — claims rebuild from verified frames.
+        drop(writer);
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let replay = writer
+            .append_batch_planned(2, &plan_deriving_from_member_zero, Some("op:declare-1"))
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.batch_id, receipt.batch_id);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 3, "one batch, however many retries");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_plan_that_is_not_a_function_of_its_ids_refuses_before_any_write() {
+        let vault = testutil::temp_vault("writer-batch-impure");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+
+        // Shape: the plan emits different KINDS depending on whether it is
+        // being digested or being written. The digest would then describe a
+        // batch nobody appended.
+        let shape_shifter = |ids: &BatchIds| {
+            let symbolic = ids.member(0)?.starts_with(MEMBER_REF_PREFIX);
+            Ok(vec![if symbolic {
+                observation_member()
+            } else {
+                (
+                    schema_mod::KIND_BELIEF_CREATED.to_string(),
+                    solo_belief_body(),
+                )
+            }])
+        };
+        let err = writer
+            .append_batch_planned(1, &shape_shifter, Some("op:shifty"))
+            .unwrap_err();
+        assert!(err.contains("SHAPE"), "{err}");
+
+        // Content: same shape, but a body that changes between two identical
+        // symbolic passes — a captured counter here, a clock in the wild.
+        let calls = std::cell::Cell::new(0u64);
+        let drifting = |_ids: &BatchIds| {
+            calls.set(calls.get() + 1);
+            let mut belief = schema_tests::belief_created();
+            belief.content = format!("call {}", calls.get());
+            Ok(vec![(
+                schema_mod::KIND_BELIEF_CREATED.to_string(),
+                serde_json::to_value(&belief).unwrap(),
+            )])
+        };
+        let err = writer
+            .append_batch_planned(1, &drifting, Some("op:drifting"))
+            .unwrap_err();
+        assert!(err.contains("pure function"), "{err}");
+
+        // A plan that promises more members than it produces reserves ids
+        // for events that do not exist.
+        let err = writer
+            .append_batch_planned(3, &plan_deriving_from_member_zero, Some("op:miscounted"))
+            .unwrap_err();
+        assert!(err.contains("promised 3"), "{err}");
+
+        // And an ordinal past the end is arithmetic, not a fallback.
+        let err = BatchIds::symbolic(2).member(2).unwrap_err();
+        assert!(err.contains("out of range"), "{err}");
+
+        assert!(
+            read_ledger(&ledger_dir(&vault)).unwrap().records == 0,
+            "every refusal above lands before a byte is written"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
