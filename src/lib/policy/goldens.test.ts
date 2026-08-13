@@ -21,10 +21,34 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { op as opRule, POLICY, transitionFor, type Destiny, type Risk } from './table';
+import {
+  op as opRule,
+  parseTable,
+  POLICY,
+  transitionFor,
+  type Destiny,
+  type PolicyTable,
+  type Risk,
+} from './table';
 import { tableVerdict, verdictEscalators, verdictRisk, type ProposalFacts } from './verdict';
 
 const GOLDENS_DIR = join(__dirname, '../../../shared/policy/goldens');
+const REPO = join(__dirname, '../../..');
+
+/** The frozen table a fixture named, parsed from the same bytes Rust reads. */
+function frozen(name: string): PolicyTable {
+  if (name !== 'v1' && name !== 'v2') {
+    throw new Error(`${name} is not a frozen policy table — the committed ones are v1 and v2`);
+  }
+  return parseTable(
+    JSON.parse(readFileSync(join(REPO, `shared/policy/policy.${name}.json`), 'utf8')),
+  );
+}
+
+/** The table a fixture is asserted against: the one it named, or the shipped one. */
+function tableOf(golden: Golden): PolicyTable {
+  return golden.table === undefined ? POLICY : frozen(golden.table);
+}
 
 type GoldenSignal = { flag: boolean } | { count: number };
 
@@ -49,6 +73,16 @@ interface Golden {
     derived_from?: Record<string, string[]>;
     lineage?: Record<string, string[]>;
   };
+  /**
+   * Which committed table this fixture replays against — a frozen one by
+   * name (`"v1"`, `"v2"`), or absent for the SHIPPED table.
+   *
+   * M27.4 made every capability the shipped table declares available, so
+   * `capability_unavailable` is unreachable against v3. The frozen artifacts
+   * are already this repo's negative controls, and a refusal path with no
+   * shared fixture is exactly where two interpreters drift apart unwatched.
+   */
+  table?: string;
   proposal: Record<string, unknown>;
   expect: {
     verdict: string;
@@ -72,7 +106,7 @@ function load(file: string): Golden {
  * The table-decidable projection of a fixture's proposal — the same extraction
  * `Golden::facts` performs in Rust, off the frozen ProposalV1 shape.
  */
-function facts(golden: Golden): ProposalFacts {
+function facts(golden: Golden, table: PolicyTable = POLICY): ProposalFacts {
   const proposal = golden.proposal as {
     op: { kind: string; payload?: Record<string, unknown> };
     declared_risk: Risk;
@@ -84,7 +118,7 @@ function facts(golden: Golden): ProposalFacts {
     if (typeof value === 'string') payloadConditions[key] = value;
   }
   const targetClasses = [...new Set(proposal.targets.map((t) => t.target_class))].sort();
-  const transition = transitionFor(POLICY, proposal.op.kind, payloadConditions);
+  const transition = transitionFor(table, proposal.op.kind, payloadConditions);
   if (transition === null)
     throw new Error(`${proposal.op.kind}: the payload selects no transition`);
   return {
@@ -107,7 +141,8 @@ describe('policy goldens replay identically in the TS interpreter', () => {
     const golden = load(file);
     const run = golden.rust_only === true ? it.skip : it;
     run(`${file} — ${golden.why.split('.')[0]}`, () => {
-      const verdict = tableVerdict(POLICY, facts(golden));
+      const against = tableOf(golden);
+      const verdict = tableVerdict(against, facts(golden, against));
       expect(verdict.kind).toBe(golden.expect.verdict);
       expect(verdictRisk(verdict)).toBe(golden.expect.effective_risk ?? null);
       expect(verdictEscalators(verdict)).toEqual(golden.expect.escalated_by ?? []);
@@ -182,7 +217,8 @@ describe('the fixture set itself', () => {
       const golden = load(file);
       const code = golden.expect.rejection;
       if (!code) continue;
-      const rule = opRule(POLICY, facts(golden).op);
+      const against = tableOf(golden);
+      const rule = opRule(against, facts(golden, against).op);
       expect(rule?.possible_rejections).toContain(code);
     }
   });

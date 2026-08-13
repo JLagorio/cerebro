@@ -1221,15 +1221,30 @@ function applyConflictClassified(
           'classify_conflict, which is the op the policy table maps to review',
       );
     }
-    if (op.comparison_id !== comparisonId) {
+    // `ProposalOp` is `{ kind, payload }` — the fields are one level down, and
+    // reading them off `op` would make every check below compare against
+    // `undefined` and refuse a verdict that is perfectly good.
+    const asked = (op.payload ?? {}) as JsonObject;
+    if (
+      asked.model_id !== classification.model_id ||
+      asked.prompt_version !== classification.prompt_version
+    ) {
       throw new RefusedError(
-        `proposal ${proposalId} classifies comparison ${String(op.comparison_id)}, and this ` +
+        `proposal ${proposalId} was made by ${String(asked.model_id)}/` +
+          `${String(asked.prompt_version)}, and this event credits ` +
+          `${String(classification.model_id)}/${String(classification.prompt_version)} — an ` +
+          'agent_supplied verdict IS its attribution',
+      );
+    }
+    if (asked.comparison_id !== comparisonId) {
+      throw new RefusedError(
+        `proposal ${proposalId} classifies comparison ${String(asked.comparison_id)}, and this ` +
           `event reports it against ${comparisonId}`,
       );
     }
-    if (op.outcome !== body.outcome) {
+    if (asked.outcome !== body.outcome) {
       throw new RefusedError(
-        `proposal ${proposalId} asked for ${String(op.outcome)}, and this event records ` +
+        `proposal ${proposalId} asked for ${String(asked.outcome)}, and this event records ` +
           `${String(body.outcome)} — the review answered a different question`,
       );
     }

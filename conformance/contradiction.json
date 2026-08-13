@@ -483,7 +483,71 @@
       "seq": 10,
       "event_id": "0000000000000000000000000000000a",
       "prev": "fad3a5977e4925e49d652e84304676bd2c12ffed151453117595c84b9e5d3ba1",
-      "hash": "a1f59ca41c774e6716ae879520539d38c421c82f891aa729e4c9c9a51d9fee0e",
+      "hash": "1ff2880ec188fc5b5e18e0024a177c1b8a93fd4b54cf795adddecb18b85cd0d7",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.candidate_detected",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-detector"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "be9316ae01f23bbcd30971fb0afb298b",
+        "left": {
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "right": {
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "detector_version": "conflict-detector-v1",
+        "reason_codes": [
+          "same_subject_predicate"
+        ]
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "1ff2880ec188fc5b5e18e0024a177c1b8a93fd4b54cf795adddecb18b85cd0d7",
+      "hash": "321ea627f0142827a0366b75c9257ced523ab02edace645b0cafc78095e39cf3",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -552,10 +616,10 @@
     },
     {
       "v": 0,
-      "seq": 11,
-      "event_id": "0000000000000000000000000000000b",
-      "prev": "a1f59ca41c774e6716ae879520539d38c421c82f891aa729e4c9c9a51d9fee0e",
-      "hash": "00d930be2d9a870960affa333a51a944583b94eb189da11f3f7f95848133d407",
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "321ea627f0142827a0366b75c9257ced523ab02edace645b0cafc78095e39cf3",
+      "hash": "072116ffc2b491477fcf783c1f77c9c3838738d2ee4202b42db1e09fd1d05c8b",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -624,10 +688,10 @@
     },
     {
       "v": 0,
-      "seq": 12,
-      "event_id": "0000000000000000000000000000000c",
-      "prev": "00d930be2d9a870960affa333a51a944583b94eb189da11f3f7f95848133d407",
-      "hash": "8fa6b8ef2986de9a09f5de06134412b54cbfce32b04f94cc662f7aafee9b6954",
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "072116ffc2b491477fcf783c1f77c9c3838738d2ee4202b42db1e09fd1d05c8b",
+      "hash": "c410fee45728fe1199f9ef6b7281d4b0bbdad66b323dd980e56fe46a77c7f693",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.opened",
@@ -684,15 +748,15 @@
           }
         },
         "kind": "partial",
-        "classified_event_id": "0000000000000000000000000000000a"
+        "classified_event_id": "0000000000000000000000000000000b"
       }
     },
     {
       "v": 0,
-      "seq": 13,
-      "event_id": "0000000000000000000000000000000d",
-      "prev": "8fa6b8ef2986de9a09f5de06134412b54cbfce32b04f94cc662f7aafee9b6954",
-      "hash": "7e25fdcc6e3315d9de16bc552c6dfc774da6773f0e4bbdcce5ceb1c01766062c",
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "prev": "c410fee45728fe1199f9ef6b7281d4b0bbdad66b323dd980e56fe46a77c7f693",
+      "hash": "69e2776c956b7fd5813abf429a4abfc446c291293d52177b18dd73f18fe5a39f",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -761,10 +825,10 @@
     },
     {
       "v": 0,
-      "seq": 14,
-      "event_id": "0000000000000000000000000000000e",
-      "prev": "7e25fdcc6e3315d9de16bc552c6dfc774da6773f0e4bbdcce5ceb1c01766062c",
-      "hash": "73147996936b18f5433e4937f89db3b02498191e9ec8952c807865fcbe88602f",
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "prev": "69e2776c956b7fd5813abf429a4abfc446c291293d52177b18dd73f18fe5a39f",
+      "hash": "85d0d10e591bb6118ab000278495a248350a9696089e32c25f933f3fa6e1a85a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -833,10 +897,10 @@
     },
     {
       "v": 0,
-      "seq": 15,
-      "event_id": "0000000000000000000000000000000f",
-      "prev": "73147996936b18f5433e4937f89db3b02498191e9ec8952c807865fcbe88602f",
-      "hash": "4e172d89d8849bbfeb69d73c26a66813918c95f6e68d9785bf57ec8b4e6aa551",
+      "seq": 16,
+      "event_id": "00000000000000000000000000000010",
+      "prev": "85d0d10e591bb6118ab000278495a248350a9696089e32c25f933f3fa6e1a85a",
+      "hash": "825760109cd48e1362f7d907f5f4f2a67369d3906e579b370cf7eee16777f430",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -905,10 +969,10 @@
     },
     {
       "v": 0,
-      "seq": 16,
-      "event_id": "00000000000000000000000000000010",
-      "prev": "4e172d89d8849bbfeb69d73c26a66813918c95f6e68d9785bf57ec8b4e6aa551",
-      "hash": "5135bbb2c4a0952e707d3febe22d91e76dfe381f5c5b75d16a4a7337429f4fc1",
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "prev": "825760109cd48e1362f7d907f5f4f2a67369d3906e579b370cf7eee16777f430",
+      "hash": "dab4b3b0dbded672f96e1a6ff1734a5fc10f5b55f8e0147d2cbe8583be4a889d",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -981,10 +1045,300 @@
     },
     {
       "v": 0,
-      "seq": 17,
-      "event_id": "00000000000000000000000000000011",
-      "prev": "5135bbb2c4a0952e707d3febe22d91e76dfe381f5c5b75d16a4a7337429f4fc1",
-      "hash": "321c4842f94b7e4a871ed2178c5faf02034473647dacdd7f1e3e046d4a4ec82d",
+      "seq": 18,
+      "event_id": "00000000000000000000000000000012",
+      "prev": "dab4b3b0dbded672f96e1a6ff1734a5fc10f5b55f8e0147d2cbe8583be4a889d",
+      "hash": "e3654b96df5970e795badf2ca8da4f14d0334a8ee3b137042b1b79a0f1d756a1",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal": {
+          "schema": 1,
+          "proposal_id": "1111111111111111111111111111111b",
+          "run_id": "4444444444444444444444444444444a",
+          "targets": [
+            {
+              "target_id": "be9316ae01f23bbcd30971fb0afb298b",
+              "target_class": "comparison",
+              "expected_version": 1
+            }
+          ],
+          "op": {
+            "kind": "classify_conflict",
+            "payload": {
+              "comparison_id": "be9316ae01f23bbcd30971fb0afb298b",
+              "outcome": "same_meaning",
+              "basis_refs": [
+                "00000000000000000000000000000002"
+              ],
+              "model_id": "claude-opus-5",
+              "prompt_version": "classify-conflict-v1"
+            }
+          },
+          "intended_use": {
+            "kind": "reversible_work",
+            "stakes": "LOW",
+            "predicate_class": null
+          },
+          "basis": {
+            "transition_cause": "maintenance",
+            "evidence_refs": [],
+            "coverage_refs": [],
+            "authority_refs": [],
+            "authority_route_refs": [],
+            "addressed_contradictions": [],
+            "absence_claim": false
+          },
+          "declared_risk": "MEDIUM",
+          "reason": "these two say the same thing",
+          "candidate_search_receipt": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "prev": "e3654b96df5970e795badf2ca8da4f14d0334a8ee3b137042b1b79a0f1d756a1",
+      "hash": "51180ca9c571efae544d1757552b9a7f7dfbeb88e267e21e96cf4a497b72c711",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.classified",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "be9316ae01f23bbcd30971fb0afb298b",
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "outcome": "same_meaning",
+        "classification": {
+          "kind": "agent_supplied",
+          "proposal_id": "1111111111111111111111111111111b",
+          "model_id": "some-other-model",
+          "prompt_version": "classify-conflict-v1"
+        },
+        "evidence_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "reason_codes": [
+          "semantic_same_meaning"
+        ],
+        "classified_at": "2026-08-12T09:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "prev": "51180ca9c571efae544d1757552b9a7f7dfbeb88e267e21e96cf4a497b72c711",
+      "hash": "a9be6b9ce216de1a551fab342926b9bcceb72ea667fd9bca3ec4fbd92b3ac634",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.classified",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "be9316ae01f23bbcd30971fb0afb298b",
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "outcome": "genuine_direct",
+        "classification": {
+          "kind": "agent_supplied",
+          "proposal_id": "1111111111111111111111111111111b",
+          "model_id": "claude-opus-5",
+          "prompt_version": "classify-conflict-v1"
+        },
+        "evidence_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "reason_codes": [
+          "incompatible_values"
+        ],
+        "classified_at": "2026-08-12T09:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 21,
+      "event_id": "00000000000000000000000000000015",
+      "prev": "a9be6b9ce216de1a551fab342926b9bcceb72ea667fd9bca3ec4fbd92b3ac634",
+      "hash": "22a3539637cd5c41818d3f99091c614f8d8d5711512bbdde5f7eb11f8e903229",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.classified",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "be9316ae01f23bbcd30971fb0afb298b",
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "outcome": "same_meaning",
+        "classification": {
+          "kind": "agent_supplied",
+          "proposal_id": "1111111111111111111111111111111b",
+          "model_id": "claude-opus-5",
+          "prompt_version": "classify-conflict-v1"
+        },
+        "evidence_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "reason_codes": [
+          "semantic_same_meaning"
+        ],
+        "classified_at": "2026-08-12T09:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 22,
+      "event_id": "00000000000000000000000000000016",
+      "prev": "22a3539637cd5c41818d3f99091c614f8d8d5711512bbdde5f7eb11f8e903229",
+      "hash": "684ce2b33a83638cc1b38412e0b9ca38528769c69b225e7d8b66f56c22477355",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.classified",
@@ -1053,10 +1407,10 @@
     },
     {
       "v": 0,
-      "seq": 18,
-      "event_id": "00000000000000000000000000000012",
-      "prev": "321c4842f94b7e4a871ed2178c5faf02034473647dacdd7f1e3e046d4a4ec82d",
-      "hash": "54d65971e279aeb9213f493ff406675137c7d2788759187694bfe842922c91fb",
+      "seq": 23,
+      "event_id": "00000000000000000000000000000017",
+      "prev": "684ce2b33a83638cc1b38412e0b9ca38528769c69b225e7d8b66f56c22477355",
+      "hash": "a753bfe448539101d15b3c7e7ef893b7f10ace0c6147e64a7d95829e29dd57f7",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.opened",
@@ -1113,15 +1467,15 @@
           }
         },
         "kind": "genuine_direct",
-        "classified_event_id": "00000000000000000000000000000011"
+        "classified_event_id": "00000000000000000000000000000016"
       }
     },
     {
       "v": 0,
-      "seq": 19,
-      "event_id": "00000000000000000000000000000013",
-      "prev": "54d65971e279aeb9213f493ff406675137c7d2788759187694bfe842922c91fb",
-      "hash": "af94ee10d20fdca05b8f13bc631c30ded4d63242953c107cf5c58ff5bb4123fe",
+      "seq": 24,
+      "event_id": "00000000000000000000000000000018",
+      "prev": "a753bfe448539101d15b3c7e7ef893b7f10ace0c6147e64a7d95829e29dd57f7",
+      "hash": "17240d36ec6a0aa3b9c20590dc74793813f495e06b61309d2c33d72ce92abe5b",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "batch.committed",
@@ -1136,20 +1490,20 @@
         "valid_from": null,
         "valid_to": null,
         "member_event_ids": [
-          "00000000000000000000000000000011",
-          "00000000000000000000000000000012"
+          "00000000000000000000000000000016",
+          "00000000000000000000000000000017"
         ],
         "member_count": 2,
-        "members_digest": "c0b94b1882458e6aed51d7f9686e29c8ee0a6903cd81b38e6cb383e4d7cbfac5",
+        "members_digest": "67ff143d675acce27a70c51dda083c31fa2931d949dd681303f232b271e7f499",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
     },
     {
       "v": 0,
-      "seq": 20,
-      "event_id": "00000000000000000000000000000014",
-      "prev": "af94ee10d20fdca05b8f13bc631c30ded4d63242953c107cf5c58ff5bb4123fe",
-      "hash": "300cd7b96be87e96defefc3ed3c07ee9831275fb4940452e479fc21804669665",
+      "seq": 25,
+      "event_id": "00000000000000000000000000000019",
+      "prev": "17240d36ec6a0aa3b9c20590dc74793813f495e06b61309d2c33d72ce92abe5b",
+      "hash": "74ce3acb3228a5fdc9862877aa545f9453116acce97cc19154b16b8070ee2101",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.opened",
@@ -1206,15 +1560,15 @@
           }
         },
         "kind": "genuine_direct",
-        "classified_event_id": "00000000000000000000000000000011"
+        "classified_event_id": "00000000000000000000000000000016"
       }
     },
     {
       "v": 0,
-      "seq": 21,
-      "event_id": "00000000000000000000000000000015",
-      "prev": "300cd7b96be87e96defefc3ed3c07ee9831275fb4940452e479fc21804669665",
-      "hash": "0f9862b9c6cf6dc7d3446cf8cb15115cdebc988cd710405fb08b15ce4c14c97a",
+      "seq": 26,
+      "event_id": "0000000000000000000000000000001a",
+      "prev": "74ce3acb3228a5fdc9862877aa545f9453116acce97cc19154b16b8070ee2101",
+      "hash": "06e4d7a2ee6ee8ddc98bed51c36d4f57a673a8415306806c3e8ba92d9793670b",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1241,10 +1595,10 @@
     },
     {
       "v": 0,
-      "seq": 22,
-      "event_id": "00000000000000000000000000000016",
-      "prev": "0f9862b9c6cf6dc7d3446cf8cb15115cdebc988cd710405fb08b15ce4c14c97a",
-      "hash": "b17eb679938608ef5708dfbbddc61b7162cd508490bcc6dcdd8ecc7499412ec2",
+      "seq": 27,
+      "event_id": "0000000000000000000000000000001b",
+      "prev": "06e4d7a2ee6ee8ddc98bed51c36d4f57a673a8415306806c3e8ba92d9793670b",
+      "hash": "97d6ddd0b1d97201439953ae83688607b2373c833b852293800a094c336bef6a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.revised",
@@ -1280,10 +1634,10 @@
     },
     {
       "v": 0,
-      "seq": 23,
-      "event_id": "00000000000000000000000000000017",
-      "prev": "b17eb679938608ef5708dfbbddc61b7162cd508490bcc6dcdd8ecc7499412ec2",
-      "hash": "06eef74aa2d2c938c7d9c0120942df04ae679b3a78f2e355a9a67f1575c6ab3e",
+      "seq": 28,
+      "event_id": "0000000000000000000000000000001c",
+      "prev": "97d6ddd0b1d97201439953ae83688607b2373c833b852293800a094c336bef6a",
+      "hash": "c5cba99fc1faa069893fd38f83ce295e9e9e78186dc05ddbffafba87f1a11b50",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1301,7 +1655,7 @@
         "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
         "left_belief_id": "ffffffffffffffffffffffffffffffff",
         "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "addressed_by_event_id": "00000000000000000000000000000016",
+        "addressed_by_event_id": "0000000000000000000000000000001b",
         "evidence_event_ids": [
           "00000000000000000000000000000003"
         ],
@@ -1310,10 +1664,10 @@
     },
     {
       "v": 0,
-      "seq": 24,
-      "event_id": "00000000000000000000000000000018",
-      "prev": "06eef74aa2d2c938c7d9c0120942df04ae679b3a78f2e355a9a67f1575c6ab3e",
-      "hash": "c77268fa1d54fada697a6c06965fee75f3d74ed588f1716e5eca381fc6e4dfe0",
+      "seq": 29,
+      "event_id": "0000000000000000000000000000001d",
+      "prev": "c5cba99fc1faa069893fd38f83ce295e9e9e78186dc05ddbffafba87f1a11b50",
+      "hash": "0d942c1f1caeb2e4da2b9d61a8ac5bed51da55e09b9e73b7c89c3c5bc18d558d",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "batch.committed",
@@ -1328,20 +1682,20 @@
         "valid_from": null,
         "valid_to": null,
         "member_event_ids": [
-          "00000000000000000000000000000016",
-          "00000000000000000000000000000017"
+          "0000000000000000000000000000001b",
+          "0000000000000000000000000000001c"
         ],
         "member_count": 2,
-        "members_digest": "30c3e8167db4e3faf619546f68c5b60218ed192d825323a9304e44df9611324e",
+        "members_digest": "6c80373526a499c36fc85de56ca4f6f370d59b77506629273450c62b5e5637d1",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
     },
     {
       "v": 0,
-      "seq": 25,
-      "event_id": "00000000000000000000000000000019",
-      "prev": "c77268fa1d54fada697a6c06965fee75f3d74ed588f1716e5eca381fc6e4dfe0",
-      "hash": "6042082d3403d326abd2ebc7f3bd4d102cda71174b7932b5771492a9519dd7b7",
+      "seq": 30,
+      "event_id": "0000000000000000000000000000001e",
+      "prev": "0d942c1f1caeb2e4da2b9d61a8ac5bed51da55e09b9e73b7c89c3c5bc18d558d",
+      "hash": "303c88da70ed30b3cb063b031cca4a9339ffe3be7dcb62b400ebd9093047ef82",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.revised",
@@ -1377,10 +1731,10 @@
     },
     {
       "v": 0,
-      "seq": 26,
-      "event_id": "0000000000000000000000000000001a",
-      "prev": "6042082d3403d326abd2ebc7f3bd4d102cda71174b7932b5771492a9519dd7b7",
-      "hash": "ecf72009d9a0026be4d6ee33acef6f78fdf83351feb8b99c197dbbb60d1502c6",
+      "seq": 31,
+      "event_id": "0000000000000000000000000000001f",
+      "prev": "303c88da70ed30b3cb063b031cca4a9339ffe3be7dcb62b400ebd9093047ef82",
+      "hash": "6543c0395410787a1fb3fdbfa49d2410153346f2c15cec9a6d73f48f51ed2f05",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1398,7 +1752,7 @@
         "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
         "left_belief_id": "ffffffffffffffffffffffffffffffff",
         "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "addressed_by_event_id": "00000000000000000000000000000019",
+        "addressed_by_event_id": "0000000000000000000000000000001e",
         "evidence_event_ids": [
           "00000000000000000000000000000003"
         ],
@@ -1407,10 +1761,10 @@
     },
     {
       "v": 0,
-      "seq": 27,
-      "event_id": "0000000000000000000000000000001b",
-      "prev": "ecf72009d9a0026be4d6ee33acef6f78fdf83351feb8b99c197dbbb60d1502c6",
-      "hash": "b4769011bf7525faaee889e307e7df12787a6180ac13292ebc339a310913368d",
+      "seq": 32,
+      "event_id": "00000000000000000000000000000020",
+      "prev": "6543c0395410787a1fb3fdbfa49d2410153346f2c15cec9a6d73f48f51ed2f05",
+      "hash": "9ac855aca357ac0afca99f68c47ddce87ed96033bb65816433173aa0893a5ff8",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "batch.committed",
@@ -1425,20 +1779,20 @@
         "valid_from": null,
         "valid_to": null,
         "member_event_ids": [
-          "00000000000000000000000000000019",
-          "0000000000000000000000000000001a"
+          "0000000000000000000000000000001e",
+          "0000000000000000000000000000001f"
         ],
         "member_count": 2,
-        "members_digest": "b6a6c1f1d83e6ef7202c8b01016c81a31ee93a3b0bd9d9cea8e61651e682037d",
+        "members_digest": "c1691a0985425248f11596fb7fbbbd9e480ecb554a87f616c7d62e22acd933ad",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
     },
     {
       "v": 0,
-      "seq": 28,
-      "event_id": "0000000000000000000000000000001c",
-      "prev": "b4769011bf7525faaee889e307e7df12787a6180ac13292ebc339a310913368d",
-      "hash": "2df783e6dc2cfd7046d00adddf922527bb4b35fe7b48c1d99ec6dd42662c917d",
+      "seq": 33,
+      "event_id": "00000000000000000000000000000021",
+      "prev": "9ac855aca357ac0afca99f68c47ddce87ed96033bb65816433173aa0893a5ff8",
+      "hash": "2c2d5113b00fce3045683bf65f09cbe7aca498956a62ae9c6d27dd979380baa8",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.relation",
@@ -1461,10 +1815,10 @@
     },
     {
       "v": 0,
-      "seq": 29,
-      "event_id": "0000000000000000000000000000001d",
-      "prev": "2df783e6dc2cfd7046d00adddf922527bb4b35fe7b48c1d99ec6dd42662c917d",
-      "hash": "984f66ae6dd8d26049e3582b47b010377986c22c525acf217b8c55d4b55bf73e",
+      "seq": 34,
+      "event_id": "00000000000000000000000000000022",
+      "prev": "2c2d5113b00fce3045683bf65f09cbe7aca498956a62ae9c6d27dd979380baa8",
+      "hash": "a28d7e70e1cb9d10b25a669ee0082f889dd0a48aa4bcee6691141e24e39ddfbe",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.relation",
@@ -1487,239 +1841,187 @@
     },
     {
       "v": 0,
-      "seq": 30,
-      "event_id": "0000000000000000000000000000001e",
-      "prev": "984f66ae6dd8d26049e3582b47b010377986c22c525acf217b8c55d4b55bf73e",
-      "hash": "fb41fd03e40d84ca46bf9816cf29847517f22345dfcba4ed911daa60e33d537d",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "conflict.comparison_registered",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "comparison_id": "8edb83492a98f7c3f6533c5efc78d127",
-        "left": {
-          "relation_event_id": "0000000000000000000000000000001c",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "right": {
-          "relation_event_id": "0000000000000000000000000000001c",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "source_relation_event_id": "0000000000000000000000000000001c",
-        "reason": "declared_contradicts_relation",
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 31,
-      "event_id": "0000000000000000000000000000001f",
-      "prev": "fb41fd03e40d84ca46bf9816cf29847517f22345dfcba4ed911daa60e33d537d",
-      "hash": "b7828e68758663c6c0b32e204c0472993cf5af9352c4fa875eda29b743055266",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "conflict.comparison_registered",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "comparison_id": "9e5cedc292af444b2de2630bafd24ccd",
-        "left": {
-          "relation_event_id": "0000000000000000000000000000001d",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "right": {
-          "relation_event_id": "0000000000000000000000000000001d",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "source_relation_event_id": "0000000000000000000000000000001d",
-        "reason": "declared_contradicts_relation",
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 32,
-      "event_id": "00000000000000000000000000000020",
-      "prev": "b7828e68758663c6c0b32e204c0472993cf5af9352c4fa875eda29b743055266",
-      "hash": "298cd06130c63ad071ae82254592c51fa9c5f8afd0baa8e9637879357853aad6",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "conflict.comparison_registered",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "comparison_id": "9e5cedc292af444b2de2630bafd24ccd",
-        "left": {
-          "relation_event_id": "0000000000000000000000000000001d",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "right": {
-          "relation_event_id": "0000000000000000000000000000001d",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "source_relation_event_id": "0000000000000000000000000000001d",
-        "reason": "declared_contradicts_relation",
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 33,
-      "event_id": "00000000000000000000000000000021",
-      "prev": "298cd06130c63ad071ae82254592c51fa9c5f8afd0baa8e9637879357853aad6",
-      "hash": "804a4989581096176f9b0223754f79abf39754c460993095a2ffb8be8a5356d4",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "contradiction.backfill_completed",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "through_event_id": "0000000000000000000000000000001d",
-        "source_relation_count": 4,
-        "resolved_count": 3,
-        "opened_count": 1,
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 34,
-      "event_id": "00000000000000000000000000000022",
-      "prev": "804a4989581096176f9b0223754f79abf39754c460993095a2ffb8be8a5356d4",
-      "hash": "00ec02aa56d7f1b40cfaf7b3e83d8bdb6a0b06192f2774fff43b4ae3e331c363",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "contradiction.backfill_completed",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "through_event_id": "0000000000000000000000000000001d",
-        "source_relation_count": 4,
-        "resolved_count": 3,
-        "opened_count": 1,
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
       "seq": 35,
       "event_id": "00000000000000000000000000000023",
-      "prev": "00ec02aa56d7f1b40cfaf7b3e83d8bdb6a0b06192f2774fff43b4ae3e331c363",
-      "hash": "14735c979065920e640f485ede65ce05f581f0bc04c09c47f6da74bf9cb2a8be",
+      "prev": "a28d7e70e1cb9d10b25a669ee0082f889dd0a48aa4bcee6691141e24e39ddfbe",
+      "hash": "d4cea133794b578975e9a5163620a80488cec7aeda2c0c3c56fea8ab39199d23",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.comparison_registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "3bb2a028f5eb3b995c1c084c293bdffe",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000021",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000021",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000021",
+        "reason": "declared_contradicts_relation",
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 36,
+      "event_id": "00000000000000000000000000000024",
+      "prev": "d4cea133794b578975e9a5163620a80488cec7aeda2c0c3c56fea8ab39199d23",
+      "hash": "881e5ff07674a3cb681a32d6fdb521b0bb1b61e53fbe036bf79aace5f0f7ab2c",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.comparison_registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "4b934ede102d665fe7ab9689c75c3e89",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000022",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000022",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000022",
+        "reason": "declared_contradicts_relation",
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 37,
+      "event_id": "00000000000000000000000000000025",
+      "prev": "881e5ff07674a3cb681a32d6fdb521b0bb1b61e53fbe036bf79aace5f0f7ab2c",
+      "hash": "974f0ff51b5da95d5591a8dc09dafbf356d13b1e22972db292651a5bbc3366f8",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.comparison_registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "4b934ede102d665fe7ab9689c75c3e89",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000022",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000022",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000022",
+        "reason": "declared_contradicts_relation",
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 38,
+      "event_id": "00000000000000000000000000000026",
+      "prev": "974f0ff51b5da95d5591a8dc09dafbf356d13b1e22972db292651a5bbc3366f8",
+      "hash": "d9a5f9a64b9939b5b20d6b0420fe3dd365316fb9e219f1e4817e075ac48208f5",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -1733,7 +2035,59 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "0000000000000000000000000000001c",
+        "through_event_id": "00000000000000000000000000000022",
+        "source_relation_count": 4,
+        "resolved_count": 3,
+        "opened_count": 1,
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 39,
+      "event_id": "00000000000000000000000000000027",
+      "prev": "d9a5f9a64b9939b5b20d6b0420fe3dd365316fb9e219f1e4817e075ac48208f5",
+      "hash": "6330c14997124756cdaa3da09ab3fb2886ae91cc8f906eb2093ba72b833e843d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.backfill_completed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "through_event_id": "00000000000000000000000000000022",
+        "source_relation_count": 4,
+        "resolved_count": 3,
+        "opened_count": 1,
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 40,
+      "event_id": "00000000000000000000000000000028",
+      "prev": "6330c14997124756cdaa3da09ab3fb2886ae91cc8f906eb2093ba72b833e843d",
+      "hash": "b4e4eaa659451ff3a053f8c7fa458f3405d841e6f4190ec338dd08e27a12dd48",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.backfill_completed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "through_event_id": "00000000000000000000000000000021",
         "source_relation_count": 9,
         "resolved_count": 3,
         "opened_count": 1,
@@ -1742,10 +2096,10 @@
     },
     {
       "v": 0,
-      "seq": 36,
-      "event_id": "00000000000000000000000000000024",
-      "prev": "14735c979065920e640f485ede65ce05f581f0bc04c09c47f6da74bf9cb2a8be",
-      "hash": "3d711cfee34d1b9da8eb3c5f17cdfe9dc7f840fc2b2ea0aa67a0efa0d1bd5c7b",
+      "seq": 41,
+      "event_id": "00000000000000000000000000000029",
+      "prev": "b4e4eaa659451ff3a053f8c7fa458f3405d841e6f4190ec338dd08e27a12dd48",
+      "hash": "37d56895022732b6f753b7fb1f3a1f219d0a0c0bee743bd6437adb1084de08ee",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -1759,7 +2113,7 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "0000000000000000000000000000001c",
+        "through_event_id": "00000000000000000000000000000021",
         "source_relation_count": 2,
         "resolved_count": 2,
         "opened_count": 0,
@@ -1768,10 +2122,10 @@
     },
     {
       "v": 0,
-      "seq": 37,
-      "event_id": "00000000000000000000000000000025",
-      "prev": "3d711cfee34d1b9da8eb3c5f17cdfe9dc7f840fc2b2ea0aa67a0efa0d1bd5c7b",
-      "hash": "d8396a80d86cb44a80ee2079129d6b3fc515728b5ff0248a0cec96645931cbb5",
+      "seq": 42,
+      "event_id": "0000000000000000000000000000002a",
+      "prev": "37d56895022732b6f753b7fb1f3a1f219d0a0c0bee743bd6437adb1084de08ee",
+      "hash": "21492dfe1650be1751bc991cf738318c25574ad8507500fb02659a59f7b8a0c2",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -1785,7 +2139,7 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "0000000000000000000000000000001c",
+        "through_event_id": "00000000000000000000000000000021",
         "source_relation_count": 9,
         "resolved_count": 7,
         "opened_count": 2,
@@ -1913,8 +2267,8 @@
         ],
         "projection": {
           "path": null,
-          "generating_event": "0000000000000000000000000000001d",
-          "state_digest": "bf58d83132e5bb3bb48cb556cac687d1d6055fabd3f954322a36e4f80e0e6d66",
+          "generating_event": "00000000000000000000000000000022",
+          "state_digest": "4843ed19753d8835a325348450b7cee9e0e0098e381da827fd83d734a079bcc2",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -1947,12 +2301,12 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000006",
-          "00000000000000000000000000000016"
+          "0000000000000000000000000000001b"
         ],
         "projection": {
           "path": null,
-          "generating_event": "00000000000000000000000000000016",
-          "state_digest": "99df99ff85133dec24b92cfe8c4e468fcdcb586078c63cf4c8dade187b260b8e",
+          "generating_event": "0000000000000000000000000000001b",
+          "state_digest": "42068d052079d46e82e8fd887f39fa326f066dc15411fbb441c580b473ad17a8",
           "content_hash": "065f46930c13ea3b017e704eb4996564de1848e194716af0bdea660401da321f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -1994,12 +2348,14 @@
       "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
       "belief:ffffffffffffffffffffffffffffffff": 4,
       "comparison:2822c2c578c15128199506ec0d7c56a9": 4,
-      "comparison:9e5cedc292af444b2de2630bafd24ccd": 1,
+      "comparison:4b934ede102d665fe7ab9689c75c3e89": 1,
+      "comparison:be9316ae01f23bbcd30971fb0afb298b": 2,
       "comparison:d16fe4449194774a8ca629c3c34597de": 2,
       "entity:cccccccccccccccccccccccccccccccc": 1,
       "observation:00000000000000000000000000000002": 1,
       "observation:00000000000000000000000000000003": 1,
       "observation:00000000000000000000000000000004": 1,
+      "proposal:1111111111111111111111111111111b": 1,
       "relation:1b9e254efbfb3f4bbb89be2e72fe7b64": 1,
       "relation:a0ac1531a7430447fa1328669a9bc6c6": 1,
       "source:c8147897afd510dad9278f297ba49115": 4
@@ -2021,7 +2377,15 @@
         2
       ]
     ],
-    "proposals": {},
+    "proposals": {
+      "1111111111111111111111111111111b": {
+        "state": "submitted",
+        "commit_set_id": null,
+        "decision": null,
+        "applied_event_id": null,
+        "has_revert_plan": false
+      }
+    },
     "coverage_facts": {},
     "coverage_assessments": {},
     "coverage_gaps": {},
@@ -2052,25 +2416,49 @@
           "subject_id": "cccccccccccccccccccccccccccccccc"
         }
       },
-      "9e5cedc292af444b2de2630bafd24ccd": {
-        "registered_by": "0000000000000000000000000000001f",
+      "4b934ede102d665fe7ab9689c75c3e89": {
+        "registered_by": "00000000000000000000000000000024",
         "origin": {
           "kind": "declared",
-          "source_relation_event_id": "0000000000000000000000000000001d",
+          "source_relation_event_id": "00000000000000000000000000000022",
           "rule_version": "contradiction-backfill-v1"
         },
         "left": {
           "kind": "declared_relation",
-          "relation_event_id": "0000000000000000000000000000001d",
+          "relation_event_id": "00000000000000000000000000000022",
           "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "belief_revision_event_id": "00000000000000000000000000000007",
           "subject_id": "cccccccccccccccccccccccccccccccc"
         },
         "right": {
           "kind": "declared_relation",
-          "relation_event_id": "0000000000000000000000000000001d",
+          "relation_event_id": "00000000000000000000000000000022",
           "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        }
+      },
+      "be9316ae01f23bbcd30971fb0afb298b": {
+        "registered_by": "0000000000000000000000000000000a",
+        "origin": {
+          "kind": "detected",
+          "detector_version": "conflict-detector-v1",
+          "reason_codes": [
+            "same_subject_predicate"
+          ]
+        },
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
           "subject_id": "cccccccccccccccccccccccccccccccc"
         }
       },
@@ -2101,7 +2489,7 @@
     },
     "classifications": {
       "2822c2c578c15128199506ec0d7c56a9": {
-        "classified_by": "00000000000000000000000000000011",
+        "classified_by": "00000000000000000000000000000016",
         "outcome": "genuine_direct",
         "classification": {
           "kind": "deterministic",
@@ -2112,8 +2500,24 @@
         ],
         "evidence_event_ids": []
       },
+      "be9316ae01f23bbcd30971fb0afb298b": {
+        "classified_by": "00000000000000000000000000000015",
+        "outcome": "same_meaning",
+        "classification": {
+          "kind": "agent_supplied",
+          "proposal_id": "1111111111111111111111111111111b",
+          "model_id": "claude-opus-5",
+          "prompt_version": "classify-conflict-v1"
+        },
+        "reason_codes": [
+          "semantic_same_meaning"
+        ],
+        "evidence_event_ids": [
+          "00000000000000000000000000000002"
+        ]
+      },
       "d16fe4449194774a8ca629c3c34597de": {
-        "classified_by": "0000000000000000000000000000000a",
+        "classified_by": "0000000000000000000000000000000b",
         "outcome": "resolved_by_stage",
         "classification": {
           "kind": "deterministic",
@@ -2131,11 +2535,11 @@
         "kind": "genuine_direct",
         "left_belief_id": "ffffffffffffffffffffffffffffffff",
         "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "opened_by": "00000000000000000000000000000012",
-        "classified_event_id": "00000000000000000000000000000011",
+        "opened_by": "00000000000000000000000000000017",
+        "classified_event_id": "00000000000000000000000000000016",
         "closed": {
-          "closed_by": "00000000000000000000000000000017",
-          "addressed_by_event_id": "00000000000000000000000000000016",
+          "closed_by": "0000000000000000000000000000001c",
+          "addressed_by_event_id": "0000000000000000000000000000001b",
           "disposition": "resolved_with_evidence",
           "evidence_event_ids": [
             "00000000000000000000000000000003"
@@ -2144,8 +2548,8 @@
       }
     },
     "contradiction_backfill": {
-      "event_id": "00000000000000000000000000000025",
-      "through_event_id": "0000000000000000000000000000001c",
+      "event_id": "0000000000000000000000000000002a",
+      "through_event_id": "00000000000000000000000000000021",
       "source_relation_count": 9,
       "resolved_count": 7,
       "opened_count": 2,
@@ -2160,106 +2564,120 @@
   },
   "expected_refusals": [
     {
-      "seq": 11,
-      "event_id": "0000000000000000000000000000000b",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "comparison d16fe4449194774a8ca629c3c34597de was already classified resolved_by_stage by event 0000000000000000000000000000000a — one classification per comparison, because the edge id carries the kind and a second verdict would open a second edge rather than amend the first"
-    },
-    {
       "seq": 12,
       "event_id": "0000000000000000000000000000000c",
       "batch_id": null,
       "code": "refused",
-      "detail": "comparison d16fe4449194774a8ca629c3c34597de classified resolved_by_stage, which RESOLVED the pair apart — opening an edge over it is the crying-wolf failure this whole pipeline exists to prevent"
+      "detail": "comparison d16fe4449194774a8ca629c3c34597de was already classified resolved_by_stage by event 0000000000000000000000000000000b — one classification per comparison, because the edge id carries the kind and a second verdict would open a second edge rather than amend the first"
     },
     {
       "seq": 13,
       "event_id": "0000000000000000000000000000000d",
       "batch_id": null,
       "code": "refused",
-      "detail": "comparison 00000000000000000000000000000000 was never detected or registered — a classification of a pair nobody put forward is a verdict with no case"
+      "detail": "comparison d16fe4449194774a8ca629c3c34597de classified resolved_by_stage, which RESOLVED the pair apart — opening an edge over it is the crying-wolf failure this whole pipeline exists to prevent"
     },
     {
       "seq": 14,
       "event_id": "0000000000000000000000000000000e",
       "batch_id": null,
       "code": "refused",
-      "detail": "the classification's endpoints are not the tuple comparison 2822c2c578c15128199506ec0d7c56a9 was minted from — side for side, because both bodies order left as the canonically-first endpoint"
+      "detail": "comparison 00000000000000000000000000000000 was never detected or registered — a classification of a pair nobody put forward is a verdict with no case"
     },
     {
       "seq": 15,
       "event_id": "0000000000000000000000000000000f",
       "batch_id": null,
       "code": "refused",
-      "detail": "outcome same_meaning is a semantic judgement and arrives only through an applied classify_conflict proposal — a deterministic rule claiming it would put a model's job in the reducer with none of the review"
+      "detail": "the classification's endpoints are not the tuple comparison 2822c2c578c15128199506ec0d7c56a9 was minted from — side for side, because both bodies order left as the canonically-first endpoint"
     },
     {
       "seq": 16,
       "event_id": "00000000000000000000000000000010",
       "batch_id": null,
       "code": "refused",
+      "detail": "outcome same_meaning is a semantic judgement and arrives only through an applied classify_conflict proposal — a deterministic rule claiming it would put a model's job in the reducer with none of the review"
+    },
+    {
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "batch_id": null,
+      "code": "refused",
       "detail": "outcome resolved_by_stage is a typed comparison over recorded qualifiers and is deterministic only — a model that could decide it could resolve a real conflict away by being confident about arithmetic"
+    },
+    {
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "proposal 1111111111111111111111111111111b was made by claude-opus-5/classify-conflict-v1, and this event credits some-other-model/classify-conflict-v1 — an agent_supplied verdict IS its attribution"
     },
     {
       "seq": 20,
       "event_id": "00000000000000000000000000000014",
       "batch_id": null,
       "code": "refused",
-      "detail": "edge a51b3fd02a735bd0c3705441ef296aa9 was already opened by event 00000000000000000000000000000012 — exact replay is deduplicated at the door by `contradiction-open:<store>:<edge>`, so a second event reaching the reducer is a duplicate append"
+      "detail": "proposal 1111111111111111111111111111111b asked for same_meaning, and this event records genuine_direct — the review answered a different question"
     },
     {
-      "seq": 21,
-      "event_id": "00000000000000000000000000000015",
+      "seq": 25,
+      "event_id": "00000000000000000000000000000019",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "edge a51b3fd02a735bd0c3705441ef296aa9 was already opened by event 00000000000000000000000000000017 — exact replay is deduplicated at the door by `contradiction-open:<store>:<edge>`, so a second event reaching the reducer is a duplicate append"
+    },
+    {
+      "seq": 26,
+      "event_id": "0000000000000000000000000000001a",
       "batch_id": null,
       "code": "refused",
       "detail": "addressed_by_event_id 00000000000000000000000000000002 is not a member of this batch — a close travels with the mutation that addressed the edge, and there is no standalone close path"
     },
     {
-      "seq": 26,
-      "event_id": "0000000000000000000000000000001a",
+      "seq": 31,
+      "event_id": "0000000000000000000000000000001f",
       "batch_id": "b0000000000000000000000000000003",
       "code": "refused",
-      "detail": "batch member 1: edge a51b3fd02a735bd0c3705441ef296aa9 was already closed by event 00000000000000000000000000000017 — a closed edge never reopens, and a second close would be a second answer to a question that has one"
-    },
-    {
-      "seq": 27,
-      "event_id": "0000000000000000000000000000001b",
-      "batch_id": "b0000000000000000000000000000003",
-      "code": "batch",
-      "detail": "member 1 refused — whole batch has no effect"
-    },
-    {
-      "seq": 30,
-      "event_id": "0000000000000000000000000000001e",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "relation 1b9e254efbfb3f4bbb89be2e72fe7b64 is a Supersedes, not a contradicts — registering a comparison from it would put a conflict in the ledger that nobody declared"
+      "detail": "batch member 1: edge a51b3fd02a735bd0c3705441ef296aa9 was already closed by event 0000000000000000000000000000001c — a closed edge never reopens, and a second close would be a second answer to a question that has one"
     },
     {
       "seq": 32,
       "event_id": "00000000000000000000000000000020",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "comparison 9e5cedc292af444b2de2630bafd24ccd already exists (event 0000000000000000000000000000001f) — registration is the one creation, and an exact retry is deduplicated at the door by its idempotency key"
-    },
-    {
-      "seq": 34,
-      "event_id": "00000000000000000000000000000022",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "a checkpoint through 0000000000000000000000000000001d is already recorded (event 00000000000000000000000000000021) — the same coverage claimed twice"
+      "batch_id": "b0000000000000000000000000000003",
+      "code": "batch",
+      "detail": "member 1 refused — whole batch has no effect"
     },
     {
       "seq": 35,
       "event_id": "00000000000000000000000000000023",
       "batch_id": null,
       "code": "refused",
+      "detail": "relation 1b9e254efbfb3f4bbb89be2e72fe7b64 is a Supersedes, not a contradicts — registering a comparison from it would put a conflict in the ledger that nobody declared"
+    },
+    {
+      "seq": 37,
+      "event_id": "00000000000000000000000000000025",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "comparison 4b934ede102d665fe7ab9689c75c3e89 already exists (event 00000000000000000000000000000024) — registration is the one creation, and an exact retry is deduplicated at the door by its idempotency key"
+    },
+    {
+      "seq": 39,
+      "event_id": "00000000000000000000000000000027",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "a checkpoint through 00000000000000000000000000000022 is already recorded (event 00000000000000000000000000000026) — the same coverage claimed twice"
+    },
+    {
+      "seq": 40,
+      "event_id": "00000000000000000000000000000028",
+      "batch_id": null,
+      "code": "refused",
       "detail": "the backfill saw 9 relations and accounts for 4 — every relation it read is either resolved apart or has an open edge, and a marker that does not add up is a marker that stopped early"
     },
     {
-      "seq": 36,
-      "event_id": "00000000000000000000000000000024",
+      "seq": 41,
+      "event_id": "00000000000000000000000000000029",
       "batch_id": null,
       "code": "refused",
       "detail": "this checkpoint saw 2 relations and the previous one saw 4 — the backfill reads a growing prefix, so a shrinking count is a run that lost its place"

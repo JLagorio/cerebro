@@ -28,6 +28,7 @@ const REPO = join(__dirname, '../../..');
 const RAW = readFileSync(join(REPO, POLICY_PATH), 'utf8');
 /** The frozen format-1 artifact — still readable, and still not the table. */
 const RAW_V1 = readFileSync(join(REPO, 'shared/policy/policy.v1.json'), 'utf8');
+const RAW_V2 = readFileSync(join(REPO, 'shared/policy/policy.v2.json'), 'utf8');
 
 describe('the shared artifact is one artifact', () => {
   it('hashes to the digest the Rust core also asserts', () => {
@@ -237,14 +238,18 @@ describe('the table answers the questions an interpreter asks', () => {
     }
   });
 
-  it('gates exactly the ops whose machinery has not shipped', () => {
-    // M27 owns the conflict classifier; until then the op is typed-unavailable
-    // rather than emitting an unnamed mutation.
-    expect(blockingCapability(POLICY, 'classify_conflict')).toBe('conflict_classification');
-    expect(blockingCapability(POLICY, 'supersede_belief')).toBeNull();
-    // M22's subject-correction body, validator, reducer effect, and vectors
-    // all landed, so the HIGH correction op is available.
+  it('gates nothing this build cannot spell, and still knows how to gate', () => {
+    // M27.4 shipped the classifier's body, expansion, reducer effect, and
+    // vectors, so nothing the shipped table declares is unavailable — the
+    // twin of `a_capability_gated_op_still_has_an_expansion_arm_to_match`.
+    expect(blockingCapability(POLICY, 'classify_conflict')).toBeNull();
     expect(blockingCapability(POLICY, 'correct_observation_subject')).toBeNull();
+    expect(blockingCapability(POLICY, 'supersede_belief')).toBeNull();
+    // The gate is still live code, and the frozen v2 table is where it can be
+    // seen firing — the same artifact `classify-conflict-is-not-available-yet`
+    // replays against.
+    const v2 = parseTable(JSON.parse(RAW_V2));
+    expect(blockingCapability(v2, 'classify_conflict')).toBe('conflict_classification');
   });
 
   it('selects a transition from the payload only where the table says to', () => {

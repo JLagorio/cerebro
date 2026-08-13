@@ -904,6 +904,23 @@ impl PolicyTable {
         }
     }
 
+    /// One of the FROZEN tables, by the name a golden fixture may pin.
+    ///
+    /// The frozen artifacts are already this repo's negative controls — v1
+    /// predates `no_self_ancestry`, v2 predates `contradiction_edges`. This
+    /// lets a shared fixture replay against one, which is what keeps a refusal
+    /// the shipped table can no longer produce from losing its parity
+    /// coverage entirely.
+    pub fn frozen(name: &str) -> Result<PolicyTable, String> {
+        match name {
+            "v1" => Self::parse(POLICY_V1_JSON),
+            "v2" => Self::parse(POLICY_V2_JSON),
+            other => Err(format!(
+                "{other:?} is not a frozen policy table — the committed ones are v1 and v2"
+            )),
+        }
+    }
+
     /// Is this op available given the table's capability flags? Returns the
     /// blocking capability name, or `None` when it is clear.
     pub fn blocking_capability(&self, name: &str) -> Option<&str> {

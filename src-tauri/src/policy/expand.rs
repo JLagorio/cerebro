@@ -46,6 +46,16 @@ pub struct Expansion {
     /// event id, so creating one cannot appear here. Those are creations
     /// with no prior version, no CAS to check, and no stored inverse.
     pub write_targets: Vec<(TargetClass, String)>,
+    /// The same advances, WITH repeats — one entry per event that bumps a
+    /// target's version (M27.4d).
+    ///
+    /// `write_targets` is a set because CAS is a set. Post-versions are
+    /// arithmetic, and an op whose members advance one target twice really
+    /// does leave it two ahead: an unresolved `classify_conflict` advances its
+    /// comparison through the classification AND through the same-batch open.
+    /// Reporting +1 there would hand the caller a version its next proposal
+    /// would fail CAS against.
+    pub advances: Vec<(TargetClass, String)>,
     /// The stored inverse. Non-empty exactly for the ops whose table rule
     /// says `revert: one_click` — held to the table by a tripwire test
     /// rather than kept in sync by hand.
@@ -177,6 +187,7 @@ struct Plan<'a> {
     ctx: &'a ExpansionContext<'a>,
     members: Vec<(String, serde_json::Value)>,
     write_targets: Vec<(TargetClass, String)>,
+    advances: Vec<(TargetClass, String)>,
     revert_steps: Vec<RevertStep>,
     /// Beliefs THIS expansion creates. A split's outputs are superseded
     /// into by the same plan that made them, so an expansion must see its
@@ -190,6 +201,7 @@ impl<'a> Plan<'a> {
             ctx,
             members: Vec::new(),
             write_targets: Vec::new(),
+            advances: Vec::new(),
             revert_steps: Vec::new(),
             created: Default::default(),
         }
@@ -205,20 +217,22 @@ impl<'a> Plan<'a> {
         Ok(ordinal)
     }
 
-    /// Record a target this plan advances. Duplicates collapse: an op that
-    /// touches one Belief twice still names it once, so the CAS set stays a
-    /// set.
+    /// Record a target this plan advances ONCE. Duplicates collapse in the
+    /// CAS set — an op that touches one Belief twice still names it once, so
+    /// the set stays a set — but each call is counted for post-versions.
     fn touches(&mut self, class: TargetClass, id: &str) {
         let entry = (class, id.to_string());
         if !self.write_targets.contains(&entry) {
-            self.write_targets.push(entry);
+            self.write_targets.push(entry.clone());
         }
+        self.advances.push(entry);
     }
 
     fn finish(self) -> Expansion {
         Expansion {
             members: self.members,
             write_targets: self.write_targets,
+            advances: self.advances,
             revert_steps: self.revert_steps,
         }
     }
@@ -407,6 +421,119 @@ impl<'a> Plan<'a> {
         )?;
         self.touches(TargetClass::Relation, relation_id);
         Ok(ordinal)
+    }
+
+    /// Record an agent's semantic verdict on a registered comparison, and the
+    /// edge an unresolved one leaves behind (M27.4d).
+    ///
+    /// This is the ONLY road to `same_meaning` and to any granularity result.
+    /// The gauntlet answers what typed gates can answer and leaves the rest
+    /// undecided on purpose; the alternative — letting a deterministic pass
+    /// call two differently-worded strings the same claim — is the reducer
+    /// inventing agreement. So a judgement about MEANING arrives here, under a
+    /// proposal, stamped with who made it, and reviewable.
+    ///
+    /// Nothing about it is trusted beyond that. It carries evidence or it does
+    /// not validate; it names its model and prompt or it does not validate;
+    /// and the ledger records it as one party's opinion rather than as a fact
+    /// the store established.
+    fn classify_conflict(
+        &mut self,
+        comparison_id: &str,
+        outcome: schema::ConflictOutcome,
+        basis_refs: &[String],
+        model_id: &str,
+        prompt_version: &str,
+    ) -> Result<(), ExpandError> {
+        let comparison = self
+            .ctx
+            .state
+            .comparisons
+            .get(comparison_id)
+            .ok_or_else(|| missing("comparison", comparison_id))?;
+        if let Some(existing) = self.ctx.state.conflict_classifications.get(comparison_id) {
+            return Err(refuse(
+                "illegal_transition",
+                format!(
+                    "comparison {comparison_id} was already classified {} — the edge id carries \
+                     the kind, so a second verdict would open a second edge rather than amend \
+                     the first",
+                    existing.outcome.as_str()
+                ),
+            ));
+        }
+        for observation in basis_refs {
+            if !self.ctx.state.observations.contains_key(observation) {
+                return Err(missing("observation", observation));
+            }
+        }
+        // The endpoints are copied FROM the registration, never from the
+        // payload: a caller's second opinion about which pair it is judging
+        // would be a second chance to classify the wrong one.
+        let (left, right) = (comparison.left.clone(), comparison.right.clone());
+        let (schema_v, batch_id, key, actor) = common(&self.ctx.actor);
+        let body = schema::ConflictClassified {
+            schema: schema_v,
+            batch_id,
+            idempotency_key: key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            comparison_id: comparison_id.to_string(),
+            left: left.clone(),
+            right: right.clone(),
+            outcome,
+            classification: schema::Classification::AgentSupplied {
+                proposal_id: self.ctx.proposal_id.clone(),
+                model_id: model_id.to_string(),
+                prompt_version: prompt_version.to_string(),
+            },
+            evidence_event_ids: basis_refs.to_vec(),
+            reason_codes: vec![semantic_reason(outcome)],
+            classified_at: self.ctx.submitted_at.clone(),
+        };
+        // The outcome/provenance matrix lives in the schema, and this is where
+        // it gets consulted: `resolved_by_stage` and its typed siblings are
+        // deterministic ONLY, because a model confident about arithmetic could
+        // resolve a real conflict away. Validating here turns that into a card
+        // the proposer can read instead of an event the reducer drops.
+        body.validate()
+            .map_err(|detail| refuse("illegal_transition", detail))?;
+        let classified_ordinal = self.push(schema::KIND_CONFLICT_CLASSIFIED, &body)?;
+        self.touches(TargetClass::Comparison, comparison_id);
+
+        if let Some(kind) = schema::EdgeKind::of(outcome) {
+            let (schema_v, batch_id, key, actor) = common(&self.ctx.actor);
+            self.push(
+                schema::KIND_CONTRADICTION_OPENED,
+                &schema::ContradictionOpened {
+                    schema: schema_v,
+                    batch_id,
+                    idempotency_key: key,
+                    actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    edge_id: schema::derive_edge_id(comparison_id, kind),
+                    comparison_id: comparison_id.to_string(),
+                    left: left.clone(),
+                    right: right.clone(),
+                    kind,
+                    classified_event_id: member_ref(classified_ordinal),
+                },
+            )?;
+            // The edge advances the comparison a SECOND time and each distinct
+            // endpoint Belief once — the matrix the reducer applies, spelled
+            // here so `resulting_versions` is arithmetic rather than a guess.
+            self.touches(TargetClass::Comparison, comparison_id);
+            let (left_belief, right_belief) = (left.belief_id(), right.belief_id());
+            self.touches(TargetClass::Belief, left_belief);
+            if right_belief != left_belief {
+                self.touches(TargetClass::Belief, right_belief);
+            }
+        }
+        Ok(())
     }
 
     /// Register, classify, and — when nothing separates the pair — open the
@@ -1462,21 +1589,52 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
             plan.touches(TargetClass::Proposal, applied_proposal_id);
         }
 
-        // --- Not yet expressible --------------------------------------------------
-        ProposalOp::ClassifyConflict { .. } => {
-            // M27 owns `conflict.classified` and `contradiction.opened`. The
-            // table gates this op behind an unavailable capability, so a
-            // proposal is refused before it reaches here; this arm exists so
-            // the match stays exhaustive and no later edit can reach a
-            // silent fallthrough.
-            return Err(refuse(
-                "capability_unavailable",
-                "classify_conflict expands to M27's classification events, which do not exist yet",
-            ));
+        // --- Conflict -------------------------------------------------------------
+        ProposalOp::ClassifyConflict {
+            comparison_id,
+            outcome,
+            basis_refs,
+            model_id,
+            prompt_version,
+        } => {
+            plan.classify_conflict(
+                comparison_id,
+                *outcome,
+                basis_refs,
+                model_id,
+                prompt_version,
+            )?;
         }
     }
     plan.close_addressed_contradictions(ctx)?;
     Ok(plan.finish())
+}
+
+/// The reason code an agent-supplied verdict carries, from the verdict.
+///
+/// One code, derived rather than supplied, because the outcome IS the reason
+/// at this level of detail — an agent that concluded `same_meaning` concluded
+/// the two claims mean the same thing, and letting it attach some other code
+/// would let the two disagree in the record. The prose case for the verdict
+/// lives in the proposal, which the ledger keeps whole.
+///
+/// This is the AGENT half of the schema's outcome/provenance matrix, and the
+/// schema is what enforces it: `classify_conflict` validates the body it
+/// builds, so a mapping that drifted from the matrix — or an agent claiming a
+/// typed comparison it is not allowed to reach — refuses as a card rather
+/// than as a reducer anomaly.
+fn semantic_reason(outcome: schema::ConflictOutcome) -> schema::ConflictReasonCode {
+    use schema::{ConflictOutcome as O, ConflictReasonCode as R};
+    match outcome {
+        O::SameMeaning => R::SemanticSameMeaning,
+        O::ResolvedTemporally => R::TemporalDisjoint,
+        O::ResolvedByScope => R::ScopeDisjoint,
+        O::ResolvedByStage => R::StageDisjoint,
+        O::ResolvedByGranularity => R::GranularityMismatch,
+        O::GenuineDirect => R::IncompatibleValues,
+        O::Partial => R::IncompatibleValues,
+        O::Conditional => R::ConditionalContext,
+    }
 }
 
 /// The basis a split output gets when the assignment gave it no evidence.
@@ -2023,35 +2181,265 @@ mod tests {
         assert_eq!(err.code, "invalid_reference");
     }
 
+    /// A registered comparison the deterministic gaunttlet declined to
+    /// decide, with the endpoints an agent is being asked about.
+    fn undecided_comparison(state: &mut EpistemicState, comparison_id: &str) {
+        let endpoint = |belief: &str| schema::ConflictEndpoint::Asserted {
+            endpoint: crate::ledger::schema::ConflictCandidateEndpointV1 {
+                belief_id: belief.to_string(),
+                belief_revision_event_id: E.into(),
+                assertion_event_id: D.into(),
+                subject_id: E.into(),
+                predicate: "gpu_supplier".into(),
+                value_hash: "0".repeat(64),
+                scope: schema::Scope {
+                    stage: Some(schema::Stage::Shipping),
+                    revision: None,
+                    environment: None,
+                    geography: None,
+                },
+                state_stage: schema::StateStage::of(Some(schema::Stage::Shipping)),
+                valid_time: schema::ValidInterval {
+                    from: None,
+                    to: None,
+                },
+            },
+        };
+        state.comparisons.insert(
+            comparison_id.to_string(),
+            crate::ledger::reduce::ComparisonRow {
+                comparison_id: comparison_id.to_string(),
+                event_id: D.into(),
+                left: endpoint(B),
+                right: endpoint(C),
+                origin: crate::ledger::reduce::ComparisonOrigin::Detected {
+                    detector_version: "conflict-detect-v1".into(),
+                    reason_codes: vec![],
+                },
+            },
+        );
+        state.observations.insert(
+            D.to_string(),
+            crate::ledger::reduce::ObservationState {
+                event_id: D.into(),
+                seq: 1,
+                kind: schema::ObservationKind::HumanAssertion,
+                source_id: E.into(),
+                source_registration_event_id: E.into(),
+                subject: SubjectRef::Resolved {
+                    entity_id: E.into(),
+                    aliases: vec![],
+                },
+                effective_entity: Some(E.into()),
+                effective_resolution_event: None,
+                authority: None,
+                assertion_basis: None,
+                absence: None,
+                actor: "human:me".into(),
+                lineage_parents: vec![],
+            },
+        );
+    }
+
+    fn classify(outcome: schema::ConflictOutcome) -> ProposalOp {
+        ProposalOp::ClassifyConflict {
+            comparison_id: A.into(),
+            outcome,
+            basis_refs: vec![D.into()],
+            model_id: "claude-opus-5".into(),
+            prompt_version: "classify-conflict-v1".into(),
+        }
+    }
+
     #[test]
-    fn classify_conflict_is_the_only_op_expansion_cannot_spell() {
-        // The table gates it behind an unavailable capability, so policy
-        // refuses first; this arm exists so no later edit reaches a silent
-        // fallthrough.
-        let state = world(&[B]);
+    fn a_semantic_verdict_is_recorded_as_one_partys_opinion_with_its_edge() {
+        // The ONLY road to `same_meaning` and to any granularity result: an
+        // agent's judgement, under a proposal, stamped with who made it. A
+        // deterministic pass that could reach these would be the reducer
+        // inventing agreement between two differently-worded claims.
+        let mut state = world(&[B, C]);
+        undecided_comparison(&mut state, A);
+
+        // Unresolved: the verdict and the edge it leaves, one batch.
+        let expansion = expand(
+            &classify(schema::ConflictOutcome::GenuineDirect),
+            &ctx(&state),
+        )
+        .unwrap();
+        assert_eq!(
+            kinds(&expansion),
+            ["conflict.classified", "contradiction.opened"]
+        );
+        let classified: schema::ConflictClassified =
+            serde_json::from_value(expansion.members[0].1.clone()).unwrap();
+        assert_eq!(
+            classified.classification,
+            schema::Classification::AgentSupplied {
+                proposal_id: A.into(),
+                model_id: "claude-opus-5".into(),
+                prompt_version: "classify-conflict-v1".into(),
+            }
+        );
+        assert_eq!(classified.evidence_event_ids, [D.to_string()]);
+        assert_eq!(
+            classified.reason_codes,
+            [schema::ConflictReasonCode::IncompatibleValues]
+        );
+        assert_eq!(classified.classified_at, SUBMITTED_AT);
+        // The endpoints come from the REGISTRATION, never from the payload:
+        // a caller's second opinion about which pair it is judging would be a
+        // second chance to classify the wrong one.
+        let comparison = &state.comparisons[A];
+        assert_eq!(classified.left, comparison.left);
+        assert_eq!(classified.right, comparison.right);
+        let opened: schema::ContradictionOpened =
+            serde_json::from_value(expansion.members[1].1.clone()).unwrap();
+        assert_eq!(opened.classified_event_id, member_ref(0));
+        assert_eq!(
+            opened.edge_id,
+            schema::derive_edge_id(A, schema::EdgeKind::GenuineDirect)
+        );
+
+        // The comparison advances TWICE — once per event — and each distinct
+        // endpoint Belief once. `write_targets` still names each one once,
+        // because CAS is a set.
+        let comparison_advances = expansion
+            .advances
+            .iter()
+            .filter(|(class, id)| *class == TargetClass::Comparison && id == A)
+            .count();
+        assert_eq!(comparison_advances, 2);
+        assert_eq!(
+            expansion.write_targets,
+            [
+                (TargetClass::Comparison, A.to_string()),
+                (TargetClass::Belief, B.to_string()),
+                (TargetClass::Belief, C.to_string()),
+            ]
+        );
+
+        // Resolved: the verdict alone, and the comparison advances once.
+        let resolved = expand(
+            &classify(schema::ConflictOutcome::SameMeaning),
+            &ctx(&state),
+        )
+        .unwrap();
+        assert_eq!(kinds(&resolved), ["conflict.classified"]);
+        assert_eq!(
+            resolved.advances,
+            [(TargetClass::Comparison, A.to_string())]
+        );
+        let body: schema::ConflictClassified =
+            serde_json::from_value(resolved.members[0].1.clone()).unwrap();
+        assert_eq!(
+            body.reason_codes,
+            [schema::ConflictReasonCode::SemanticSameMeaning]
+        );
+    }
+
+    #[test]
+    fn a_verdict_needs_a_case_evidence_and_no_predecessor() {
+        let mut state = world(&[B, C]);
+
+        // A comparison nobody put forward.
+        let err = expand(
+            &classify(schema::ConflictOutcome::SameMeaning),
+            &ctx(&state),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "invalid_reference");
+
+        undecided_comparison(&mut state, A);
+        // Evidence that is not something observed.
         let err = expand(
             &ProposalOp::ClassifyConflict {
-                comparison_id: B.into(),
-                outcome: schema::ConflictOutcome::GenuineDirect,
-                basis_refs: vec![A.into()],
+                comparison_id: A.into(),
+                outcome: schema::ConflictOutcome::SameMeaning,
+                basis_refs: vec![C.into()],
+                model_id: "claude-opus-5".into(),
+                prompt_version: "classify-conflict-v1".into(),
             },
             &ctx(&state),
         )
         .unwrap_err();
-        assert_eq!(err.code, "capability_unavailable");
+        assert_eq!(err.code, "invalid_reference");
 
+        // A second verdict is a second edge, not an amendment.
+        state.conflict_classifications.insert(
+            A.to_string(),
+            crate::ledger::reduce::ClassificationRow {
+                comparison_id: A.into(),
+                event_id: D.into(),
+                outcome: schema::ConflictOutcome::Partial,
+                classification: schema::Classification::Deterministic {
+                    rule_version: "x".into(),
+                },
+                reason_codes: vec![schema::ConflictReasonCode::IncompatibleValues],
+                evidence_event_ids: vec![],
+            },
+        );
+        let err = expand(
+            &classify(schema::ConflictOutcome::SameMeaning),
+            &ctx(&state),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "illegal_transition");
+        assert!(err.detail.contains("already classified"), "{}", err.detail);
+    }
+
+    #[test]
+    fn an_agent_cannot_claim_a_comparison_the_typed_gates_own() {
+        // The matrix's sharpest edge: a model confident about arithmetic could
+        // resolve a real conflict away, so scope, stage, and valid time are
+        // deterministic ONLY. The refusal is the schema's, consulted here so
+        // the proposer gets a card instead of a reducer anomaly.
+        let mut state = world(&[B, C]);
+        undecided_comparison(&mut state, A);
+        for typed in [
+            schema::ConflictOutcome::ResolvedByStage,
+            schema::ConflictOutcome::ResolvedByScope,
+            schema::ConflictOutcome::ResolvedTemporally,
+        ] {
+            let err = expand(&classify(typed), &ctx(&state)).unwrap_err();
+            assert_eq!(err.code, "illegal_transition", "{}", typed.as_str());
+            assert!(
+                err.detail.contains("deterministic only"),
+                "{}: {}",
+                typed.as_str(),
+                err.detail
+            );
+        }
+        // And the ones a model IS allowed to reach still expand.
+        for semantic in [
+            schema::ConflictOutcome::SameMeaning,
+            schema::ConflictOutcome::ResolvedByGranularity,
+            schema::ConflictOutcome::Conditional,
+            schema::ConflictOutcome::Partial,
+            schema::ConflictOutcome::GenuineDirect,
+        ] {
+            expand(&classify(semantic), &ctx(&state))
+                .unwrap_or_else(|e| panic!("{}: {e:?}", semantic.as_str()));
+        }
+    }
+
+    #[test]
+    fn a_capability_gated_op_still_has_an_expansion_arm_to_match() {
+        // Every gated op must be spellable, or an available capability would
+        // reach a refusal instead of a plan.
         let table = crate::policy::table::PolicyTable::load().unwrap();
         let gated: Vec<&str> = table
             .ops
             .iter()
-            .filter(|(name, _)| table.blocking_capability(name).is_some())
+            .filter(|(name, _)| table.ops[*name].requires_capability.is_some())
             .map(|(name, _)| name.as_str())
             .collect();
-        assert_eq!(
-            gated,
-            ["classify_conflict"],
-            "an op became capability-gated without an expansion arm to match"
-        );
+        assert_eq!(gated, ["classify_conflict", "correct_observation_subject"]);
+        for op in gated {
+            assert!(
+                table.blocking_capability(op).is_none(),
+                "{op} is gated behind a capability this build does not have"
+            );
+        }
     }
 
     #[test]

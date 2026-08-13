@@ -166,6 +166,18 @@ pub struct Golden {
     /// the walk reads reducer state the mock has no counterpart for.
     #[serde(default)]
     pub ancestry: GoldenAncestry,
+    /// Which committed table this fixture replays against — a frozen one by
+    /// name (`"v1"`, `"v2"`), or absent for the SHIPPED table, which is almost
+    /// always right.
+    ///
+    /// The exception is a refusal the shipped table can no longer produce.
+    /// M27.4 made every capability available, so `capability_unavailable` is
+    /// unreachable against v3 — and a refusal path with no shared fixture is
+    /// exactly where two interpreters drift apart unwatched. The frozen tables
+    /// are already this repo's negative controls; a fixture may name one
+    /// rather than the case being dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<String>,
     /// A complete `ProposalV1` body.
     pub proposal: serde_json::Value,
     pub expect: GoldenExpectation,
@@ -180,6 +192,15 @@ fn string_at(value: &serde_json::Value, pointer: &str) -> Result<String, String>
 }
 
 impl Golden {
+    /// The table this fixture is asserted against: the frozen one it names,
+    /// or the shipped one.
+    pub fn table_of(&self, shipped: &PolicyTable) -> Result<PolicyTable, String> {
+        match &self.table {
+            Some(name) => PolicyTable::frozen(name).map_err(|e| format!("{}: {e}", self.name)),
+            None => Ok(shipped.clone()),
+        }
+    }
+
     /// The table-decidable projection of the fixture's proposal. Identical
     /// extraction in TS — the shape is the frozen schema's, not this
     /// module's invention.
@@ -413,8 +434,11 @@ mod tests {
         let goldens = load_all().expect("goldens load");
         assert!(!goldens.is_empty(), "no goldens committed");
         for (file, golden) in &goldens {
+            let against = golden
+                .table_of(&table)
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
             golden
-                .check(&table)
+                .check(&against)
                 .unwrap_or_else(|e| panic!("{file}: {e}"));
         }
     }
@@ -482,6 +506,44 @@ mod tests {
     }
 
     #[test]
+    fn an_unavailable_capability_owes_the_goldens_a_negative_fixture() {
+        // The shared fixtures are how the two interpreters' capability branch
+        // is held together, and M27.4 made every capability this build ships
+        // available — so the only fixture left is the positive one.
+        //
+        // This fails the moment that stops being true, which is exactly when
+        // the negative fixture is needed again. Without it, a milestone that
+        // adds an unavailable capability would ship a refusal path that no
+        // shared fixture ever replays, and the two engines could disagree
+        // about it in silence.
+        let table = PolicyTable::load().unwrap();
+        let unavailable: Vec<&str> = table
+            .capabilities
+            .iter()
+            .filter(|(_, capability)| !capability.available)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        let against_shipped = load_all().unwrap().iter().any(|(_, golden)| {
+            golden.table.is_none()
+                && golden.expect.rejection.as_deref() == Some("capability_unavailable")
+        });
+        assert_eq!(
+            unavailable.is_empty(),
+            !against_shipped,
+            "unavailable capabilities {unavailable:?} and a capability_unavailable fixture \
+             against the SHIPPED table must arrive and leave together"
+        );
+        // Either way the refusal keeps a fixture: today's runs against frozen
+        // v2, where `conflict_classification` really is off.
+        assert!(
+            load_all().unwrap().iter().any(|(_, golden)| {
+                golden.expect.rejection.as_deref() == Some("capability_unavailable")
+            }),
+            "the capability gate is live code and owes the shared fixtures a case"
+        );
+    }
+
+    #[test]
     fn a_goldens_declared_name_matches_its_file() {
         // The file name is what a failure message shows first; a fixture
         // whose `name` disagrees sends the reader to the wrong file.
@@ -545,8 +607,9 @@ mod tests {
             let Some(code) = &golden.expect.rejection else {
                 continue;
             };
-            let facts = golden.facts(&table).unwrap();
-            let rule = table.op(&facts.op).unwrap();
+            let against = golden.table_of(&table).unwrap();
+            let facts = golden.facts(&against).unwrap();
+            let rule = against.op(&facts.op).unwrap();
             assert!(
                 rule.possible_rejections.contains(code),
                 "{file}: {} does not declare {code} possible",

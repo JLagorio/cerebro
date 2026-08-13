@@ -2233,7 +2233,12 @@ fn apply_conflict_classified(
             body.comparison_id
         )));
     }
-    if let schema::Classification::AgentSupplied { proposal_id, .. } = &body.classification {
+    if let schema::Classification::AgentSupplied {
+        proposal_id,
+        model_id,
+        prompt_version,
+    } = &body.classification
+    {
         let proposal = state.proposals.get(proposal_id).ok_or_else(|| {
             refused(format!(
                 "agent_supplied classification names proposal {proposal_id}, which is not \
@@ -2249,8 +2254,21 @@ fn apply_conflict_classified(
             schema::ProposalOp::ClassifyConflict {
                 comparison_id,
                 outcome,
+                model_id: asked_model,
+                prompt_version: asked_prompt,
                 ..
             } => {
+                // The attribution is the whole content of `agent_supplied`:
+                // the ledger records WHOSE judgement this is, never that it is
+                // true. An event naming a real proposal while crediting some
+                // other model would keep the review and lose the credit.
+                if asked_model != model_id || asked_prompt != prompt_version {
+                    return Err(refused(format!(
+                        "proposal {proposal_id} was made by {asked_model}/{asked_prompt}, and \
+                         this event credits {model_id}/{prompt_version} — an agent_supplied \
+                         verdict IS its attribution"
+                    )));
+                }
                 if comparison_id != &body.comparison_id {
                     return Err(refused(format!(
                         "proposal {proposal_id} classifies comparison {comparison_id}, and this \
@@ -6859,6 +6877,8 @@ mod tests {
                     comparison_id: pair.comparison_id.clone(),
                     outcome: schema::ConflictOutcome::Conditional,
                     basis_refs: vec![pair.left.assertion_event_id.clone()],
+                    model_id: "claude-opus-5".into(),
+                    prompt_version: "classify-conflict-v1".into(),
                 },
                 intended_use: schema::IntendedUse {
                     kind: schema::IntendedUseKind::ReversibleWork,

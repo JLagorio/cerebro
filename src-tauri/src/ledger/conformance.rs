@@ -3011,6 +3011,63 @@ fn archive_submission(id: &str) -> schema::ProposalSubmitted {
     }
 }
 
+/// The proposal a semantic verdict names (M27.4d).
+const SEMANTIC_PROPOSAL: &str = "1111111111111111111111111111111b";
+
+/// One MEDIUM `classify_conflict` submission — the review an `agent_supplied`
+/// classification claims to be the answer to.
+fn classify_submission(
+    id: &str,
+    comparison_id: &str,
+    outcome: schema::ConflictOutcome,
+    basis: &str,
+) -> schema::ProposalSubmitted {
+    let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+    schema::ProposalSubmitted {
+        schema: schema_v,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        proposal: Box::new(schema::ProposalV1 {
+            schema: schema::PROPOSAL_SCHEMA,
+            proposal_id: id.into(),
+            run_id: "4444444444444444444444444444444a".into(),
+            targets: vec![schema::ProposalTarget {
+                target_id: comparison_id.to_string(),
+                target_class: schema::TargetClass::Comparison,
+                expected_version: Some(1),
+            }],
+            op: schema::ProposalOp::ClassifyConflict {
+                comparison_id: comparison_id.to_string(),
+                outcome,
+                basis_refs: vec![basis.to_string()],
+                model_id: "claude-opus-5".into(),
+                prompt_version: "classify-conflict-v1".into(),
+            },
+            intended_use: schema::IntendedUse {
+                kind: schema::IntendedUseKind::ReversibleWork,
+                stakes: schema::Risk::Low,
+                predicate_class: None,
+            },
+            basis: schema::ProposalBasis {
+                transition_cause: schema::TransitionCause::Maintenance,
+                evidence_refs: vec![],
+                coverage_refs: vec![],
+                authority_refs: vec![],
+                authority_route_refs: vec![],
+                addressed_contradictions: vec![],
+                absence_claim: false,
+            },
+            declared_risk: schema::Risk::Medium,
+            reason: "these two say the same thing".into(),
+            candidate_search_receipt: None,
+        }),
+    }
+}
+
 /// The durable proposal lifecycle and its closed version effects.
 fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
@@ -4787,8 +4844,16 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
         endpoint(&assert_three, BELIEF_C, &third, ENTITY),
         vec![ConflictCandidateReason::IncompatibleValueHash],
     );
+    // A third pair, so the agent-supplied control owns a comparison outright
+    // rather than racing the deterministic verdicts above for one.
+    let semantic_pair = candidate(
+        endpoint(&assert_one, BELIEF, &first, ENTITY),
+        endpoint(&assert_three, BELIEF_C, &third, ENTITY),
+        vec![ConflictCandidateReason::SameSubjectPredicate],
+    );
     b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &resolved_pair);
     b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &open_pair);
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &semantic_pair);
 
     // --- the ordinary outcome: resolved apart, and nothing opens -----------
     let resolved = classified_body(
@@ -4869,6 +4934,60 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
                 prompt_version: "classify-conflict-v1".into(),
             },
             vec![ConflictReasonCode::StageDisjoint],
+            vec![assert_one.clone()],
+        ),
+    );
+
+    // --- the verdict that DOES arrive through review (M27.4d) --------------
+    // The control for everything above: an agent-supplied classification with
+    // its proposal committed, its attribution matching, and its question the
+    // one that was asked. Without this the refusals would all pass against an
+    // engine that refused every semantic verdict.
+    let credited = |model: &str| Classification::AgentSupplied {
+        proposal_id: SEMANTIC_PROPOSAL.into(),
+        model_id: model.into(),
+        prompt_version: "classify-conflict-v1".into(),
+    };
+    b.push_body(
+        KIND_PROPOSAL_SUBMITTED,
+        &classify_submission(
+            SEMANTIC_PROPOSAL,
+            &semantic_pair.comparison_id,
+            ConflictOutcome::SameMeaning,
+            &assert_one,
+        ),
+    );
+    // Crediting a different model keeps the review and loses the credit.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &semantic_pair,
+            ConflictOutcome::SameMeaning,
+            credited("some-other-model"),
+            vec![ConflictReasonCode::SemanticSameMeaning],
+            vec![assert_one.clone()],
+        ),
+    );
+    // Answering a question nobody asked.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &semantic_pair,
+            ConflictOutcome::GenuineDirect,
+            credited("claude-opus-5"),
+            vec![ConflictReasonCode::IncompatibleValues],
+            vec![assert_one.clone()],
+        ),
+    );
+    // And the one that applies: same question, same attribution, evidence
+    // behind it. `same_meaning` is resolved, so no edge follows.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &semantic_pair,
+            ConflictOutcome::SameMeaning,
+            credited("claude-opus-5"),
+            vec![ConflictReasonCode::SemanticSameMeaning],
             vec![assert_one.clone()],
         ),
     );

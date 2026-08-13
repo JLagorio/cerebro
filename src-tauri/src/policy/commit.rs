@@ -1157,7 +1157,7 @@ fn apply_with_decisions(
                 effective_risk: risk,
                 decision_id: approvals[index].clone(),
                 mutation_event_ids: mutation_refs,
-                resulting_versions: post_versions(state, proposal, &expansion.write_targets),
+                resulting_versions: post_versions(state, proposal, &expansion.advances),
                 revert_plan,
             };
             events.push((
@@ -1244,16 +1244,19 @@ fn apply_with_decisions(
 fn post_versions(
     state: &EpistemicState,
     proposal: &ProposalV1,
-    write_targets: &[(TargetClass, String)],
+    advances: &[(TargetClass, String)],
 ) -> Vec<TargetVersion> {
     let mut versions = target_versions(state, proposal);
     for version in &mut versions {
-        if write_targets
+        // COUNTED, not tested. An op whose members advance one target twice
+        // leaves it two ahead — an unresolved `classify_conflict` advances its
+        // comparison through both the classification and the same-batch open —
+        // and a caller building its next proposal from a +1 here would fail
+        // CAS against a world that had moved by two.
+        version.version += advances
             .iter()
-            .any(|(class, id)| *class == version.target_class && id == &version.target_id)
-        {
-            version.version += 1;
-        }
+            .filter(|(class, id)| *class == version.target_class && id == &version.target_id)
+            .count() as u64;
     }
     versions
 }
@@ -1649,6 +1652,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    /// The shipped table with one capability turned off.
+    ///
+    /// M27.4 made every capability this build ships AVAILABLE, so there is no
+    /// longer a live gap to point a fixture at — and the gate is still real
+    /// code that the next unavailable capability will run through. Parsing a
+    /// mutated table is the same door `table.rs` uses to test its own
+    /// refusals.
+    fn table_without(capability: &str) -> PolicyTable {
+        let mut raw: serde_json::Value =
+            serde_json::from_str(crate::policy::table::POLICY_JSON).unwrap();
+        raw["capabilities"][capability]["available"] = serde_json::json!(false);
+        PolicyTable::parse(&serde_json::to_string(&raw).unwrap()).unwrap()
+    }
+
     #[test]
     fn a_capability_gap_never_becomes_a_durable_proposal() {
         // `capability_unavailable` is OPERATIONAL by declaration, so it is
@@ -1661,11 +1678,19 @@ mod tests {
                 comparison_id: belief.clone(),
                 outcome: schema::ConflictOutcome::GenuineDirect,
                 basis_refs: vec![belief.clone()],
+                model_id: "claude-opus-5".into(),
+                prompt_version: "classify-conflict-v1".into(),
             },
             vec![target(TargetClass::Comparison, &belief, Some(1))],
             Risk::Medium,
         );
-        let err = submit_proposal(&table(), &mut writer, &actor(), &p).unwrap_err();
+        let err = submit_proposal(
+            &table_without("conflict_classification"),
+            &mut writer,
+            &actor(),
+            &p,
+        )
+        .unwrap_err();
         assert_eq!(err.code, "capability_unavailable");
         assert!(
             state(&writer, &vault).proposals.is_empty(),

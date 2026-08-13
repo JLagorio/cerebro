@@ -132,8 +132,8 @@
   ],
   "capabilities": {
     "conflict_classification": {
-      "available": false,
-      "arrives": "M27"
+      "available": true,
+      "arrives": "M27.4"
     },
     "contradiction_edges": {
       "available": true,

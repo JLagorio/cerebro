@@ -441,6 +441,15 @@ pub enum ProposalOp {
         comparison_id: String,
         outcome: ConflictOutcome,
         basis_refs: Vec<String>,
+        /// WHICH model reached this, and under which prompt (M27.4d).
+        ///
+        /// Supplied rather than server-observed, because the server cannot
+        /// see either: the proposer is the only party that knows what
+        /// produced the judgement. That is also why a semantic verdict is
+        /// stamped `agent_supplied` — the ledger records whose opinion it is,
+        /// never that it is true.
+        model_id: String,
+        prompt_version: String,
     },
     AddEntityAlias {
         entity_id: String,
@@ -687,9 +696,21 @@ impl ProposalOp {
             ProposalOp::ClassifyConflict {
                 comparison_id,
                 basis_refs,
+                model_id,
+                prompt_version,
                 ..
             } => {
                 id("comparison_id", comparison_id)?;
+                // A semantic judgement with no evidence is an opinion, and an
+                // opinion with no attribution is a rumour. Both refuse here
+                // rather than at the reducer, so the card can say which.
+                if basis_refs.is_empty() {
+                    return Err(
+                        "basis_refs must name the evidence this judgement rests on".to_string()
+                    );
+                }
+                non_empty("model_id", model_id)?;
+                non_empty("prompt_version", prompt_version)?;
                 sorted_unique("basis_refs", basis_refs)
             }
             ProposalOp::AddEntityAlias { entity_id, alias } => {

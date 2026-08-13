@@ -1,10 +1,9 @@
 {
-  "name": "classify-conflict-is-not-available-yet",
-  "table": "v2",
-  "why": "The negative control for the capability gate, replayed against the FROZEN v2 table because M27.4 made every capability the shipped table declares available — and a refusal path with no shared fixture is exactly where two interpreters drift apart unwatched. Capability noise is OPERATIONAL: an agent asking for something a build cannot do is not epistemic history. Its positive twin is `classify-conflict-is-a-medium-verdict-on-the-ladder`.",
+  "name": "classify-conflict-is-a-medium-verdict-on-the-ladder",
+  "why": "M27.4 made `conflict_classification` available, so the only road to `same_meaning` and to any granularity result is open: an agent's judgement, under a proposal, stamped `agent_supplied` with the model and prompt that reached it. The outcome is `same_meaning` deliberately \u2014 the typed comparisons (scope, stage, valid time) are deterministic ONLY, because a model confident about arithmetic could resolve a real conflict away. The op stays capability-gated and stays MEDIUM: a verdict the store records as one party's opinion is not one the store claims is true.",
   "proposal": {
     "schema": 1,
-    "proposal_id": "9dcaf000000000000000000000000001",
+    "proposal_id": "9dcaf000000000000000000000000000",
     "run_id": "cdcaf000000000000000000000000000",
     "targets": [
       {
@@ -49,10 +48,10 @@
     "candidate_search_receipt": null
   },
   "expect": {
-    "verdict": "rejected",
-    "effective_risk": null,
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
     "escalated_by": [],
-    "rejection": "capability_unavailable",
-    "destiny": "operational"
+    "rejection": null,
+    "destiny": null
   }
 }
