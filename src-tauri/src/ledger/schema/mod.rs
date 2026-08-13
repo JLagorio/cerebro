@@ -24,6 +24,7 @@
 pub mod batch;
 pub mod belief;
 pub mod conflict;
+pub mod contradiction;
 pub mod coverage;
 pub mod entity_merge;
 pub mod freshness;
@@ -55,6 +56,14 @@ pub use belief::{
 pub use conflict::{
     derive_comparison_id, derive_conflict_candidate_key, derive_value_hash, ordered_endpoints,
     ConflictCandidateDetected, ConflictCandidateEndpointV1, ConflictCandidateReason, StateStage,
+};
+pub use contradiction::{
+    check_matrix, derive_contradiction_open_key, derive_declared_comparison_id,
+    derive_declared_comparison_key, derive_edge_id, ordered_declared_endpoints, Classification,
+    ClassificationOutcome, CloseDisposition, ConflictClassified, ConflictComparisonRegistered,
+    ConflictEndpoint, ConflictReasonCode, ContradictionBackfillCompleted, ContradictionClosed,
+    ContradictionOpened, DeclaredRelationEndpoint, EdgeKind, KnownScope, KnownStage,
+    KnownValidTime, RelationOrigin,
 };
 pub use coverage::{
     AccessResult, ConnectionResult, CoverageAssessed, CoverageFactRecorded, CoverageGap,
