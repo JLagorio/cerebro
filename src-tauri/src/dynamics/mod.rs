@@ -26,4 +26,5 @@
 pub mod facet;
 pub mod freshness;
 pub mod review;
+pub mod schedule;
 pub mod validity;

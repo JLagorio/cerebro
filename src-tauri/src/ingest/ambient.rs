@@ -15,8 +15,8 @@
 //! first.
 //!
 //! **The DETERMINISTIC half is always on** (M26.9's flip): conflict
-//! detection, the attention primitives, convergence, and the Source Monitor
-//! run for every open vault. The argument for asking permission was about a
+//! detection, the freshness scheduler (M27.1), the attention primitives,
+//! convergence, and the Source Monitor run for every open vault. The argument for asking permission was about a
 //! subscription, and none of these touches one — they spawn nothing, hold no
 //! lease, and no budget gate can defer them. What they do cost is disk, and
 //! that is bounded by the base's own size.
@@ -295,6 +295,11 @@ fn deterministic(
     // Detection first, so the comparison counts the attention pass reads
     // include this tick's.
     detect_conflicts(vault, store_uuid, &state);
+    // Then the freshness scheduler, on the same fold. It appends only
+    // crossings the base has not already recorded, and the crossing's own
+    // stamp comes from pinned evidence rather than from now — so a laptop
+    // opened three days late records the boundary it missed, at the boundary.
+    schedule_freshness(vault, store_uuid, &state, chrono::Utc::now());
 
     if let Err(detail) = record_attention(conn, vault_id, store_uuid, &chain_head, &state) {
         eprintln!("attention signals: {detail}");
@@ -394,6 +399,43 @@ fn detect_conflicts(vault: &Path, store_uuid: &str, state: &crate::ledger::reduc
     }
     for (comparison, detail) in &emitted.failed {
         eprintln!("conflict detection: {comparison} could not be recorded — {detail}");
+    }
+}
+
+/// Append every freshness crossing the base has not recorded yet.
+///
+/// `as_of` is passed IN. The scheduler is a pure function of state, the
+/// versioned rules, and that instant; reading the clock is the supervisor's
+/// job, which is what lets a test ask what is due on a day of its choosing
+/// without pretending to be that day.
+///
+/// A rules artifact that will not load is reported and skipped rather than
+/// fatal. The digest guard exists to catch an edited table, and the answer to
+/// one is "say so and stop assessing freshness", not "take the ambient tick
+/// down for every vault".
+fn schedule_freshness(
+    vault: &Path,
+    store_uuid: &str,
+    state: &crate::ledger::reduce::EpistemicState,
+    as_of: chrono::DateTime<chrono::Utc>,
+) {
+    let rules = match crate::dynamics::freshness::load() {
+        Ok(rules) => rules,
+        Err(detail) => {
+            eprintln!("freshness rules: {detail}");
+            return;
+        }
+    };
+    let appender = crate::conflict::emit::ShadowAppend::new(vault);
+    let emitted = crate::dynamics::schedule::emit(state, store_uuid, &rules, as_of, &appender);
+    if emitted.appended > 0 {
+        eprintln!(
+            "freshness: {} crossing(s) recorded, {} already known",
+            emitted.appended, emitted.already_known
+        );
+    }
+    for (dedupe_key, detail) in &emitted.failed {
+        eprintln!("freshness: {dedupe_key} could not be recorded — {detail}");
     }
 }
 
