@@ -26,6 +26,7 @@
 pub mod coverage;
 pub mod facet;
 pub mod freshness;
+pub mod hygiene;
 pub mod review;
 pub mod schedule;
 pub mod support;
