@@ -113,3 +113,30 @@ export function deriveFreshnessDedupeKey(
   ]);
   return sha256Hex(`cerebro-freshness-dedupe-v1\0${tuple}`).slice(0, 32);
 }
+
+/**
+ * A DECLARED comparison's id (M27.3) — its own domain, so a comparison built
+ * from evidence and one built from a `contradicts` relation about the same
+ * two beliefs can never collide. They are different claims about different
+ * things and have to be classifiable separately.
+ */
+export function deriveDeclaredComparisonId(
+  relationEventId: string,
+  left: Json,
+  right: Json,
+): string {
+  const [first, second] = orderedEndpoints(left, right);
+  return sha256Hex(`cerebro-relation-conflict-v1\0${relationEventId}\0${first}\0${second}`).slice(
+    0,
+    32,
+  );
+}
+
+/**
+ * The edge id, KIND included — so a `partial` edge and a `genuine_direct` one
+ * over the same comparison are two different edges, which they are: a
+ * reclassification is a different claim, not an amendment.
+ */
+export function deriveEdgeId(comparisonId: string, kind: string): string {
+  return sha256Hex(`cerebro-contradiction-edge-v1\0${comparisonId}\0${kind}`).slice(0, 32);
+}

@@ -160,7 +160,8 @@ impl Append for ShadowAppend {
 mod tests {
     use super::*;
     use crate::conflict::detect;
-    use crate::ledger::reduce::ComparisonRow;
+    use crate::ledger::reduce::{ComparisonOrigin, ComparisonRow};
+    use crate::ledger::schema::ConflictEndpoint;
     use std::cell::RefCell;
 
     const STORE: &str = "cafebabecafebabecafebabecafebabe";
@@ -234,10 +235,16 @@ mod tests {
             ComparisonRow {
                 comparison_id,
                 event_id: "90000000000000000000000000000001".into(),
-                left: candidates[0].left.clone(),
-                right: candidates[0].right.clone(),
-                reason_codes: candidates[0].reason_codes.clone(),
-                detector_version: DETECTOR_VERSION.into(),
+                left: ConflictEndpoint::Asserted {
+                    endpoint: candidates[0].left.clone(),
+                },
+                right: ConflictEndpoint::Asserted {
+                    endpoint: candidates[0].right.clone(),
+                },
+                origin: ComparisonOrigin::Detected {
+                    detector_version: DETECTOR_VERSION.into(),
+                    reason_codes: candidates[0].reason_codes.clone(),
+                },
             },
         );
         let spy = Spy::default();

@@ -224,14 +224,73 @@ export interface SemanticAssessmentRow {
   proposalIds: string[];
 }
 
-/** One detected comparison (M26.7) — a pair that needs classifying. */
+/**
+ * One comparison (M26.7, widened by M27.3) — a pair that needs classifying.
+ *
+ * ONE map, two ways in: M26's detector creates comparisons from evidence, and
+ * a declared `contradicts` relation creates one with no evidence at all. Two
+ * maps keyed by comparison id would be two places to ask "is this registered".
+ */
 export interface ComparisonRow {
   comparisonId: string;
   eventId: string;
+  /** The tagged endpoint — `asserted` or `declared_relation`, as it arrived. */
   left: JsonObject;
   right: JsonObject;
+  origin: ComparisonOrigin;
+}
+
+/**
+ * Where a comparison came from, with the facts only that path has. A declared
+ * comparison has no detector and no candidate reason codes, and spelling that
+ * as an empty list would make "nothing detected it" indistinguishable from a
+ * detector that gave no reason — which M26 refuses outright.
+ */
+export type ComparisonOrigin =
+  | { kind: 'detected'; detectorVersion: string; reasonCodes: string[] }
+  | { kind: 'declared'; sourceRelationEventId: string; ruleVersion: string };
+
+/** What the gauntlet concluded about one comparison (M27.3). One, ever. */
+export interface ClassificationRow {
+  comparisonId: string;
+  eventId: string;
+  outcome: string;
+  classification: JsonObject;
   reasonCodes: string[];
-  detectorVersion: string;
+  evidenceEventIds: string[];
+}
+
+/**
+ * One contradiction edge (M27.3) — the protected thing. `closed` is a field
+ * rather than a deletion: M27.4's preservation gate reads these, and an edge
+ * that vanished would leave a hole where a disagreement used to be.
+ */
+export interface ContradictionEdgeRow {
+  edgeId: string;
+  comparisonId: string;
+  kind: string;
+  leftBeliefId: string;
+  rightBeliefId: string;
+  openedEventId: string;
+  classifiedEventId: string;
+  closed: EdgeClosure | null;
+}
+
+export interface EdgeClosure {
+  eventId: string;
+  addressedByEventId: string;
+  disposition: string;
+  evidenceEventIds: string[];
+}
+
+/** The backfill's checkpoint (M27.3) — activation is gated on one. */
+export interface BackfillCheckpoint {
+  eventId: string;
+  throughEventId: string;
+  sourceRelationCount: number;
+  resolvedCount: number;
+  openedCount: number;
+  ruleVersion: string;
 }
 
 /**
@@ -291,6 +350,16 @@ export interface EpistemicState {
    * disagreements the app already noticed.
    */
   comparisons: Map<string, ComparisonRow>;
+  /** M27.3's classifications, keyed by comparison id — resolutions included. */
+  conflictClassifications: Map<string, ClassificationRow>;
+  /**
+   * M27.3's contradiction edges, keyed by edge id, closed ones included. A
+   * rebuild that lost an open edge would silently un-protect a merge the user
+   * was told was blocked.
+   */
+  contradictionEdges: Map<string, ContradictionEdgeRow>;
+  /** The latest backfill checkpoint, or null. */
+  contradictionBackfill: BackfillCheckpoint | null;
   /**
    * M27.1's recorded freshness crossings, keyed by facet id. Portable
    * epistemic history: a rebuild that lost these would forget when a claim
@@ -335,6 +404,9 @@ function emptyState(): EpistemicState {
     semanticAssessments: new Map(),
     semanticByEvent: new Map(),
     comparisons: new Map(),
+    conflictClassifications: new Map(),
+    contradictionEdges: new Map(),
+    contradictionBackfill: null,
     freshness: new Map(),
     coverageFacts: new Map(),
     coverageAssessments: new Map(),
@@ -597,6 +669,16 @@ function apply(
       return applyConflictCandidate(state, frame, body, staged);
     case 'freshness.transitioned':
       return applyFreshnessTransitioned(state, frame, body, staged);
+    case 'conflict.comparison_registered':
+      return applyComparisonRegistered(state, frame, body, staged);
+    case 'conflict.classified':
+      return applyConflictClassified(state, frame, body);
+    case 'contradiction.opened':
+      return applyContradictionOpened(state, frame, body);
+    case 'contradiction.closed':
+      return applyContradictionClosed(state, frame, body, staged);
+    case 'contradiction.backfill_completed':
+      return applyBackfillCompleted(state, frame, body, staged);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -842,10 +924,15 @@ function applyConflictCandidate(
   state.comparisons.set(comparisonId, {
     comparisonId,
     eventId: frame.event_id,
-    left: body.left as JsonObject,
-    right: body.right as JsonObject,
-    reasonCodes: body.reason_codes as string[],
-    detectorVersion: body.detector_version as string,
+    // Wrapped into the tagged endpoint M27 classifies against: a relabelling,
+    // not a reshaping, because `asserted` flattens M26's endpoint.
+    left: { kind: 'asserted', ...(body.left as JsonObject) },
+    right: { kind: 'asserted', ...(body.right as JsonObject) },
+    origin: {
+      kind: 'detected',
+      detectorVersion: body.detector_version as string,
+      reasonCodes: body.reason_codes as string[],
+    },
   });
   createVersion(state, 'comparison', comparisonId, frame.event_id);
 }
@@ -945,6 +1032,441 @@ function applyFreshnessTransitioned(
     folded,
   });
   bumpVersion(state, 'belief', beliefId, frame.event_id);
+}
+
+// --- M27.3 the resolution pipeline ------------------------------------------
+
+/**
+ * `conflict.comparison_registered` (M27.3) — the ONLY declared-endpoint
+ * creation event.
+ *
+ * The anchoring is about the RELATION, because there is no assertion to point
+ * at: it was really added, it really is a `contradicts`, it is the relation's
+ * current add, and its endpoints are the two Beliefs named.
+ *
+ * The relation event may be in this very batch, and normally is — the
+ * declared path commits relation, registration, classification, and edge
+ * together — so a staged relation is deliberately NOT refused here.
+ */
+function applyComparisonRegistered(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const comparisonId = body.comparison_id as string;
+  const existing = state.comparisons.get(comparisonId);
+  if (existing !== undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} already exists (event ${existing.eventId}) — registration is ` +
+        'the one creation, and an exact retry is deduplicated at the door by its idempotency key',
+    );
+  }
+  const relationEvent = body.source_relation_event_id as string;
+  const relationId = state.relationAddEvents.get(relationEvent);
+  if (relationId === undefined) {
+    throw new RefusedError(
+      `source_relation_event_id ${relationEvent} names no relation ADD event — a declared ` +
+        'comparison is registered because somebody declared a relation, and this names none',
+    );
+  }
+  const relation = state.relations.get(relationId);
+  if (relation === undefined) {
+    throw new RefusedError(
+      `relation ${relationId} is indexed by its add event but absent from state`,
+    );
+  }
+  if (relation.relation !== 'contradicts') {
+    throw new RefusedError(
+      `relation ${relationId} is a ${relation.relation}, not a contradicts — registering a ` +
+        'comparison from it would put a conflict in the ledger that nobody declared',
+    );
+  }
+  if (!relation.live || relation.lastAddEventId !== relationEvent) {
+    throw new RefusedError(
+      `relation ${relationId} is not live at add event ${relationEvent} — a comparison pinned ` +
+        'to a withdrawn declaration would keep a conflict alive that its author took back',
+    );
+  }
+  const left = body.left as JsonObject;
+  const right = body.right as JsonObject;
+  const declaredEnds = [left.belief_id as string, right.belief_id as string].sort();
+  const relationEnds = [relation.from, relation.to].sort();
+  if (declaredEnds[0] !== relationEnds[0] || declaredEnds[1] !== relationEnds[1]) {
+    throw new RefusedError(
+      `the registration names beliefs ${JSON.stringify(declaredEnds)} and relation ` +
+        `${relationId} joins ${JSON.stringify(relationEnds)} — a comparison about a different ` +
+        'pair than the one declared',
+    );
+  }
+  for (const [side, endpoint] of [
+    ['left', left],
+    ['right', right],
+  ] as [string, JsonObject][]) {
+    anchorDeclaredEndpoint(state, staged, side, endpoint);
+  }
+
+  state.comparisons.set(comparisonId, {
+    comparisonId,
+    eventId: frame.event_id,
+    left: { kind: 'declared_relation', ...left },
+    right: { kind: 'declared_relation', ...right },
+    origin: {
+      kind: 'declared',
+      sourceRelationEventId: relationEvent,
+      ruleVersion: body.rule_version as string,
+    },
+  });
+  createVersion(state, 'comparison', comparisonId, frame.event_id);
+}
+
+/**
+ * What one declared endpoint has to earn. Fewer references than an asserted
+ * one, because there is no assertion and no basis link — the missing third
+ * check is exactly what the `declared_relation` variant exists to admit. The
+ * `content_hash` is not recomputed, for the reason M26 never recomputes
+ * `value_hash`: the reducer anchors REFERENCES.
+ */
+function anchorDeclaredEndpoint(
+  state: EpistemicState,
+  staged: Set<string>,
+  side: string,
+  endpoint: JsonObject,
+): void {
+  const revisionEvent = endpoint.belief_revision_event_id as string;
+  if (staged.has(revisionEvent)) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id pins a STAGED event — the endpoint pins the revision ` +
+        'current AT the relation, which is something the store already holds',
+    );
+  }
+  const beliefId = endpoint.belief_id as string;
+  const belief = state.beliefs.get(beliefId);
+  if (belief === undefined) throw new RefusedError(`${side}.belief_id ${beliefId} does not exist`);
+  if (belief.entityId !== endpoint.subject_id) {
+    throw new RefusedError(
+      `${side}.subject_id ${String(endpoint.subject_id)} is not the entity belief ${beliefId} ` +
+        `is about (${belief.entityId})`,
+    );
+  }
+  const revision = state.beliefRevisionEvents.get(revisionEvent);
+  if (revision === undefined) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id ${revisionEvent} names no committed revision`,
+    );
+  }
+  if (revision[0] !== beliefId) {
+    throw new RefusedError(
+      `${side}.belief_revision_event_id belongs to belief ${revision[0]}, not to ${beliefId}`,
+    );
+  }
+}
+
+/**
+ * `conflict.classified` (M27.3) — what the gauntlet concluded.
+ *
+ * One classification per comparison, and a second refuses: the version matrix
+ * assumes it, and `edge_id` carries the kind, so a reclassification would mint
+ * a SECOND edge over one pair rather than amend the first.
+ */
+function applyConflictClassified(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+): void {
+  const comparisonId = body.comparison_id as string;
+  const comparison = state.comparisons.get(comparisonId);
+  if (comparison === undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} was never detected or registered — a classification of a pair ` +
+        'nobody put forward is a verdict with no case',
+    );
+  }
+  const existing = state.conflictClassifications.get(comparisonId);
+  if (existing !== undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} was already classified ${existing.outcome} by event ` +
+        `${existing.eventId} — one classification per comparison, because the edge id carries ` +
+        'the kind and a second verdict would open a second edge rather than amend the first',
+    );
+  }
+  if (!sameEndpoints(body, comparison)) {
+    throw new RefusedError(
+      `the classification's endpoints are not the tuple comparison ${comparisonId} was minted ` +
+        'from — side for side, because both bodies order left as the canonically-first endpoint',
+    );
+  }
+  const classification = body.classification as JsonObject;
+  if (classification.kind === 'agent_supplied') {
+    const proposalId = classification.proposal_id as string;
+    const proposal = state.proposals.get(proposalId);
+    if (proposal === undefined) {
+      throw new RefusedError(
+        `agent_supplied classification names proposal ${proposalId}, which is not committed — a ` +
+          'semantic verdict claims to have been reviewed, and this claims it about nothing',
+      );
+    }
+    // Checked for what it ASKED, not for `state === applied`: the applying
+    // events fold after their mutations in the same batch.
+    const op = (proposal.proposal as JsonObject).op as JsonObject;
+    if (op.kind !== 'classify_conflict') {
+      throw new RefusedError(
+        `proposal ${proposalId} is a ${String(op.kind)} — a classification arrives through ` +
+          'classify_conflict, which is the op the policy table maps to review',
+      );
+    }
+    if (op.comparison_id !== comparisonId) {
+      throw new RefusedError(
+        `proposal ${proposalId} classifies comparison ${String(op.comparison_id)}, and this ` +
+          `event reports it against ${comparisonId}`,
+      );
+    }
+    if (op.outcome !== body.outcome) {
+      throw new RefusedError(
+        `proposal ${proposalId} asked for ${String(op.outcome)}, and this event records ` +
+          `${String(body.outcome)} — the review answered a different question`,
+      );
+    }
+  }
+  for (const id of body.evidence_event_ids as string[]) {
+    if (!state.observations.has(id)) {
+      throw new RefusedError(
+        `evidence_event_ids names ${id}, which is no Observation — a classification's evidence ` +
+          'is what somebody OBSERVED, never another verdict',
+      );
+    }
+  }
+
+  state.conflictClassifications.set(comparisonId, {
+    comparisonId,
+    eventId: frame.event_id,
+    outcome: body.outcome as string,
+    classification,
+    reasonCodes: body.reason_codes as string[],
+    evidenceEventIds: body.evidence_event_ids as string[],
+  });
+  // The comparison advances once. Endpoint Beliefs and evidence Observations
+  // are READ — an unresolved verdict advances the Beliefs through its
+  // same-batch open, and a resolved one advances nothing.
+  bumpVersion(state, 'comparison', comparisonId, frame.event_id);
+}
+
+/** The edge a classification opens, or null for the five that resolve. */
+const EDGE_KIND_OF: { [outcome: string]: string } = {
+  genuine_direct: 'genuine_direct',
+  partial: 'partial',
+  conditional: 'conditional',
+};
+
+function sameEndpoints(body: JsonObject, comparison: ComparisonRow): boolean {
+  return (
+    canonicalJson(body.left as Json) === canonicalJson(comparison.left as Json) &&
+    canonicalJson(body.right as Json) === canonicalJson(comparison.right as Json)
+  );
+}
+
+/**
+ * `contradiction.opened` (M27.3) — the protected edge. Its classification is
+ * normally a member of the SAME batch, folded one position earlier, so this
+ * looks it up in state and does not refuse a staged reference.
+ */
+function applyContradictionOpened(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+): void {
+  const edgeId = body.edge_id as string;
+  const existingEdge = state.contradictionEdges.get(edgeId);
+  if (existingEdge !== undefined) {
+    throw new RefusedError(
+      `edge ${edgeId} was already opened by event ${existingEdge.openedEventId} — exact replay ` +
+        'is deduplicated at the door, so a second event reaching the reducer is a duplicate append',
+    );
+  }
+  const comparisonId = body.comparison_id as string;
+  const comparison = state.comparisons.get(comparisonId);
+  if (comparison === undefined) {
+    throw new RefusedError(`comparison ${comparisonId} was never detected or registered`);
+  }
+  if (!sameEndpoints(body, comparison)) {
+    throw new RefusedError(
+      `the edge's endpoints are not the tuple comparison ${comparisonId} was minted from`,
+    );
+  }
+  const classification = state.conflictClassifications.get(comparisonId);
+  if (classification === undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} has no classification — an edge is what an UNRESOLVED verdict ` +
+        'leaves behind, and there is no verdict here to leave one',
+    );
+  }
+  if (classification.eventId !== body.classified_event_id) {
+    throw new RefusedError(
+      `classified_event_id ${String(body.classified_event_id)} is not the classification of ` +
+        `comparison ${comparisonId} (that is event ${classification.eventId})`,
+    );
+  }
+  const expected = EDGE_KIND_OF[classification.outcome];
+  if (expected === undefined) {
+    throw new RefusedError(
+      `comparison ${comparisonId} classified ${classification.outcome}, which RESOLVED the pair ` +
+        'apart — opening an edge over it is the crying-wolf failure this whole pipeline exists ' +
+        'to prevent',
+    );
+  }
+  if (expected !== body.kind) {
+    throw new RefusedError(
+      `comparison ${comparisonId} classified ${classification.outcome}, which opens a ` +
+        `${expected} edge, and this opens a ${String(body.kind)} — the kind is in the edge id, ` +
+        'so these are two different edges',
+    );
+  }
+
+  const leftBeliefId = (comparison.left as JsonObject).belief_id as string;
+  const rightBeliefId = (comparison.right as JsonObject).belief_id as string;
+  state.contradictionEdges.set(edgeId, {
+    edgeId,
+    comparisonId,
+    kind: body.kind as string,
+    leftBeliefId,
+    rightBeliefId,
+    openedEventId: frame.event_id,
+    classifiedEventId: body.classified_event_id as string,
+    closed: null,
+  });
+  bumpVersion(state, 'comparison', comparisonId, frame.event_id);
+  for (const beliefId of distinctEndpoints(leftBeliefId, rightBeliefId)) {
+    bumpVersion(state, 'belief', beliefId, frame.event_id);
+  }
+}
+
+/**
+ * The endpoint Beliefs an open or close advances — "each DISTINCT endpoint
+ * Belief once". One comparison can hold two assertions the SAME Belief
+ * revision rests on, and double-bumping it would make every proposal against
+ * that Belief fail its CAS for a reason nobody could reconstruct.
+ */
+function distinctEndpoints(left: string, right: string): string[] {
+  return left === right ? [left] : [left, right];
+}
+
+/**
+ * `contradiction.closed` (M27.3) — and there is no caller-authored path to it.
+ *
+ * The close travels in the same logical batch as the mutation that addressed
+ * the edge, carrying that mutation's server-preallocated event id. Requiring
+ * that id to be a member of THIS batch is the reducer half of "no standalone
+ * close path exists".
+ */
+function applyContradictionClosed(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const edgeId = body.edge_id as string;
+  const edge = state.contradictionEdges.get(edgeId);
+  if (edge === undefined) {
+    throw new RefusedError(`edge ${edgeId} was never opened — a close of nothing`);
+  }
+  if (edge.closed !== null) {
+    throw new RefusedError(
+      `edge ${edgeId} was already closed by event ${edge.closed.eventId} — a closed edge never ` +
+        'reopens, and a second close would be a second answer to a question that has one',
+    );
+  }
+  if (edge.comparisonId !== body.comparison_id) {
+    throw new RefusedError(
+      `edge ${edgeId} belongs to comparison ${edge.comparisonId}, and this close names ` +
+        String(body.comparison_id),
+    );
+  }
+  if (edge.leftBeliefId !== body.left_belief_id || edge.rightBeliefId !== body.right_belief_id) {
+    throw new RefusedError(
+      `the close's endpoint Beliefs are not edge ${edgeId}'s, side for side — the close copies ` +
+        'the edge, it does not re-describe it',
+    );
+  }
+  const addressedBy = body.addressed_by_event_id as string;
+  if (addressedBy === frame.event_id) {
+    throw new RefusedError(
+      'addressed_by_event_id is this close’s own event — a close cannot be what addressed ' +
+        'the contradiction',
+    );
+  }
+  if (!staged.has(addressedBy)) {
+    throw new RefusedError(
+      `addressed_by_event_id ${addressedBy} is not a member of this batch — a close travels ` +
+        'with the mutation that addressed the edge, and there is no standalone close path',
+    );
+  }
+  for (const id of body.evidence_event_ids as string[]) {
+    if (!state.observations.has(id)) {
+      throw new RefusedError(
+        `evidence_event_ids names ${id}, which is no Observation — silence and elapsed time ` +
+          'cannot close an edge, and neither can a reference to nothing',
+      );
+    }
+  }
+
+  edge.closed = {
+    eventId: frame.event_id,
+    addressedByEventId: addressedBy,
+    disposition: body.disposition as string,
+    evidenceEventIds: body.evidence_event_ids as string[],
+  };
+  bumpVersion(state, 'comparison', edge.comparisonId, frame.event_id);
+  for (const beliefId of distinctEndpoints(edge.leftBeliefId, edge.rightBeliefId)) {
+    bumpVersion(state, 'belief', beliefId, frame.event_id);
+  }
+}
+
+/**
+ * `contradiction.backfill_completed` (M27.3) — the checkpoint activation is
+ * gated on. Neither check is about ordering: `through_event_id` is an event
+ * id and this reducer holds no id→position index. What it can prove is that
+ * the same coverage is not claimed twice, and that a later checkpoint never
+ * claims to have seen FEWER relations than an earlier one.
+ */
+function applyBackfillCompleted(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const through = body.through_event_id as string;
+  if (staged.has(through)) {
+    throw new RefusedError(
+      `through_event_id ${through} is a member of this batch — a checkpoint claims coverage of ` +
+        'what the store already holds, not of what it is still writing',
+    );
+  }
+  const seen = body.source_relation_count as number;
+  const previous = state.contradictionBackfill;
+  if (previous !== null) {
+    if (previous.throughEventId === through) {
+      throw new RefusedError(
+        `a checkpoint through ${through} is already recorded (event ${previous.eventId}) — the ` +
+          'same coverage claimed twice',
+      );
+    }
+    if (seen < previous.sourceRelationCount) {
+      throw new RefusedError(
+        `this checkpoint saw ${seen} relations and the previous one saw ` +
+          `${previous.sourceRelationCount} — the backfill reads a growing prefix, so a ` +
+          'shrinking count is a run that lost its place',
+      );
+    }
+  }
+  state.contradictionBackfill = {
+    eventId: frame.event_id,
+    throughEventId: through,
+    sourceRelationCount: seen,
+    resolvedCount: body.resolved_count as number,
+    openedCount: body.opened_count as number,
+    ruleVersion: body.rule_version as string,
+  };
+  // No registered-target effect: a marker is a fact about the backfill.
 }
 
 /** The three references one endpoint has to earn. */
@@ -2450,6 +2972,32 @@ function applyMigrationCompleted(state: EpistemicState, body: JsonObject): void 
 
 // --- the vector-state view (must match Rust's `vector_state`) --------------
 
+/**
+ * One comparison endpoint, summarized for the vectors: the kind, then the
+ * four ids it pins. The FIRST id differs by kind on purpose — an asserted
+ * endpoint pins the assertion its claim came from, a declared one pins the
+ * relation event somebody wrote, and a declared endpoint has no assertion at
+ * all.
+ */
+function endpointSummary(endpoint: JsonObject): JsonObject {
+  if (endpoint.kind === 'asserted') {
+    return {
+      kind: 'asserted',
+      assertion_event_id: endpoint.assertion_event_id,
+      belief_id: endpoint.belief_id,
+      belief_revision_event_id: endpoint.belief_revision_event_id,
+      subject_id: endpoint.subject_id,
+    };
+  }
+  return {
+    kind: 'declared_relation',
+    relation_event_id: endpoint.relation_event_id,
+    belief_id: endpoint.belief_id,
+    belief_revision_event_id: endpoint.belief_revision_event_id,
+    subject_id: endpoint.subject_id,
+  };
+}
+
 const sorted = <T>(entries: [string, T][]): [string, T][] =>
   [...entries].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 
@@ -2643,25 +3191,81 @@ export function vectorState(state: EpistemicState): Json {
       const out: JsonObject = {};
       for (const [, c] of sorted([...state.comparisons.entries()])) {
         out[c.comparisonId] = {
-          detected_by: c.eventId,
-          detector_version: c.detectorVersion,
-          left: [
-            c.left.assertion_event_id,
-            c.left.belief_id,
-            c.left.belief_revision_event_id,
-            c.left.subject_id,
-          ] as Json[],
-          right: [
-            c.right.assertion_event_id,
-            c.right.belief_id,
-            c.right.belief_revision_event_id,
-            c.right.subject_id,
-          ] as Json[],
-          reason_codes: c.reasonCodes,
+          registered_by: c.eventId,
+          origin:
+            c.origin.kind === 'detected'
+              ? {
+                  kind: 'detected',
+                  detector_version: c.origin.detectorVersion,
+                  reason_codes: c.origin.reasonCodes,
+                }
+              : {
+                  kind: 'declared',
+                  source_relation_event_id: c.origin.sourceRelationEventId,
+                  rule_version: c.origin.ruleVersion,
+                },
+          left: endpointSummary(c.left),
+          right: endpointSummary(c.right),
         };
       }
       return out;
     })(),
+    classifications: (() => {
+      const out: JsonObject = {};
+      for (const [, c] of sorted([...state.conflictClassifications.entries()])) {
+        const classification = c.classification;
+        out[c.comparisonId] = {
+          classified_by: c.eventId,
+          outcome: c.outcome,
+          classification:
+            classification.kind === 'deterministic'
+              ? { kind: 'deterministic', rule_version: classification.rule_version }
+              : {
+                  kind: 'agent_supplied',
+                  proposal_id: classification.proposal_id,
+                  model_id: classification.model_id,
+                  prompt_version: classification.prompt_version,
+                },
+          reason_codes: c.reasonCodes,
+          evidence_event_ids: c.evidenceEventIds,
+        };
+      }
+      return out;
+    })(),
+    contradiction_edges: (() => {
+      const out: JsonObject = {};
+      for (const [, e] of sorted([...state.contradictionEdges.entries()])) {
+        out[e.edgeId] = {
+          comparison_id: e.comparisonId,
+          kind: e.kind,
+          left_belief_id: e.leftBeliefId,
+          right_belief_id: e.rightBeliefId,
+          opened_by: e.openedEventId,
+          classified_event_id: e.classifiedEventId,
+          closed:
+            e.closed === null
+              ? null
+              : {
+                  closed_by: e.closed.eventId,
+                  addressed_by_event_id: e.closed.addressedByEventId,
+                  disposition: e.closed.disposition,
+                  evidence_event_ids: e.closed.evidenceEventIds,
+                },
+        };
+      }
+      return out;
+    })(),
+    contradiction_backfill:
+      state.contradictionBackfill === null
+        ? null
+        : {
+            event_id: state.contradictionBackfill.eventId,
+            through_event_id: state.contradictionBackfill.throughEventId,
+            source_relation_count: state.contradictionBackfill.sourceRelationCount,
+            resolved_count: state.contradictionBackfill.resolvedCount,
+            opened_count: state.contradictionBackfill.openedCount,
+            rule_version: state.contradictionBackfill.ruleVersion,
+          },
     freshness: (() => {
       const out: JsonObject = {};
       for (const [, f] of sorted([...state.freshness.entries()])) {

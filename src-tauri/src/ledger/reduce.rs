@@ -217,22 +217,100 @@ pub struct AssertionFacet {
     pub raw_pointer: Option<String>,
 }
 
-/// One detected comparison, reduced (M26.7).
+/// One comparison, reduced (M26.7, widened by M27.3b).
 ///
-/// It says a pair needs classifying and nothing else — there is no outcome
-/// field here because M26 has no outcomes to record. M27 adds classification
-/// and edges against this `comparison_id`, which is why the row keeps the
+/// A comparison says a pair needs classifying. M27 adds classification and
+/// edges against this `comparison_id`, which is why the row keeps the
 /// endpoints rather than just their ids: a classification has to be checked
-/// against the exact tuple the comparison was minted from.
+/// against the exact tuple the comparison was minted from, side for side.
+///
+/// ONE map, two ways in. M26's detector creates comparisons from evidence; a
+/// declared `contradicts` relation creates one with no evidence at all. Two
+/// maps keyed by comparison id would be two places to ask "is this
+/// registered", and the classification path would have to ask both.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComparisonRow {
     pub comparison_id: String,
     /// The event that created it — one, always, because a second is refused.
     pub event_id: String,
-    pub left: schema::ConflictCandidateEndpointV1,
-    pub right: schema::ConflictCandidateEndpointV1,
-    pub reason_codes: Vec<schema::ConflictCandidateReason>,
-    pub detector_version: String,
+    pub left: schema::ConflictEndpoint,
+    pub right: schema::ConflictEndpoint,
+    pub origin: ComparisonOrigin,
+}
+
+/// Where a comparison came from, with the facts only that path has.
+///
+/// A tagged union rather than nullable columns: a declared comparison has no
+/// detector and no candidate reason codes, and spelling that as an empty list
+/// would make "nothing detected it" indistinguishable from a detector that
+/// gave no reason — which M26 refuses outright.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ComparisonOrigin {
+    /// M26.7's deterministic detector put this pair forward.
+    Detected {
+        detector_version: String,
+        reason_codes: Vec<schema::ConflictCandidateReason>,
+    },
+    /// Somebody DECLARED a `contradicts` relation. The comparison exists
+    /// because of the declaration, not because of evidence.
+    Declared {
+        source_relation_event_id: String,
+        rule_version: String,
+    },
+}
+
+/// What the gauntlet concluded about one comparison (M27.3b). One per
+/// comparison, ever — see [`apply_conflict_classified`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassificationRow {
+    pub comparison_id: String,
+    pub event_id: String,
+    pub outcome: schema::ConflictOutcome,
+    pub classification: schema::Classification,
+    pub reason_codes: Vec<schema::ConflictReasonCode>,
+    pub evidence_event_ids: Vec<String>,
+}
+
+/// One contradiction edge (M27.3b) — the protected thing. M27.4's
+/// preservation gate refuses a merge or supersede over an OPEN one, which is
+/// why `closed` is a field rather than a deletion: an edge that vanished
+/// would leave the gate with nothing to point at and the history with a hole
+/// where a disagreement used to be.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContradictionEdgeRow {
+    pub edge_id: String,
+    pub comparison_id: String,
+    pub kind: schema::EdgeKind,
+    /// The endpoints' Beliefs, in the comparison's own left/right order. The
+    /// full endpoint tuples stay on the comparison; an edge that copied them
+    /// would be a second place for them to drift.
+    pub left_belief_id: String,
+    pub right_belief_id: String,
+    pub opened_event_id: String,
+    pub classified_event_id: String,
+    pub closed: Option<EdgeClosure>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EdgeClosure {
+    pub event_id: String,
+    /// The addressing mutation, which travelled in the same batch.
+    pub addressed_by_event_id: String,
+    pub disposition: schema::CloseDisposition,
+    pub evidence_event_ids: Vec<String>,
+}
+
+/// The backfill's checkpoint (M27.3b). Activation of the M27.4 gate and the
+/// contradiction lane requires one covering the pre-activation ledger head;
+/// a restart resumes from `through_event_id`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackfillCheckpoint {
+    pub event_id: String,
+    pub through_event_id: String,
+    pub source_relation_count: u64,
+    pub resolved_count: u64,
+    pub opened_count: u64,
+    pub rule_version: String,
 }
 
 /// One facet's recorded freshness, folded from its transitions (M27.1).
@@ -698,11 +776,25 @@ pub struct EpistemicState {
     /// Event id → assessment id. A successor receipt names the EVENT, and
     /// has to be checked against what that event concluded.
     pub semantic_by_event: BTreeMap<String, String>,
-    /// M26.7's detected comparisons, keyed by `comparison_id` — the pairs
-    /// that need classifying. Portable, because M27's classifications and
-    /// contradiction edges target these ids: losing the runtime DB must not
-    /// erase which pairs were already handed over.
+    /// M26.7's detected comparisons and M27.3's declared ones, keyed by
+    /// `comparison_id` — the pairs that need classifying. Portable, because
+    /// M27's classifications and contradiction edges target these ids: losing
+    /// the runtime DB must not erase which pairs were already handed over.
     pub comparisons: BTreeMap<String, ComparisonRow>,
+    /// M27.3's classifications, keyed by `comparison_id`. In the vector
+    /// contract: a rebuild that forgot a resolution would re-litigate every
+    /// pair the gauntlet has already settled, and one that forgot an
+    /// unresolved verdict would leave its edge unexplainable.
+    pub conflict_classifications: BTreeMap<String, ClassificationRow>,
+    /// M27.3's contradiction edges, keyed by `edge_id`, closed ones included.
+    /// In the vector contract for the sharpest reason of the three: M27.4's
+    /// preservation gate reads this map, so a rebuild that lost an open edge
+    /// would silently UN-protect a merge the user was told was blocked.
+    pub contradiction_edges: BTreeMap<String, ContradictionEdgeRow>,
+    /// The latest backfill checkpoint, or none. Also in the vector contract —
+    /// activation is gated on it, and a rebuild that forgot it would either
+    /// re-run the whole backfill or, worse, activate without one.
+    pub contradiction_backfill: Option<BackfillCheckpoint>,
     /// M27.1's recorded freshness crossings, keyed by
     /// [`schema::BeliefFacetKey::facet_id`]. In the vector contract because
     /// the crossing is portable epistemic history: a rebuild that lost these
@@ -1028,6 +1120,15 @@ fn apply(
         }
         EventBody::FreshnessTransitioned(b) => {
             apply_freshness_transitioned(state, frame, b, staged)
+        }
+        EventBody::ConflictComparisonRegistered(b) => {
+            apply_comparison_registered(state, frame, b, staged)
+        }
+        EventBody::ConflictClassified(b) => apply_conflict_classified(state, frame, b),
+        EventBody::ContradictionOpened(b) => apply_contradiction_opened(state, frame, b),
+        EventBody::ContradictionClosed(b) => apply_contradiction_closed(state, frame, b, staged),
+        EventBody::ContradictionBackfillCompleted(b) => {
+            apply_backfill_completed(state, frame, b, staged)
         }
     }
 }
@@ -1790,10 +1891,20 @@ fn apply_conflict_candidate(
         ComparisonRow {
             comparison_id: body.comparison_id.clone(),
             event_id: frame.event_id.clone(),
-            left: body.left.clone(),
-            right: body.right.clone(),
-            reason_codes: body.reason_codes.clone(),
-            detector_version: body.detector_version.clone(),
+            // Wrapped into the tagged endpoint M27 classifies against. The
+            // `asserted` variant flattens M26's endpoint, so this is a
+            // relabelling and not a reshaping — the stored bytes are the same
+            // facts, and a classification's `asserted` endpoint compares equal.
+            left: schema::ConflictEndpoint::Asserted {
+                endpoint: body.left.clone(),
+            },
+            right: schema::ConflictEndpoint::Asserted {
+                endpoint: body.right.clone(),
+            },
+            origin: ComparisonOrigin::Detected {
+                detector_version: body.detector_version.clone(),
+                reason_codes: body.reason_codes.clone(),
+            },
         },
     );
     // The first and only creation: expected version was null, and it lands at
@@ -1892,6 +2003,525 @@ fn anchor_conflict_endpoint(
             endpoint.assertion_event_id
         )));
     }
+    Ok(())
+}
+
+// --- M27.3 the resolution pipeline ------------------------------------------
+
+/// `conflict.comparison_registered` (M27.3) — the ONLY declared-endpoint
+/// creation event.
+///
+/// A declared comparison exists because somebody wrote a `contradicts`
+/// relation, and the whole reason this event kind exists is that there is no
+/// assertion to point at. So the anchoring is about the RELATION: it was
+/// really added, it really is a `contradicts`, it is the relation's current
+/// add, and its two endpoints really are the two Beliefs this registration
+/// names.
+///
+/// **The relation may be in this very batch, and that is the normal case.**
+/// M27.4's `edit_relation(add, contradicts)` commits the relation, this
+/// registration, the classification, and any required edge as one logical
+/// batch — so unlike a comparison endpoint or a freshness facet, a STAGED
+/// relation event is not refused here. It cannot be: members fold in order,
+/// so by the time this runs the relation is already in the scratch state, and
+/// refusing it would make the declared path unreachable from the only
+/// producer the design gives it.
+///
+/// Endpoint lifecycle is deliberately NOT filtered. A declaration about a
+/// superseded or archived Belief is still a declaration somebody made, and
+/// dropping it here would quietly shrink what the backfill can account for.
+fn apply_comparison_registered(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ConflictComparisonRegistered,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if let Some(existing) = state.comparisons.get(&body.comparison_id) {
+        return Err(refused(format!(
+            "comparison {} already exists (event {}) — registration is the one creation, and an \
+             exact retry is deduplicated at the door by its idempotency key",
+            body.comparison_id, existing.event_id
+        )));
+    }
+    let relation_id = state
+        .relation_add_events
+        .get(&body.source_relation_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "source_relation_event_id {} names no relation ADD event — a declared comparison \
+                 is registered because somebody declared a relation, and this names none",
+                body.source_relation_event_id
+            ))
+        })?
+        .clone();
+    let relation = state
+        .relations
+        .get(&relation_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "relation {relation_id} is indexed by its add event but absent from state"
+            ))
+        })?
+        .clone();
+    if relation.relation != schema::RelationKind::Contradicts {
+        return Err(refused(format!(
+            "relation {relation_id} is a {:?}, not a contradicts — registering a comparison from \
+             it would put a conflict in the ledger that nobody declared",
+            relation.relation
+        )));
+    }
+    if !relation.live || relation.last_add_event_id != body.source_relation_event_id {
+        return Err(refused(format!(
+            "relation {relation_id} is not live at add event {} — a comparison pinned to a \
+             withdrawn declaration would keep a conflict alive that its author took back",
+            body.source_relation_event_id
+        )));
+    }
+    let declared_ends: BTreeSet<&str> =
+        [body.left.belief_id.as_str(), body.right.belief_id.as_str()]
+            .into_iter()
+            .collect();
+    let relation_ends: BTreeSet<&str> = [relation.from.as_str(), relation.to.as_str()]
+        .into_iter()
+        .collect();
+    if declared_ends != relation_ends {
+        return Err(refused(format!(
+            "the registration names beliefs {declared_ends:?} and relation {relation_id} joins \
+             {relation_ends:?} — a comparison about a different pair than the one declared"
+        )));
+    }
+    for (side, endpoint) in [("left", &body.left), ("right", &body.right)] {
+        anchor_declared_endpoint(state, staged, side, endpoint)?;
+    }
+
+    state.comparisons.insert(
+        body.comparison_id.clone(),
+        ComparisonRow {
+            comparison_id: body.comparison_id.clone(),
+            event_id: frame.event_id.clone(),
+            left: schema::ConflictEndpoint::DeclaredRelation {
+                endpoint: body.left.clone(),
+            },
+            right: schema::ConflictEndpoint::DeclaredRelation {
+                endpoint: body.right.clone(),
+            },
+            origin: ComparisonOrigin::Declared {
+                source_relation_event_id: body.source_relation_event_id.clone(),
+                rule_version: body.rule_version.clone(),
+            },
+        },
+    );
+    // The matrix: registration CREATES its comparison at v1, expected version
+    // null — the same shape M26's detection has, because they are the same
+    // kind of fact arriving by two roads.
+    state.create_version("comparison", &body.comparison_id, &frame.event_id);
+    Ok(())
+}
+
+/// What one declared endpoint has to earn. Fewer references than an asserted
+/// one, because there is no assertion and no basis link — the missing third
+/// check is exactly what the `declared_relation` variant exists to admit.
+///
+/// The endpoint's `content_hash` is NOT recomputed. M26 does not re-derive
+/// `value_hash` against the assertion either: the reducer anchors REFERENCES,
+/// and re-deriving content here would need the projection rules, which the
+/// TypeScript reducer does not have and must not grow for one check.
+fn anchor_declared_endpoint(
+    state: &EpistemicState,
+    staged: &Staged,
+    side: &str,
+    endpoint: &schema::DeclaredRelationEndpoint,
+) -> Result<(), Refusal> {
+    if staged.contains(&endpoint.belief_revision_event_id) {
+        return Err(refused(format!(
+            "{side}.belief_revision_event_id pins a STAGED event — the endpoint pins the revision \
+             current AT the relation, which is something the store already holds"
+        )));
+    }
+    let belief = state.beliefs.get(&endpoint.belief_id).ok_or_else(|| {
+        refused(format!(
+            "{side}.belief_id {} does not exist",
+            endpoint.belief_id
+        ))
+    })?;
+    if belief.entity_id != endpoint.subject_id {
+        return Err(refused(format!(
+            "{side}.subject_id {} is not the entity belief {} is about ({})",
+            endpoint.subject_id, endpoint.belief_id, belief.entity_id
+        )));
+    }
+    let (revision_belief, _) = state
+        .belief_revision_events
+        .get(&endpoint.belief_revision_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "{side}.belief_revision_event_id {} names no committed revision",
+                endpoint.belief_revision_event_id
+            ))
+        })?;
+    if revision_belief != &endpoint.belief_id {
+        return Err(refused(format!(
+            "{side}.belief_revision_event_id belongs to belief {revision_belief}, not to {}",
+            endpoint.belief_id
+        )));
+    }
+    Ok(())
+}
+
+/// `conflict.classified` (M27.3) — what the gauntlet concluded.
+///
+/// **One classification per comparison, and a second refuses.** The version
+/// matrix assumes it (v1 → v2 resolved, v3 unresolved), and `edge_id` carries
+/// the kind — so a reclassification would silently mint a SECOND edge over
+/// one pair rather than amend the first. If a pair genuinely needs
+/// re-deciding, that is a new comparison with new evidence, and it says so.
+///
+/// The endpoints are compared side for side against the tuple the comparison
+/// was minted from. Not as a set: both bodies order `left` as the
+/// lexicographically-first canonical endpoint, so a swapped pair is a
+/// classification of something the detector never put forward.
+fn apply_conflict_classified(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ConflictClassified,
+) -> Result<(), Refusal> {
+    let comparison = state
+        .comparisons
+        .get(&body.comparison_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "comparison {} was never detected or registered — a classification of a pair \
+                 nobody put forward is a verdict with no case",
+                body.comparison_id
+            ))
+        })?
+        .clone();
+    if let Some(existing) = state.conflict_classifications.get(&body.comparison_id) {
+        return Err(refused(format!(
+            "comparison {} was already classified {} by event {} — one classification per \
+             comparison, because the edge id carries the kind and a second verdict would open a \
+             second edge rather than amend the first",
+            body.comparison_id,
+            existing.outcome.as_str(),
+            existing.event_id
+        )));
+    }
+    if body.left != comparison.left || body.right != comparison.right {
+        return Err(refused(format!(
+            "the classification's endpoints are not the tuple comparison {} was minted from — \
+             side for side, because both bodies order left as the canonically-first endpoint",
+            body.comparison_id
+        )));
+    }
+    if let schema::Classification::AgentSupplied { proposal_id, .. } = &body.classification {
+        let proposal = state.proposals.get(proposal_id).ok_or_else(|| {
+            refused(format!(
+                "agent_supplied classification names proposal {proposal_id}, which is not \
+                 committed — a semantic verdict claims to have been reviewed, and this claims it \
+                 about nothing"
+            ))
+        })?;
+        // Checked for what it ASKED, not for `state == applied`: the applying
+        // events fold after their mutations in the same batch (the M27.2c
+        // lesson). What matters is that the proposal a person or the policy
+        // ladder saw is the one this event reports the answer to.
+        match &proposal.proposal.op {
+            schema::ProposalOp::ClassifyConflict {
+                comparison_id,
+                outcome,
+                ..
+            } => {
+                if comparison_id != &body.comparison_id {
+                    return Err(refused(format!(
+                        "proposal {proposal_id} classifies comparison {comparison_id}, and this \
+                         event reports it against {}",
+                        body.comparison_id
+                    )));
+                }
+                if outcome != &body.outcome {
+                    return Err(refused(format!(
+                        "proposal {proposal_id} asked for {}, and this event records {} — the \
+                         review answered a different question",
+                        outcome.as_str(),
+                        body.outcome.as_str()
+                    )));
+                }
+            }
+            other => {
+                return Err(refused(format!(
+                    "proposal {proposal_id} is a {} — a classification arrives through \
+                     classify_conflict, which is the op the policy table maps to review",
+                    other.kind()
+                )))
+            }
+        }
+    }
+    for id in &body.evidence_event_ids {
+        if !state.observations.contains_key(id) {
+            return Err(refused(format!(
+                "evidence_event_ids names {id}, which is no Observation — a classification's \
+                 evidence is what somebody OBSERVED, never another verdict"
+            )));
+        }
+    }
+
+    state.conflict_classifications.insert(
+        body.comparison_id.clone(),
+        ClassificationRow {
+            comparison_id: body.comparison_id.clone(),
+            event_id: frame.event_id.clone(),
+            outcome: body.outcome,
+            classification: body.classification.clone(),
+            reason_codes: body.reason_codes.clone(),
+            evidence_event_ids: body.evidence_event_ids.clone(),
+        },
+    );
+    // The matrix: the comparison advances once. Endpoint Beliefs and evidence
+    // Observations are READ — a resolved verdict changes nothing about either,
+    // and an unresolved one advances the Beliefs through its same-batch open.
+    state.bump_version("comparison", &body.comparison_id, &frame.event_id);
+    Ok(())
+}
+
+/// `contradiction.opened` (M27.3) — the protected edge.
+///
+/// Its classification is normally a member of the SAME batch, folded one
+/// position earlier: the design requires a classification and its required
+/// edge to commit together so a crash can expose neither an unresolved
+/// verdict without its edge nor an edge without its verdict. So this looks
+/// the classification up in state and does not refuse a staged reference.
+fn apply_contradiction_opened(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ContradictionOpened,
+) -> Result<(), Refusal> {
+    if let Some(existing) = state.contradiction_edges.get(&body.edge_id) {
+        return Err(refused(format!(
+            "edge {} was already opened by event {} — exact replay is deduplicated at the door by \
+             `contradiction-open:<store>:<edge>`, so a second event reaching the reducer is a \
+             duplicate append",
+            body.edge_id, existing.opened_event_id
+        )));
+    }
+    let comparison = state.comparisons.get(&body.comparison_id).ok_or_else(|| {
+        refused(format!(
+            "comparison {} was never detected or registered",
+            body.comparison_id
+        ))
+    })?;
+    if body.left != comparison.left || body.right != comparison.right {
+        return Err(refused(format!(
+            "the edge's endpoints are not the tuple comparison {} was minted from",
+            body.comparison_id
+        )));
+    }
+    let classification = state
+        .conflict_classifications
+        .get(&body.comparison_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "comparison {} has no classification — an edge is what an UNRESOLVED verdict \
+                 leaves behind, and there is no verdict here to leave one",
+                body.comparison_id
+            ))
+        })?;
+    if classification.event_id != body.classified_event_id {
+        return Err(refused(format!(
+            "classified_event_id {} is not the classification of comparison {} (that is event {})",
+            body.classified_event_id, body.comparison_id, classification.event_id
+        )));
+    }
+    match schema::EdgeKind::of(classification.outcome) {
+        Some(kind) if kind == body.kind => {}
+        Some(kind) => {
+            return Err(refused(format!(
+                "comparison {} classified {}, which opens a {} edge, and this opens a {} — the \
+                 kind is in the edge id, so these are two different edges",
+                body.comparison_id,
+                classification.outcome.as_str(),
+                kind.as_str(),
+                body.kind.as_str()
+            )))
+        }
+        None => {
+            return Err(refused(format!(
+                "comparison {} classified {}, which RESOLVED the pair apart — opening an edge \
+                 over it is the crying-wolf failure this whole pipeline exists to prevent",
+                body.comparison_id,
+                classification.outcome.as_str()
+            )))
+        }
+    }
+
+    let left_belief = comparison.left.belief_id().to_string();
+    let right_belief = comparison.right.belief_id().to_string();
+    state.contradiction_edges.insert(
+        body.edge_id.clone(),
+        ContradictionEdgeRow {
+            edge_id: body.edge_id.clone(),
+            comparison_id: body.comparison_id.clone(),
+            kind: body.kind,
+            left_belief_id: left_belief.clone(),
+            right_belief_id: right_belief.clone(),
+            opened_event_id: frame.event_id.clone(),
+            classified_event_id: body.classified_event_id.clone(),
+            closed: None,
+        },
+    );
+    state.bump_version("comparison", &body.comparison_id, &frame.event_id);
+    for belief_id in distinct_endpoints(&left_belief, &right_belief) {
+        state.bump_version("belief", belief_id, &frame.event_id);
+    }
+    Ok(())
+}
+
+/// `contradiction.closed` (M27.3) — and there is no caller-authored path to
+/// it.
+///
+/// The close travels in the same logical batch as the mutation that addressed
+/// the edge, carrying that mutation's server-preallocated event id. Requiring
+/// the id to be a member of THIS batch is the reducer half of "no standalone
+/// close path exists": an unbatched close has no batch to name and refuses,
+/// and a close naming some unrelated committed event refuses too.
+///
+/// Silence and elapsed time cannot close an edge — the body already refuses
+/// empty evidence, and this refuses evidence that is not something observed.
+fn apply_contradiction_closed(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ContradictionClosed,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    let mut edge = state
+        .contradiction_edges
+        .get(&body.edge_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "edge {} was never opened — a close of nothing",
+                body.edge_id
+            ))
+        })?
+        .clone();
+    if let Some(closure) = &edge.closed {
+        return Err(refused(format!(
+            "edge {} was already closed by event {} — a closed edge never reopens, and a second \
+             close would be a second answer to a question that has one",
+            body.edge_id, closure.event_id
+        )));
+    }
+    if edge.comparison_id != body.comparison_id {
+        return Err(refused(format!(
+            "edge {} belongs to comparison {}, and this close names {}",
+            body.edge_id, edge.comparison_id, body.comparison_id
+        )));
+    }
+    if edge.left_belief_id != body.left_belief_id || edge.right_belief_id != body.right_belief_id {
+        return Err(refused(format!(
+            "the close's endpoint Beliefs are not edge {}'s, side for side — the close copies the \
+             edge, it does not re-describe it",
+            body.edge_id
+        )));
+    }
+    if body.addressed_by_event_id == frame.event_id {
+        return Err(refused(
+            "addressed_by_event_id is this close's own event — a close cannot be what addressed \
+             the contradiction",
+        ));
+    }
+    if !staged.contains(&body.addressed_by_event_id) {
+        return Err(refused(format!(
+            "addressed_by_event_id {} is not a member of this batch — a close travels with the \
+             mutation that addressed the edge, and there is no standalone close path",
+            body.addressed_by_event_id
+        )));
+    }
+    for id in &body.evidence_event_ids {
+        if !state.observations.contains_key(id) {
+            return Err(refused(format!(
+                "evidence_event_ids names {id}, which is no Observation — silence and elapsed \
+                 time cannot close an edge, and neither can a reference to nothing"
+            )));
+        }
+    }
+
+    // Re-inserted rather than mutated through `get_mut`: the row is already
+    // cloned above, and an `if let` here would have a silent branch where the
+    // version bumps below still happened and the closure did not.
+    edge.closed = Some(EdgeClosure {
+        event_id: frame.event_id.clone(),
+        addressed_by_event_id: body.addressed_by_event_id.clone(),
+        disposition: body.disposition,
+        evidence_event_ids: body.evidence_event_ids.clone(),
+    });
+    state.contradiction_edges.insert(body.edge_id.clone(), edge);
+    state.bump_version("comparison", &body.comparison_id, &frame.event_id);
+    for belief_id in distinct_endpoints(&body.left_belief_id, &body.right_belief_id) {
+        state.bump_version("belief", belief_id, &frame.event_id);
+    }
+    Ok(())
+}
+
+/// The endpoint Beliefs an open or close advances — "each DISTINCT endpoint
+/// Belief once". One comparison can hold two assertions the SAME Belief
+/// revision rests on, and double-bumping that Belief would make every
+/// proposal against it fail its CAS for a reason nobody could reconstruct.
+fn distinct_endpoints<'a>(left: &'a str, right: &'a str) -> Vec<&'a str> {
+    if left == right {
+        vec![left]
+    } else {
+        vec![left, right]
+    }
+}
+
+/// `contradiction.backfill_completed` (M27.3) — the checkpoint activation is
+/// gated on.
+///
+/// Two checks, and neither is about ordering, because there is nothing here
+/// to order BY: `through_event_id` is an event id, and the reducer holds no
+/// id→position index it could use to prove one checkpoint is later than
+/// another. What it can prove is that the same coverage is not claimed twice,
+/// and that a later checkpoint never claims to have seen FEWER relations than
+/// an earlier one — the backfill reads a growing prefix of the ledger, so a
+/// shrinking count is a backfill that lost its place.
+fn apply_backfill_completed(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ContradictionBackfillCompleted,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if staged.contains(&body.through_event_id) {
+        return Err(refused(format!(
+            "through_event_id {} is a member of this batch — a checkpoint claims coverage of what \
+             the store already holds, not of what it is still writing",
+            body.through_event_id
+        )));
+    }
+    if let Some(previous) = &state.contradiction_backfill {
+        if previous.through_event_id == body.through_event_id {
+            return Err(refused(format!(
+                "a checkpoint through {} is already recorded (event {}) — the same coverage \
+                 claimed twice",
+                body.through_event_id, previous.event_id
+            )));
+        }
+        if body.source_relation_count < previous.source_relation_count {
+            return Err(refused(format!(
+                "this checkpoint saw {} relations and the previous one saw {} — the backfill \
+                 reads a growing prefix, so a shrinking count is a run that lost its place",
+                body.source_relation_count, previous.source_relation_count
+            )));
+        }
+    }
+    state.contradiction_backfill = Some(BackfillCheckpoint {
+        event_id: frame.event_id.clone(),
+        through_event_id: body.through_event_id.clone(),
+        source_relation_count: body.source_relation_count,
+        resolved_count: body.resolved_count,
+        opened_count: body.opened_count,
+        rule_version: body.rule_version.clone(),
+    });
+    // No registered-target effect, exactly as the matrix says: a marker is a
+    // fact about the backfill, not about any comparison or Belief.
     Ok(())
 }
 
@@ -4217,34 +4847,123 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
         // them), but a vector that repeated every scope and value digest
         // would be asserting the schema round-trip a second time, in a file
         // where a hand edit reads as a semantic change.
+        //
+        // The summary is TAGGED, because the two endpoint kinds pin different
+        // first ids: an asserted endpoint's is the assertion it came from, a
+        // declared one's is the relation event somebody wrote. Untagged, the
+        // two would project identically and a vector could not tell a claim
+        // backed by evidence from a claim backed by a declaration.
         "comparisons": state
             .comparisons
             .values()
             .map(|c| (
                 c.comparison_id.clone(),
                 serde_json::json!({
-                    "detected_by": c.event_id,
-                    "detector_version": c.detector_version,
-                    "left": [
-                        c.left.assertion_event_id.clone(),
-                        c.left.belief_id.clone(),
-                        c.left.belief_revision_event_id.clone(),
-                        c.left.subject_id.clone(),
-                    ],
-                    "right": [
-                        c.right.assertion_event_id.clone(),
-                        c.right.belief_id.clone(),
-                        c.right.belief_revision_event_id.clone(),
-                        c.right.subject_id.clone(),
-                    ],
+                    "registered_by": c.event_id,
+                    "origin": match &c.origin {
+                        ComparisonOrigin::Detected { detector_version, reason_codes } =>
+                            serde_json::json!({
+                                "kind": "detected",
+                                "detector_version": detector_version,
+                                "reason_codes": reason_codes
+                                    .iter()
+                                    .map(|r| r.as_str())
+                                    .collect::<Vec<_>>(),
+                            }),
+                        ComparisonOrigin::Declared {
+                            source_relation_event_id,
+                            rule_version,
+                        } => serde_json::json!({
+                            "kind": "declared",
+                            "source_relation_event_id": source_relation_event_id,
+                            "rule_version": rule_version,
+                        }),
+                    },
+                    "left": endpoint_summary(&c.left),
+                    "right": endpoint_summary(&c.right),
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M27.3: what the gauntlet concluded, keyed by comparison. The
+        // RESOLVED verdicts are in here too, and deliberately: "we almost
+        // called this a contradiction and here is why we did not" is the fact
+        // that stops the same pair being re-litigated on every pass.
+        "classifications": state
+            .conflict_classifications
+            .values()
+            .map(|c| (
+                c.comparison_id.clone(),
+                serde_json::json!({
+                    "classified_by": c.event_id,
+                    "outcome": c.outcome.as_str(),
+                    "classification": match &c.classification {
+                        schema::Classification::Deterministic { rule_version } =>
+                            serde_json::json!({
+                                "kind": "deterministic",
+                                "rule_version": rule_version,
+                            }),
+                        schema::Classification::AgentSupplied {
+                            proposal_id,
+                            model_id,
+                            prompt_version,
+                        } => serde_json::json!({
+                            "kind": "agent_supplied",
+                            "proposal_id": proposal_id,
+                            "model_id": model_id,
+                            "prompt_version": prompt_version,
+                        }),
+                    },
                     "reason_codes": c
                         .reason_codes
                         .iter()
                         .map(|r| r.as_str())
                         .collect::<Vec<_>>(),
+                    "evidence_event_ids": c.evidence_event_ids,
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M27.3: the edges themselves, closed ones included. The sharpest
+        // reason anything is in this contract — M27.4's preservation gate
+        // reads exactly this map, so a rebuild that lost an open edge would
+        // silently un-protect a merge the user was told was blocked.
+        "contradiction_edges": state
+            .contradiction_edges
+            .values()
+            .map(|e| (
+                e.edge_id.clone(),
+                serde_json::json!({
+                    "comparison_id": e.comparison_id,
+                    "kind": e.kind.as_str(),
+                    "left_belief_id": e.left_belief_id,
+                    "right_belief_id": e.right_belief_id,
+                    "opened_by": e.opened_event_id,
+                    "classified_event_id": e.classified_event_id,
+                    "closed": match &e.closed {
+                        None => serde_json::Value::Null,
+                        Some(closure) => serde_json::json!({
+                            "closed_by": closure.event_id,
+                            "addressed_by_event_id": closure.addressed_by_event_id,
+                            "disposition": closure.disposition.as_str(),
+                            "evidence_event_ids": closure.evidence_event_ids,
+                        }),
+                    },
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M27.3: the backfill checkpoint, or an explicit null. Activation is
+        // gated on it, so "no checkpoint" is a state a vector has to be able
+        // to say out loud.
+        "contradiction_backfill": match &state.contradiction_backfill {
+            None => serde_json::Value::Null,
+            Some(checkpoint) => serde_json::json!({
+                "event_id": checkpoint.event_id,
+                "through_event_id": checkpoint.through_event_id,
+                "source_relation_count": checkpoint.source_relation_count,
+                "resolved_count": checkpoint.resolved_count,
+                "opened_count": checkpoint.opened_count,
+                "rule_version": checkpoint.rule_version,
+            }),
+        },
         // M27.1: recorded freshness crossings, keyed by facet id. In the
         // vector contract because the crossing is portable history and both
         // reducers have to land on the same one — including agreeing that an
@@ -4289,6 +5008,30 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                 .collect::<Vec<_>>(),
         },
     })
+}
+
+/// One comparison endpoint, summarized for the vectors: the kind, then the
+/// four ids it pins. The FIRST id differs by kind on purpose — an asserted
+/// endpoint pins the assertion its claim came from, and a declared one pins
+/// the relation event somebody wrote. A declared endpoint has no assertion at
+/// all, which is the entire reason the second kind exists.
+fn endpoint_summary(endpoint: &schema::ConflictEndpoint) -> serde_json::Value {
+    match endpoint {
+        schema::ConflictEndpoint::Asserted { endpoint } => serde_json::json!({
+            "kind": "asserted",
+            "assertion_event_id": endpoint.assertion_event_id,
+            "belief_id": endpoint.belief_id,
+            "belief_revision_event_id": endpoint.belief_revision_event_id,
+            "subject_id": endpoint.subject_id,
+        }),
+        schema::ConflictEndpoint::DeclaredRelation { endpoint } => serde_json::json!({
+            "kind": "declared_relation",
+            "relation_event_id": endpoint.relation_event_id,
+            "belief_id": endpoint.belief_id,
+            "belief_revision_event_id": endpoint.belief_revision_event_id,
+            "subject_id": endpoint.subject_id,
+        }),
+    }
 }
 
 fn capability_name(c: schema::AuthorityCapability) -> &'static str {
@@ -5720,5 +6463,821 @@ mod tests {
             .unwrap();
         assert!(!first.replayed);
         assert!(second.replayed, "the same window does not close twice");
+    }
+
+    // --- M27.3b the resolution pipeline -------------------------------------
+
+    /// Two Beliefs, each resting on its own assertion, plus the detected
+    /// comparison between them. Returns (comparison id, left belief revision,
+    /// right belief revision, the candidate body).
+    struct Pair {
+        comparison_id: String,
+        left: schema::ConflictCandidateEndpointV1,
+        right: schema::ConflictCandidateEndpointV1,
+    }
+
+    fn conflict_endpoint(
+        assertion_event: &str,
+        belief_id: &str,
+        revision_event: &str,
+    ) -> schema::ConflictCandidateEndpointV1 {
+        schema::ConflictCandidateEndpointV1 {
+            assertion_event_id: assertion_event.into(),
+            belief_id: belief_id.into(),
+            belief_revision_event_id: revision_event.into(),
+            subject_id: ENTITY.into(),
+            predicate: "status".into(),
+            value_hash: schema::derive_value_hash(&TypedValue::string("active")).unwrap(),
+            scope: Scope::empty(),
+            state_stage: schema::StateStage::Unknown,
+            valid_time: schema::ValidInterval {
+                from: None,
+                to: None,
+            },
+        }
+    }
+
+    /// Order the pair the way a detector must: `left` is the canonically
+    /// first endpoint, because the body is a function of the pair.
+    fn detected(
+        rig: &mut Rig,
+        left: schema::ConflictCandidateEndpointV1,
+        right: schema::ConflictCandidateEndpointV1,
+    ) -> Pair {
+        let (first, _) = schema::ordered_endpoints(&left, &right).unwrap();
+        let (left, right) = if serde_json::to_string(&left).unwrap() == first {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let comparison_id = schema::derive_comparison_id(&left, &right).unwrap();
+        let body = schema::ConflictCandidateDetected {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "system:conflict-detector".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            comparison_id: comparison_id.clone(),
+            left: left.clone(),
+            right: right.clone(),
+            detector_version: "conflict-detector-v1".into(),
+            reason_codes: vec![schema::ConflictCandidateReason::IncompatibleValueHash],
+        };
+        rig.append(schema::KIND_CONFLICT_CANDIDATE_DETECTED, &body);
+        Pair {
+            comparison_id,
+            left,
+            right,
+        }
+    }
+
+    /// Two Beliefs about one entity, each with an assertion its basis names.
+    fn two_supported_beliefs(rig: &mut Rig) -> Pair {
+        let human = rig.human_source("human:josef");
+        let subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![],
+        };
+        let one = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &human,
+                "human:josef",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let two = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &human,
+                "human:josef",
+                subject,
+                vec![],
+                human_payload(AssertionBasis::Reported),
+            ),
+        );
+        let linked = |observation: &str| BeliefBasis::Linked {
+            links: vec![BasisLink {
+                observation_event_id: observation.to_string(),
+                role: BasisRole::Supports,
+            }],
+        };
+        let first = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, linked(&one)),
+        );
+        let second = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF_B, ENTITY, linked(&two)),
+        );
+        detected(
+            rig,
+            conflict_endpoint(&one, BELIEF, &first),
+            conflict_endpoint(&two, BELIEF_B, &second),
+        )
+    }
+
+    fn classified(
+        pair: &Pair,
+        outcome: schema::ConflictOutcome,
+        classification: schema::Classification,
+        reason_codes: Vec<schema::ConflictReasonCode>,
+    ) -> schema::ConflictClassified {
+        schema::ConflictClassified {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "system:conflict-classifier".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            comparison_id: pair.comparison_id.clone(),
+            left: schema::ConflictEndpoint::Asserted {
+                endpoint: pair.left.clone(),
+            },
+            right: schema::ConflictEndpoint::Asserted {
+                endpoint: pair.right.clone(),
+            },
+            outcome,
+            classification,
+            evidence_event_ids: vec![],
+            reason_codes,
+            classified_at: "2026-08-12T09:00:00.000Z".into(),
+        }
+    }
+
+    fn deterministic() -> schema::Classification {
+        schema::Classification::Deterministic {
+            rule_version: "gauntlet-v1".into(),
+        }
+    }
+
+    fn opened(
+        pair: &Pair,
+        kind: schema::EdgeKind,
+        classified_event_id: &str,
+    ) -> schema::ContradictionOpened {
+        schema::ContradictionOpened {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "system:conflict-classifier".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            edge_id: schema::derive_edge_id(&pair.comparison_id, kind),
+            comparison_id: pair.comparison_id.clone(),
+            left: schema::ConflictEndpoint::Asserted {
+                endpoint: pair.left.clone(),
+            },
+            right: schema::ConflictEndpoint::Asserted {
+                endpoint: pair.right.clone(),
+            },
+            kind,
+            classified_event_id: classified_event_id.into(),
+        }
+    }
+
+    #[test]
+    fn a_resolution_is_recorded_and_opens_nothing() {
+        // The milestone's whole point: most candidates are NOT
+        // contradictions, and the resolution is still worth keeping.
+        let mut rig = Rig::new("m27-classify-resolved");
+        let pair = two_supported_beliefs(&mut rig);
+        assert_eq!(
+            rig.state().version("comparison", &pair.comparison_id),
+            Some(1)
+        );
+
+        rig.append(
+            schema::KIND_CONFLICT_CLASSIFIED,
+            &classified(
+                &pair,
+                schema::ConflictOutcome::ResolvedByStage,
+                deterministic(),
+                vec![schema::ConflictReasonCode::StageDisjoint],
+            ),
+        );
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        assert_eq!(state.version("comparison", &pair.comparison_id), Some(2));
+        assert_eq!(
+            state.conflict_classifications[&pair.comparison_id].outcome,
+            schema::ConflictOutcome::ResolvedByStage
+        );
+        assert!(state.contradiction_edges.is_empty());
+        // The Beliefs did not move: a resolved verdict READS them.
+        assert_eq!(state.version("belief", BELIEF), Some(1));
+        assert_eq!(state.version("belief", BELIEF_B), Some(1));
+    }
+
+    #[test]
+    fn an_unresolved_verdict_and_its_edge_commit_together() {
+        let mut rig = Rig::new("m27-classify-unresolved");
+        let pair = two_supported_beliefs(&mut rig);
+        let verdict = classified(
+            &pair,
+            schema::ConflictOutcome::GenuineDirect,
+            deterministic(),
+            vec![schema::ConflictReasonCode::IncompatibleValues],
+        );
+        let edge = opened(&pair, schema::EdgeKind::GenuineDirect, &member_ref(0));
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_CONFLICT_CLASSIFIED.to_string(),
+                        serde_json::to_value(&verdict).unwrap(),
+                    ),
+                    (
+                        schema::KIND_CONTRADICTION_OPENED.to_string(),
+                        serde_json::to_value(&edge).unwrap(),
+                    ),
+                ],
+                Some("op:classify"),
+            )
+            .unwrap();
+
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        // v1 detected, v2 classified, v3 opened.
+        assert_eq!(state.version("comparison", &pair.comparison_id), Some(3));
+        assert_eq!(state.version("belief", BELIEF), Some(2));
+        assert_eq!(state.version("belief", BELIEF_B), Some(2));
+        let row = &state.contradiction_edges[&edge.edge_id];
+        assert_eq!(row.kind, schema::EdgeKind::GenuineDirect);
+        assert!(row.closed.is_none());
+    }
+
+    #[test]
+    fn a_resolved_classification_opens_no_edge_and_a_second_verdict_refuses() {
+        let mut rig = Rig::new("m27-classify-guards");
+        let pair = two_supported_beliefs(&mut rig);
+        let verdict = classified(
+            &pair,
+            schema::ConflictOutcome::ResolvedTemporally,
+            deterministic(),
+            vec![schema::ConflictReasonCode::TemporalDisjoint],
+        );
+        let classified_event = rig.append(schema::KIND_CONFLICT_CLASSIFIED, &verdict);
+
+        // The crying-wolf guard, at the reducer: an edge over a pair the
+        // gauntlet resolved apart.
+        rig.append(
+            schema::KIND_CONTRADICTION_OPENED,
+            &opened(&pair, schema::EdgeKind::Partial, &classified_event),
+        );
+        // And a second verdict about one comparison.
+        rig.append(
+            schema::KIND_CONFLICT_CLASSIFIED,
+            &classified(
+                &pair,
+                schema::ConflictOutcome::GenuineDirect,
+                deterministic(),
+                vec![schema::ConflictReasonCode::IncompatibleValues],
+            ),
+        );
+
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert!(state.anomalies[0]
+            .detail
+            .contains("RESOLVED the pair apart"));
+        assert!(state.anomalies[1]
+            .detail
+            .contains("one classification per comparison"));
+        assert!(state.contradiction_edges.is_empty());
+        assert_eq!(state.version("comparison", &pair.comparison_id), Some(2));
+    }
+
+    #[test]
+    fn a_classification_is_checked_against_the_tuple_the_comparison_was_minted_from() {
+        let mut rig = Rig::new("m27-classify-tuple");
+        let pair = two_supported_beliefs(&mut rig);
+        // The same two endpoints, swapped. Same pair as a SET, and not the
+        // comparison anybody registered — both bodies order `left` as the
+        // canonically first endpoint.
+        let mut swapped = classified(
+            &pair,
+            schema::ConflictOutcome::ResolvedByScope,
+            deterministic(),
+            vec![schema::ConflictReasonCode::ScopeDisjoint],
+        );
+        std::mem::swap(&mut swapped.left, &mut swapped.right);
+        rig.append(schema::KIND_CONFLICT_CLASSIFIED, &swapped);
+
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 1);
+        assert!(state.anomalies[0].detail.contains("side for side"));
+        assert!(state.conflict_classifications.is_empty());
+    }
+
+    #[test]
+    fn an_agent_supplied_verdict_names_the_proposal_that_asked_for_it() {
+        // The smuggling guard. `same_meaning` cannot be a deterministic
+        // reducer fact, so it arrives claiming a proposal — and the claim is
+        // checked against what that proposal actually asked.
+        let mut rig = Rig::new("m27-classify-agent");
+        let pair = two_supported_beliefs(&mut rig);
+        let proposal_id = "1111111111111111111111111111111a";
+        let agent = |id: &str| schema::Classification::AgentSupplied {
+            proposal_id: id.into(),
+            model_id: "claude-opus-5".into(),
+            prompt_version: "classify-conflict-v1".into(),
+        };
+        let same_meaning = |classification| {
+            let mut body = classified(
+                &pair,
+                schema::ConflictOutcome::SameMeaning,
+                classification,
+                vec![schema::ConflictReasonCode::SemanticSameMeaning],
+            );
+            body.evidence_event_ids = vec![pair.left.assertion_event_id.clone()];
+            body
+        };
+
+        // Nothing proposed it.
+        rig.append(
+            schema::KIND_CONFLICT_CLASSIFIED,
+            &same_meaning(agent(proposal_id)),
+        );
+
+        // A proposal that asked a different question.
+        let submission = schema::ProposalSubmitted {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal: Box::new(schema::ProposalV1 {
+                schema: schema::PROPOSAL_SCHEMA,
+                proposal_id: proposal_id.into(),
+                run_id: "4444444444444444444444444444444a".into(),
+                targets: vec![schema::ProposalTarget {
+                    target_id: pair.comparison_id.clone(),
+                    target_class: schema::TargetClass::Comparison,
+                    expected_version: Some(1),
+                }],
+                op: schema::ProposalOp::ClassifyConflict {
+                    comparison_id: pair.comparison_id.clone(),
+                    outcome: schema::ConflictOutcome::Conditional,
+                    basis_refs: vec![pair.left.assertion_event_id.clone()],
+                },
+                intended_use: schema::IntendedUse {
+                    kind: schema::IntendedUseKind::ReversibleWork,
+                    stakes: schema::Risk::Low,
+                    predicate_class: None,
+                },
+                basis: schema::ProposalBasis {
+                    transition_cause: schema::TransitionCause::Maintenance,
+                    evidence_refs: vec![],
+                    coverage_refs: vec![],
+                    authority_refs: vec![],
+                    authority_route_refs: vec![],
+                    addressed_contradictions: vec![],
+                    absence_claim: false,
+                },
+                declared_risk: schema::Risk::Medium,
+                reason: "these say the same thing".into(),
+                candidate_search_receipt: None,
+            }),
+        };
+        rig.append(schema::KIND_PROPOSAL_SUBMITTED, &submission);
+        rig.append(
+            schema::KIND_CONFLICT_CLASSIFIED,
+            &same_meaning(agent(proposal_id)),
+        );
+
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert!(
+            state.anomalies[0].detail.contains("is not \\ncommitted")
+                || state.anomalies[0].detail.contains("not committed")
+        );
+        assert!(state.anomalies[1].detail.contains("a different question"));
+        assert!(state.conflict_classifications.is_empty());
+    }
+
+    #[test]
+    fn one_belief_can_contradict_itself_and_advances_once() {
+        // Two assertions ONE revision rests on, saying incompatible things.
+        // The base disagreeing with itself is not a degenerate case — it is
+        // the one a merge cannot fix — and M27.3a's close validator would
+        // have made this edge unclosable.
+        let mut rig = Rig::new("m27-self-contradiction");
+        let human = rig.human_source("human:josef");
+        let subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![],
+        };
+        let one = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &human,
+                "human:josef",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let two = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &human,
+                "human:josef",
+                subject,
+                vec![],
+                human_payload(AssertionBasis::Reported),
+            ),
+        );
+        let revision = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(
+                BELIEF,
+                ENTITY,
+                BeliefBasis::Linked {
+                    links: vec![
+                        BasisLink {
+                            observation_event_id: one.clone(),
+                            role: BasisRole::Supports,
+                        },
+                        BasisLink {
+                            observation_event_id: two.clone(),
+                            role: BasisRole::Supports,
+                        },
+                    ],
+                },
+            ),
+        );
+        let pair = detected(
+            &mut rig,
+            conflict_endpoint(&one, BELIEF, &revision),
+            conflict_endpoint(&two, BELIEF, &revision),
+        );
+        let verdict = classified(
+            &pair,
+            schema::ConflictOutcome::GenuineDirect,
+            deterministic(),
+            vec![schema::ConflictReasonCode::IncompatibleValues],
+        );
+        let edge = opened(&pair, schema::EdgeKind::GenuineDirect, &member_ref(0));
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_CONFLICT_CLASSIFIED.to_string(),
+                        serde_json::to_value(&verdict).unwrap(),
+                    ),
+                    (
+                        schema::KIND_CONTRADICTION_OPENED.to_string(),
+                        serde_json::to_value(&edge).unwrap(),
+                    ),
+                ],
+                Some("op:self-classify"),
+            )
+            .unwrap();
+
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        let row = &state.contradiction_edges[&edge.edge_id];
+        assert_eq!(row.left_belief_id, row.right_belief_id);
+        // ONE bump, not two: "each DISTINCT endpoint Belief once".
+        assert_eq!(state.version("belief", BELIEF), Some(2));
+    }
+
+    #[test]
+    fn a_close_travels_with_the_mutation_that_addressed_it() {
+        let mut rig = Rig::new("m27-close");
+        let pair = two_supported_beliefs(&mut rig);
+        let verdict = classified(
+            &pair,
+            schema::ConflictOutcome::GenuineDirect,
+            deterministic(),
+            vec![schema::ConflictReasonCode::IncompatibleValues],
+        );
+        let edge = opened(&pair, schema::EdgeKind::GenuineDirect, &member_ref(0));
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_CONFLICT_CLASSIFIED.to_string(),
+                        serde_json::to_value(&verdict).unwrap(),
+                    ),
+                    (
+                        schema::KIND_CONTRADICTION_OPENED.to_string(),
+                        serde_json::to_value(&edge).unwrap(),
+                    ),
+                ],
+                Some("op:classify"),
+            )
+            .unwrap();
+
+        let close = |addressed_by: &str| schema::ContradictionClosed {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            edge_id: edge.edge_id.clone(),
+            comparison_id: pair.comparison_id.clone(),
+            left_belief_id: pair.left.belief_id.clone(),
+            right_belief_id: pair.right.belief_id.clone(),
+            addressed_by_event_id: addressed_by.into(),
+            evidence_event_ids: vec![pair.left.assertion_event_id.clone()],
+            disposition: schema::CloseDisposition::ResolvedWithEvidence,
+        };
+
+        // Standalone: no batch, so nothing addressed anything.
+        rig.append(
+            schema::KIND_CONTRADICTION_CLOSED,
+            &close(&pair.right.assertion_event_id),
+        );
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 1);
+        assert!(state.anomalies[0]
+            .detail
+            .contains("not a member of this batch"));
+        assert!(state.contradiction_edges[&edge.edge_id].closed.is_none());
+
+        // Batched with the mutation whose id it names.
+        let addressing = |before: &str, after: &str| BeliefRevised {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF.into(),
+            patch: vec![PatchOp {
+                field_path: "/fields/status".into(),
+                before: TypedValue::string(before),
+                after: TypedValue::string(after),
+            }],
+            basis: unsupported(),
+        };
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_BELIEF_REVISED.to_string(),
+                        serde_json::to_value(addressing("active", "retired")).unwrap(),
+                    ),
+                    (
+                        schema::KIND_CONTRADICTION_CLOSED.to_string(),
+                        serde_json::to_value(close(&member_ref(0))).unwrap(),
+                    ),
+                ],
+                Some("op:address"),
+            )
+            .unwrap();
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 1, "{:?}", state.anomalies);
+        let row = &state.contradiction_edges[&edge.edge_id];
+        let closure = row.closed.as_ref().expect("the edge is closed");
+        assert_eq!(
+            closure.disposition,
+            schema::CloseDisposition::ResolvedWithEvidence
+        );
+        // v3 open, v4 close.
+        assert_eq!(state.version("comparison", &pair.comparison_id), Some(4));
+
+        // And it never reopens.
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_BELIEF_REVISED.to_string(),
+                        serde_json::to_value(addressing("retired", "revived")).unwrap(),
+                    ),
+                    (
+                        schema::KIND_CONTRADICTION_CLOSED.to_string(),
+                        serde_json::to_value(close(&member_ref(0))).unwrap(),
+                    ),
+                ],
+                Some("op:address-again"),
+            )
+            .unwrap();
+        let state = rig.state();
+        assert!(
+            state
+                .anomalies
+                .iter()
+                .any(|a| a.detail.contains("never reopens")),
+            "{:?}",
+            state.anomalies
+        );
+    }
+
+    #[test]
+    fn a_declared_comparison_needs_a_live_contradicts_relation() {
+        let mut rig = Rig::new("m27-declared");
+        let human = rig.human_source("human:josef");
+        let subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![],
+        };
+        let obs = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &human,
+                "human:josef",
+                subject,
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let linked = BeliefBasis::Linked {
+            links: vec![BasisLink {
+                observation_event_id: obs,
+                role: BasisRole::Supports,
+            }],
+        };
+        let first = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, linked.clone()),
+        );
+        let second = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF_B, ENTITY, linked),
+        );
+
+        let relation = |kind: RelationKind, action: schema::RelationAction| BeliefRelation {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "human:josef".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            relation_id: derive_relation_id(BELIEF, BELIEF_B, kind),
+            from: BELIEF.into(),
+            to: BELIEF_B.into(),
+            relation: kind,
+            action,
+        };
+        let supersedes = rig.append(
+            schema::KIND_BELIEF_RELATION,
+            &relation(RelationKind::Supersedes, schema::RelationAction::Add),
+        );
+        let contradicts = rig.append(
+            schema::KIND_BELIEF_RELATION,
+            &relation(RelationKind::Contradicts, schema::RelationAction::Add),
+        );
+
+        let declared =
+            |relation_event: &str, belief: &str, revision: &str| schema::DeclaredRelationEndpoint {
+                relation_event_id: relation_event.into(),
+                belief_id: belief.into(),
+                belief_revision_event_id: revision.into(),
+                relation_origin: schema::RelationOrigin::LegacyMigration,
+                subject_id: ENTITY.into(),
+                content_hash: "a".repeat(64),
+                scope: schema::KnownScope::Unknown,
+                state_stage: schema::KnownStage::Unknown,
+                valid_time: schema::KnownValidTime::Unknown,
+            };
+        let registration = |relation_event: &str| {
+            let left = declared(relation_event, BELIEF, &first);
+            let right = declared(relation_event, BELIEF_B, &second);
+            let (ordered_first, _) = schema::ordered_declared_endpoints(&left, &right).unwrap();
+            let (left, right) = if serde_json::to_string(&left).unwrap() == ordered_first {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            schema::ConflictComparisonRegistered {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: "system:contradiction-backfill".into(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                comparison_id: schema::derive_declared_comparison_id(relation_event, &left, &right)
+                    .unwrap(),
+                left,
+                right,
+                source_relation_event_id: relation_event.into(),
+                reason: schema::ConflictReasonCode::DeclaredContradictsRelation,
+                rule_version: "contradiction-backfill-v1".into(),
+            }
+        };
+
+        // A registration off the SUPERSEDES relation: a conflict nobody
+        // declared.
+        rig.append(
+            schema::KIND_CONFLICT_COMPARISON_REGISTERED,
+            &registration(&supersedes),
+        );
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 1);
+        assert!(state.anomalies[0].detail.contains("not a contradicts"));
+
+        // The real one.
+        let good = registration(&contradicts);
+        rig.append(schema::KIND_CONFLICT_COMPARISON_REGISTERED, &good);
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 1, "{:?}", state.anomalies);
+        assert_eq!(state.version("comparison", &good.comparison_id), Some(1));
+        assert!(matches!(
+            state.comparisons[&good.comparison_id].origin,
+            ComparisonOrigin::Declared { .. }
+        ));
+
+        // The author takes it back; a registration pinned to the withdrawn
+        // add must not keep the conflict alive.
+        rig.append(
+            schema::KIND_BELIEF_RELATION,
+            &relation(RelationKind::Contradicts, schema::RelationAction::Remove),
+        );
+        let mut reused = registration(&contradicts);
+        reused.comparison_id = good.comparison_id.clone();
+        rig.append(schema::KIND_CONFLICT_COMPARISON_REGISTERED, &reused);
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert!(state.anomalies[1].detail.contains("already exists"));
+    }
+
+    #[test]
+    fn a_backfill_checkpoint_never_claims_less_than_the_one_before() {
+        let mut rig = Rig::new("m27-backfill");
+        let marker = |through: &str, seen: u64, resolved: u64, opened: u64| {
+            schema::ContradictionBackfillCompleted {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: "system:contradiction-backfill".into(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                through_event_id: through.into(),
+                source_relation_count: seen,
+                resolved_count: resolved,
+                opened_count: opened,
+                rule_version: "contradiction-backfill-v1".into(),
+            }
+        };
+        let first = "1".repeat(32);
+        let second = "2".repeat(32);
+        rig.append(
+            schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
+            &marker(&first, 4, 3, 1),
+        );
+        // The same coverage, claimed twice.
+        rig.append(
+            schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
+            &marker(&first, 4, 3, 1),
+        );
+        // A later checkpoint that saw FEWER relations — a run that lost its
+        // place, not progress.
+        rig.append(
+            schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
+            &marker(&second, 2, 2, 0),
+        );
+        // Progress.
+        rig.append(
+            schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
+            &marker(&second, 9, 7, 2),
+        );
+
+        let state = rig.state();
+        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert!(state.anomalies[0].detail.contains("claimed twice"));
+        assert!(state.anomalies[1].detail.contains("lost its place"));
+        let checkpoint = state.contradiction_backfill.expect("a checkpoint");
+        assert_eq!(checkpoint.through_event_id, second);
+        assert_eq!(checkpoint.source_relation_count, 9);
     }
 }

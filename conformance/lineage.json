@@ -559,6 +559,9 @@
     "ingest_receipts": {},
     "semantic_assessments": {},
     "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
     "freshness": {},
     "reconciliation": {
       "open": false,

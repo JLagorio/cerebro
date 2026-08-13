@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     canonical_json, is_id128, is_sha256, schema_body, sha256_first128, ConflictCandidateEndpointV1,
-    Scope, Stage, ValidInterval,
+    ConflictOutcome, Scope, Stage, ValidInterval,
 };
 
 /// Where a declared `contradicts` relation came from. Closed, and the three
@@ -270,57 +270,6 @@ impl ConflictReasonCode {
     ];
 }
 
-/// What the gauntlet concluded. The first five RESOLVE the pair apart; the
-/// last three do not, and only those open an edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ClassificationOutcome {
-    ResolvedTemporally,
-    ResolvedByScope,
-    ResolvedByStage,
-    ResolvedByGranularity,
-    SameMeaning,
-    GenuineDirect,
-    Partial,
-    Conditional,
-}
-
-impl ClassificationOutcome {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ClassificationOutcome::ResolvedTemporally => "resolved_temporally",
-            ClassificationOutcome::ResolvedByScope => "resolved_by_scope",
-            ClassificationOutcome::ResolvedByStage => "resolved_by_stage",
-            ClassificationOutcome::ResolvedByGranularity => "resolved_by_granularity",
-            ClassificationOutcome::SameMeaning => "same_meaning",
-            ClassificationOutcome::GenuineDirect => "genuine_direct",
-            ClassificationOutcome::Partial => "partial",
-            ClassificationOutcome::Conditional => "conditional",
-        }
-    }
-
-    /// The unresolved classes — and the ONLY ones that open an edge.
-    pub fn edge_kind(self) -> Option<EdgeKind> {
-        match self {
-            ClassificationOutcome::GenuineDirect => Some(EdgeKind::GenuineDirect),
-            ClassificationOutcome::Partial => Some(EdgeKind::Partial),
-            ClassificationOutcome::Conditional => Some(EdgeKind::Conditional),
-            _ => None,
-        }
-    }
-
-    pub const ALL: [ClassificationOutcome; 8] = [
-        ClassificationOutcome::ResolvedTemporally,
-        ClassificationOutcome::ResolvedByScope,
-        ClassificationOutcome::ResolvedByStage,
-        ClassificationOutcome::ResolvedByGranularity,
-        ClassificationOutcome::SameMeaning,
-        ClassificationOutcome::GenuineDirect,
-        ClassificationOutcome::Partial,
-        ClassificationOutcome::Conditional,
-    ];
-}
-
 /// What kind of contradiction an open edge records. Exactly the three
 /// unresolved outcomes — an edge is never `resolved_by_stage`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -337,6 +286,19 @@ impl EdgeKind {
             EdgeKind::GenuineDirect => "genuine_direct",
             EdgeKind::Partial => "partial",
             EdgeKind::Conditional => "conditional",
+        }
+    }
+
+    /// The edge an outcome opens, or `None` for the five that resolve the
+    /// pair apart. The one place the "only unresolved classes open an edge"
+    /// rule is spelled — [`ConflictOutcome::is_unresolved`] answers the same
+    /// question, and this returns the kind that answer implies.
+    pub fn of(outcome: ConflictOutcome) -> Option<EdgeKind> {
+        match outcome {
+            ConflictOutcome::GenuineDirect => Some(EdgeKind::GenuineDirect),
+            ConflictOutcome::Partial => Some(EdgeKind::Partial),
+            ConflictOutcome::Conditional => Some(EdgeKind::Conditional),
+            _ => None,
         }
     }
 
@@ -532,7 +494,7 @@ schema_body! {
         pub comparison_id: String,
         pub left: ConflictEndpoint,
         pub right: ConflictEndpoint,
-        pub outcome: ClassificationOutcome,
+        pub outcome: ConflictOutcome,
         pub classification: Classification,
         /// Non-empty for an agent-supplied classification: a semantic
         /// judgement with no evidence is an opinion.
@@ -637,11 +599,11 @@ impl ConflictClassified {
 /// - **Mixed reason sets refuse**: semantic with structural, relation with
 ///   non-relation. A classification is one claim about one pair.
 pub fn check_matrix(
-    outcome: ClassificationOutcome,
+    outcome: ConflictOutcome,
     classification: &Classification,
     reasons: &[ConflictReasonCode],
 ) -> Result<(), String> {
-    use ClassificationOutcome as O;
+    use ConflictOutcome as O;
     use ConflictReasonCode as R;
 
     let deterministic = classification.is_deterministic();
@@ -804,9 +766,15 @@ impl ContradictionClosed {
                 return Err(format!("{name} must be a 128-bit hex id"));
             }
         }
-        if self.left_belief_id == self.right_belief_id {
-            return Err("a contradiction edge has two distinct endpoint Beliefs".into());
-        }
+        // NO distinctness check, deliberately, and M27.3a was wrong to have
+        // one. A comparison may hold two assertions that one Belief revision
+        // rests on at once — "Rev C is AMD" and "Rev C is NVIDIA", both
+        // supporting the same revision — and that is not a degenerate case but
+        // the most serious one: the base disagreeing with ITSELF, where a
+        // merge cannot even be the fix. Refusing the close of such an edge
+        // would have made it unclosable, which is a trap with a two-milestone
+        // fuse. The version matrix says "each DISTINCT endpoint Belief once"
+        // for exactly this reason.
         if self.evidence_event_ids.is_empty() {
             return Err(
                 "a close carries the evidence that addressed it — silence and elapsed time \
@@ -947,7 +915,7 @@ mod tests {
     }
 
     fn classified(
-        outcome: ClassificationOutcome,
+        outcome: ConflictOutcome,
         classification: Classification,
         reasons: Vec<ConflictReasonCode>,
     ) -> ConflictClassified {
@@ -1006,12 +974,23 @@ mod tests {
 
     #[test]
     fn only_the_three_unresolved_outcomes_open_an_edge() {
-        let opens: Vec<&str> = ClassificationOutcome::ALL
+        let opens: Vec<&str> = ConflictOutcome::ALL
             .iter()
-            .filter(|outcome| outcome.edge_kind().is_some())
+            .filter(|outcome| EdgeKind::of(**outcome).is_some())
             .map(|outcome| outcome.as_str())
             .collect();
         assert_eq!(opens, ["genuine_direct", "partial", "conditional"]);
+        // The two spellings of the same rule must agree — `is_unresolved` is
+        // M24's, `EdgeKind::of` is M27's, and a disagreement would mean a
+        // proposal and its event class different things unresolved.
+        for outcome in ConflictOutcome::ALL {
+            assert_eq!(
+                outcome.is_unresolved(),
+                EdgeKind::of(outcome).is_some(),
+                "{} disagrees with itself",
+                outcome.as_str()
+            );
+        }
     }
 
     #[test]
@@ -1019,7 +998,7 @@ mod tests {
         // Every cell, both ways round. The rows that must refuse are the
         // whole reason the matrix is checked in the body rather than trusted
         // to the producer.
-        use ClassificationOutcome as O;
+        use ConflictOutcome as O;
         use ConflictReasonCode as R;
         for (outcome, reason, deterministic_ok, agent_ok) in [
             (O::ResolvedTemporally, R::TemporalDisjoint, true, false),
@@ -1048,7 +1027,7 @@ mod tests {
     #[test]
     fn a_semantic_result_cannot_be_smuggled_in_as_a_reducer_fact() {
         let detail = classified(
-            ClassificationOutcome::SameMeaning,
+            ConflictOutcome::SameMeaning,
             deterministic(),
             vec![ConflictReasonCode::SemanticSameMeaning],
         )
@@ -1060,7 +1039,7 @@ mod tests {
     #[test]
     fn a_structural_result_cannot_be_asserted_by_a_model() {
         let detail = classified(
-            ClassificationOutcome::ResolvedByStage,
+            ConflictOutcome::ResolvedByStage,
             agent(),
             vec![ConflictReasonCode::StageDisjoint],
         )
@@ -1081,11 +1060,9 @@ mod tests {
                 ConflictReasonCode::IncompatibleValues,
             ],
         ] {
-            assert!(
-                classified(ClassificationOutcome::GenuineDirect, agent(), reasons)
-                    .validate()
-                    .is_err()
-            );
+            assert!(classified(ConflictOutcome::GenuineDirect, agent(), reasons)
+                .validate()
+                .is_err());
         }
     }
 
@@ -1093,7 +1070,7 @@ mod tests {
     fn a_deterministic_partial_is_the_declared_relation_expansion_only() {
         // The bare declaration.
         classified(
-            ClassificationOutcome::Partial,
+            ConflictOutcome::Partial,
             deterministic(),
             vec![ConflictReasonCode::DeclaredContradictsRelation],
         )
@@ -1101,7 +1078,7 @@ mod tests {
         .unwrap();
         // Or named missing qualifiers, one or more.
         classified(
-            ClassificationOutcome::Partial,
+            ConflictOutcome::Partial,
             deterministic(),
             vec![
                 ConflictReasonCode::RelationMissingScope,
@@ -1112,7 +1089,7 @@ mod tests {
         .unwrap();
         // Never incompatible values, which is the agent's route to partial.
         assert!(classified(
-            ClassificationOutcome::Partial,
+            ConflictOutcome::Partial,
             deterministic(),
             vec![ConflictReasonCode::IncompatibleValues],
         )
@@ -1120,7 +1097,7 @@ mod tests {
         .is_err());
         // And the agent may not reach it through relation codes.
         assert!(classified(
-            ClassificationOutcome::Partial,
+            ConflictOutcome::Partial,
             agent(),
             vec![ConflictReasonCode::RelationMissingScope],
         )
@@ -1131,7 +1108,7 @@ mod tests {
     #[test]
     fn an_agent_supplied_classification_without_evidence_is_an_opinion() {
         let mut body = classified(
-            ClassificationOutcome::SameMeaning,
+            ConflictOutcome::SameMeaning,
             agent(),
             vec![ConflictReasonCode::SemanticSameMeaning],
         );
@@ -1142,7 +1119,7 @@ mod tests {
     #[test]
     fn a_classification_has_to_say_why() {
         let mut body = classified(
-            ClassificationOutcome::GenuineDirect,
+            ConflictOutcome::GenuineDirect,
             deterministic(),
             vec![ConflictReasonCode::IncompatibleValues],
         );

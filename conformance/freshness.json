@@ -542,6 +542,9 @@
     "ingest_receipts": {},
     "semantic_assessments": {},
     "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
     "freshness": {
       "a2e097292b7f8f1165a7247b4974dc16": {
         "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",

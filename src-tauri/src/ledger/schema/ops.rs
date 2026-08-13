@@ -264,6 +264,13 @@ pub struct SupersedePair {
 /// The conflict classifier's structured outcome (M27 computes it; M24 types
 /// it). The first five are RESOLVED — the apparent disagreement was scope,
 /// stage, time, or granularity — and the last three leave an edge open.
+///
+/// This is the ONE closed set, read by both the proposal that ASKS for a
+/// classification and the [`super::ConflictClassified`] event that records
+/// one. M27.3a briefly declared a second, identical enum for the event; two
+/// spellings of one closed set is the mirrored rule this repo forbids, and it
+/// would have needed a mapping function whose only job was to be wrong once.
+/// Comparing the proposal's outcome with the event's is now `==`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictOutcome {
@@ -288,6 +295,30 @@ impl ConflictOutcome {
                 | ConflictOutcome::Conditional
         )
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConflictOutcome::SameMeaning => "same_meaning",
+            ConflictOutcome::ResolvedTemporally => "resolved_temporally",
+            ConflictOutcome::ResolvedByScope => "resolved_by_scope",
+            ConflictOutcome::ResolvedByStage => "resolved_by_stage",
+            ConflictOutcome::ResolvedByGranularity => "resolved_by_granularity",
+            ConflictOutcome::GenuineDirect => "genuine_direct",
+            ConflictOutcome::Partial => "partial",
+            ConflictOutcome::Conditional => "conditional",
+        }
+    }
+
+    pub const ALL: [ConflictOutcome; 8] = [
+        ConflictOutcome::SameMeaning,
+        ConflictOutcome::ResolvedTemporally,
+        ConflictOutcome::ResolvedByScope,
+        ConflictOutcome::ResolvedByStage,
+        ConflictOutcome::ResolvedByGranularity,
+        ConflictOutcome::GenuineDirect,
+        ConflictOutcome::Partial,
+        ConflictOutcome::Conditional,
+    ];
 }
 
 /// The ONLY observation shape an agent may author (M26's wire type, typed

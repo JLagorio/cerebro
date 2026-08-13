@@ -924,26 +924,34 @@
     "semantic_assessments": {},
     "comparisons": {
       "d16fe4449194774a8ca629c3c34597de": {
-        "detected_by": "00000000000000000000000000000007",
-        "detector_version": "conflict-detector-v1",
-        "left": [
-          "00000000000000000000000000000002",
-          "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "00000000000000000000000000000005",
-          "cccccccccccccccccccccccccccccccc"
-        ],
-        "right": [
-          "00000000000000000000000000000003",
-          "ffffffffffffffffffffffffffffffff",
-          "00000000000000000000000000000006",
-          "cccccccccccccccccccccccccccccccc"
-        ],
-        "reason_codes": [
-          "incompatible_value_hash",
-          "same_subject_predicate"
-        ]
+        "registered_by": "00000000000000000000000000000007",
+        "origin": {
+          "kind": "detected",
+          "detector_version": "conflict-detector-v1",
+          "reason_codes": [
+            "incompatible_value_hash",
+            "same_subject_predicate"
+          ]
+        },
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000002",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000003",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        }
       }
     },
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
     "freshness": {},
     "reconciliation": {
       "open": false,

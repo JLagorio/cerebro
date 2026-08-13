@@ -102,14 +102,28 @@ impl Validity {
     }
 }
 
-/// Whether anybody has declared this belief in conflict.
+/// Whether this belief is in conflict — by an OPEN edge the pipeline
+/// classified, or by a `contradicts` relation somebody declared.
+///
+/// Two terms, and both are needed until the M27.3d backfill has run: a
+/// declared relation with no classification yet is a conflict a person wrote
+/// down, and dropping it while waiting for the pipeline would make the chip
+/// go quiet about something the user can see in their own vault.
+///
+/// A detected COMPARISON is still not contestation. It says a pair is worth
+/// classifying, and most of them resolve as stage lag — the crying-wolf
+/// failure this milestone exists to prevent starts exactly here.
 pub fn conflict_of(state: &EpistemicState, belief_id: &str) -> Conflict {
+    let open_edge = state.contradiction_edges.values().any(|edge| {
+        edge.closed.is_none()
+            && (edge.left_belief_id == belief_id || edge.right_belief_id == belief_id)
+    });
     let declared = state.relations.values().any(|relation| {
         relation.live
             && relation.relation == RelationKind::Contradicts
             && (relation.from == belief_id || relation.to == belief_id)
     });
-    if declared {
+    if open_edge || declared {
         return Conflict::Contested;
     }
     Conflict::Clear
@@ -195,14 +209,56 @@ mod tests {
         state.comparisons.insert(
             comparison_id.clone(),
             crate::ledger::reduce::ComparisonRow {
-                comparison_id,
+                comparison_id: comparison_id.clone(),
                 event_id: "90000000000000000000000000000001".into(),
-                left: candidates[0].left.clone(),
-                right: candidates[0].right.clone(),
-                reason_codes: candidates[0].reason_codes.clone(),
-                detector_version: "conflict-detector-v1".into(),
+                left: crate::ledger::schema::ConflictEndpoint::Asserted {
+                    endpoint: candidates[0].left.clone(),
+                },
+                right: crate::ledger::schema::ConflictEndpoint::Asserted {
+                    endpoint: candidates[0].right.clone(),
+                },
+                origin: crate::ledger::reduce::ComparisonOrigin::Detected {
+                    detector_version: "conflict-detector-v1".into(),
+                    reason_codes: candidates[0].reason_codes.clone(),
+                },
             },
         );
+        assert_eq!(
+            conflict_of(&state, &candidates[0].left.belief_id),
+            Conflict::Clear
+        );
+
+        // Classify it as a real one and the same belief is contested — and
+        // closing the edge clears it again, with no relation involved either
+        // way (M27.3b).
+        let edge_id = crate::ledger::schema::derive_edge_id(
+            &comparison_id,
+            crate::ledger::schema::EdgeKind::GenuineDirect,
+        );
+        state.contradiction_edges.insert(
+            edge_id.clone(),
+            crate::ledger::reduce::ContradictionEdgeRow {
+                edge_id: edge_id.clone(),
+                comparison_id,
+                kind: crate::ledger::schema::EdgeKind::GenuineDirect,
+                left_belief_id: candidates[0].left.belief_id.clone(),
+                right_belief_id: candidates[0].right.belief_id.clone(),
+                opened_event_id: "90000000000000000000000000000002".into(),
+                classified_event_id: "90000000000000000000000000000003".into(),
+                closed: None,
+            },
+        );
+        assert_eq!(
+            conflict_of(&state, &candidates[0].left.belief_id),
+            Conflict::Contested
+        );
+        state.contradiction_edges.get_mut(&edge_id).unwrap().closed =
+            Some(crate::ledger::reduce::EdgeClosure {
+                event_id: "90000000000000000000000000000004".into(),
+                addressed_by_event_id: "90000000000000000000000000000005".into(),
+                disposition: crate::ledger::schema::CloseDisposition::ResolvedWithEvidence,
+                evidence_event_ids: vec!["90000000000000000000000000000006".into()],
+            });
         assert_eq!(
             conflict_of(&state, &candidates[0].left.belief_id),
             Conflict::Clear

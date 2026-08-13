@@ -60,10 +60,9 @@ pub use conflict::{
 pub use contradiction::{
     check_matrix, derive_contradiction_open_key, derive_declared_comparison_id,
     derive_declared_comparison_key, derive_edge_id, ordered_declared_endpoints, Classification,
-    ClassificationOutcome, CloseDisposition, ConflictClassified, ConflictComparisonRegistered,
-    ConflictEndpoint, ConflictReasonCode, ContradictionBackfillCompleted, ContradictionClosed,
-    ContradictionOpened, DeclaredRelationEndpoint, EdgeKind, KnownScope, KnownStage,
-    KnownValidTime, RelationOrigin,
+    CloseDisposition, ConflictClassified, ConflictComparisonRegistered, ConflictEndpoint,
+    ConflictReasonCode, ContradictionBackfillCompleted, ContradictionClosed, ContradictionOpened,
+    DeclaredRelationEndpoint, EdgeKind, KnownScope, KnownStage, KnownValidTime, RelationOrigin,
 };
 pub use coverage::{
     AccessResult, ConnectionResult, CoverageAssessed, CoverageFactRecorded, CoverageGap,
@@ -195,6 +194,18 @@ pub const KIND_CONFLICT_CANDIDATE_DETECTED: &str = "conflict.candidate_detected"
 // is how the moment it changed enters portable history, so a surface can say
 // when and a rebuild lands on the same bytes.
 pub const KIND_FRESHNESS_TRANSITIONED: &str = "freshness.transitioned";
+
+// The resolution pipeline (M27.3). Five kinds, and the split between the
+// first two is the milestone's point: a COMPARISON is a pair somebody thinks
+// is worth classifying, and a CLASSIFICATION is what the gauntlet concluded
+// about it — including the five conclusions that resolve the pair apart. Only
+// the three unresolved ones reach `contradiction.opened`, which is why an
+// edge is a much rarer thing than a candidate.
+pub const KIND_CONFLICT_COMPARISON_REGISTERED: &str = "conflict.comparison_registered";
+pub const KIND_CONFLICT_CLASSIFIED: &str = "conflict.classified";
+pub const KIND_CONTRADICTION_OPENED: &str = "contradiction.opened";
+pub const KIND_CONTRADICTION_CLOSED: &str = "contradiction.closed";
+pub const KIND_CONTRADICTION_BACKFILL_COMPLETED: &str = "contradiction.backfill_completed";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -374,6 +385,11 @@ pub enum EventBody {
     IngestSemanticAssessed(Box<IngestSemanticAssessed>),
     ConflictCandidateDetected(Box<ConflictCandidateDetected>),
     FreshnessTransitioned(Box<FreshnessTransitioned>),
+    ConflictComparisonRegistered(Box<ConflictComparisonRegistered>),
+    ConflictClassified(Box<ConflictClassified>),
+    ContradictionOpened(Box<ContradictionOpened>),
+    ContradictionClosed(Box<ContradictionClosed>),
+    ContradictionBackfillCompleted(Box<ContradictionBackfillCompleted>),
 }
 
 impl EventBody {
@@ -413,6 +429,11 @@ impl EventBody {
             EventBody::IngestSemanticAssessed(_) => KIND_INGEST_SEMANTIC_ASSESSED,
             EventBody::ConflictCandidateDetected(_) => KIND_CONFLICT_CANDIDATE_DETECTED,
             EventBody::FreshnessTransitioned(_) => KIND_FRESHNESS_TRANSITIONED,
+            EventBody::ConflictComparisonRegistered(_) => KIND_CONFLICT_COMPARISON_REGISTERED,
+            EventBody::ConflictClassified(_) => KIND_CONFLICT_CLASSIFIED,
+            EventBody::ContradictionOpened(_) => KIND_CONTRADICTION_OPENED,
+            EventBody::ContradictionClosed(_) => KIND_CONTRADICTION_CLOSED,
+            EventBody::ContradictionBackfillCompleted(_) => KIND_CONTRADICTION_BACKFILL_COMPLETED,
         }
     }
 
@@ -452,6 +473,11 @@ impl EventBody {
             EventBody::IngestSemanticAssessed(b) => b.batch_id.as_deref(),
             EventBody::ConflictCandidateDetected(b) => b.batch_id.as_deref(),
             EventBody::FreshnessTransitioned(b) => b.batch_id.as_deref(),
+            EventBody::ConflictComparisonRegistered(b) => b.batch_id.as_deref(),
+            EventBody::ConflictClassified(b) => b.batch_id.as_deref(),
+            EventBody::ContradictionOpened(b) => b.batch_id.as_deref(),
+            EventBody::ContradictionClosed(b) => b.batch_id.as_deref(),
+            EventBody::ContradictionBackfillCompleted(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -491,6 +517,11 @@ impl EventBody {
             EventBody::IngestSemanticAssessed(b) => b.idempotency_key.as_deref(),
             EventBody::ConflictCandidateDetected(b) => b.idempotency_key.as_deref(),
             EventBody::FreshnessTransitioned(b) => b.idempotency_key.as_deref(),
+            EventBody::ConflictComparisonRegistered(b) => b.idempotency_key.as_deref(),
+            EventBody::ConflictClassified(b) => b.idempotency_key.as_deref(),
+            EventBody::ContradictionOpened(b) => b.idempotency_key.as_deref(),
+            EventBody::ContradictionClosed(b) => b.idempotency_key.as_deref(),
+            EventBody::ContradictionBackfillCompleted(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -534,6 +565,11 @@ impl EventBody {
             EventBody::IngestSemanticAssessed(b) => b.validate(),
             EventBody::ConflictCandidateDetected(b) => b.validate(),
             EventBody::FreshnessTransitioned(b) => b.validate(),
+            EventBody::ConflictComparisonRegistered(b) => b.validate(),
+            EventBody::ConflictClassified(b) => b.validate(),
+            EventBody::ContradictionOpened(b) => b.validate(),
+            EventBody::ContradictionClosed(b) => b.validate(),
+            EventBody::ContradictionBackfillCompleted(b) => b.validate(),
         }
     }
 
@@ -574,6 +610,11 @@ impl EventBody {
             EventBody::IngestSemanticAssessed(b) => serde_json::to_value(b),
             EventBody::ConflictCandidateDetected(b) => serde_json::to_value(b),
             EventBody::FreshnessTransitioned(b) => serde_json::to_value(b),
+            EventBody::ConflictComparisonRegistered(b) => serde_json::to_value(b),
+            EventBody::ConflictClassified(b) => serde_json::to_value(b),
+            EventBody::ContradictionOpened(b) => serde_json::to_value(b),
+            EventBody::ContradictionClosed(b) => serde_json::to_value(b),
+            EventBody::ContradictionBackfillCompleted(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -666,6 +707,15 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         }
         KIND_FRESHNESS_TRANSITIONED => {
             EventBody::FreshnessTransitioned(Box::new(gate(kind, body)?))
+        }
+        KIND_CONFLICT_COMPARISON_REGISTERED => {
+            EventBody::ConflictComparisonRegistered(Box::new(gate(kind, body)?))
+        }
+        KIND_CONFLICT_CLASSIFIED => EventBody::ConflictClassified(Box::new(gate(kind, body)?)),
+        KIND_CONTRADICTION_OPENED => EventBody::ContradictionOpened(Box::new(gate(kind, body)?)),
+        KIND_CONTRADICTION_CLOSED => EventBody::ContradictionClosed(Box::new(gate(kind, body)?)),
+        KIND_CONTRADICTION_BACKFILL_COMPLETED => {
+            EventBody::ContradictionBackfillCompleted(Box::new(gate(kind, body)?))
         }
         other => {
             return Err(format!(

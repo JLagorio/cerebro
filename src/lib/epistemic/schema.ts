@@ -20,6 +20,8 @@ import {
   canonicalJson,
   compareUtf8,
   deriveComparisonId,
+  deriveDeclaredComparisonId,
+  deriveEdgeId,
   deriveFreshnessDedupeKey,
   deriveRelationId,
   deriveSourceId,
@@ -1516,7 +1518,135 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     rule_version: asString(obj.rule_version, 'rule_version'),
     dedupe_key: asString(obj.dedupe_key, 'dedupe_key'),
   }),
+  // M27.3 — the resolution pipeline. Field order IS the canonical byte order,
+  // so each list mirrors its Rust struct's declaration exactly.
+  'conflict.comparison_registered': (obj) => ({
+    ...canonCommon(obj),
+    comparison_id: asString(obj.comparison_id, 'comparison_id'),
+    left: canonDeclaredEndpoint(obj.left, 'left'),
+    right: canonDeclaredEndpoint(obj.right, 'right'),
+    source_relation_event_id: asString(obj.source_relation_event_id, 'source_relation_event_id'),
+    reason: oneOf(obj.reason, CONFLICT_REASON_CODES, 'reason'),
+    rule_version: asString(obj.rule_version, 'rule_version'),
+  }),
+  'conflict.classified': (obj) => ({
+    ...canonCommon(obj),
+    comparison_id: asString(obj.comparison_id, 'comparison_id'),
+    left: canonTaggedEndpoint(obj.left, 'left'),
+    right: canonTaggedEndpoint(obj.right, 'right'),
+    outcome: oneOf(obj.outcome, CONFLICT_OUTCOMES, 'outcome'),
+    classification: canonClassification(obj.classification),
+    evidence_event_ids: asArray(obj.evidence_event_ids, 'evidence_event_ids').map((id) =>
+      asString(id, 'evidence event id'),
+    ),
+    reason_codes: asArray(obj.reason_codes, 'reason_codes').map((r) =>
+      oneOf(r, CONFLICT_REASON_CODES, 'reason code'),
+    ),
+    classified_at: asString(obj.classified_at, 'classified_at'),
+  }),
+  'contradiction.opened': (obj) => ({
+    ...canonCommon(obj),
+    edge_id: asString(obj.edge_id, 'edge_id'),
+    comparison_id: asString(obj.comparison_id, 'comparison_id'),
+    left: canonTaggedEndpoint(obj.left, 'left'),
+    right: canonTaggedEndpoint(obj.right, 'right'),
+    kind: oneOf(obj.kind, EDGE_KINDS, 'kind'),
+    classified_event_id: asString(obj.classified_event_id, 'classified_event_id'),
+  }),
+  'contradiction.closed': (obj) => ({
+    ...canonCommon(obj),
+    edge_id: asString(obj.edge_id, 'edge_id'),
+    comparison_id: asString(obj.comparison_id, 'comparison_id'),
+    left_belief_id: asString(obj.left_belief_id, 'left_belief_id'),
+    right_belief_id: asString(obj.right_belief_id, 'right_belief_id'),
+    addressed_by_event_id: asString(obj.addressed_by_event_id, 'addressed_by_event_id'),
+    evidence_event_ids: asArray(obj.evidence_event_ids, 'evidence_event_ids').map((id) =>
+      asString(id, 'evidence event id'),
+    ),
+    disposition: oneOf(obj.disposition, CLOSE_DISPOSITIONS, 'disposition'),
+  }),
+  'contradiction.backfill_completed': (obj) => ({
+    ...canonCommon(obj),
+    through_event_id: asString(obj.through_event_id, 'through_event_id'),
+    source_relation_count: asU64(obj.source_relation_count, 'source_relation_count'),
+    resolved_count: asU64(obj.resolved_count, 'resolved_count'),
+    opened_count: asU64(obj.opened_count, 'opened_count'),
+    rule_version: asString(obj.rule_version, 'rule_version'),
+  }),
 };
+
+/**
+ * A declared-relation endpoint (M27.3): no assertion, because there is none.
+ * Its qualifiers are TAGGED rather than nullable — "the relation did not say"
+ * and "the relation said planned" are different inputs to the gauntlet.
+ */
+function canonDeclaredEndpoint(v: Json | undefined, side: string): JsonObject {
+  const e = asObject(v, side);
+  const scope = asObject(e.scope, `${side}.scope`);
+  const stage = asObject(e.state_stage, `${side}.state_stage`);
+  const validTime = asObject(e.valid_time, `${side}.valid_time`);
+  const scopeKind = oneOf(scope.kind, ['known', 'unknown'], `${side}.scope.kind`);
+  const stageKind = oneOf(stage.kind, ['known', 'unknown'], `${side}.state_stage.kind`);
+  const timeKind = oneOf(validTime.kind, ['known', 'unknown'], `${side}.valid_time.kind`);
+  return {
+    relation_event_id: asString(e.relation_event_id, `${side}.relation_event_id`),
+    belief_id: asString(e.belief_id, `${side}.belief_id`),
+    belief_revision_event_id: asString(
+      e.belief_revision_event_id,
+      `${side}.belief_revision_event_id`,
+    ),
+    relation_origin: oneOf(e.relation_origin, RELATION_ORIGINS, `${side}.relation_origin`),
+    subject_id: asString(e.subject_id, `${side}.subject_id`),
+    content_hash: asString(e.content_hash, `${side}.content_hash`),
+    scope:
+      scopeKind === 'known'
+        ? { kind: scopeKind, value: canonScopeObject(scope.value) }
+        : { kind: scopeKind },
+    state_stage:
+      stageKind === 'known'
+        ? { kind: stageKind, value: oneOf(stage.value, STAGES, `${side}.state_stage.value`) }
+        : { kind: stageKind },
+    valid_time:
+      timeKind === 'known'
+        ? {
+            kind: timeKind,
+            value: (() => {
+              const value = asObject(validTime.value, `${side}.valid_time.value`);
+              return {
+                from: asStringOrNull(value.from, `${side}.valid_time.from`),
+                to: asStringOrNull(value.to, `${side}.valid_time.to`),
+              };
+            })(),
+          }
+        : { kind: timeKind },
+  };
+}
+
+/**
+ * The tagged endpoint union (M27.3). `asserted` FLATTENS M26's endpoint — the
+ * design says it wraps the exact candidate endpoint, and a nesting level would
+ * make the two shapes different bytes for the same facts.
+ */
+function canonTaggedEndpoint(v: Json | undefined, side: string): JsonObject {
+  const e = asObject(v, side);
+  const kind = oneOf(e.kind, ['asserted', 'declared_relation'], `${side}.kind`);
+  return kind === 'asserted'
+    ? { kind, ...canonConflictEndpoint(e, side) }
+    : { kind, ...canonDeclaredEndpoint(e, side) };
+}
+
+function canonClassification(v: Json | undefined): JsonObject {
+  const c = asObject(v, 'classification');
+  const kind = oneOf(c.kind, ['deterministic', 'agent_supplied'], 'classification.kind');
+  return kind === 'deterministic'
+    ? { kind, rule_version: asString(c.rule_version, 'rule_version') }
+    : {
+        kind,
+        proposal_id: asString(c.proposal_id, 'proposal_id'),
+        model_id: asString(c.model_id, 'model_id'),
+        prompt_version: asString(c.prompt_version, 'prompt_version'),
+      };
+}
 
 /**
  * The facet key, rebuilt in the Rust struct's declaration order (M27.1).
@@ -1588,6 +1718,39 @@ const CONFLICT_CANDIDATE_REASONS = [
 const SUBJECT_ROLES = ['project_owner', 'team_member', 'adjacent', 'unknown'];
 /** D9's freshness axis (M27.1) — `unknown` is a member, not an absence. */
 const FRESHNESS_VALUES = ['fresh', 'stale', 'unknown'];
+/** M27.3's reason codes, declared in string-sorted order like the Rust enum. */
+const CONFLICT_REASON_CODES = [
+  'conditional_context',
+  'declared_contradicts_relation',
+  'granularity_mismatch',
+  'incompatible_values',
+  'relation_missing_assertion',
+  'relation_missing_scope',
+  'relation_missing_stage',
+  'relation_missing_valid_time',
+  'scope_disjoint',
+  'semantic_same_meaning',
+  'stage_disjoint',
+  'temporal_disjoint',
+];
+/** The ONE closed outcome set — M24's proposal op and M27's event share it. */
+const CONFLICT_OUTCOMES = [
+  'same_meaning',
+  'resolved_temporally',
+  'resolved_by_scope',
+  'resolved_by_stage',
+  'resolved_by_granularity',
+  'genuine_direct',
+  'partial',
+  'conditional',
+];
+const EDGE_KINDS = ['genuine_direct', 'partial', 'conditional'];
+const RELATION_ORIGINS = [
+  'legacy_migration',
+  'pre_activation_declared',
+  'post_activation_declared',
+];
+const CLOSE_DISPOSITIONS = ['resolved_with_evidence', 'superseded_with_addressing'];
 
 /** Assertion fields: canonical rebuild for the flattened payload unions. */
 function canonAssertionFields(obj: JsonObject): JsonObject {
@@ -2761,6 +2924,184 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       break;
     }
+    case 'conflict.comparison_registered': {
+      for (const name of ['comparison_id', 'source_relation_event_id']) {
+        if (!isId128(body[name])) throw new RefusedError(`${name} must be a 128-bit hex id`);
+      }
+      if ((body.rule_version as string) === '') {
+        throw new RefusedError('rule_version must be non-empty');
+      }
+      if (body.reason !== 'declared_contradicts_relation') {
+        throw new RefusedError(
+          `a declared-relation registration is raised for declared_contradicts_relation, and ` +
+            `this says ${String(body.reason)} — the registration records that somebody DECLARED ` +
+            'a conflict, which is the only reason it exists',
+        );
+      }
+      validateDeclaredEndpoint(body.left as JsonObject, 'left');
+      validateDeclaredEndpoint(body.right as JsonObject, 'right');
+      for (const [side, endpoint] of [
+        ['left', body.left as JsonObject],
+        ['right', body.right as JsonObject],
+      ] as [string, JsonObject][]) {
+        if (endpoint.relation_event_id !== body.source_relation_event_id) {
+          throw new RefusedError(
+            `${side}.relation_event_id is ${String(endpoint.relation_event_id)}, and ` +
+              `source_relation_event_id is ${String(body.source_relation_event_id)} — both ` +
+              'endpoints come from the ONE relation this registration is about',
+          );
+        }
+      }
+      const [first, second] = orderedEndpoints(body.left as Json, body.right as Json);
+      if (first === second) {
+        throw new RefusedError(
+          'left and right are the same endpoint — a belief does not contradict itself through a ' +
+            'relation to itself',
+        );
+      }
+      if (canonicalJson(body.left as Json) !== first) {
+        throw new RefusedError(
+          'left must be the lexicographically-first endpoint — the body is a function of the ' +
+            'pair, so an exact retry is exactly a retry',
+        );
+      }
+      const derived = deriveDeclaredComparisonId(
+        body.source_relation_event_id as string,
+        body.left as Json,
+        body.right as Json,
+      );
+      if (derived !== body.comparison_id) {
+        throw new RefusedError(
+          `comparison_id ${String(body.comparison_id)} does not follow from this relation and ` +
+            `these endpoints (expected ${derived})`,
+        );
+      }
+      break;
+    }
+    case 'conflict.classified': {
+      if (!isId128(body.comparison_id)) {
+        throw new RefusedError('comparison_id must be a 128-bit hex id');
+      }
+      validateTaggedEndpoint(body.left as JsonObject, 'left');
+      validateTaggedEndpoint(body.right as JsonObject, 'right');
+      if (!isRfc3339(body.classified_at as string)) {
+        throw new RefusedError(
+          `classified_at ${JSON.stringify(body.classified_at)} is not RFC3339`,
+        );
+      }
+      const reasons = body.reason_codes as string[];
+      if (reasons.length === 0) {
+        throw new RefusedError(
+          'reason_codes must name at least one reason — a classification that cannot say why is ' +
+            'not one',
+        );
+      }
+      if (!reasons.every((r, i) => i === 0 || compareUtf8(reasons[i - 1], r) < 0)) {
+        throw new RefusedError('reason_codes must be sorted and duplicate-free');
+      }
+      const evidence = body.evidence_event_ids as string[];
+      for (const id of evidence) {
+        if (!isId128(id)) {
+          throw new RefusedError(
+            `evidence_event_ids names ${JSON.stringify(id)}, which is not an id`,
+          );
+        }
+      }
+      if (!evidence.every((id, i) => i === 0 || compareUtf8(evidence[i - 1], id) < 0)) {
+        throw new RefusedError('evidence_event_ids must be sorted and duplicate-free');
+      }
+      const classification = body.classification as JsonObject;
+      if (classification.kind === 'deterministic') {
+        if ((classification.rule_version as string) === '') {
+          throw new RefusedError('a deterministic classification carries its rule version');
+        }
+      } else {
+        if (!isId128(classification.proposal_id)) {
+          throw new RefusedError('agent_supplied.proposal_id must be a 128-bit hex id');
+        }
+        if (
+          (classification.model_id as string) === '' ||
+          (classification.prompt_version as string) === ''
+        ) {
+          throw new RefusedError(
+            'an agent-supplied classification names the model and the prompt version it came from',
+          );
+        }
+        if (evidence.length === 0) {
+          throw new RefusedError(
+            'an agent-supplied classification requires evidence — a semantic judgement with ' +
+              'nothing behind it is an opinion',
+          );
+        }
+      }
+      checkConflictMatrix(body.outcome as string, classification, reasons);
+      break;
+    }
+    case 'contradiction.opened': {
+      for (const name of ['edge_id', 'comparison_id', 'classified_event_id']) {
+        if (!isId128(body[name])) throw new RefusedError(`${name} must be a 128-bit hex id`);
+      }
+      validateTaggedEndpoint(body.left as JsonObject, 'left');
+      validateTaggedEndpoint(body.right as JsonObject, 'right');
+      const derived = deriveEdgeId(body.comparison_id as string, body.kind as string);
+      if (derived !== body.edge_id) {
+        throw new RefusedError(
+          `edge_id ${String(body.edge_id)} does not follow from comparison ` +
+            `${String(body.comparison_id)} and kind ${String(body.kind)} (expected ${derived})`,
+        );
+      }
+      break;
+    }
+    case 'contradiction.closed': {
+      for (const name of [
+        'edge_id',
+        'comparison_id',
+        'left_belief_id',
+        'right_belief_id',
+        'addressed_by_event_id',
+      ]) {
+        if (!isId128(body[name])) throw new RefusedError(`${name} must be a 128-bit hex id`);
+      }
+      // NO distinctness check on the endpoint Beliefs, deliberately: one
+      // Belief revision can rest on two incompatible assertions at once, and
+      // that edge has to be closable.
+      const evidence = body.evidence_event_ids as string[];
+      if (evidence.length === 0) {
+        throw new RefusedError(
+          'a close carries the evidence that addressed it — silence and elapsed time cannot ' +
+            'close an edge',
+        );
+      }
+      for (const id of evidence) {
+        if (!isId128(id)) {
+          throw new RefusedError(
+            `evidence_event_ids names ${JSON.stringify(id)}, which is not an id`,
+          );
+        }
+      }
+      if (!evidence.every((id, i) => i === 0 || compareUtf8(evidence[i - 1], id) < 0)) {
+        throw new RefusedError('evidence_event_ids must be sorted and duplicate-free');
+      }
+      break;
+    }
+    case 'contradiction.backfill_completed': {
+      if (!isId128(body.through_event_id)) {
+        throw new RefusedError('through_event_id must be a 128-bit hex id');
+      }
+      if ((body.rule_version as string) === '') {
+        throw new RefusedError('rule_version must be non-empty');
+      }
+      const seen = body.source_relation_count as number;
+      const accounted = (body.resolved_count as number) + (body.opened_count as number);
+      if (accounted !== seen) {
+        throw new RefusedError(
+          `the backfill saw ${seen} relations and accounts for ${accounted} — every relation it ` +
+            'read is either resolved apart or has an open edge, and a marker that does not add ' +
+            'up is a marker that stopped early',
+        );
+      }
+      break;
+    }
     case 'coverage.fact_recorded': {
       for (const [name, id] of [
         ['fact_id', body.fact_id],
@@ -3091,6 +3432,114 @@ function validateConflictEndpoint(endpoint: JsonObject, side: string): void {
   const to = validTime.to as string | null;
   if (from !== null && to !== null && from > to) {
     throw new RefusedError(`${side}.valid_time ends before it starts`);
+  }
+}
+
+/**
+ * A declared endpoint answers for its own shape only (M27.3): four real ids,
+ * a real digest, and a valid time that does not end before it starts. Whether
+ * the relation it names exists is reducer state.
+ */
+function validateDeclaredEndpoint(endpoint: JsonObject, side: string): void {
+  for (const name of ['relation_event_id', 'belief_id', 'belief_revision_event_id', 'subject_id']) {
+    if (!isId128(endpoint[name])) {
+      throw new RefusedError(`${side}.${name} is not a 128-bit hex id`);
+    }
+  }
+  if (!isSha256(endpoint.content_hash)) {
+    throw new RefusedError(`${side}.content_hash is not a sha256 digest`);
+  }
+  const validTime = endpoint.valid_time as JsonObject;
+  if (validTime.kind === 'known') {
+    const value = validTime.value as JsonObject;
+    for (const name of ['from', 'to']) {
+      const stamp = value[name];
+      if (stamp !== null && !isRfc3339(stamp as string)) {
+        throw new RefusedError(
+          `${side}.valid_time.${name} ${JSON.stringify(stamp)} is not RFC3339`,
+        );
+      }
+    }
+    const from = value.from as string | null;
+    const to = value.to as string | null;
+    if (from !== null && to !== null && from > to) {
+      throw new RefusedError(`${side}.valid_time ends before it starts`);
+    }
+  }
+}
+
+function validateTaggedEndpoint(endpoint: JsonObject, side: string): void {
+  if (endpoint.kind === 'asserted') validateConflictEndpoint(endpoint, side);
+  else validateDeclaredEndpoint(endpoint, side);
+}
+
+/**
+ * The closed outcome/provenance/reason matrix (M27.3), mirroring
+ * `contradiction::check_matrix`. Every rule stops one specific lie: typed
+ * comparisons may never be agent-supplied, semantic judgements may never be
+ * deterministic, `partial` splits by provenance, and mixed reason sets refuse.
+ */
+function checkConflictMatrix(outcome: string, classification: JsonObject, reasons: string[]): void {
+  const deterministic = classification.kind === 'deterministic';
+  const list = reasons.join(', ');
+  const exactly = (code: string): void => {
+    if (reasons.length !== 1 || reasons[0] !== code) {
+      throw new RefusedError(
+        `outcome ${outcome} carries exactly [${code}], and this carries [${list}]`,
+      );
+    }
+  };
+  const deterministicOnly = (): void => {
+    if (!deterministic) {
+      throw new RefusedError(
+        `outcome ${outcome} is a typed comparison over recorded qualifiers and is ` +
+          'deterministic only — a model that could decide it could resolve a real conflict away ' +
+          'by being confident about arithmetic',
+      );
+    }
+  };
+  const agentOnly = (): void => {
+    if (deterministic) {
+      throw new RefusedError(
+        `outcome ${outcome} is a semantic judgement and arrives only through an applied ` +
+          "classify_conflict proposal — a deterministic rule claiming it would put a model's " +
+          'job in the reducer with none of the review',
+      );
+    }
+  };
+  switch (outcome) {
+    case 'resolved_temporally':
+      deterministicOnly();
+      return exactly('temporal_disjoint');
+    case 'resolved_by_scope':
+      deterministicOnly();
+      return exactly('scope_disjoint');
+    case 'resolved_by_stage':
+      deterministicOnly();
+      return exactly('stage_disjoint');
+    case 'resolved_by_granularity':
+      return exactly('granularity_mismatch');
+    case 'same_meaning':
+      agentOnly();
+      return exactly('semantic_same_meaning');
+    case 'genuine_direct':
+      return exactly('incompatible_values');
+    case 'conditional':
+      agentOnly();
+      return exactly('conditional_context');
+    case 'partial': {
+      if (!deterministic) return exactly('incompatible_values');
+      // The declared-relation expansion, and nothing else.
+      if (reasons.length === 1 && reasons[0] === 'declared_contradicts_relation') return;
+      if (reasons.length > 0 && reasons.every((r) => r.startsWith('relation_missing_'))) return;
+      throw new RefusedError(
+        'a deterministic `partial` is the declared-relation expansion only: either exactly ' +
+          `[declared_contradicts_relation] or one or more relation_missing_* codes, and this ` +
+          `carries [${list}]`,
+      );
+    }
+    default:
+      throw new RefusedError(`unknown outcome ${outcome}`);
   }
 }
 

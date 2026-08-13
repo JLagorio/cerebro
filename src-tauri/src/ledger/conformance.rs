@@ -22,6 +22,9 @@ const ENTITY: &str = "cccccccccccccccccccccccccccccccc";
 const ENTITY_B: &str = "dddddddddddddddddddddddddddddddd";
 const BELIEF: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 const BELIEF_B: &str = "ffffffffffffffffffffffffffffffff";
+/// A third Belief on the same entity — M27.3's second comparison needs a
+/// genuinely different pair, not a re-run of the first.
+const BELIEF_C: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 /// A proposal id nothing ever submits — for the vectors that name one.
 const UNSUBMITTED_PROPOSAL: &str = "abababababababababababababababab";
 
@@ -4690,6 +4693,476 @@ fn scenario_freshness() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// The resolution pipeline (M27.3) — five kinds, and the point of all five is
+/// that most candidates are NOT contradictions.
+///
+/// What needs a cross-language vector rather than a Rust test:
+///
+/// - **a RESOLVED verdict opens nothing and advances only its comparison.**
+///   An implementation that bumped the endpoint Beliefs here would drift every
+///   CAS in the store by one on the ordinary path, since resolution is the
+///   ordinary outcome.
+/// - **an unresolved verdict and its edge are one batch.** The comparison
+///   reaches v3 and each DISTINCT endpoint Belief advances once; a crash can
+///   expose neither half alone.
+/// - **the close travels with the mutation that addressed it.** A standalone
+///   close refuses, because there is no caller-authored close path at all.
+/// - **a closed edge never reopens**, and a comparison is classified once.
+/// - **the outcome/provenance/reason matrix**, both ways round: a
+///   deterministic rule may not claim `same_meaning`, and an agent may not
+///   claim `resolved_by_stage`.
+fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let josef = human_registration("human:josef");
+    let josef_reg = b.push_body(KIND_SOURCE_REGISTERED, &josef);
+    let subject = SubjectRef::Resolved {
+        entity_id: ENTITY.into(),
+        aliases: vec!["Acme Corp".into()],
+    };
+    let assert_one = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject.clone(),
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        ),
+    );
+    let assert_two = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject.clone(),
+            vec![],
+            human_payload(AssertionBasis::Reported),
+        ),
+    );
+    let assert_three = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::HumanAssertion,
+            &josef,
+            &josef_reg,
+            "human:josef",
+            subject,
+            vec![],
+            human_payload(AssertionBasis::Inferred),
+        ),
+    );
+
+    let linked = |observation: &str| BeliefBasis::Linked {
+        links: vec![BasisLink {
+            observation_event_id: observation.to_string(),
+            role: BasisRole::Supports,
+        }],
+    };
+    let first = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, linked(&assert_one)),
+    );
+    let second = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY, linked(&assert_two)),
+    );
+    // A third Belief on the same entity, so the second comparison is a
+    // genuinely different pair rather than a re-run of the first.
+    let third = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_C, ENTITY, linked(&assert_three)),
+    );
+
+    let resolved_pair = candidate(
+        endpoint(&assert_one, BELIEF, &first, ENTITY),
+        endpoint(&assert_two, BELIEF_B, &second, ENTITY),
+        vec![ConflictCandidateReason::SameSubjectPredicate],
+    );
+    let open_pair = candidate(
+        endpoint(&assert_two, BELIEF_B, &second, ENTITY),
+        endpoint(&assert_three, BELIEF_C, &third, ENTITY),
+        vec![ConflictCandidateReason::IncompatibleValueHash],
+    );
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &resolved_pair);
+    b.push_body(KIND_CONFLICT_CANDIDATE_DETECTED, &open_pair);
+
+    // --- the ordinary outcome: resolved apart, and nothing opens -----------
+    let resolved = classified_body(
+        &resolved_pair,
+        ConflictOutcome::ResolvedByStage,
+        Classification::Deterministic {
+            rule_version: "gauntlet-v1".into(),
+        },
+        vec![ConflictReasonCode::StageDisjoint],
+        vec![],
+    );
+    let resolved_event = b.push_body(KIND_CONFLICT_CLASSIFIED, &resolved);
+
+    // A second verdict about the same comparison: refused. `edge_id` carries
+    // the kind, so a reclassification would open a SECOND edge.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &resolved_pair,
+            ConflictOutcome::GenuineDirect,
+            Classification::Deterministic {
+                rule_version: "gauntlet-v1".into(),
+            },
+            vec![ConflictReasonCode::IncompatibleValues],
+            vec![],
+        ),
+    );
+
+    // An edge over a pair the gauntlet resolved apart — the crying-wolf
+    // failure, refused at the reducer.
+    b.push_body(
+        KIND_CONTRADICTION_OPENED,
+        &opened_body(&resolved_pair, EdgeKind::Partial, &resolved_event),
+    );
+
+    // A classification of a pair nobody put forward.
+    let mut orphan = resolved.clone();
+    orphan.comparison_id = "0".repeat(32);
+    b.push_body(KIND_CONFLICT_CLASSIFIED, &orphan);
+
+    // The same two endpoints, swapped: the same pair as a SET, and not the
+    // comparison anybody registered.
+    let mut swapped = classified_body(
+        &open_pair,
+        ConflictOutcome::ResolvedByScope,
+        Classification::Deterministic {
+            rule_version: "gauntlet-v1".into(),
+        },
+        vec![ConflictReasonCode::ScopeDisjoint],
+        vec![],
+    );
+    std::mem::swap(&mut swapped.left, &mut swapped.right);
+    b.push_body(KIND_CONFLICT_CLASSIFIED, &swapped);
+
+    // --- the matrix, both ways round --------------------------------------
+    // A deterministic rule claiming a semantic judgement.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &open_pair,
+            ConflictOutcome::SameMeaning,
+            Classification::Deterministic {
+                rule_version: "gauntlet-v1".into(),
+            },
+            vec![ConflictReasonCode::SemanticSameMeaning],
+            vec![],
+        ),
+    );
+    // An agent claiming a typed comparison over recorded qualifiers.
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &classified_body(
+            &open_pair,
+            ConflictOutcome::ResolvedByStage,
+            Classification::AgentSupplied {
+                proposal_id: "1111111111111111111111111111111a".into(),
+                model_id: "claude-opus-5".into(),
+                prompt_version: "classify-conflict-v1".into(),
+            },
+            vec![ConflictReasonCode::StageDisjoint],
+            vec![assert_one.clone()],
+        ),
+    );
+
+    // --- the unresolved half: one batch, both events -----------------------
+    let unresolved = classified_body(
+        &open_pair,
+        ConflictOutcome::GenuineDirect,
+        Classification::Deterministic {
+            rule_version: "gauntlet-v1".into(),
+        },
+        vec![ConflictReasonCode::IncompatibleValues],
+        vec![],
+    );
+    let classify_event = format!("{:032x}", b.frames.len() + 1);
+    let edge = opened_body(&open_pair, EdgeKind::GenuineDirect, &classify_event);
+    b.push_batch(
+        "b0000000000000000000000000000001",
+        vec![
+            (
+                KIND_CONFLICT_CLASSIFIED.to_string(),
+                serde_json::to_value(&unresolved).unwrap(),
+            ),
+            (
+                KIND_CONTRADICTION_OPENED.to_string(),
+                serde_json::to_value(&edge).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // A second open of the same edge: exact replay is deduplicated at the
+    // door, so one reaching the reducer is a duplicate append.
+    b.push_body(KIND_CONTRADICTION_OPENED, &edge);
+
+    // --- closing, and the two ways it must not happen ----------------------
+    let close = |addressed_by: &str| ContradictionClosed {
+        schema: BODY_SCHEMA,
+        batch_id: None,
+        idempotency_key: None,
+        actor: Actor {
+            id: "agent:run-1".into(),
+        },
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        edge_id: edge.edge_id.clone(),
+        comparison_id: open_pair.comparison_id.clone(),
+        left_belief_id: open_pair.left.belief_id.clone(),
+        right_belief_id: open_pair.right.belief_id.clone(),
+        addressed_by_event_id: addressed_by.into(),
+        evidence_event_ids: vec![assert_two.clone()],
+        disposition: CloseDisposition::ResolvedWithEvidence,
+    };
+    // Standalone: nothing addressed anything.
+    b.push_body(KIND_CONTRADICTION_CLOSED, &close(&assert_one));
+
+    // Batched with the mutation whose preallocated id it names.
+    let addressing = format!("{:032x}", b.frames.len() + 1);
+    b.push_batch(
+        "b0000000000000000000000000000002",
+        vec![
+            (
+                KIND_BELIEF_REVISED.to_string(),
+                serde_json::to_value(addressing_revision("active", "retired")).unwrap(),
+            ),
+            (
+                KIND_CONTRADICTION_CLOSED.to_string(),
+                serde_json::to_value(close(&addressing)).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // And it never reopens.
+    let reclose = format!("{:032x}", b.frames.len() + 1);
+    b.push_batch(
+        "b0000000000000000000000000000003",
+        vec![
+            (
+                KIND_BELIEF_REVISED.to_string(),
+                serde_json::to_value(addressing_revision("retired", "revived")).unwrap(),
+            ),
+            (
+                KIND_CONTRADICTION_CLOSED.to_string(),
+                serde_json::to_value(close(&reclose)).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // --- the declared road in ----------------------------------------------
+    let supersedes = b.push_body(
+        KIND_BELIEF_RELATION,
+        &relation_body(
+            BELIEF,
+            BELIEF_C,
+            RelationKind::Supersedes,
+            RelationAction::Add,
+        ),
+    );
+    let contradicts = b.push_body(
+        KIND_BELIEF_RELATION,
+        &relation_body(
+            BELIEF,
+            BELIEF_C,
+            RelationKind::Contradicts,
+            RelationAction::Add,
+        ),
+    );
+    // A conflict nobody declared: the relation is a `supersedes`.
+    b.push_body(
+        KIND_CONFLICT_COMPARISON_REGISTERED,
+        &registration_of(&supersedes, (BELIEF, &first), (BELIEF_C, &third)),
+    );
+    let declared = registration_of(&contradicts, (BELIEF, &first), (BELIEF_C, &third));
+    b.push_body(KIND_CONFLICT_COMPARISON_REGISTERED, &declared);
+    // Registered once: a second is a duplicate append.
+    b.push_body(KIND_CONFLICT_COMPARISON_REGISTERED, &declared);
+
+    // --- the checkpoint ----------------------------------------------------
+    let marker =
+        |through: &str, seen: u64, resolved: u64, opened: u64| ContradictionBackfillCompleted {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "system:contradiction-backfill".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            through_event_id: through.into(),
+            source_relation_count: seen,
+            resolved_count: resolved,
+            opened_count: opened,
+            rule_version: "contradiction-backfill-v1".into(),
+        };
+    b.push_body(
+        KIND_CONTRADICTION_BACKFILL_COMPLETED,
+        &marker(&contradicts, 4, 3, 1),
+    );
+    // The same coverage claimed twice.
+    b.push_body(
+        KIND_CONTRADICTION_BACKFILL_COMPLETED,
+        &marker(&contradicts, 4, 3, 1),
+    );
+    // A marker that does not add up — refused structurally.
+    b.push_body(
+        KIND_CONTRADICTION_BACKFILL_COMPLETED,
+        &marker(&supersedes, 9, 3, 1),
+    );
+    // A later checkpoint that saw FEWER relations: a run that lost its place.
+    b.push_body(
+        KIND_CONTRADICTION_BACKFILL_COMPLETED,
+        &marker(&supersedes, 2, 2, 0),
+    );
+    // Progress.
+    b.push_body(
+        KIND_CONTRADICTION_BACKFILL_COMPLETED,
+        &marker(&supersedes, 9, 7, 2),
+    );
+
+    (
+        "contradiction",
+        "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one \
+         batched with its edge, the close that must travel with its mutation, the matrix both \
+         ways round, the declared road in, and a checkpoint that cannot shrink",
+        b.frames,
+    )
+}
+
+/// The mutation a close rides with. Any mutation will do at this layer — the
+/// reducer's rule is that the close names a member of its own batch, and
+/// M27.4 is what makes that member an ADDRESSING one.
+fn addressing_revision(before: &str, after: &str) -> BeliefRevised {
+    revised_body(
+        BELIEF_B,
+        vec![PatchOp {
+            field_path: "/fields/status".into(),
+            before: TypedValue::string(before),
+            after: TypedValue::string(after),
+        }],
+        BeliefBasis::Unsupported {
+            reason: "the addressing mutation this close rides with".into(),
+        },
+    )
+}
+
+/// One `conflict.classified` body over a detected pair.
+fn classified_body(
+    pair: &ConflictCandidateDetected,
+    outcome: ConflictOutcome,
+    classification: Classification,
+    reason_codes: Vec<ConflictReasonCode>,
+    evidence_event_ids: Vec<String>,
+) -> ConflictClassified {
+    let (schema, batch_id, idempotency_key, actor) = common("system:conflict-classifier");
+    ConflictClassified {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        comparison_id: pair.comparison_id.clone(),
+        left: ConflictEndpoint::Asserted {
+            endpoint: pair.left.clone(),
+        },
+        right: ConflictEndpoint::Asserted {
+            endpoint: pair.right.clone(),
+        },
+        outcome,
+        classification,
+        evidence_event_ids,
+        reason_codes,
+        classified_at: "2026-08-12T09:00:00.000Z".into(),
+    }
+}
+
+fn opened_body(
+    pair: &ConflictCandidateDetected,
+    kind: EdgeKind,
+    classified_event_id: &str,
+) -> ContradictionOpened {
+    let (schema, batch_id, idempotency_key, actor) = common("system:conflict-classifier");
+    ContradictionOpened {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        edge_id: derive_edge_id(&pair.comparison_id, kind),
+        comparison_id: pair.comparison_id.clone(),
+        left: ConflictEndpoint::Asserted {
+            endpoint: pair.left.clone(),
+        },
+        right: ConflictEndpoint::Asserted {
+            endpoint: pair.right.clone(),
+        },
+        kind,
+        classified_event_id: classified_event_id.into(),
+    }
+}
+
+/// A declared registration over one relation event, endpoints in the order
+/// the id sorted them.
+fn registration_of(
+    relation_event: &str,
+    left: (&str, &str),
+    right: (&str, &str),
+) -> ConflictComparisonRegistered {
+    let build = |belief: &str, revision: &str| DeclaredRelationEndpoint {
+        relation_event_id: relation_event.to_string(),
+        belief_id: belief.into(),
+        belief_revision_event_id: revision.into(),
+        relation_origin: RelationOrigin::LegacyMigration,
+        subject_id: ENTITY.into(),
+        content_hash: crate::ledger::sha256_hex(belief.as_bytes()),
+        scope: KnownScope::Unknown,
+        state_stage: KnownStage::Unknown,
+        valid_time: KnownValidTime::Unknown,
+    };
+    let (left, right) = (build(left.0, left.1), build(right.0, right.1));
+    let (first, _) = ordered_declared_endpoints(&left, &right).unwrap();
+    let (left, right) = if serde_json::to_string(&left).unwrap() == first {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let (schema, batch_id, idempotency_key, actor) = common("system:contradiction-backfill");
+    ConflictComparisonRegistered {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        comparison_id: derive_declared_comparison_id(relation_event, &left, &right).unwrap(),
+        left,
+        right,
+        source_relation_event_id: relation_event.to_string(),
+        reason: ConflictReasonCode::DeclaredContradictsRelation,
+        rule_version: "contradiction-backfill-v1".into(),
+    }
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -4718,6 +5191,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_coverage(),
         scenario_conflict(),
         scenario_freshness(),
+        scenario_contradiction(),
     ]
 }
 

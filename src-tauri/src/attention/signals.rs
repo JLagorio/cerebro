@@ -179,8 +179,8 @@ fn comparison_counts(state: &EpistemicState) -> BTreeMap<String, u32> {
         // A comparison between two revisions of ONE belief counts once for
         // that belief: it is one thing to look at, not two.
         let mut ends = BTreeSet::new();
-        ends.insert(comparison.left.belief_id.clone());
-        ends.insert(comparison.right.belief_id.clone());
+        ends.insert(comparison.left.belief_id().to_string());
+        ends.insert(comparison.right.belief_id().to_string());
         for end in ends {
             *out.entry(end).or_default() += 1;
         }
