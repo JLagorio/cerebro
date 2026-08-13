@@ -85,7 +85,15 @@ impl ConflictCandidateReason {
 /// `scope.stage` as a total value. `Unknown` is a member rather than an
 /// absence, because "no stage was recorded" and "the stage is planned" are
 /// different comparisons and a nullable field makes them one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Ord` follows the DECLARATION order, which is the lifecycle progression —
+/// planned before shipping, unknown last. That is what M27's facet keys sort
+/// by, and it is deliberately NOT the string order that
+/// [`ConflictCandidateReason`] carries: nothing serializes a sorted list of
+/// stages, so nothing has to agree across languages about it. A body that
+/// ever does needs the same declaration-order-equals-wire-order test the
+/// reason codes have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StateStage {
     Planned,

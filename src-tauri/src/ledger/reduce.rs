@@ -649,6 +649,21 @@ pub struct EpistemicState {
     /// contradiction edges target these ids: losing the runtime DB must not
     /// erase which pairs were already handed over.
     pub comparisons: BTreeMap<String, ComparisonRow>,
+    /// Producer-side index (deliberately OUTSIDE the vector contract, like
+    /// `assertion_facets`): belief-revision event → the frame stamp the store
+    /// wrote it under. M27.1's `belief_revision_time` freshness basis reads
+    /// it.
+    ///
+    /// Not on `RevisionState`, and not in the vector projection, because the
+    /// TypeScript reducer has no use for it: nothing it validates depends on
+    /// when a revision was written, and putting a timestamp into the shared
+    /// belief projection would make every vector sensitive to the fixture
+    /// clock for the benefit of one Rust-side derivation.
+    pub belief_revision_times: BTreeMap<String, String>,
+    /// The same index for attestation events — read only where a freshness
+    /// rule explicitly permits review to anchor a clock (D8 channel 1). Also
+    /// outside the vector contract, for the same reason.
+    pub belief_attestation_times: BTreeMap<String, String>,
 }
 
 impl EpistemicState {
@@ -2955,6 +2970,9 @@ fn apply_belief_created(
     state
         .belief_revision_events
         .insert(frame.event_id.clone(), (body.belief_id.clone(), 1));
+    state
+        .belief_revision_times
+        .insert(frame.event_id.clone(), frame.ingested_at.clone());
     state.create_version("belief", &body.belief_id, &frame.event_id);
     Ok(())
 }
@@ -3007,6 +3025,9 @@ fn apply_belief_revised(
     state
         .belief_revision_events
         .insert(frame.event_id.clone(), (body.belief_id.clone(), revision));
+    state
+        .belief_revision_times
+        .insert(frame.event_id.clone(), frame.ingested_at.clone());
     state.bump_version("belief", &body.belief_id, &frame.event_id);
     Ok(())
 }
@@ -3276,6 +3297,9 @@ fn apply_attested(
     ));
     belief.attestation_events.push(frame.event_id.clone());
     belief.projection_head_event = frame.event_id.clone();
+    state
+        .belief_attestation_times
+        .insert(frame.event_id.clone(), frame.ingested_at.clone());
     state.bump_version("belief", &body.belief_id, &frame.event_id);
     Ok(())
 }
