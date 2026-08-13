@@ -157,6 +157,17 @@ fn target_set_bound(
         // that omitted them would let a merge run against an edge whose
         // Belief moved underneath it.
         addressed_contradictions: proposal.basis.addressed_contradictions.clone(),
+        // Symbolic: this pass reads the write set, and an id a body DERIVES
+        // from a sibling is never a target the caller could have named.
+        member_ids: None,
+        // Nothing in a write set is dated. Taking the real stamp anyway keeps
+        // this expansion identical to the one that applies, rather than merely
+        // equivalent to it.
+        submitted_at: state
+            .proposals
+            .get(&proposal.proposal_id)
+            .map(|row| row.submitted_at.clone())
+            .unwrap_or_default(),
     };
     // A plan that cannot be built writes nothing, so there is nothing to
     // bind. The refusal stays owned by the layer where expansion is

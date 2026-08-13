@@ -1,6 +1,6 @@
 {
-  "name": "contradicts-relation-add-is-not-available-yet",
-  "why": "A CONDITIONAL capability, and M27.4 split it from the gate's. The preservation gate is LIVE (`contradiction_edges` is available), but AUTHORING a new declared contradiction still is not: its relation event, registration, classification, and edge have to commit as one batch, and the comparison id is derived from the relation event id — which does not exist until the writer allocates it. `declared_contradiction_authoring` is what stays false until that path exists. The same op remains fine for ordinary relations.",
+  "name": "contradicts-relation-add-is-an-ordinary-relation-edit",
+  "why": "The positive control for the conditional capability, and the mirror of `classify-conflict-is-not-available-yet`. `edit_relation` is gated on `declared_contradiction_authoring` ONLY when the payload says `add` + `contradicts`; M27.4 made that capability available, so the same clause that refused this proposal now lets it through to the ordinary MEDIUM ladder. What the capability buys is not the relation event — that always worked — but the registration, classification, and any open edge that now commit in the SAME batch as it, so a declaration is never durable while unclassified.",
   "proposal": {
     "schema": 1,
     "proposal_id": "9dcadcadd00000000000000000000000",
@@ -51,10 +51,10 @@
     "candidate_search_receipt": null
   },
   "expect": {
-    "verdict": "rejected",
-    "effective_risk": null,
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
     "escalated_by": [],
-    "rejection": "capability_unavailable",
-    "destiny": "operational"
+    "rejection": null,
+    "destiny": null
   }
 }

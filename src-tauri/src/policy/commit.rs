@@ -137,6 +137,13 @@ fn state_of(writer: &LedgerWriter, vault: &Path) -> Result<EpistemicState, Submi
     Ok(reduce(&read.frames, writer.store_id()))
 }
 
+/// One pass of the apply plan: the batch members, and what each proposal's
+/// caller is told about them.
+struct Built {
+    events: Vec<(String, serde_json::Value)>,
+    results: Vec<SubmitResult>,
+}
+
 fn internal(detail: impl Into<String>) -> SubmitError {
     SubmitError {
         code: "malformed_arguments",
@@ -1041,112 +1048,103 @@ fn apply_with_decisions(
     transition: TransitionCode,
 ) -> Result<CommitOutcome, SubmitError> {
     let protocol = protocol_actor();
-    let mut events: Vec<(String, serde_json::Value)> = Vec::new();
-    let mut results = Vec::with_capacity(members.len());
-    // What earlier members of THIS set create, so "create a Belief, then
-    // link it" works inside one atomic set instead of refusing against a
-    // snapshot taken before the set ran.
-    let mut staged_beliefs: std::collections::BTreeSet<String> = Default::default();
-    let mut staged_entities: std::collections::BTreeSet<String> = Default::default();
+    // The apply plan is built as a FUNCTION of the event ids the batch will
+    // carry (M27.4b): once with them still symbolic, which is what the
+    // operation digest hashes and what the caller's results are read from, and
+    // once with the writer's preallocated ids, which is what an expansion
+    // needs when a body carries a value DERIVED from a sibling event id.
+    //
+    // Nothing in here reads a clock or the writer, so the two passes differ in
+    // the ids and in nothing else — and `append_batch_planned` refuses the
+    // batch if that ever stops being true.
+    let build = |member_ids: Option<&[String]>| -> Result<Built, SubmitError> {
+        let mut events: Vec<(String, serde_json::Value)> = Vec::new();
+        let mut results = Vec::with_capacity(members.len());
+        // What earlier members of THIS set create, so "create a Belief, then
+        // link it" works inside one atomic set instead of refusing against a
+        // snapshot taken before the set ran.
+        let mut staged_beliefs: std::collections::BTreeSet<String> = Default::default();
+        let mut staged_entities: std::collections::BTreeSet<String> = Default::default();
 
-    for (index, proposal) in members.iter().enumerate() {
-        let rule = table
-            .op(proposal.op.kind())
-            .ok_or_else(|| internal(format!("{} is not in the table", proposal.op.kind())))?;
-        let ctx = ExpansionContext {
-            // The MUTATION is the proposer's act...
-            actor: actors[index].clone(),
-            state,
-            base_ordinal: events.len(),
-            decision_event_id: approvals[index].clone(),
-            proposal_id: proposal.proposal_id.clone(),
-            staged_beliefs: staged_beliefs.clone(),
-            staged_entities: staged_entities.clone(),
-            addressed_contradictions: proposal.basis.addressed_contradictions.clone(),
-        };
-        let expansion = expand(&proposal.op, &ctx).map_err(|e| expand_error(table, e))?;
-        // AFTER its own expansion: a create must not see itself staged, or
-        // it would refuse as a duplicate of the thing it is creating.
-        stage_created(&proposal.op, &mut staged_beliefs, &mut staged_entities);
-        if expansion.members.is_empty() {
-            return Err(internal(format!(
-                "{} expanded to nothing — an application that changes nothing is not one",
-                proposal.op.kind()
-            )));
-        }
-        let mutation_refs: Vec<String> = (0..expansion.members.len())
-            .map(|offset| member_ref(events.len() + offset))
-            .collect();
-        let applied_ordinal = events.len() + expansion.members.len();
-        events.extend(expansion.members.clone());
-
-        // The stored inverse exists for exactly the ops the table calls
-        // one_click — which is what the UI keys its Revert action off, never
-        // the op name.
-        let revert_plan = if rule.revert == Revert::OneClick {
-            let digest = operation_digest(&expansion.members).map_err(internal)?;
-            Some(RevertPlan {
-                source_operation_digest: digest,
-                expected_post_versions: expansion
-                    .write_targets
-                    .iter()
-                    .map(|(class, id)| schema::PostVersion {
-                        target_class: *class,
-                        target_id: id.clone(),
-                        version: state.version(class.as_str(), id).unwrap_or(0) + 1,
-                    })
-                    .collect(),
-                steps: expansion.revert_steps.clone(),
-            })
-        } else {
-            None
-        };
-        if revert_plan.is_none() && !expansion.revert_steps.is_empty() {
-            return Err(internal(format!(
-                "{} produced an inverse the table does not call one_click",
-                proposal.op.kind()
-            )));
-        }
-
-        let risk = verdicts[index]
-            .effective_risk()
-            .ok_or_else(|| internal("an applied verdict always resolved a risk"))?;
-        // ...but the APPLICATION is the ledger's own record of authorizing
-        // it, so it commits under the protocol actor.
-        let (schema_v, batch_id, key, body_actor) = common(&protocol);
-        let applied = ProposalApplied {
-            schema: schema_v,
-            batch_id,
-            idempotency_key: key,
-            actor: body_actor,
-            occurred_at: None,
-            valid_from: None,
-            valid_to: None,
-            proposal_id: proposal.proposal_id.clone(),
-            commit_set_id: commit_set_id.to_string(),
-            effective_risk: risk,
-            decision_id: approvals[index].clone(),
-            mutation_event_ids: mutation_refs,
-            resulting_versions: post_versions(state, proposal, &expansion.write_targets),
-            revert_plan,
-        };
-        events.push((
-            schema::KIND_PROPOSAL_APPLIED.to_string(),
-            serde_json::to_value(&applied).map_err(|e| internal(e.to_string()))?,
-        ));
-
-        // A revert names what it undid, in the same batch, right after the
-        // application that performed it. Neither record is erased.
-        if let schema::ProposalOp::RevertProposal {
-            applied_proposal_id,
-            applied_event_ids,
-        } = &proposal.op
-        {
-            let forward: Vec<String> = (ctx.base_ordinal..applied_ordinal)
-                .map(member_ref)
+        for (index, proposal) in members.iter().enumerate() {
+            let rule = table
+                .op(proposal.op.kind())
+                .ok_or_else(|| internal(format!("{} is not in the table", proposal.op.kind())))?;
+            let ctx = ExpansionContext {
+                // The MUTATION is the proposer's act...
+                actor: actors[index].clone(),
+                state,
+                base_ordinal: events.len(),
+                decision_event_id: approvals[index].clone(),
+                proposal_id: proposal.proposal_id.clone(),
+                staged_beliefs: staged_beliefs.clone(),
+                staged_entities: staged_entities.clone(),
+                addressed_contradictions: proposal.basis.addressed_contradictions.clone(),
+                member_ids,
+                // The proposal's own submission stamp — durable, so both
+                // passes and every retry date a generated body identically.
+                submitted_at: state
+                    .proposals
+                    .get(&proposal.proposal_id)
+                    .map(|row| row.submitted_at.clone())
+                    .ok_or_else(|| {
+                        internal(format!(
+                            "proposal {} is being applied without a submitted row",
+                            proposal.proposal_id
+                        ))
+                    })?,
+            };
+            let expansion = expand(&proposal.op, &ctx).map_err(|e| expand_error(table, e))?;
+            // AFTER its own expansion: a create must not see itself staged, or
+            // it would refuse as a duplicate of the thing it is creating.
+            stage_created(&proposal.op, &mut staged_beliefs, &mut staged_entities);
+            if expansion.members.is_empty() {
+                return Err(internal(format!(
+                    "{} expanded to nothing — an application that changes nothing is not one",
+                    proposal.op.kind()
+                )));
+            }
+            let mutation_refs: Vec<String> = (0..expansion.members.len())
+                .map(|offset| member_ref(events.len() + offset))
                 .collect();
+            let applied_ordinal = events.len() + expansion.members.len();
+            events.extend(expansion.members.clone());
+
+            // The stored inverse exists for exactly the ops the table calls
+            // one_click — which is what the UI keys its Revert action off, never
+            // the op name.
+            let revert_plan = if rule.revert == Revert::OneClick {
+                let digest = operation_digest(&expansion.members).map_err(internal)?;
+                Some(RevertPlan {
+                    source_operation_digest: digest,
+                    expected_post_versions: expansion
+                        .write_targets
+                        .iter()
+                        .map(|(class, id)| schema::PostVersion {
+                            target_class: *class,
+                            target_id: id.clone(),
+                            version: state.version(class.as_str(), id).unwrap_or(0) + 1,
+                        })
+                        .collect(),
+                    steps: expansion.revert_steps.clone(),
+                })
+            } else {
+                None
+            };
+            if revert_plan.is_none() && !expansion.revert_steps.is_empty() {
+                return Err(internal(format!(
+                    "{} produced an inverse the table does not call one_click",
+                    proposal.op.kind()
+                )));
+            }
+
+            let risk = verdicts[index]
+                .effective_risk()
+                .ok_or_else(|| internal("an applied verdict always resolved a risk"))?;
+            // ...but the APPLICATION is the ledger's own record of authorizing
+            // it, so it commits under the protocol actor.
             let (schema_v, batch_id, key, body_actor) = common(&protocol);
-            let reverted = ProposalReverted {
+            let applied = ProposalApplied {
                 schema: schema_v,
                 batch_id,
                 idempotency_key: key,
@@ -1154,27 +1152,76 @@ fn apply_with_decisions(
                 occurred_at: None,
                 valid_from: None,
                 valid_to: None,
-                proposal_id: applied_proposal_id.clone(),
-                reverted_by_proposal_id: proposal.proposal_id.clone(),
-                prior_applied_event_ids: applied_event_ids.clone(),
-                forward_event_ids: forward,
-                resulting_versions: vec![],
+                proposal_id: proposal.proposal_id.clone(),
+                commit_set_id: commit_set_id.to_string(),
+                effective_risk: risk,
+                decision_id: approvals[index].clone(),
+                mutation_event_ids: mutation_refs,
+                resulting_versions: post_versions(state, proposal, &expansion.write_targets),
+                revert_plan,
             };
             events.push((
-                schema::KIND_PROPOSAL_REVERTED.to_string(),
-                serde_json::to_value(&reverted).map_err(|e| internal(e.to_string()))?,
+                schema::KIND_PROPOSAL_APPLIED.to_string(),
+                serde_json::to_value(&applied).map_err(|e| internal(e.to_string()))?,
             ));
+
+            // A revert names what it undid, in the same batch, right after the
+            // application that performed it. Neither record is erased.
+            if let schema::ProposalOp::RevertProposal {
+                applied_proposal_id,
+                applied_event_ids,
+            } = &proposal.op
+            {
+                let forward: Vec<String> = (ctx.base_ordinal..applied_ordinal)
+                    .map(member_ref)
+                    .collect();
+                let (schema_v, batch_id, key, body_actor) = common(&protocol);
+                let reverted = ProposalReverted {
+                    schema: schema_v,
+                    batch_id,
+                    idempotency_key: key,
+                    actor: body_actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    proposal_id: applied_proposal_id.clone(),
+                    reverted_by_proposal_id: proposal.proposal_id.clone(),
+                    prior_applied_event_ids: applied_event_ids.clone(),
+                    forward_event_ids: forward,
+                    resulting_versions: vec![],
+                };
+                events.push((
+                    schema::KIND_PROPOSAL_REVERTED.to_string(),
+                    serde_json::to_value(&reverted).map_err(|e| internal(e.to_string()))?,
+                ));
+            }
+
+            results.push(SubmitResult::Applied {
+                proposal_id: proposal.proposal_id.clone(),
+                resulting_versions: applied.resulting_versions.clone(),
+            });
         }
+        Ok(Built { events, results })
+    };
 
-        results.push(SubmitResult::Applied {
-            proposal_id: proposal.proposal_id.clone(),
-            resulting_versions: applied.resulting_versions.clone(),
-        });
-    }
-
+    // The symbolic pass: what the caller is told, and the member count the
+    // writer preallocates against.
+    let Built { events, results } = build(None)?;
     let decisions: Vec<String> = approvals.iter().flatten().cloned().collect();
     let key = operation_key(commit_set_id, transition, &decisions);
-    let receipt = writer.append_batch(events, Some(&key)).map_err(internal)?;
+    let receipt = writer
+        .append_batch_planned(
+            events.len(),
+            &|ids| {
+                build(Some(&ids.members))
+                    .map(|built| built.events)
+                    // Unreachable: the symbolic pass already succeeded, and
+                    // the only difference is which ids the bodies carry.
+                    .map_err(|e| format!("expanding against preallocated ids: {}", e.detail))
+            },
+            Some(&key),
+        )
+        .map_err(internal)?;
     crate::crash::crash_point("commit-set-apply-committed");
 
     // Only after the marker is durable does the projection follow — and a
@@ -2092,6 +2139,112 @@ mod tests {
         let err = commit_proposals(&table(), &mut writer, &vault, REVERT_RUN, &[P3.to_string()])
             .unwrap_err();
         assert!(err.detail.contains("revert_not_supported"), "{err:?}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_declared_contradiction_commits_with_its_classification_or_not_at_all() {
+        // End to end (M27.4c): a `contradicts` add is one batch holding the
+        // relation, its comparison registration, the verdict, and — because
+        // nothing here can separate the pair — the open edge. The window in
+        // which the declaration is durable and unclassified does not exist,
+        // which is what lets the preservation gate trust classification.
+        let vault = testutil::temp_vault("commit-declared-contradiction");
+        let mut writer = LedgerWriter::open(&vault, "1111111111111111111111111111111a").unwrap();
+        let left = seed_belief(&mut writer, "left");
+        let right = seed_belief(&mut writer, "right");
+        let relation_id =
+            schema::derive_relation_id(&left, &right, schema::RelationKind::Contradicts);
+        let p = proposal(
+            P1,
+            RUN,
+            ProposalOp::EditRelation {
+                relation_id: relation_id.clone(),
+                action: schema::RelationAction::Add,
+                from: left.clone(),
+                to: right.clone(),
+                relation: schema::RelationKind::Contradicts,
+            },
+            {
+                let mut targets = vec![
+                    target(TargetClass::Belief, &left, Some(1)),
+                    target(TargetClass::Belief, &right, Some(1)),
+                ];
+                targets.sort_by(|a, b| a.target_id.cmp(&b.target_id));
+                targets.push(target(TargetClass::Relation, &relation_id, None));
+                targets
+            },
+            Risk::Medium,
+        );
+        submit_proposal(&table(), &mut writer, &actor(), &p).unwrap();
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert!(
+            matches!(outcome.results[0], SubmitResult::Applied { .. }),
+            "{:?}",
+            outcome.results[0]
+        );
+
+        let state = state(&writer, &vault);
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        assert_eq!(state.contradiction_edges.len(), 1);
+        let edge = state.contradiction_edges.values().next().unwrap();
+        assert_eq!(edge.kind, schema::EdgeKind::Partial);
+        assert!(edge.closed.is_none());
+
+        // The comparison id follows from the relation event this same batch
+        // wrote — the property `append_batch_planned` exists for. Recomputing
+        // it from the committed frame is the only check that would catch an
+        // expansion that derived it from a placeholder instead.
+        let frames = crate::ledger::read_ledger(&crate::ledger::ledger_dir(&vault))
+            .unwrap()
+            .frames;
+        let relation_event = frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_BELIEF_RELATION)
+            .expect("the relation committed");
+        let registration = frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_CONFLICT_COMPARISON_REGISTERED)
+            .expect("the registration committed");
+        let body: schema::ConflictComparisonRegistered =
+            serde_json::from_value(registration.body.clone()).unwrap();
+        assert_eq!(body.source_relation_event_id, relation_event.event_id);
+        assert_eq!(
+            body.comparison_id,
+            schema::derive_declared_comparison_id(
+                &relation_event.event_id,
+                &body.left,
+                &body.right
+            )
+            .unwrap()
+        );
+        assert_eq!(edge.comparison_id, body.comparison_id);
+        assert!(
+            state.comparisons.contains_key(&body.comparison_id),
+            "the registration created its comparison"
+        );
+
+        // One batch: the four mutations and the application that authorized
+        // them, contiguous, under one marker.
+        let members: Vec<&str> = frames
+            .iter()
+            .filter(|f| {
+                f.kind != schema::KIND_BATCH_COMMITTED
+                    && f.body.get("batch_id") == Some(&serde_json::json!(outcome.batch_id))
+            })
+            .map(|f| f.kind.as_str())
+            .collect();
+        assert_eq!(
+            members,
+            [
+                schema::KIND_BELIEF_RELATION,
+                schema::KIND_CONFLICT_COMPARISON_REGISTERED,
+                schema::KIND_CONFLICT_CLASSIFIED,
+                schema::KIND_CONTRADICTION_OPENED,
+                schema::KIND_PROPOSAL_APPLIED,
+            ]
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 

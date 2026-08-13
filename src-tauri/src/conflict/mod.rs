@@ -11,12 +11,16 @@
 //! contradiction there is — or a question about meaning, which it refuses to
 //! answer and leaves for review.
 //!
-//! [`backfill`] is the one-time sweep that gives the same treatment to
-//! declarations nobody ever backed with evidence — the `contradicts`
-//! relations a migration inherited or a person typed before any of this
-//! existed. Nothing may be gated on classification until it has run.
+//! [`declared`] is the other gauntlet, for the claims nobody ever backed with
+//! evidence — someone simply wrote that two beliefs contradict. It is the
+//! RULE, shared by both callers: [`backfill`] is the one-time sweep that
+//! applies it to the `contradicts` relations a migration inherited or a
+//! person typed before any of this existed, and the `edit_relation`
+//! expansion applies it to one being authored now. Nothing may be gated on
+//! classification until the backfill has run.
 
 pub mod backfill;
+pub mod declared;
 pub mod detect;
 pub mod emit;
 pub mod resolve;

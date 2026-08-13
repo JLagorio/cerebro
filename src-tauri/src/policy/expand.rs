@@ -84,13 +84,56 @@ pub struct ExpansionContext<'a> {
     /// an open edge over a Belief this op touches — so this list is a fact
     /// about the world, not a claim still to be checked.
     pub addressed_contradictions: Vec<schema::AddressedContradiction>,
+    /// The physical event ids this batch will carry, once the writer has
+    /// preallocated them (M27.4c).
+    ///
+    /// `None` is the symbolic pass — target binding, and the plan the
+    /// operation digest hashes. Everything an expansion emits is the same in
+    /// both passes except a body that carries a value DERIVED from a sibling
+    /// event id, which `member_ref` cannot express (see `writer::BatchIds`).
+    /// One such body exists: the registration for a `contradicts` relation
+    /// being authored right now.
+    pub member_ids: Option<&'a [String]>,
+    /// When the store received the proposal — the submission frame's own
+    /// stamp, and the ONLY time an expansion may date a generated body by.
+    ///
+    /// A wall clock read here would land in the plan, and the operation digest
+    /// is over the plan: a retry after a lost acknowledgement would read as a
+    /// different operation and apply the set a second time.
+    pub submitted_at: String,
 }
 
 impl ExpansionContext<'_> {
     fn staged_belief(&self, belief_id: &str) -> bool {
         self.staged_beliefs.contains(belief_id)
     }
+
+    /// The id of the batch member at `ordinal`: physical once the writer has
+    /// allocated, symbolic before that.
+    ///
+    /// Out of range is this expansion being wrong about its own arithmetic,
+    /// so it refuses. Falling back to a placeholder would derive an id from a
+    /// string no reader can resolve.
+    fn member_id(&self, ordinal: usize) -> Result<String, ExpandError> {
+        match self.member_ids {
+            Some(ids) => ids.get(ordinal).cloned().ok_or_else(|| {
+                refuse(
+                    "schema_invalid",
+                    format!(
+                        "batch member {ordinal} is out of range — this batch has {} members",
+                        ids.len()
+                    ),
+                )
+            }),
+            None => Ok(member_ref(ordinal)),
+        }
+    }
 }
+
+/// The rule version a declaration authored through this path is classified
+/// under. Distinct from the backfill's, because a reader asking "what decided
+/// this?" is asking which pass wrote it, not which module the gates live in.
+const DECLARED_RULE_VERSION: &str = "contradiction-declared-v1";
 
 /// A refusal discovered during expansion, in table vocabulary. Every code
 /// here is a `rejection_destinies` key, so a caller records it without
@@ -364,6 +407,90 @@ impl<'a> Plan<'a> {
         )?;
         self.touches(TargetClass::Relation, relation_id);
         Ok(ordinal)
+    }
+
+    /// Register, classify, and — when nothing separates the pair — open the
+    /// edge for a `contradicts` relation being authored in THIS batch
+    /// (M27.4c).
+    ///
+    /// The gauntlet is [`crate::conflict::declared`], shared with the backfill
+    /// that classified the declarations this store already held. A second copy
+    /// of those verdicts for newly authored declarations would be a second set
+    /// of answers to keep in step, and they would drift on exactly the case
+    /// the gate must never fire on — stage lag wearing a declaration.
+    ///
+    /// The comparison id is `sha256(relation_event_id ‖ endpoints)`, and the
+    /// relation event is `relation_ordinal` of this same batch. That is why
+    /// `member_id` exists: a placeholder would derive an id from the string
+    /// `cerebro-batch-member:0`, which no reader could resolve.
+    ///
+    /// The endpoints pin the revisions the pre-batch snapshot holds. A
+    /// concurrent revision would make them stale — which is what declaring
+    /// both Beliefs as CAS targets is for, and why `edit_relation` requires
+    /// `versions_current`.
+    fn declare_contradiction(
+        &mut self,
+        relation_id: &str,
+        relation_ordinal: usize,
+        from: &str,
+        to: &str,
+    ) -> Result<(), ExpandError> {
+        let mut pinned = Vec::new();
+        for belief_id in [from, to] {
+            let belief = self.committed_belief(belief_id)?;
+            let revision = belief.revisions.last().ok_or_else(|| {
+                refuse(
+                    "invalid_reference",
+                    format!("belief {belief_id} has no revision to pin a declaration to"),
+                )
+            })?;
+            pinned.push((belief_id.to_string(), revision.event_id.clone()));
+        }
+        let declaration = crate::conflict::declared::Declaration {
+            relation_event_id: self.ctx.member_id(relation_ordinal)?,
+            relation_id: relation_id.to_string(),
+            // Authored now, through the pipeline, under a live gate.
+            origin: schema::RelationOrigin::PostActivationDeclared,
+            from: pinned[0].clone(),
+            to: pinned[1].clone(),
+        };
+        let planned = crate::conflict::declared::plan(
+            self.ctx.state,
+            &declaration,
+            &self.ctx.actor,
+            DECLARED_RULE_VERSION,
+            &self.ctx.submitted_at,
+            self.ctx.base_ordinal + self.members.len(),
+        )
+        .map_err(|detail| refuse("schema_invalid", detail))?
+        .ok_or_else(|| {
+            // Unreachable behind `committed_belief` above, which already
+            // refuses a Belief that does not exist.
+            refuse(
+                "invalid_reference",
+                "a declaration between beliefs that exist could not be classified",
+            )
+        })?;
+        if planned.members.is_empty() {
+            // Only reachable if this exact comparison were already classified,
+            // which needs the relation event id — an id this batch is about to
+            // mint. Refusing rather than silently emitting nothing keeps that
+            // reasoning checkable instead of assumed.
+            return Err(refuse(
+                "illegal_transition",
+                format!(
+                    "comparison {} is already classified — a relation event that does not exist \
+                     yet cannot have been compared",
+                    planned.comparison_id
+                ),
+            ));
+        }
+        self.members.extend(planned.members);
+        // Server-derived, so the target-binding predicate skips it: the caller
+        // could not have named an id that follows from an event this batch is
+        // about to mint. It is still a target this plan advances.
+        self.touches(TargetClass::Comparison, &planned.comparison_id);
+        Ok(())
     }
 
     /// Close every contradiction edge this proposal addressed (M27.4).
@@ -1033,7 +1160,17 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
                 }
                 _ => {}
             }
-            plan.relation_member(relation_id, *action, from, to, *relation)?;
+            let relation_ordinal =
+                plan.relation_member(relation_id, *action, from, to, *relation)?;
+            // A declared contradiction is classified in the batch that
+            // declares it, or it is not declared (M27.4c). The alternative —
+            // commit the relation now, classify later — is a window in which
+            // the preservation gate sees an unclassified declaration it can
+            // only refuse to compress over, which is the debt this whole
+            // phase exists to stop accruing.
+            if *action == RelationAction::Add && *relation == RelationKind::Contradicts {
+                plan.declare_contradiction(relation_id, relation_ordinal, from, to)?;
+            }
             plan.revert_steps.push(RevertStep::RelationRestored {
                 relation_id: relation_id.clone(),
                 action: match action {
@@ -1372,6 +1509,10 @@ mod tests {
     const C: &str = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
     const D: &str = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4";
     const E: &str = "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5";
+    /// The proposal's durable submission stamp — the only clock an expansion
+    /// sees, and a fixed one, because a plan that moved with the wall clock
+    /// would stop replaying under its own operation key.
+    const SUBMITTED_AT: &str = "2026-08-12T09:00:00.000Z";
 
     fn belief(id: &str) -> BeliefState {
         BeliefState {
@@ -1424,6 +1565,8 @@ mod tests {
             staged_beliefs: Default::default(),
             staged_entities: Default::default(),
             addressed_contradictions: Vec::new(),
+            member_ids: None,
+            submitted_at: SUBMITTED_AT.into(),
         }
     }
 
@@ -1433,6 +1576,145 @@ mod tests {
             .iter()
             .map(|(kind, _)| kind.as_str())
             .collect()
+    }
+
+    fn contradicts_add() -> ProposalOp {
+        ProposalOp::EditRelation {
+            relation_id: schema::derive_relation_id(B, C, RelationKind::Contradicts),
+            action: RelationAction::Add,
+            from: B.into(),
+            to: C.into(),
+            relation: RelationKind::Contradicts,
+        }
+    }
+
+    #[test]
+    fn a_declared_contradiction_is_classified_in_the_batch_that_declares_it() {
+        // The whole point of M27.4c: there is no window in which a
+        // `contradicts` relation is durable and unclassified, because the
+        // preservation gate can only refuse to compress over one of those.
+        let state = world(&[B, C]);
+        let expansion = expand(&contradicts_add(), &ctx(&state)).unwrap();
+        assert_eq!(
+            kinds(&expansion),
+            [
+                "belief.relation",
+                "conflict.comparison_registered",
+                "conflict.classified",
+                "contradiction.opened",
+            ]
+        );
+        // Neither fixture belief has evidence, so nothing can separate the
+        // pair — `partial`, naming what was absent, with an edge. A verdict
+        // that resolved silence into "no conflict" would be the failure this
+        // milestone is built to prevent.
+        let classified: schema::ConflictClassified =
+            serde_json::from_value(expansion.members[2].1.clone()).unwrap();
+        assert_eq!(classified.outcome, schema::ConflictOutcome::Partial);
+        assert_eq!(
+            classified.reason_codes,
+            [schema::ConflictReasonCode::RelationMissingAssertion]
+        );
+        // The Comparison is a target this plan advances, and a server-derived
+        // one: it follows from an event the batch has not written yet, so no
+        // caller could have named it in `targets`.
+        assert!(expansion
+            .write_targets
+            .contains(&(TargetClass::Comparison, classified.comparison_id.clone())));
+
+        // A relation the gauntlet has nothing to say about is one event, as
+        // it always was.
+        let refines = expand(
+            &ProposalOp::EditRelation {
+                relation_id: schema::derive_relation_id(B, C, RelationKind::Refines),
+                action: RelationAction::Add,
+                from: B.into(),
+                to: C.into(),
+                relation: RelationKind::Refines,
+            },
+            &ctx(&state),
+        )
+        .unwrap();
+        assert_eq!(kinds(&refines), ["belief.relation"]);
+    }
+
+    #[test]
+    fn the_comparison_id_follows_from_the_relation_event_this_batch_will_write() {
+        // The reason `member_id` exists. A comparison id is
+        // `sha256(relation_event_id ‖ endpoints)`, and substitution cannot
+        // re-hash what was computed from a placeholder — so an expansion that
+        // reached for `member_ref` here would mint an id derived from the
+        // string "cerebro-batch-member:0" and commit it.
+        let state = world(&[B, C]);
+        let physical = [
+            "1".repeat(32),
+            "2".repeat(32),
+            "3".repeat(32),
+            "4".repeat(32),
+        ];
+        let mut context = ctx(&state);
+        context.member_ids = Some(&physical);
+        let expansion = expand(&contradicts_add(), &context).unwrap();
+
+        let registration: schema::ConflictComparisonRegistered =
+            serde_json::from_value(expansion.members[1].1.clone()).unwrap();
+        assert_eq!(registration.source_relation_event_id, physical[0]);
+        assert_eq!(registration.left.relation_event_id, physical[0]);
+        assert_eq!(registration.right.relation_event_id, physical[0]);
+        assert_eq!(
+            registration.comparison_id,
+            schema::derive_declared_comparison_id(
+                &physical[0],
+                &registration.left,
+                &registration.right
+            )
+            .unwrap()
+        );
+        // Which is exactly what the schema insists on, so the physical pass
+        // validates where a symbolic one could not.
+        registration.validate().unwrap();
+
+        // The edge names the classification by ORDINAL, because that one is a
+        // plain reference the writer substitutes.
+        let opened: schema::ContradictionOpened =
+            serde_json::from_value(expansion.members[3].1.clone()).unwrap();
+        assert_eq!(opened.classified_event_id, member_ref(2));
+        assert_eq!(opened.comparison_id, registration.comparison_id);
+        assert_eq!(
+            opened.edge_id,
+            schema::derive_edge_id(&registration.comparison_id, schema::EdgeKind::Partial)
+        );
+
+        // And the symbolic pass — the one the operation digest hashes — is the
+        // SAME plan with the placeholder in place of the id.
+        let symbolic: schema::ConflictComparisonRegistered = serde_json::from_value(
+            expand(&contradicts_add(), &ctx(&state)).unwrap().members[1]
+                .1
+                .clone(),
+        )
+        .unwrap();
+        assert_eq!(symbolic.source_relation_event_id, member_ref(0));
+        assert_ne!(symbolic.comparison_id, registration.comparison_id);
+    }
+
+    #[test]
+    fn a_declaration_riding_behind_other_members_still_names_its_own_relation() {
+        // `base_ordinal` is where this op's first member lands in a multi-op
+        // commit set. Getting it wrong would derive the comparison from a
+        // sibling proposal's event — a plausible off-by-one that every
+        // single-op test would miss.
+        let state = world(&[B, C]);
+        let physical: Vec<String> = (0..8).map(|i| format!("{i}").repeat(32)).collect();
+        let mut context = ctx(&state);
+        context.base_ordinal = 3;
+        context.member_ids = Some(&physical);
+        let expansion = expand(&contradicts_add(), &context).unwrap();
+        let registration: schema::ConflictComparisonRegistered =
+            serde_json::from_value(expansion.members[1].1.clone()).unwrap();
+        assert_eq!(registration.source_relation_event_id, physical[3]);
+        let opened: schema::ContradictionOpened =
+            serde_json::from_value(expansion.members[3].1.clone()).unwrap();
+        assert_eq!(opened.classified_event_id, member_ref(5));
     }
 
     #[test]

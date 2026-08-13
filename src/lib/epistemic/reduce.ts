@@ -129,6 +129,12 @@ interface ProposalRow {
   appliedEventId: string | null;
   revertPlan: Json | null;
   submittedEventId: string;
+  /**
+   * When the STORE received it — the submission frame's own stamp, the only
+   * durable time a proposal has, and so the one an expansion may date a
+   * generated body by (M27.4c).
+   */
+  submittedAt: string;
 }
 
 interface RelationState {
@@ -1962,6 +1968,7 @@ function applyProposalSubmitted(state: EpistemicState, frame: VectorFrame, body:
     appliedEventId: null,
     revertPlan: null,
     submittedEventId: frame.event_id,
+    submittedAt: frame.ingested_at,
   });
   createVersion(state, 'proposal', id, frame.event_id);
 }

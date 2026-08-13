@@ -16,9 +16,10 @@ preemptively.)
 
 | File | What it is |
 | --- | --- |
-| `policy.v2.json` | **The table** (`format: 2`, M26.3): target classes, predicates, transitions, rejection destinies, escalators, capability gates, silence/absence/high-stakes/preventive-ancestry rules, the risk ladder, and one row per op. |
-| `policy.v2.sha256` | SHA-256 of `policy.v2.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
-| `policy.v1.json` + `.sha256` | **Frozen** (`format: 1`, M24–M25). Not history for its own sake: it is the negative control for M26.3's live-registration gate — a table that parses cleanly and simply predates `no_self_ancestry`. Both loaders still read it, and nothing edits it. |
+| `policy.v3.json` | **The table** (`format: 3`, M27.4): target classes, predicates, transitions, rejection destinies, escalators, capability gates, silence/absence/high-stakes/preventive-ancestry/contradiction-addressing rules, the risk ladder, and one row per op. |
+| `policy.v3.sha256` | SHA-256 of `policy.v3.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
+| `policy.v2.json` + `.sha256` | **Frozen** (`format: 2`, M26). The negative control for M27.4's contradiction-preservation gate: a table that parses cleanly, binds `open_contradictions_addressed` to the same five ops, and simply predates `contradiction_edges` being available. Registration against it refuses BY NAME. |
+| `policy.v1.json` + `.sha256` | **Frozen** (`format: 1`, M24–M25). Not history for its own sake: it is the negative control for M26.3's live-registration gate — a table that parses cleanly and simply predates `no_self_ancestry`. All loaders still read it, and nothing edits it. |
 | `authority-routes.v1.json` | The current predicate- and stage-specific authority routes (D11). |
 | `authority-routes/<hash>.json` | Immutable content-addressed snapshots. A queued proposal pins `(route_id, rule_version, artifact_hash)`, so an approval tomorrow is evaluated against the rule the agent was actually shown. |
 | `independence-rules.v1.json` + `.sha256` | The two deterministic positive-independence predicates (M25.5), loaded by `src-tauri/src/ingest/independence.rs`. `rule_version` is bumped by ANY predicate change and pinned into every event the producer emits. |
@@ -34,7 +35,7 @@ the suite does on its own:
 
 ```sh
 cd src-tauri
-# after ANY edit to policy.v2.json
+# after ANY edit to policy.v3.json
 cargo test --lib policy::table::tests::write_policy_digest -- --ignored
 # after an edit to authority-routes.v1.json (bump artifact_version and every
 # changed route's authority_rule_version first; the prior snapshot stays)
@@ -51,7 +52,7 @@ can evaluate.
 Every closed list is non-empty, duplicate-free, and in canonical order, because
 two artifacts that mean the same thing must not be able to differ.
 
-- In `policy.v2.json`, canonical means **sorted**. `unbound_rejections` is the
+- In `policy.v3.json`, canonical means **sorted**. `unbound_rejections` is the
   one list allowed to be *empty*, and format 2 emptied it (see below).
 - In `authority-routes.v1.json`, canonical means the **enum declaration order**
   the M22 schema fixes: `planned … shipping` reads as reality moving forward,

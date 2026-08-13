@@ -704,6 +704,15 @@ pub struct ProposalRow {
     /// which is what the UI keys its Revert action off, never the op name.
     pub revert_plan: Option<schema::RevertPlan>,
     pub submitted_event_id: String,
+    /// When the STORE received it — the submission frame's own stamp.
+    ///
+    /// This is the only durable time a proposal has, which is what makes it
+    /// the one an expansion may date a generated body by (M27.4c). A wall
+    /// clock read at expansion time would put a different value in the plan on
+    /// every attempt, and the operation digest is over the plan: a retry after
+    /// a lost acknowledgement would read as a different operation and apply
+    /// the set twice.
+    pub submitted_at: String,
 }
 
 /// One reconciliation resolution, kept as history after the mode closes.
@@ -1410,6 +1419,7 @@ fn apply_proposal_submitted(
             applied_event_id: None,
             revert_plan: None,
             submitted_event_id: frame.event_id.clone(),
+            submitted_at: frame.ingested_at.clone(),
         },
     );
     state.create_version("proposal", &id, &frame.event_id);

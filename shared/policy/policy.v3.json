@@ -140,8 +140,8 @@
       "arrives": "M27"
     },
     "declared_contradiction_authoring": {
-      "available": false,
-      "arrives": "M27.4b"
+      "available": true,
+      "arrives": "M27.4"
     },
     "subject_correction": {
       "available": true,
