@@ -3724,6 +3724,45 @@ fn apply_independence(
                     "proposal {proposal_id} was never put to a person — an auto-applied                      confirmation confirms nothing"
                 )));
             }
+            // WHAT THE HUMAN ACTUALLY APPROVED (M27.10). Without this, the
+            // three checks above prove only that SOME proposal was approved
+            // by SOMEBODY — so one approval of anything, a merge, an edit,
+            // a tombstone, could be cited as proof that any two Observations
+            // are independent. Corroboration is a PROVEN property in this
+            // system; a proof that any approval satisfies is not one.
+            match &proposal.proposal.op {
+                schema::ProposalOp::ConfirmObservationIndependence {
+                    left_observation_event_id,
+                    right_observation_event_id,
+                    ..
+                } => {
+                    // Either order: the reducer keys the pair sorted, and the
+                    // proposal names the two sides as the proposer saw them.
+                    let named = [
+                        left_observation_event_id.as_str(),
+                        right_observation_event_id.as_str(),
+                    ];
+                    let this = [left.event_id.as_str(), right.event_id.as_str()];
+                    let mut named_sorted = named;
+                    named_sorted.sort_unstable();
+                    let mut this_sorted = this;
+                    this_sorted.sort_unstable();
+                    if named_sorted != this_sorted {
+                        return Err(refused(format!(
+                            "proposal {proposal_id} confirms {named:?} and this proof is about \
+                             {this:?} — an approval is about the pair a person was shown"
+                        )));
+                    }
+                }
+                other => {
+                    return Err(refused(format!(
+                        "proposal {proposal_id} is a {} — a human confirming independence is the \
+                         only decision that proves it, and any other approval would prove every \
+                         pair",
+                        other.kind()
+                    )))
+                }
+            }
             "human_confirmed"
         }
     };

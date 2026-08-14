@@ -2414,6 +2414,32 @@ function applyIndependence(state: EpistemicState, frame: VectorFrame, body: Json
           'confirms nothing',
       );
     }
+    // WHAT THE HUMAN ACTUALLY APPROVED (M27.10). Without this, the checks
+    // above prove only that SOME proposal was approved by SOMEBODY — so one
+    // approval of anything could be cited as proof that any two Observations
+    // are independent. Corroboration is a PROVEN property here; a proof that
+    // any approval satisfies is not one.
+    const op = (proposal.proposal as { op?: Record<string, Json> }).op ?? {};
+    const payload = (op.payload ?? {}) as Record<string, Json>;
+    if (op.kind !== 'confirm_observation_independence') {
+      throw new RefusedError(
+        `proposal ${proposalId} is a ${String(op.kind)} — a human confirming independence is ` +
+          'the only decision that proves it, and any other approval would prove every pair',
+      );
+    }
+    // Either order: the reducer keys the pair sorted, and the proposal names
+    // the two sides as the proposer saw them.
+    const named = [
+      String(payload.left_observation_event_id),
+      String(payload.right_observation_event_id),
+    ].sort();
+    const here = [left.eventId, right.eventId].sort();
+    if (named[0] !== here[0] || named[1] !== here[1]) {
+      throw new RefusedError(
+        `proposal ${proposalId} confirms ${JSON.stringify(named)} and this proof is about ` +
+          `${JSON.stringify(here)} — an approval is about the pair a person was shown`,
+      );
+    }
     proofKind = 'human_confirmed';
   } else if (proof.kind === 'distinct_firsthand_origin') {
     for (const endpoint of [left, right]) {

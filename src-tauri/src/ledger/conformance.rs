@@ -1372,6 +1372,117 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
             confirmed(confirm_proposal, "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"),
         ),
     );
+    // THE ATTACK (M27.10). An approved, queued proposal that is not a
+    // confirmation at all — and a confirmation of a DIFFERENT pair. Until
+    // these vectors existed the reducer checked only that some proposal had
+    // been approved by somebody, so one approval of anything proved every
+    // pair independent. Both must refuse, in both languages.
+    let unrelated_proposal = "cccc0000cccc0000cccc0000cccc0002";
+    let unrelated_decision = "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2";
+    let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &schema::ProposalSubmitted {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal: Box::new(schema::ProposalV1 {
+                schema: schema::PROPOSAL_SCHEMA,
+                proposal_id: unrelated_proposal.into(),
+                run_id: "4444444444444444444444444444444a".into(),
+                targets: vec![schema::ProposalTarget {
+                    target_id: orphan_a.clone(),
+                    target_class: schema::TargetClass::Observation,
+                    expected_version: None,
+                }],
+                op: schema::ProposalOp::ArchiveBelief {
+                    belief_id: "b111111111111111111111111111111a".into(),
+                    replacement_id: None,
+                },
+                intended_use: schema::IntendedUse {
+                    kind: schema::IntendedUseKind::ReversibleWork,
+                    stakes: schema::Risk::Low,
+                    predicate_class: None,
+                },
+                basis: schema::ProposalBasis {
+                    transition_cause: schema::TransitionCause::Maintenance,
+                    evidence_refs: vec![],
+                    coverage_refs: vec![],
+                    authority_refs: vec![],
+                    authority_route_refs: vec![],
+                    addressed_contradictions: vec![],
+                    absence_claim: false,
+                },
+                declared_risk: schema::Risk::High,
+                reason: "an ordinary approval, cited as a proof".into(),
+                candidate_search_receipt: None,
+            }),
+        },
+    );
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_PROPOSAL_QUEUED,
+        &schema::ProposalQueued {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: unrelated_proposal.into(),
+            commit_set_id: "5e75e75e75e75e75e75e75e75e75e750".into(),
+            member_proposal_ids: vec![unrelated_proposal.into()],
+            effective_risk: schema::Risk::High,
+            policy_version: 1,
+            target_versions: vec![],
+            queued_at: STAMP.into(),
+            queued_for: vec![],
+        },
+    );
+    let (schema_v, batch_id, idempotency_key, actor) = common("human:josef");
+    b.push_body(
+        schema::KIND_PROPOSAL_DECISION_RECORDED,
+        &schema::ProposalDecisionRecorded {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            decision_id: unrelated_decision.into(),
+            proposal_id: unrelated_proposal.into(),
+            decision: schema::Decision::Approve,
+            reviewer: "human:josef".into(),
+            decided_at: STAMP.into(),
+            reason: None,
+            reviewed_target_versions: vec![],
+        },
+    );
+    // Approved, queued, and about something else entirely: refused.
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &orphan_b,
+            confirmed(unrelated_proposal, unrelated_decision),
+        ),
+    );
+    // A real confirmation, aimed at a pair it does not name: refused. The
+    // approval a person gave was about the pair on the card.
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &orphan_a,
+            &solo_b,
+            confirmed(confirm_proposal, confirm_decision),
+        ),
+    );
     // And the one that works.
     b.push_body(
         KIND_INDEPENDENCE_RECORDED,
@@ -1410,7 +1521,8 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
         "independence",
         "Positive firsthand and direct-artifact proofs record the unordered pair; shared \
          ancestry, same actors, mismatched refs, duplicates, and the reserved human proof are \
-         refused; absence of any fact stays unknown.",
+         refused; a human_confirmed proof citing an approval that was not a confirmation, or a \
+         confirmation of a different pair, is refused too; absence of any fact stays unknown.",
         b.frames,
     )
 }
