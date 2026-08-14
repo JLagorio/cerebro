@@ -260,7 +260,12 @@ where
         failed: sweep.failed,
         ..Ran::default()
     };
-    let mut wrote_everything = true;
+    // A declaration that could not even be PLANNED is unclassified, and a
+    // marker claiming the whole prefix while one sits there is the exact lie
+    // the checkpoint exists to prevent. Before M27.5b only append failures
+    // counted here, so a planning failure was logged and then checkpointed
+    // over.
+    let mut wrote_everything = out.failed.is_empty();
     for plan in &sweep.plans {
         match committer.append_batch(plan.members.clone(), &plan.operation_key) {
             Ok(()) => out.classified += 1,

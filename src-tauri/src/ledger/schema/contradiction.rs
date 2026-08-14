@@ -821,13 +821,20 @@ impl ContradictionBackfillCompleted {
         if self.rule_version.is_empty() {
             return Err("rule_version must be non-empty".into());
         }
-        if self.resolved_count + self.opened_count != self.source_relation_count {
+        // CHECKED, because this is the arithmetic the check is about: an
+        // unchecked add panics in debug and wraps in release, and a body whose
+        // counts wrap past `source_relation_count` would validate through the
+        // very rule that exists to catch it.
+        let accounted = self
+            .resolved_count
+            .checked_add(self.opened_count)
+            .ok_or("resolved_count + opened_count overflows — no run read that many relations")?;
+        if accounted != self.source_relation_count {
             return Err(format!(
-                "the backfill saw {} relations and accounts for {} — every relation it read is \
-                 either resolved apart or has an open edge, and a marker that does not add up is \
-                 a marker that stopped early",
+                "the backfill saw {} relations and accounts for {accounted} — every relation it \
+                 read is either resolved apart or has an open edge, and a marker that does not \
+                 add up is a marker that stopped early",
                 self.source_relation_count,
-                self.resolved_count + self.opened_count
             ));
         }
         Ok(())
