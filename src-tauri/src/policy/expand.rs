@@ -1418,6 +1418,27 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
                         .replacement
                         .as_ref()
                         .expect("validate() proved add_replacement carries one");
+                    // A `contradicts` add is never just a relation event
+                    // (M27.4c): it carries its comparison, its verdict, and
+                    // any edge, in the same batch. This path emits the
+                    // relation alone, so a rewrite that re-pointed a
+                    // contradiction at the survivor would leave a live
+                    // declaration nobody classified — which the preservation
+                    // gate then reads as an unaddressable block on every
+                    // later compression. Refusing is the honest answer:
+                    // re-declaring a contradiction between the merged pair is
+                    // its own decision, not a side effect of a merge.
+                    if replacement.relation == RelationKind::Contradicts {
+                        return Err(refuse(
+                            "illegal_transition",
+                            format!(
+                                "the rewrite of relation {} would add a contradicts relation, and \
+                                 a declared contradiction is classified in the batch that declares \
+                                 it — declare it as its own proposal",
+                                rewrite.prior_relation_id
+                            ),
+                        ));
+                    }
                     plan.relation_member(
                         &replacement.relation_id,
                         RelationAction::Add,
@@ -2089,6 +2110,79 @@ mod tests {
         assert_eq!(forwards.members[1].1["belief_id"], B);
         assert_eq!(forwards.members[2].1["to"], C);
         assert_eq!(forwards.members[3].1["belief_id"], C);
+    }
+
+    #[test]
+    fn a_merge_cannot_re_point_a_contradiction_at_the_survivor() {
+        // M27.5a. The rewrite path emits a bare `belief.relation`, and a
+        // declared contradiction is never bare — it carries its comparison,
+        // its verdict, and any edge in the same batch. A rewrite that added
+        // one would leave a live declaration nobody classified, which the
+        // preservation gate then reads as an unaddressable block on every
+        // later compression: a merge would poison the base it was tidying.
+        let mut state = world(&[B, C, D]);
+        state.relations.insert(
+            A.to_string(),
+            crate::ledger::reduce::RelationState {
+                relation_id: A.into(),
+                from: C.into(),
+                to: D.into(),
+                relation: RelationKind::Contradicts,
+                live: true,
+                last_add_event_id: E.into(),
+                last_event_id: E.into(),
+            },
+        );
+        let rewrite = |relation: RelationKind| schema::RelationRewrite {
+            prior_relation_id: A.into(),
+            prior_from: C.into(),
+            prior_to: D.into(),
+            relation: RelationKind::Contradicts,
+            disposition: schema::RewriteDisposition::AddReplacement,
+            replacement: Some(schema::RewriteReplacement {
+                relation_id: schema::derive_relation_id(B, D, relation),
+                from: B.into(),
+                to: D.into(),
+                relation,
+            }),
+        };
+        let merge = |relation: RelationKind| ProposalOp::MergeBeliefsExact {
+            survivor_id: B.into(),
+            merged_ids: vec![C.to_string()],
+            equivalence_receipt: Box::new(schema::EquivalenceReceipt {
+                receipt_id: A.into(),
+                index_head: E.into(),
+                belief_ids: {
+                    let mut ids = vec![B.to_string(), C.to_string()];
+                    ids.sort();
+                    ids
+                },
+                subject_id: E.into(),
+                scope_digest: "1".repeat(64),
+                valid_interval: None,
+                normalized_content_hash: "2".repeat(64),
+                attestation_conflict: false,
+                merged_basis: BeliefBasis::Unsupported {
+                    reason: "fixture".into(),
+                },
+                relation_rewrites: vec![rewrite(relation)],
+            }),
+        };
+        let err = expand(&merge(RelationKind::Contradicts), &ctx(&state)).unwrap_err();
+        assert_eq!(err.code, "illegal_transition");
+        assert!(err.detail.contains("declares it"), "{}", err.detail);
+
+        // Every other relation kind rewrites exactly as it always did.
+        let fine = expand(&merge(RelationKind::Refines), &ctx(&state)).unwrap();
+        assert!(
+            kinds(&fine)
+                .iter()
+                .filter(|k| **k == "belief.relation")
+                .count()
+                >= 2,
+            "{:?}",
+            kinds(&fine)
+        );
     }
 
     #[test]

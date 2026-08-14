@@ -46,6 +46,33 @@ pub const ACTOR: &str = "system:contradiction-backfill";
 pub fn declarations(frames: &[Frame], state: &EpistemicState) -> Vec<Declaration> {
     let mut current: BTreeMap<String, String> = BTreeMap::new();
     let mut found: Vec<Declaration> = Vec::new();
+    // The origin the STORE already recorded for a relation, where it has one.
+    //
+    // `relation_origin` is a field of the endpoint, so it is inside the bytes
+    // the comparison id hashes — guessing a different one derives a different
+    // comparison for the same relation. Before M27.5a this sweep guessed
+    // `pre_activation_declared` for every non-migrator relation, including
+    // ones the `edit_relation` expansion had ALREADY registered as
+    // `post_activation_declared`: the store then held two comparisons, two
+    // classifications, and two open edges for one declaration, and the
+    // preservation gate demanded both be addressed.
+    let known: BTreeMap<&str, RelationOrigin> = state
+        .comparisons
+        .values()
+        .filter_map(|row| {
+            let crate::ledger::reduce::ComparisonOrigin::Declared {
+                source_relation_event_id,
+                ..
+            } = &row.origin
+            else {
+                return None;
+            };
+            let schema::ConflictEndpoint::DeclaredRelation { endpoint } = &row.left else {
+                return None;
+            };
+            Some((source_relation_event_id.as_str(), endpoint.relation_origin))
+        })
+        .collect();
 
     for frame in frames {
         let Ok(Some(body)) = schema::decode_body(&frame.kind, &frame.body) else {
@@ -76,11 +103,16 @@ pub fn declarations(frames: &[Frame], state: &EpistemicState) -> Vec<Declaration
                 found.push(Declaration {
                     relation_event_id: frame.event_id.clone(),
                     relation_id: relation.relation_id.clone(),
-                    origin: if relation.actor.id == schema::ACTOR_MIGRATOR {
-                        RelationOrigin::LegacyMigration
-                    } else {
-                        RelationOrigin::PreActivationDeclared
-                    },
+                    // What the store recorded beats what the actor suggests:
+                    // a guess that disagrees mints a second comparison for
+                    // one declaration.
+                    origin: known.get(frame.event_id.as_str()).copied().unwrap_or(
+                        if relation.actor.id == schema::ACTOR_MIGRATOR {
+                            RelationOrigin::LegacyMigration
+                        } else {
+                            RelationOrigin::PreActivationDeclared
+                        },
+                    ),
                     from: (relation.from.clone(), from),
                     to: (relation.to.clone(), to),
                 });
@@ -734,6 +766,60 @@ mod tests {
                 .append_once(key, kind, body)
                 .map(|_| super::super::emit::Wrote::Appended)
         }
+    }
+
+    #[test]
+    fn a_relation_the_store_already_classified_is_not_classified_a_second_way() {
+        // M27.5a. `relation_origin` sits inside the bytes the comparison id
+        // hashes, so guessing an origin the store has already recorded
+        // differently mints a SECOND comparison, verdict, and open edge for
+        // one declaration — and the preservation gate then demands both be
+        // addressed.
+        let mut rig = Rig::new("m27-backfill-origin");
+        belief(&mut rig, BELIEF, unsupported());
+        belief(&mut rig, BELIEF_B, unsupported());
+        contradicts(&mut rig, "agent:run-1");
+
+        // Classify it the way the AUTHORING path does — post-activation.
+        let frames = rig.frames();
+        let state = rig.state();
+        let mut declaration = declarations(&frames, &state)[0].clone();
+        assert_eq!(declaration.origin, RelationOrigin::PreActivationDeclared);
+        declaration.origin = RelationOrigin::PostActivationDeclared;
+        let planned = declared::plan(
+            &state,
+            &declaration,
+            &Actor {
+                id: "agent:run-1".into(),
+            },
+            "contradiction-declared-v1",
+            AS_OF,
+            0,
+        )
+        .unwrap()
+        .unwrap();
+        rig.writer
+            .append_batch(planned.members.clone(), Some("op:authored"))
+            .unwrap();
+
+        let state = rig.state();
+        assert_eq!(state.comparisons.len(), 1);
+        assert_eq!(state.contradiction_edges.len(), 1);
+
+        // The sweep now reads the origin the store recorded instead of
+        // guessing, derives the SAME comparison, and finds it settled.
+        let sweep = sweep(&rig.frames(), &state, &rig.store_id, AS_OF);
+        assert!(
+            sweep.plans.is_empty(),
+            "a classified declaration is not classified a second way: {:?}",
+            sweep.plans
+        );
+        assert_eq!(sweep.source_relation_count, 1, "and it still counts");
+        assert_eq!(sweep.opened_count, 1);
+        assert_eq!(
+            declarations(&rig.frames(), &state)[0].origin,
+            RelationOrigin::PostActivationDeclared
+        );
     }
 
     #[test]
