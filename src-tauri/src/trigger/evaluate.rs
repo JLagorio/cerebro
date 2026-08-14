@@ -146,6 +146,21 @@ fn parse_z(stamp: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
 /// Record what a protocol concluded: snapshot first, evaluation second, both
 /// idempotent, and the record checked against the shared validator before a
 /// byte is written.
+///
+/// **The snapshot id names the question, not only the bytes.** Two gates can
+/// collect byte-identical payloads (R3 and R6 over an empty store do), and
+/// the same gate collects the same bytes under a different window on a quiet
+/// day — so gate key, scope, rule version, and window are hashed alongside
+/// the payload. The M28.1 runner's first pass over one database found the
+/// collision the no-caller seam had been hiding.
+///
+/// **A later ask of an answered question adopts the stored stamps.** The
+/// evaluation id deliberately hashes inputs, not the instant of asking; the
+/// record still carries `evaluated_at`. Without adoption, a 9am ask followed
+/// by a 5pm ask of the same window would refuse as "different content" over
+/// the one field the id does not cover. With it, the first observation of
+/// the fact stands, the rerun replays byte-identically, and any OTHER
+/// divergence under the same id still refuses in the store.
 #[allow(clippy::too_many_arguments)]
 fn persist(
     conn: &Connection,
@@ -161,8 +176,25 @@ fn persist(
 ) -> Result<Recorded, String> {
     let payload_json =
         serde_json::to_string(payload).map_err(|e| format!("canonicalizing payload: {e}"))?;
-    let snapshot_id =
-        sha256_hex(format!("{}\0{payload_json}", registry.snapshot_hash_domain).as_bytes());
+    let scope_bytes = match &stored_scope {
+        StoredScope::SubscriptionGlobal => "subscription_global".to_string(),
+        StoredScope::VaultStore {
+            vault_id,
+            store_uuid,
+        } => format!("vault_store\0{vault_id}\0{store_uuid}"),
+    };
+    let snapshot_id = sha256_hex(
+        format!(
+            "{}\0{}\0{scope_bytes}\0{}\0{}\0{}\0{}\0{payload_json}",
+            registry.snapshot_hash_domain,
+            gate_key.canonical(),
+            registry.rule_version,
+            window.start,
+            window.end,
+            window.timezone,
+        )
+        .as_bytes(),
+    );
     let input_snapshot_hash = derive_input_snapshot_hash(
         &registry.snapshot_hash_domain,
         &[(
@@ -178,12 +210,20 @@ fn persist(
         &registry.rule_version,
         &input_snapshot_hash,
     );
+    let stamp = match triggers::evaluation(conn, &evaluation_id)? {
+        Some(existing) => existing.evaluated_at,
+        None => evaluated_at.to_string(),
+    };
+    let collected_at = match triggers::snapshot(conn, &snapshot_id)? {
+        Some(existing) => existing.collected_at,
+        None => stamp.clone(),
+    };
     let evaluation = TriggerEvaluation {
         variant: crate::trigger::registry::Variant::Measurable,
         evaluation_id: evaluation_id.clone(),
         gate_key,
         scope,
-        evaluated_at: evaluated_at.to_string(),
+        evaluated_at: stamp.clone(),
         window: Some(window),
         input_snapshot_refs: vec![InputSnapshotRef::Runtime {
             snapshot_id: snapshot_id.clone(),
@@ -214,7 +254,7 @@ fn persist(
             scope: stored_scope.clone(),
             rule_version: registry.rule_version.clone(),
             payload_json,
-            collected_at: evaluated_at.to_string(),
+            collected_at,
         },
     )?;
     let window_row = evaluation.window.clone().map(|w| triggers::Window {
@@ -232,7 +272,7 @@ fn persist(
             subkey: evaluation.gate_key.subcapability.clone(),
             variant: "measurable".to_string(),
             scope: stored_scope,
-            evaluated_at: evaluated_at.to_string(),
+            evaluated_at: stamp,
             window: window_row,
             input_snapshot_refs_json: serde_json::to_string(&evaluation.input_snapshot_refs)
                 .map_err(|e| e.to_string())?,
@@ -1225,6 +1265,81 @@ mod tests {
 
     fn utc(stamp: &str) -> chrono::DateTime<chrono::Utc> {
         parse_z(stamp).unwrap()
+    }
+
+    fn empty_store(label: &str) -> (std::path::PathBuf, Connection, VaultScope) {
+        let dir = testutil::temp_vault(label);
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        let scope = VaultScope {
+            vault_id: vault,
+            store_uuid: "feedfacefeedfacefeedfacefeedface".to_string(),
+        };
+        (dir, conn, scope)
+    }
+
+    #[test]
+    fn two_gates_sharing_bytes_are_two_snapshots() {
+        // R3 and R6 over an empty store collect byte-identical payloads. The
+        // snapshot id names the question as well as the bytes — without
+        // that, the second gate's record refuses as an amended snapshot.
+        // Found by the M28.1 runner's first pass over one database.
+        let (dir, conn, scope) = empty_store("evaluate-shared-bytes");
+        let registry = registry::load().unwrap();
+        let r3 = evaluate_r3(&conn, &registry, &scope, utc(NOW), "Europe/Berlin").unwrap();
+        let r6 = evaluate_r6(&conn, &registry, &scope, utc(NOW), "Europe/Berlin").unwrap();
+        assert_eq!(r3.snapshot_put, Put::Inserted);
+        assert_eq!(r6.snapshot_put, Put::Inserted);
+        assert_ne!(r3.snapshot_id, r6.snapshot_id);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_later_ask_the_same_day_replays_with_the_first_stamp() {
+        // The evaluation id hashes inputs, not the instant of asking. The
+        // 17:30 ask answers the same window as the 09:30 ask, so it replays
+        // the 09:30 record — first observation of the fact stands.
+        let (dir, conn, scope) = empty_store("evaluate-same-day");
+        let registry = registry::load().unwrap();
+        let first = evaluate_r13(&conn, &registry, &scope, utc(NOW), "Europe/Berlin").unwrap();
+        let later = evaluate_r13(
+            &conn,
+            &registry,
+            &scope,
+            utc("2026-08-14T17:30:00Z"),
+            "Europe/Berlin",
+        )
+        .unwrap();
+        assert_eq!(later.evaluation_put, Put::Replayed);
+        assert_eq!(later.evaluation, first.evaluation);
+        assert_eq!(later.evaluation.evaluated_at, "2026-08-14T09:30:00Z");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_next_day_is_a_new_evaluation() {
+        // The window moved, so the question moved — even when the store is
+        // quiet and the payload bytes did not.
+        let (dir, conn, scope) = empty_store("evaluate-next-day");
+        let registry = registry::load().unwrap();
+        let today = evaluate_r13(&conn, &registry, &scope, utc(NOW), "Europe/Berlin").unwrap();
+        let tomorrow = evaluate_r13(
+            &conn,
+            &registry,
+            &scope,
+            utc("2026-08-15T09:30:00Z"),
+            "Europe/Berlin",
+        )
+        .unwrap();
+        assert_eq!(tomorrow.evaluation_put, Put::Inserted);
+        assert_ne!(
+            tomorrow.evaluation.evaluation_id,
+            today.evaluation.evaluation_id
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn r13_constants() -> R13Constants {
