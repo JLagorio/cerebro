@@ -963,3 +963,104 @@ pub const SCHEMA_V10: &str = "
         ON convergence_runs (vault_id, store_uuid, generated_at)
         WHERE superseded_by_run_id IS NULL;
 ";
+
+/// The M28.0 schema — the two governance tables, and ONLY those two.
+///
+/// **The registry authorizes nothing, and neither does this DDL.** A trigger
+/// evaluation is a reading of already-persisted rows against the closed
+/// artifact `shared/policy/trigger-registry.v1.json`; recording one changes
+/// no ledger, no vault, no flag, and launches nothing. A `fired` row permits
+/// exactly one thing — a dated plan document plus a matrix update in one
+/// commit — and that permission lives in review, not in code.
+///
+/// **`trigger_input_snapshots` is immutable by contract.** `snapshot_id` is
+/// the domain-separated hash of the canonical payload, so a rerun over the
+/// same rows lands on the same id, and the writer refuses the same id with
+/// different bytes — a snapshot that could be amended would make every
+/// evaluation derived from it unreproducible, which is the one property the
+/// table exists to provide. The payload keeps the CANONICAL SOURCE ROWS and
+/// their distinct ids, not only aggregates, so each metric, day, bucket,
+/// source, artifact, attempt, plan, and gap episode can be recomputed.
+///
+/// **The variant decides which columns exist, and the CHECKs say so.** A
+/// measurable record carries a window and metrics and no evidence pack and
+/// no owner; a discretionary record is the mirror image; a hybrid carries
+/// both halves. Those are the design's closed union arms spelled as DDL, so
+/// a row from a build with a looser validator still cannot land here.
+///
+/// **Scope is columns, not prose.** `subscription_global` rows carry NULL
+/// vault/store (R1/R2 deliberately aggregate the whole subscription);
+/// `vault_store` rows carry both, and the vault must be registered. A
+/// cross-scope input is a refusal at the evaluator, but the row itself
+/// cannot even express a half-scoped evaluation.
+pub const SCHEMA_V11: &str = "
+    CREATE TABLE trigger_input_snapshots (
+        snapshot_id TEXT PRIMARY KEY
+            CHECK (length(snapshot_id) = 64 AND snapshot_id = lower(snapshot_id)),
+        registry_id TEXT NOT NULL CHECK (registry_id IN (
+            'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7',
+            'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14'
+        )),
+        subkey TEXT NOT NULL CHECK (subkey <> ''),
+        scope_kind TEXT NOT NULL
+            CHECK (scope_kind IN ('subscription_global', 'vault_store')),
+        vault_id TEXT REFERENCES vault_registry (vault_id),
+        store_uuid TEXT CHECK (store_uuid IS NULL OR store_uuid <> ''),
+        rule_version TEXT NOT NULL CHECK (rule_version <> ''),
+        payload_json TEXT NOT NULL CHECK (payload_json <> ''),
+        collected_at TEXT NOT NULL CHECK (collected_at LIKE '____-__-__T%Z'),
+        CHECK ((scope_kind = 'vault_store') = (vault_id IS NOT NULL)),
+        CHECK ((scope_kind = 'vault_store') = (store_uuid IS NOT NULL))
+    );
+    CREATE INDEX trigger_input_snapshots_by_gate
+        ON trigger_input_snapshots (registry_id, subkey, collected_at);
+
+    CREATE TABLE trigger_evaluations (
+        evaluation_id TEXT PRIMARY KEY
+            CHECK (length(evaluation_id) = 64 AND evaluation_id = lower(evaluation_id)),
+        registry_id TEXT NOT NULL CHECK (registry_id IN (
+            'R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7',
+            'R8', 'R9', 'R10', 'R11', 'R12', 'R13', 'R14'
+        )),
+        subkey TEXT NOT NULL CHECK (subkey <> ''),
+        variant TEXT NOT NULL
+            CHECK (variant IN ('measurable', 'discretionary', 'hybrid')),
+        scope_kind TEXT NOT NULL
+            CHECK (scope_kind IN ('subscription_global', 'vault_store')),
+        vault_id TEXT REFERENCES vault_registry (vault_id),
+        store_uuid TEXT CHECK (store_uuid IS NULL OR store_uuid <> ''),
+        evaluated_at TEXT NOT NULL CHECK (evaluated_at LIKE '____-__-__T%Z'),
+        window_start TEXT CHECK (window_start IS NULL OR window_start <> ''),
+        window_end TEXT CHECK (window_end IS NULL OR window_end >= window_start),
+        window_timezone TEXT CHECK (window_timezone IS NULL OR window_timezone <> ''),
+        input_snapshot_refs_json TEXT NOT NULL CHECK (input_snapshot_refs_json <> ''),
+        input_snapshot_hash TEXT NOT NULL
+            CHECK (length(input_snapshot_hash) = 64
+                   AND input_snapshot_hash = lower(input_snapshot_hash)),
+        metrics_json TEXT CHECK (metrics_json IS NULL OR metrics_json <> ''),
+        evidence_pack_path TEXT
+            CHECK (evidence_pack_path IS NULL OR evidence_pack_path <> ''),
+        result TEXT NOT NULL CHECK (result IN ('not_ready', 'not_fired', 'fired')),
+        rule_version TEXT NOT NULL CHECK (rule_version <> ''),
+        approving_owner TEXT
+            CHECK (approving_owner IS NULL OR approving_owner <> ''),
+        parent_evaluation_id TEXT
+            REFERENCES trigger_evaluations (evaluation_id)
+            CHECK (parent_evaluation_id IS NULL
+                   OR parent_evaluation_id <> evaluation_id),
+        record_json TEXT NOT NULL CHECK (record_json <> ''),
+        CHECK ((scope_kind = 'vault_store') = (vault_id IS NOT NULL)),
+        CHECK ((scope_kind = 'vault_store') = (store_uuid IS NOT NULL)),
+        -- The union arms as arithmetic: a window and metrics belong to the
+        -- measuring variants, an evidence pack and an owner to the
+        -- discretionary ones, and hybrid is exactly both halves.
+        CHECK ((variant = 'discretionary') = (window_start IS NULL)),
+        CHECK ((variant = 'discretionary') = (window_end IS NULL)),
+        CHECK ((variant = 'discretionary') = (window_timezone IS NULL)),
+        CHECK ((variant = 'discretionary') = (metrics_json IS NULL)),
+        CHECK ((variant = 'measurable') = (evidence_pack_path IS NULL)),
+        CHECK ((variant = 'measurable') = (approving_owner IS NULL))
+    );
+    CREATE INDEX trigger_evaluations_by_gate
+        ON trigger_evaluations (registry_id, subkey, evaluated_at);
+";

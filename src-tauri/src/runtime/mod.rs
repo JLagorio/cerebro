@@ -56,6 +56,7 @@ mod soak;
 pub mod status;
 pub mod surface;
 pub mod taint;
+pub mod triggers;
 
 use std::path::{Path, PathBuf};
 
@@ -79,8 +80,9 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 
 /// The schema version this build speaks. M24 established 2 (`operational_log`
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
-/// meter, budget, coverage cache, and settings at 3.
-pub const USER_VERSION: i64 = 10;
+/// meter, budget, coverage cache, and settings at 3. M28.0 adds the two
+/// trigger-governance tables at 11.
+pub const USER_VERSION: i64 = 11;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -218,7 +220,25 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V10,
         validate: validate_v10,
     },
+    Migration {
+        to: 11,
+        sql: schema::SCHEMA_V11,
+        validate: validate_v11,
+    },
 ];
+
+/// The two governance tables `user_version = 11` promises (M28.0), checked
+/// the same way. Two, and exactly two: the trigger registry may write
+/// nothing else.
+fn validate_v11(conn: &Connection) -> Result<(), String> {
+    for table in ["trigger_input_snapshots", "trigger_evaluations"] {
+        conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(|e| format!("validating {table}: {e}"))?;
+    }
+    Ok(())
+}
 
 /// The one table `user_version = 10` promises, checked the same way.
 fn validate_v10(conn: &Connection) -> Result<(), String> {
