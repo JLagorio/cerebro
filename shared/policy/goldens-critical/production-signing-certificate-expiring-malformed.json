@@ -1,0 +1,17 @@
+{
+  "name": "a missing expiry does not fire",
+  "description": "The field is required and absent. Absent is not a comparison result; it is a reason not to interrupt.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-prod-signing",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production"
+      }
+    }
+  ],
+  "replacements": [],
+  "expected": []
+}

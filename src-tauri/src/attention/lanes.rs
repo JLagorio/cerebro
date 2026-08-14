@@ -61,6 +61,11 @@ struct Artifact {
 #[serde(deny_unknown_fields)]
 struct LaneDef {
     id: String,
+    /// §33: preference may tune verbosity, ordering, phrasing, grouping and
+    /// cadence — and may NEVER suppress this lane. Declared per lane in the
+    /// artifact rather than hard-coded, so widening the protected set is an
+    /// artifact change somebody can see in a diff.
+    protected: bool,
     reasons: Vec<String>,
 }
 
@@ -75,6 +80,7 @@ pub struct Definitions {
     pub rule_version: String,
     order: Vec<String>,
     reasons: BTreeMap<String, Vec<String>>,
+    protected: BTreeSet<String>,
     reliance: Vec<String>,
     debt_requires_reliance: bool,
 }
@@ -83,6 +89,11 @@ impl Definitions {
     /// Lanes in the order a surface renders them.
     pub fn order(&self) -> &[String] {
         &self.order
+    }
+
+    /// Can a preference hide this lane? Never, for the protected ones.
+    pub fn is_protected(&self, lane: Lane) -> bool {
+        self.protected.contains(lane.as_str())
     }
 
     /// Where a reason sorts within its lane. `None` for a reason the artifact
@@ -148,6 +159,17 @@ pub fn load() -> Result<Definitions, String> {
         reasons.insert(lane.id.clone(), lane.reasons.clone());
     }
 
+    // The protected set is not allowed to be empty. §33 names four classes
+    // that preference may never suppress, and an artifact that protected
+    // nothing would make the firewall a comment.
+    if artifact.lanes.iter().all(|lane| !lane.protected) {
+        return Err(
+            "lanes.v1.json protects no lane — §33's firewall is a rule, and a table that \
+             declares no protected class turns it into a comment"
+                .into(),
+        );
+    }
+
     // The reasons this build can emit, against the reasons the artifact
     // declares. Both directions: an undeclared reason would sort nowhere, and
     // a declared-but-unreachable one is a promise the code does not keep.
@@ -180,6 +202,12 @@ pub fn load() -> Result<Definitions, String> {
         artifact_version: artifact.artifact_version,
         rule_version: artifact.rule_version,
         order: artifact.lanes.iter().map(|l| l.id.clone()).collect(),
+        protected: artifact
+            .lanes
+            .iter()
+            .filter(|l| l.protected)
+            .map(|l| l.id.clone())
+            .collect(),
         reasons,
         reliance: artifact.reliance,
         debt_requires_reliance: artifact.debt_requires_reliance,

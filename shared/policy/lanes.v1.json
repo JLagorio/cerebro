@@ -1,10 +1,11 @@
 {
   "format": 1,
-  "artifact_version": 1,
+  "artifact_version": 2,
   "rule_version": "lanes-v1",
   "lanes": [
     {
       "id": "contradiction",
+      "protected": true,
       "reasons": [
         "open_edge_genuine_direct",
         "open_edge_partial",
@@ -14,14 +15,22 @@
     },
     {
       "id": "blindness",
-      "reasons": ["coverage_blind_assessed", "coverage_unassessed"]
+      "protected": true,
+      "reasons": [
+        "coverage_blind_assessed",
+        "coverage_unassessed"
+      ]
     },
     {
       "id": "staleness",
-      "reasons": ["freshness_stale"]
+      "protected": false,
+      "reasons": [
+        "freshness_stale"
+      ]
     },
     {
       "id": "epistemic_debt",
+      "protected": false,
       "reasons": [
         "unresolved_contradiction",
         "unsupported_inference",
@@ -33,6 +42,10 @@
       ]
     }
   ],
-  "reliance": ["qualified", "promotion_attempted", "refined_by"],
+  "reliance": [
+    "qualified",
+    "promotion_attempted",
+    "refined_by"
+  ],
   "debt_requires_reliance": true
 }

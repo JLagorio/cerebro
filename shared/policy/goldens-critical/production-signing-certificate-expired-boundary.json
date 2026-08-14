@@ -1,0 +1,23 @@
+{
+  "name": "expiry exactly at as_of is expired, not expiring",
+  "description": "The operator is lte, so the instant of expiry counts as expired. The expiring trigger uses gt and must NOT also fire \u2014 one certificate, one sentence.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-prod-signing",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-12T00:00:00Z"
+      }
+    }
+  ],
+  "replacements": [],
+  "expected": [
+    {
+      "trigger_id": "production_signing_certificate_expired",
+      "candidate_id": "cert-prod-signing"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "expiry inside 72 hours fires the imminent trigger",
+  "description": "Human-confirmable imminent expiry: 48 hours out is inside the window and not yet expired.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-prod-signing",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-14T00:00:00Z"
+      }
+    }
+  ],
+  "replacements": [],
+  "expected": [
+    {
+      "trigger_id": "production_signing_certificate_expiring",
+      "candidate_id": "cert-prod-signing"
+    }
+  ]
+}
