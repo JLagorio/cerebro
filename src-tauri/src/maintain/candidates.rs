@@ -74,6 +74,12 @@ pub enum Signal {
     SingleSourceSupport,
     /// It is live and promoted past draft and rests on nothing at all.
     UnsupportedStanding,
+    /// M27's staleness lane holds it: at least one facet's evidence is past
+    /// the freshness rule for its predicate. This is where the lane becomes
+    /// WORK — the pass already knows how to say a thing once and remember
+    /// having said it, and a second recheck mechanism would have to learn
+    /// that again (§10).
+    StaleEvidence,
 }
 
 impl Signal {
@@ -83,6 +89,7 @@ impl Signal {
             Signal::UnresolvedContradiction => "unresolved_contradiction",
             Signal::SingleSourceSupport => "single_source_support",
             Signal::UnsupportedStanding => "unsupported_standing",
+            Signal::StaleEvidence => "stale_evidence",
         }
     }
 }
@@ -115,11 +122,16 @@ impl Findings {
 }
 
 /// Look at the base once.
-pub fn find(state: &EpistemicState) -> Findings {
+///
+/// `stale` is handed in rather than derived: this module has no clock and
+/// must not grow one, and M27.6's staleness lane already answers exactly this
+/// question. Two derivations of "which beliefs are stale" could disagree, and
+/// the one a person is looking at is the lane.
+pub fn find(state: &EpistemicState, stale: &BTreeSet<String>) -> Findings {
     Findings {
         exact_merges: exact_merges(state),
         compress: compress(state),
-        attention: attention(state),
+        attention: attention(state, stale),
     }
 }
 
@@ -219,7 +231,7 @@ fn compress(state: &EpistemicState) -> Vec<Compress> {
 }
 
 /// Every live belief that tripped at least one signal.
-fn attention(state: &EpistemicState) -> Vec<Attention> {
+fn attention(state: &EpistemicState, stale: &BTreeSet<String>) -> Vec<Attention> {
     let contested = contested(state);
     let mut out = Vec::new();
     for belief in state.beliefs.values() {
@@ -232,6 +244,9 @@ fn attention(state: &EpistemicState) -> Vec<Attention> {
         }
         if contested.contains(belief.belief_id.as_str()) {
             signals.push(Signal::UnresolvedContradiction);
+        }
+        if stale.contains(&belief.belief_id) {
+            signals.push(Signal::StaleEvidence);
         }
         match &belief.current().basis {
             BeliefBasis::Unsupported { .. } => {
@@ -332,7 +347,7 @@ mod tests {
             .beliefs
             .insert("b0000000000000000000000000000009".into(), twin);
 
-        let found = find(&state);
+        let found = find(&state, &BTreeSet::new());
         assert_eq!(found.exact_merges.len(), 1, "{:?}", found.exact_merges);
         let merge = &found.exact_merges[0];
         assert_eq!(
@@ -375,7 +390,7 @@ mod tests {
             .insert("b0000000000000000000000000000009".into(), twin);
 
         assert!(
-            find(&state).exact_merges.is_empty(),
+            find(&state, &BTreeSet::new()).exact_merges.is_empty(),
             "two independent sources agreeing is the strongest thing a base can hold"
         );
     }
@@ -407,12 +422,12 @@ mod tests {
         state
             .beliefs
             .insert("b0000000000000000000000000000009".into(), elsewhere);
-        assert!(find(&state).exact_merges.is_empty());
+        assert!(find(&state, &BTreeSet::new()).exact_merges.is_empty());
     }
 
     #[test]
     fn a_live_contradicts_edge_is_an_attention_signal_on_both_ends() {
-        let found = find(&state());
+        let found = find(&state(), &BTreeSet::new());
         let flagged: Vec<&str> = found
             .attention
             .iter()
@@ -428,14 +443,14 @@ mod tests {
         // behind and still cannot source is a different thing.
         let mut state = state();
         assert!(
-            !find(&state)
+            !find(&state, &BTreeSet::new())
                 .attention
                 .iter()
                 .any(|a| a.signals.contains(&Signal::UnsupportedStanding)),
             "the fixture's unsupported beliefs are drafts"
         );
         state.beliefs.get_mut(fixture::B_TWO).unwrap().qualification = Qualification::Qualified;
-        let found = find(&state);
+        let found = find(&state, &BTreeSet::new());
         let flagged = found
             .attention
             .iter()
@@ -445,17 +460,52 @@ mod tests {
     }
 
     #[test]
+    fn the_staleness_lane_becomes_recheck_work_here_and_nowhere_else() {
+        // §10: M27 builds no second recheck mechanism. The lane says WHICH
+        // beliefs are stale; this pass already knows how to say a thing once
+        // and remember having said it, so the lane's answer arrives as an
+        // ordinary finding and inherits all of that.
+        let state = state();
+        let quiet = find(&state, &BTreeSet::new());
+        assert!(
+            !quiet
+                .attention
+                .iter()
+                .any(|a| a.signals.contains(&Signal::StaleEvidence)),
+            "nothing is stale until the lane says so — this module has no clock"
+        );
+
+        let stale = BTreeSet::from([fixture::B_ONE.to_string()]);
+        let flagged = find(&state, &stale);
+        assert!(flagged
+            .attention
+            .iter()
+            .find(|a| a.belief_id == fixture::B_ONE)
+            .expect("B_ONE")
+            .signals
+            .contains(&Signal::StaleEvidence));
+        assert!(
+            !flagged
+                .attention
+                .iter()
+                .find(|a| a.belief_id == fixture::B_TWO)
+                .is_some_and(|a| a.signals.contains(&Signal::StaleEvidence)),
+            "and only the beliefs the lane named"
+        );
+    }
+
+    #[test]
     fn one_source_behind_everything_is_a_signal_and_two_are_not() {
         let mut state = state();
         // B_ONE rests on two sources in the fixture.
-        assert!(!find(&state)
+        assert!(!find(&state, &BTreeSet::new())
             .attention
             .iter()
             .find(|a| a.belief_id == fixture::B_ONE)
             .is_some_and(|a| a.signals.contains(&Signal::SingleSourceSupport)));
         state.beliefs.get_mut(fixture::B_ONE).unwrap().revisions[1].basis =
             fixture::linked(&[fixture::OBS_AUTHORITY]);
-        assert!(find(&state)
+        assert!(find(&state, &BTreeSet::new())
             .attention
             .iter()
             .find(|a| a.belief_id == fixture::B_ONE)
@@ -470,11 +520,11 @@ mod tests {
         state.beliefs.get_mut(fixture::B_KESTREL).unwrap().lifecycle = Lifecycle::Superseded;
         // The fixture's `refines` edge still touches it, so it is not free.
         assert!(
-            find(&state).compress.is_empty(),
+            find(&state, &BTreeSet::new()).compress.is_empty(),
             "something live still refers to it"
         );
         state.relations.get_mut("r2").unwrap().live = false;
-        let found = find(&state);
+        let found = find(&state, &BTreeSet::new());
         assert_eq!(found.compress.len(), 1);
         assert_eq!(found.compress[0].belief_id, fixture::B_KESTREL);
     }
@@ -494,7 +544,7 @@ mod tests {
             RelationKind::Supersedes,
             true,
         );
-        let found = find(&state);
+        let found = find(&state, &BTreeSet::new());
         assert_eq!(found.compress.len(), 1);
         assert_eq!(
             found.compress[0].superseded_by.as_deref(),
@@ -531,7 +581,10 @@ mod tests {
     #[test]
     fn the_same_base_finds_the_same_things_in_the_same_order() {
         let state = state();
-        assert_eq!(find(&state), find(&state));
+        assert_eq!(
+            find(&state, &BTreeSet::new()),
+            find(&state, &BTreeSet::new())
+        );
     }
 
     #[test]
@@ -564,6 +617,10 @@ mod tests {
                 ),
             );
         }
-        assert!(find(&state).is_empty(), "{:?}", find(&state));
+        assert!(
+            find(&state, &BTreeSet::new()).is_empty(),
+            "{:?}",
+            find(&state, &BTreeSet::new())
+        );
     }
 }

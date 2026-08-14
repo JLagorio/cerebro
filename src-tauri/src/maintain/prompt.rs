@@ -119,11 +119,12 @@ mod tests {
     use super::*;
     use crate::assembly::fixture;
     use crate::maintain::{candidates, pass};
+    use std::collections::BTreeSet;
 
     fn findings() -> Vec<Finding> {
         pass::keyed(
             "cafebabecafebabecafebabecafebabe",
-            &candidates::find(&fixture::state()),
+            &candidates::find(&fixture::state(), &BTreeSet::new()),
         )
     }
 

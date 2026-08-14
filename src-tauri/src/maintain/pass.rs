@@ -82,11 +82,12 @@ pub fn tick<R: Runner>(
     conn: &Connection,
     context: &Context<'_>,
     state: &EpistemicState,
+    stale: &std::collections::BTreeSet<String>,
     runner: &R,
     run_id: &str,
     now: DateTime<Utc>,
 ) -> Result<Tick, String> {
-    let all = keyed(context.store_uuid, &candidates::find(state));
+    let all = keyed(context.store_uuid, &candidates::find(state, stale));
     let mut fresh = Vec::new();
     let mut already_said = 0usize;
     for finding in all {
@@ -256,6 +257,7 @@ mod tests {
     use crate::ledger::schema::{Qualification, TransitionCause};
     use crate::vault::testutil;
     use std::cell::RefCell;
+    use std::collections::BTreeSet;
 
     const STORE: &str = "cafebabecafebabecafebabecafebabe";
     const HEAD: &str = "90000000000000000000000000000001";
@@ -328,6 +330,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &state,
+            &BTreeSet::new(),
             &spy,
             LEASE,
             now(),
@@ -344,6 +347,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &state,
+            &BTreeSet::new(),
             &spy,
             LEASE,
             now(),
@@ -364,6 +368,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &state,
+            &BTreeSet::new(),
             &spy,
             LEASE,
             now(),
@@ -374,6 +379,7 @@ mod tests {
                 &harness.conn,
                 &harness.context(),
                 &state,
+                &BTreeSet::new(),
                 &spy,
                 LEASE,
                 now()
@@ -388,6 +394,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &state,
+            &BTreeSet::new(),
             &spy,
             LEASE,
             now(),
@@ -411,6 +418,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &state,
+            &BTreeSet::new(),
             &Broken,
             LEASE,
             now(),
@@ -430,6 +438,7 @@ mod tests {
                 &harness.conn,
                 &harness.context(),
                 &state,
+                &BTreeSet::new(),
                 &spy,
                 LEASE,
                 now()
@@ -447,6 +456,7 @@ mod tests {
             &harness.conn,
             &harness.context(),
             &EpistemicState::default(),
+            &BTreeSet::new(),
             &spy,
             LEASE,
             now(),
@@ -458,7 +468,7 @@ mod tests {
 
     #[test]
     fn the_key_is_the_content_and_two_stores_never_share_one() {
-        let findings = candidates::find(&fixture::state());
+        let findings = candidates::find(&fixture::state(), &BTreeSet::new());
         let mine = keyed(STORE, &findings);
         let theirs = keyed("beefbeefbeefbeefbeefbeefbeefbeef", &findings);
         assert_eq!(mine.len(), theirs.len());

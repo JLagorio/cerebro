@@ -72,7 +72,11 @@ pub fn attempt<R: Runner>(
     runner: &R,
     now: DateTime<Utc>,
 ) -> Result<Scheduled, String> {
-    if !anything_new(conn, context, state)? {
+    // ONE derivation of "which beliefs are stale", shared with the lane a
+    // person opens (M27.6b). A pass that computed its own could name work the
+    // surface does not show.
+    let stale = crate::attention::lanes::stale_beliefs(state, now)?;
+    if !anything_new(conn, context, state, &stale)? {
         return Ok(Scheduled::NothingNew);
     }
 
@@ -94,7 +98,7 @@ pub fn attempt<R: Runner>(
         Dispatched::NothingToClaim => return Ok(Scheduled::NothingNew),
     };
 
-    let outcome = pass::tick(conn, context, state, runner, &lease.run_id, now);
+    let outcome = pass::tick(conn, context, state, &stale, runner, &lease.run_id, now);
     let (run_outcome, result) = match &outcome {
         Ok(_) => (RunOutcome::Succeeded, None),
         Err(detail) => (RunOutcome::Failed, Some(detail.clone())),
@@ -133,8 +137,9 @@ fn anything_new(
     conn: &Connection,
     context: &pass::Context<'_>,
     state: &EpistemicState,
+    stale: &std::collections::BTreeSet<String>,
 ) -> Result<bool, String> {
-    let findings = pass::keyed(context.store_uuid, &super::candidates::find(state));
+    let findings = pass::keyed(context.store_uuid, &super::candidates::find(state, stale));
     for finding in findings {
         if !pass::said_before(conn, context, &finding.key)? {
             return Ok(true);

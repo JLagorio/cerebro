@@ -429,6 +429,28 @@ pub fn lanes(
     }
 }
 
+/// The beliefs the staleness lane holds, for the maintenance pass (M27.6b).
+///
+/// §10 in one function: **M27 builds no second recheck mechanism.** The lane
+/// a person opens and the recheck work the pass emits come from the SAME
+/// computation, so a prompt can never name something the surface does not
+/// show — or, worse, miss something it does.
+///
+/// `parked` is empty because it cannot matter: parked promotions feed the
+/// debt lane and nothing else, and passing them would suggest the answer
+/// depended on them.
+pub fn stale_beliefs(
+    state: &EpistemicState,
+    as_of: chrono::DateTime<chrono::Utc>,
+) -> Result<BTreeSet<String>, String> {
+    let tables = bundle::Tables::load()?;
+    let definitions = load()?;
+    Ok(lanes(state, &tables, &definitions, &[], as_of)
+        .of(Lane::Staleness)
+        .map(|item| item.belief_id.clone())
+        .collect())
+}
+
 fn sorted_reasons(definitions: &Definitions, lane: Lane, mut reasons: Vec<Reason>) -> Vec<Reason> {
     reasons.sort_by_key(|reason| {
         definitions
@@ -997,6 +1019,23 @@ mod tests {
         state.beliefs.get_mut(B_ONE).unwrap().attested =
             Some(("a".repeat(32), REV_ONE.to_string()));
         assert_eq!(run(&state, &[]).of(Lane::Staleness).count(), 1);
+    }
+
+    #[test]
+    fn stale_beliefs_is_the_staleness_lane_and_not_a_second_opinion() {
+        // The maintenance pass calls this to decide what needs a recheck. If
+        // it could answer differently from the lane, a prompt could name work
+        // the surface does not show — or miss work it does.
+        let state = standing();
+        let from_lane: BTreeSet<String> = run(&state, &[])
+            .of(Lane::Staleness)
+            .map(|item| item.belief_id.clone())
+            .collect();
+        assert_eq!(
+            stale_beliefs(&state, at("2026-08-12T00:00:00Z")).unwrap(),
+            from_lane
+        );
+        assert_eq!(from_lane, BTreeSet::from([B_ONE.to_string()]));
     }
 
     /// Regenerate `shared/policy/lanes.v1.sha256` after a DELIBERATE edit.
