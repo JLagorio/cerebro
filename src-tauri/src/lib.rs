@@ -339,7 +339,7 @@ fn converge(
     app: tauri::AppHandle,
     vault: String,
     from_seq: Option<u64>,
-) -> Result<convergence::diff::Output, String> {
+) -> Result<attention::status::ChangesView, String> {
     let vault_path = Path::new(&vault);
     let conn = runtime::open_existing(&config_dir(&app)?)?;
     let scope = runtime::open_vault(vault_path)
@@ -363,7 +363,12 @@ fn converge(
         from_seq: from_seq.min(head_seq),
         to_seq: head_seq,
     };
-    convergence::over(&read.frames, &store_uuid, window)
+    // Read aloud on the way out (M27.8a). The stored row keeps the structured
+    // `Output` — its bytes are content-hashed and a prose field would change
+    // every one already on disk — so the sentences are composed per call, in
+    // the module that owns the surface's whole vocabulary.
+    let output = convergence::over(&read.frames, &store_uuid, window)?;
+    Ok(attention::status::change_sections(&output))
 }
 
 /// The three axes, per belief facet (M27.5b).
@@ -374,6 +379,49 @@ fn converge(
 #[tauri::command(async)]
 fn belief_chips(vault: String) -> Result<Vec<dynamics::bundle::BeliefChips>, String> {
     dynamics::bundle::for_vault(Path::new(&vault), chrono::Utc::now())
+}
+
+/// The four attention lanes, for the Epistemic Status surface (M27.8a).
+///
+/// The parked-promotion feed is OPERATIONAL and its absence is not a reason to
+/// refuse: a contradiction is worth showing to somebody whose app-data is
+/// unavailable. But it is also not nothing — a debt lane silently missing every
+/// parked item reads as a base that owes nothing — so `None` travels as far as
+/// the view, which names it in `incomplete`.
+///
+/// Preferences are the defaults until they are persisted. That is one line to
+/// change here and nowhere else, which is why every surface goes through this.
+#[tauri::command(async)]
+fn attention_lanes(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<attention::status::LanesView, String> {
+    let vault_path = Path::new(&vault);
+    let parked = parked_promotions(&app, vault_path);
+    attention::status::for_vault(
+        vault_path,
+        parked.as_deref(),
+        &attention::preferences::Preferences::default(),
+        chrono::Utc::now(),
+    )
+}
+
+/// Open parked promotions, or `None` when this process could not ask.
+fn parked_promotions(
+    app: &tauri::AppHandle,
+    vault: &Path,
+) -> Option<Vec<attention::lanes::ParkedPromotion>> {
+    let conn = runtime::open_existing(&config_dir(app).ok()?).ok()?;
+    let store_uuid = runtime::open_vault(vault)?.store_uuid?;
+    let rows = runtime::parked::open_rows(&conn, &store_uuid).ok()?;
+    Some(
+        rows.into_iter()
+            .map(|row| attention::lanes::ParkedPromotion {
+                belief_id: row.belief_id,
+                missing_roles: row.missing_roles,
+            })
+            .collect(),
+    )
 }
 
 /// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
@@ -812,6 +860,7 @@ pub fn run() {
             ask_question,
             converge,
             belief_chips,
+            attention_lanes,
             resolve_held_items,
             create_note,
             set_note_title,

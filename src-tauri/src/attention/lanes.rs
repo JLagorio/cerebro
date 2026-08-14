@@ -743,7 +743,7 @@ fn reliance_index(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::assembly::fixture::{relate, B_ONE, B_TWO, OBS_AUTHORITY, OBS_INFERRED, REV_ONE};
     use crate::dynamics::facet::tests::{assertion_facet, base};
@@ -772,7 +772,11 @@ mod tests {
     /// reducer never indexed lands in the `unknown/unknown` bucket, which is a
     /// SECOND facet and therefore a second row in every per-facet lane. That
     /// is correct behaviour and a confusing fixture.
-    fn standing() -> EpistemicState {
+    ///
+    /// Shared with [`crate::attention::status`] rather than copied there: the
+    /// trap above is the reason this helper exists, and a second copy of it is
+    /// a second place to fall into it.
+    pub(crate) fn standing() -> EpistemicState {
         let mut state = base();
         for event in [OBS_AUTHORITY, OBS_INFERRED] {
             let mut assertion = assertion_facet(
