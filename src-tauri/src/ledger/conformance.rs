@@ -1235,7 +1235,7 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
         &direct_a_reg,
         vec![LineageEdge {
             edge: LineageKind::DerivedFrom,
-            parent_observation_event_id: snap_a,
+            parent_observation_event_id: snap_a.clone(),
         }],
     );
     let orphan_b = extract(
@@ -1244,7 +1244,7 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
         &direct_b_reg,
         vec![LineageEdge {
             edge: LineageKind::DerivedFrom,
-            parent_observation_event_id: snap_b,
+            parent_observation_event_id: snap_b.clone(),
         }],
     );
     b.push_body(
@@ -1517,12 +1517,121 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
             },
         ),
     );
+    // --- the never-queued road (the M27.10 fix's other half) ---------------
+    // A decision cannot land on a proposal nobody queued — "auto-applied" is
+    // not a person — and the proof that cites the refused decision then
+    // fails as undecided. Both doors close, and the vector pins both seqs.
+    let fresh_a = extract(
+        &mut b,
+        &direct_a,
+        &direct_a_reg,
+        vec![LineageEdge {
+            edge: LineageKind::DerivedFrom,
+            parent_observation_event_id: snap_a.clone(),
+        }],
+    );
+    let fresh_b = extract(
+        &mut b,
+        &direct_b,
+        &direct_b_reg,
+        vec![LineageEdge {
+            edge: LineageKind::DerivedFrom,
+            parent_observation_event_id: snap_b.clone(),
+        }],
+    );
+    let unqueued_proposal = "cccc0000cccc0000cccc0000cccc0003";
+    let unqueued_decision = "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3";
+    let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &schema::ProposalSubmitted {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal: Box::new(schema::ProposalV1 {
+                schema: schema::PROPOSAL_SCHEMA,
+                proposal_id: unqueued_proposal.into(),
+                run_id: "4444444444444444444444444444444a".into(),
+                targets: vec![
+                    schema::ProposalTarget {
+                        target_id: fresh_a.clone(),
+                        target_class: schema::TargetClass::Observation,
+                        expected_version: None,
+                    },
+                    schema::ProposalTarget {
+                        target_id: fresh_b.clone(),
+                        target_class: schema::TargetClass::Observation,
+                        expected_version: None,
+                    },
+                ],
+                op: schema::ProposalOp::ConfirmObservationIndependence {
+                    left_observation_event_id: fresh_a.clone(),
+                    right_observation_event_id: fresh_b.clone(),
+                    basis_event_ids: vec![fresh_a.clone(), fresh_b.clone()],
+                    reason: "an auto-applied confirmation confirms nothing".into(),
+                },
+                intended_use: schema::IntendedUse {
+                    kind: schema::IntendedUseKind::ReversibleWork,
+                    stakes: schema::Risk::Low,
+                    predicate_class: None,
+                },
+                basis: schema::ProposalBasis {
+                    transition_cause: schema::TransitionCause::Maintenance,
+                    evidence_refs: vec![],
+                    coverage_refs: vec![],
+                    authority_refs: vec![],
+                    authority_route_refs: vec![],
+                    addressed_contradictions: vec![],
+                    absence_claim: false,
+                },
+                declared_risk: schema::Risk::Low,
+                reason: "an auto-applied confirmation confirms nothing".into(),
+                candidate_search_receipt: None,
+            }),
+        },
+    );
+    // A decision on something that is not awaiting one: refused.
+    let (schema_v, batch_id, idempotency_key, actor) = common("human:josef");
+    b.push_body(
+        schema::KIND_PROPOSAL_DECISION_RECORDED,
+        &schema::ProposalDecisionRecorded {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            decision_id: unqueued_decision.into(),
+            proposal_id: unqueued_proposal.into(),
+            decision: schema::Decision::Approve,
+            reviewer: "human:josef".into(),
+            decided_at: STAMP.into(),
+            reason: None,
+            reviewed_target_versions: vec![],
+        },
+    );
+    // And the proof citing that refused decision: refused as undecided.
+    b.push_body(
+        KIND_INDEPENDENCE_RECORDED,
+        &independence_body(
+            &fresh_a,
+            &fresh_b,
+            confirmed(unqueued_proposal, unqueued_decision),
+        ),
+    );
+
     (
         "independence",
         "Positive firsthand and direct-artifact proofs record the unordered pair; shared \
          ancestry, same actors, mismatched refs, duplicates, and the reserved human proof are \
-         refused; a human_confirmed proof citing an approval that was not a confirmation, or a \
-         confirmation of a different pair, is refused too; absence of any fact stays unknown.",
+         refused; a human_confirmed proof citing an approval that was not a confirmation, a \
+         confirmation of a different pair, or a decision that could not land because its \
+         proposal was never queued, is refused too; absence of any fact stays unknown.",
         b.frames,
     )
 }
@@ -4852,12 +4961,77 @@ fn scenario_freshness() -> (&'static str, &'static str, Vec<Frame>) {
     forged.dedupe_key = "0".repeat(32);
     b.push_body(KIND_FRESHNESS_TRANSITIONED, &forged);
 
+    // A transition pinned to the revision its OWN batch is still writing.
+    // Freshness is about what the store already HOLDS; the member refuses,
+    // so the whole batch — the revision included — has no effect.
+    let staged_revision = format!("{:032x}", b.frames.len() + 1);
+    b.push_batch(
+        "b0000000000000000000000000000001",
+        vec![
+            (
+                KIND_BELIEF_REVISED.to_string(),
+                serde_json::to_value(revised_body(BELIEF, vec![], unsupported())).unwrap(),
+            ),
+            (
+                KIND_FRESHNESS_TRANSITIONED.to_string(),
+                serde_json::to_value(transition(
+                    BELIEF,
+                    &staged_revision,
+                    FacetPredicate::Known {
+                        value: "ci_status".into(),
+                    },
+                    StateStage::Implemented,
+                    Freshness::Fresh,
+                    Freshness::Stale,
+                    "2026-08-14T09:00:00.000Z",
+                ))
+                .unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // Terminal means terminal: a tombstoned Belief's claims do not go stale,
+    // because a claim nobody may act on has no freshness to lose.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_BELIEF_TOMBSTONED,
+        &schema::BeliefTombstoned {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF.into(),
+            replacement_id: None,
+            reason_code: schema::TombstoneReason::Invalid,
+        },
+    );
+    b.push_body(
+        KIND_FRESHNESS_TRANSITIONED,
+        &transition(
+            BELIEF,
+            &created,
+            FacetPredicate::Known {
+                value: "ci_status".into(),
+            },
+            StateStage::Shipping,
+            Freshness::Stale,
+            Freshness::Unknown,
+            "2026-08-14T09:00:00.000Z",
+        ),
+    );
+
     (
         "freshness",
         "recorded freshness crossings: one facet going stale and coming back at an earlier \
          effective time, the exact retry that changes nothing, the same dedupe key telling a \
-         different story, a broken chain, a second facet on the same revision, and every \
-         structural refusal",
+         different story, a broken chain, a second facet on the same revision, every structural \
+         refusal, a transition pinned to its own batch's staged revision, and a tombstoned \
+         Belief whose claims cannot go stale",
         b.frames,
     )
 }
@@ -5136,6 +5310,14 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
     // door, so one reaching the reducer is a duplicate append.
     b.push_body(KIND_CONTRADICTION_OPENED, &edge);
 
+    // The right verdict, the wrong edge: the pair classified genuine_direct,
+    // and this opens a partial. The kind is in the edge id, so this is not
+    // the open above replayed — it is a SECOND edge the verdict never left.
+    b.push_body(
+        KIND_CONTRADICTION_OPENED,
+        &opened_body(&open_pair, EdgeKind::Partial, &classify_event),
+    );
+
     // --- closing, and the two ways it must not happen ----------------------
     let close = |addressed_by: &str| ContradictionClosed {
         schema: BODY_SCHEMA,
@@ -5157,6 +5339,11 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
     };
     // Standalone: nothing addressed anything.
     b.push_body(KIND_CONTRADICTION_CLOSED, &close(&assert_one));
+
+    // A close that names ITSELF as what addressed the edge — the one staged
+    // id that, if admitted, would let a close be its own justification.
+    let own_id = format!("{:032x}", b.frames.len() + 1);
+    b.push_body(KIND_CONTRADICTION_CLOSED, &close(&own_id));
 
     // Batched with the mutation whose preallocated id it names.
     let addressing = format!("{:032x}", b.frames.len() + 1);
@@ -5223,6 +5410,118 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
     // Registered once: a second is a duplicate append.
     b.push_body(KIND_CONFLICT_COMPARISON_REGISTERED, &declared);
 
+    // --- the declared road, walked to a verdict ----------------------------
+    // A DECLARED comparison's classification carries the DeclaredRelation
+    // tuple the registration minted, side for side — the path M27 shipped
+    // and no vector had walked. Resolved: opens nothing, advances once.
+    let declared_verdict = |registration: &ConflictComparisonRegistered,
+                            outcome: ConflictOutcome,
+                            reason_codes: Vec<ConflictReasonCode>| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:conflict-classifier");
+        ConflictClassified {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            comparison_id: registration.comparison_id.clone(),
+            left: ConflictEndpoint::DeclaredRelation {
+                endpoint: registration.left.clone(),
+            },
+            right: ConflictEndpoint::DeclaredRelation {
+                endpoint: registration.right.clone(),
+            },
+            outcome,
+            classification: Classification::Deterministic {
+                rule_version: "gauntlet-v1".into(),
+            },
+            evidence_event_ids: vec![],
+            reason_codes,
+            classified_at: "2026-08-12T09:00:00.000Z".into(),
+        }
+    };
+    b.push_body(
+        KIND_CONFLICT_CLASSIFIED,
+        &declared_verdict(
+            &declared,
+            ConflictOutcome::ResolvedByStage,
+            vec![ConflictReasonCode::StageDisjoint],
+        ),
+    );
+
+    // A comparison registered in the SAME batch as the declaration that
+    // creates it — the shape the declare_contradiction producer actually
+    // emits, and the registration road no vector had walked.
+    let relation_event = format!("{:032x}", b.frames.len() + 1);
+    let batch_declared = registration_of(&relation_event, (BELIEF_B, &second), (BELIEF_C, &third));
+    b.push_batch(
+        "b0000000000000000000000000000004",
+        vec![
+            (
+                KIND_BELIEF_RELATION.to_string(),
+                serde_json::to_value(relation_body(
+                    BELIEF_B,
+                    BELIEF_C,
+                    RelationKind::Contradicts,
+                    RelationAction::Add,
+                ))
+                .unwrap(),
+            ),
+            (
+                KIND_CONFLICT_COMPARISON_REGISTERED.to_string(),
+                serde_json::to_value(&batch_declared).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // And the declared road's unresolved half: verdict and edge, one batch,
+    // DeclaredRelation endpoints end to end.
+    let declared_unresolved = declared_verdict(
+        &batch_declared,
+        ConflictOutcome::GenuineDirect,
+        vec![ConflictReasonCode::IncompatibleValues],
+    );
+    let declared_classify_event = format!("{:032x}", b.frames.len() + 1);
+    let (schema_v, batch_id_v, idempotency_key_v, actor_v) = common("system:conflict-classifier");
+    let declared_edge = ContradictionOpened {
+        schema: schema_v,
+        batch_id: batch_id_v,
+        idempotency_key: idempotency_key_v,
+        actor: actor_v,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        edge_id: derive_edge_id(&batch_declared.comparison_id, EdgeKind::GenuineDirect),
+        comparison_id: batch_declared.comparison_id.clone(),
+        left: ConflictEndpoint::DeclaredRelation {
+            endpoint: batch_declared.left.clone(),
+        },
+        right: ConflictEndpoint::DeclaredRelation {
+            endpoint: batch_declared.right.clone(),
+        },
+        kind: EdgeKind::GenuineDirect,
+        classified_event_id: declared_classify_event,
+    };
+    b.push_batch(
+        "b0000000000000000000000000000005",
+        vec![
+            (
+                KIND_CONFLICT_CLASSIFIED.to_string(),
+                serde_json::to_value(&declared_unresolved).unwrap(),
+            ),
+            (
+                KIND_CONTRADICTION_OPENED.to_string(),
+                serde_json::to_value(&declared_edge).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
     // --- the checkpoint ----------------------------------------------------
     let marker =
         |through: &str, seen: u64, resolved: u64, opened: u64| ContradictionBackfillCompleted {
@@ -5269,8 +5568,11 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
     (
         "contradiction",
         "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one \
-         batched with its edge, the close that must travel with its mutation, the matrix both \
-         ways round, the declared road in, and a checkpoint that refuses the same coverage twice",
+         batched with its edge, a mismatched-kind edge and a self-addressing close refused, the \
+         close that must travel with its mutation, the matrix both ways round, the declared \
+         road walked to both verdicts — resolved standalone, unresolved with its edge, and a \
+         registration batched with the declaration that creates it — and a checkpoint that \
+         refuses the same coverage twice",
         b.frames,
     )
 }

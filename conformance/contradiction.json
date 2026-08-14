@@ -1,6 +1,6 @@
 {
   "name": "contradiction",
-  "description": "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one batched with its edge, the close that must travel with its mutation, the matrix both ways round, the declared road in, and a checkpoint that refuses the same coverage twice",
+  "description": "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one batched with its edge, a mismatched-kind edge and a self-addressing close refused, the close that must travel with its mutation, the matrix both ways round, the declared road walked to both verdicts — resolved standalone, unresolved with its edge, and a registration batched with the declaration that creates it — and a checkpoint that refuses the same coverage twice",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -1568,7 +1568,72 @@
       "seq": 26,
       "event_id": "0000000000000000000000000000001a",
       "prev": "74ce3acb3228a5fdc9862877aa545f9453116acce97cc19154b16b8070ee2101",
-      "hash": "06e4d7a2ee6ee8ddc98bed51c36d4f57a673a8415306806c3e8ba92d9793670b",
+      "hash": "09b0cdecd8ced770d214386c12331386f8f88aeecb51f79712d506dcdfcde9ad",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.opened",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "edge_id": "5a966b3eeb9a6079d792ff3d5f27af93",
+        "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
+        "left": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000003",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "right": {
+          "kind": "asserted",
+          "assertion_event_id": "00000000000000000000000000000004",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "predicate": "status",
+          "value_hash": "fe41b2218b8be35a11b5a8619c2dab010e94c097c90a08da74df449647d1e50a",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "state_stage": "unknown",
+          "valid_time": {
+            "from": null,
+            "to": null
+          }
+        },
+        "kind": "partial",
+        "classified_event_id": "00000000000000000000000000000016"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 27,
+      "event_id": "0000000000000000000000000000001b",
+      "prev": "09b0cdecd8ced770d214386c12331386f8f88aeecb51f79712d506dcdfcde9ad",
+      "hash": "464ffed9ef26654f46154c733e51608c40cc143bf7f643546407a6f0e285c706",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1595,10 +1660,40 @@
     },
     {
       "v": 0,
-      "seq": 27,
-      "event_id": "0000000000000000000000000000001b",
-      "prev": "06e4d7a2ee6ee8ddc98bed51c36d4f57a673a8415306806c3e8ba92d9793670b",
-      "hash": "97d6ddd0b1d97201439953ae83688607b2373c833b852293800a094c336bef6a",
+      "seq": 28,
+      "event_id": "0000000000000000000000000000001c",
+      "prev": "464ffed9ef26654f46154c733e51608c40cc143bf7f643546407a6f0e285c706",
+      "hash": "e0dfdb07b72a1fc6fd342d06e71f222f5242b6a890630cafd31b07b3fef8184b",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.closed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "edge_id": "a51b3fd02a735bd0c3705441ef296aa9",
+        "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
+        "left_belief_id": "ffffffffffffffffffffffffffffffff",
+        "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "addressed_by_event_id": "0000000000000000000000000000001c",
+        "evidence_event_ids": [
+          "00000000000000000000000000000003"
+        ],
+        "disposition": "resolved_with_evidence"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 29,
+      "event_id": "0000000000000000000000000000001d",
+      "prev": "e0dfdb07b72a1fc6fd342d06e71f222f5242b6a890630cafd31b07b3fef8184b",
+      "hash": "a0863a700f6e2d01df6de9e7da4c6b0374eadc90f649a0b1aef982156be6434a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.revised",
@@ -1634,10 +1729,10 @@
     },
     {
       "v": 0,
-      "seq": 28,
-      "event_id": "0000000000000000000000000000001c",
-      "prev": "97d6ddd0b1d97201439953ae83688607b2373c833b852293800a094c336bef6a",
-      "hash": "c5cba99fc1faa069893fd38f83ce295e9e9e78186dc05ddbffafba87f1a11b50",
+      "seq": 30,
+      "event_id": "0000000000000000000000000000001e",
+      "prev": "a0863a700f6e2d01df6de9e7da4c6b0374eadc90f649a0b1aef982156be6434a",
+      "hash": "1f40d815ffb9beaa4d9a0329698966373a897e5d9bb51706c82947e60bcb23ba",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1655,7 +1750,7 @@
         "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
         "left_belief_id": "ffffffffffffffffffffffffffffffff",
         "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "addressed_by_event_id": "0000000000000000000000000000001b",
+        "addressed_by_event_id": "0000000000000000000000000000001d",
         "evidence_event_ids": [
           "00000000000000000000000000000003"
         ],
@@ -1664,10 +1759,10 @@
     },
     {
       "v": 0,
-      "seq": 29,
-      "event_id": "0000000000000000000000000000001d",
-      "prev": "c5cba99fc1faa069893fd38f83ce295e9e9e78186dc05ddbffafba87f1a11b50",
-      "hash": "0d942c1f1caeb2e4da2b9d61a8ac5bed51da55e09b9e73b7c89c3c5bc18d558d",
+      "seq": 31,
+      "event_id": "0000000000000000000000000000001f",
+      "prev": "1f40d815ffb9beaa4d9a0329698966373a897e5d9bb51706c82947e60bcb23ba",
+      "hash": "830c9ed158010ecdca59b65c4f49e3176b3e2e324e69a1523ea712571942457d",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "batch.committed",
@@ -1682,20 +1777,20 @@
         "valid_from": null,
         "valid_to": null,
         "member_event_ids": [
-          "0000000000000000000000000000001b",
-          "0000000000000000000000000000001c"
+          "0000000000000000000000000000001d",
+          "0000000000000000000000000000001e"
         ],
         "member_count": 2,
-        "members_digest": "6c80373526a499c36fc85de56ca4f6f370d59b77506629273450c62b5e5637d1",
+        "members_digest": "8eac3ef15b680595c10ff54ec2874d9805871773542b45478f655320f65d1f71",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
     },
     {
       "v": 0,
-      "seq": 30,
-      "event_id": "0000000000000000000000000000001e",
-      "prev": "0d942c1f1caeb2e4da2b9d61a8ac5bed51da55e09b9e73b7c89c3c5bc18d558d",
-      "hash": "303c88da70ed30b3cb063b031cca4a9339ffe3be7dcb62b400ebd9093047ef82",
+      "seq": 32,
+      "event_id": "00000000000000000000000000000020",
+      "prev": "830c9ed158010ecdca59b65c4f49e3176b3e2e324e69a1523ea712571942457d",
+      "hash": "d024def91e053f60a7a6590e0f6c1900ed2d0ede6eceec9ed5a9492dc1994101",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.revised",
@@ -1731,10 +1826,10 @@
     },
     {
       "v": 0,
-      "seq": 31,
-      "event_id": "0000000000000000000000000000001f",
-      "prev": "303c88da70ed30b3cb063b031cca4a9339ffe3be7dcb62b400ebd9093047ef82",
-      "hash": "6543c0395410787a1fb3fdbfa49d2410153346f2c15cec9a6d73f48f51ed2f05",
+      "seq": 33,
+      "event_id": "00000000000000000000000000000021",
+      "prev": "d024def91e053f60a7a6590e0f6c1900ed2d0ede6eceec9ed5a9492dc1994101",
+      "hash": "703c07a60175359c41f18b1ddf9dc1aa2290f48340d3e5a781f715325ac73216",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.closed",
@@ -1752,7 +1847,7 @@
         "comparison_id": "2822c2c578c15128199506ec0d7c56a9",
         "left_belief_id": "ffffffffffffffffffffffffffffffff",
         "right_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "addressed_by_event_id": "0000000000000000000000000000001e",
+        "addressed_by_event_id": "00000000000000000000000000000020",
         "evidence_event_ids": [
           "00000000000000000000000000000003"
         ],
@@ -1761,10 +1856,10 @@
     },
     {
       "v": 0,
-      "seq": 32,
-      "event_id": "00000000000000000000000000000020",
-      "prev": "6543c0395410787a1fb3fdbfa49d2410153346f2c15cec9a6d73f48f51ed2f05",
-      "hash": "9ac855aca357ac0afca99f68c47ddce87ed96033bb65816433173aa0893a5ff8",
+      "seq": 34,
+      "event_id": "00000000000000000000000000000022",
+      "prev": "703c07a60175359c41f18b1ddf9dc1aa2290f48340d3e5a781f715325ac73216",
+      "hash": "62b0cb620db45283843f4026ab68bdd0e14f8193b67c908007b3362b5a897685",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "batch.committed",
@@ -1779,20 +1874,20 @@
         "valid_from": null,
         "valid_to": null,
         "member_event_ids": [
-          "0000000000000000000000000000001e",
-          "0000000000000000000000000000001f"
+          "00000000000000000000000000000020",
+          "00000000000000000000000000000021"
         ],
         "member_count": 2,
-        "members_digest": "c1691a0985425248f11596fb7fbbbd9e480ecb554a87f616c7d62e22acd933ad",
+        "members_digest": "bc6c4fdb5931e9634b1160142f76a043818e28660e9a6baff78ebe0fa7b51455",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
       }
     },
     {
       "v": 0,
-      "seq": 33,
-      "event_id": "00000000000000000000000000000021",
-      "prev": "9ac855aca357ac0afca99f68c47ddce87ed96033bb65816433173aa0893a5ff8",
-      "hash": "2c2d5113b00fce3045683bf65f09cbe7aca498956a62ae9c6d27dd979380baa8",
+      "seq": 35,
+      "event_id": "00000000000000000000000000000023",
+      "prev": "62b0cb620db45283843f4026ab68bdd0e14f8193b67c908007b3362b5a897685",
+      "hash": "486a087f71de274e87110700cecb4a42e5edea4e0af809d30d2a3c86b4a88432",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.relation",
@@ -1815,10 +1910,10 @@
     },
     {
       "v": 0,
-      "seq": 34,
-      "event_id": "00000000000000000000000000000022",
-      "prev": "2c2d5113b00fce3045683bf65f09cbe7aca498956a62ae9c6d27dd979380baa8",
-      "hash": "a28d7e70e1cb9d10b25a669ee0082f889dd0a48aa4bcee6691141e24e39ddfbe",
+      "seq": 36,
+      "event_id": "00000000000000000000000000000024",
+      "prev": "486a087f71de274e87110700cecb4a42e5edea4e0af809d30d2a3c86b4a88432",
+      "hash": "eabc39d26cddc6327a528fce201acc19cfaf1ec74db059dac90ef050692e97c4",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "belief.relation",
@@ -1841,128 +1936,10 @@
     },
     {
       "v": 0,
-      "seq": 35,
-      "event_id": "00000000000000000000000000000023",
-      "prev": "a28d7e70e1cb9d10b25a669ee0082f889dd0a48aa4bcee6691141e24e39ddfbe",
-      "hash": "d4cea133794b578975e9a5163620a80488cec7aeda2c0c3c56fea8ab39199d23",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "conflict.comparison_registered",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "comparison_id": "3bb2a028f5eb3b995c1c084c293bdffe",
-        "left": {
-          "relation_event_id": "00000000000000000000000000000021",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "right": {
-          "relation_event_id": "00000000000000000000000000000021",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "source_relation_event_id": "00000000000000000000000000000021",
-        "reason": "declared_contradicts_relation",
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 36,
-      "event_id": "00000000000000000000000000000024",
-      "prev": "d4cea133794b578975e9a5163620a80488cec7aeda2c0c3c56fea8ab39199d23",
-      "hash": "881e5ff07674a3cb681a32d6fdb521b0bb1b61e53fbe036bf79aace5f0f7ab2c",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "conflict.comparison_registered",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "system:contradiction-backfill"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "comparison_id": "4b934ede102d665fe7ab9689c75c3e89",
-        "left": {
-          "relation_event_id": "00000000000000000000000000000022",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "right": {
-          "relation_event_id": "00000000000000000000000000000022",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "relation_origin": "legacy_migration",
-          "subject_id": "cccccccccccccccccccccccccccccccc",
-          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
-          "scope": {
-            "kind": "unknown"
-          },
-          "state_stage": {
-            "kind": "unknown"
-          },
-          "valid_time": {
-            "kind": "unknown"
-          }
-        },
-        "source_relation_event_id": "00000000000000000000000000000022",
-        "reason": "declared_contradicts_relation",
-        "rule_version": "contradiction-backfill-v1"
-      }
-    },
-    {
-      "v": 0,
       "seq": 37,
       "event_id": "00000000000000000000000000000025",
-      "prev": "881e5ff07674a3cb681a32d6fdb521b0bb1b61e53fbe036bf79aace5f0f7ab2c",
-      "hash": "974f0ff51b5da95d5591a8dc09dafbf356d13b1e22972db292651a5bbc3366f8",
+      "prev": "eabc39d26cddc6327a528fce201acc19cfaf1ec74db059dac90ef050692e97c4",
+      "hash": "b0452b1b4d0a226377170822020a11fcc909e1afdb2ace609603d82c7b6122a1",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "conflict.comparison_registered",
@@ -1976,9 +1953,9 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "comparison_id": "4b934ede102d665fe7ab9689c75c3e89",
+        "comparison_id": "fc757e545a6dcd6798fb588df5e6236a",
         "left": {
-          "relation_event_id": "00000000000000000000000000000022",
+          "relation_event_id": "00000000000000000000000000000023",
           "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "belief_revision_event_id": "00000000000000000000000000000007",
           "relation_origin": "legacy_migration",
@@ -1995,7 +1972,7 @@
           }
         },
         "right": {
-          "relation_event_id": "00000000000000000000000000000022",
+          "relation_event_id": "00000000000000000000000000000023",
           "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "belief_revision_event_id": "00000000000000000000000000000005",
           "relation_origin": "legacy_migration",
@@ -2011,7 +1988,7 @@
             "kind": "unknown"
           }
         },
-        "source_relation_event_id": "00000000000000000000000000000022",
+        "source_relation_event_id": "00000000000000000000000000000023",
         "reason": "declared_contradicts_relation",
         "rule_version": "contradiction-backfill-v1"
       }
@@ -2020,11 +1997,11 @@
       "v": 0,
       "seq": 38,
       "event_id": "00000000000000000000000000000026",
-      "prev": "974f0ff51b5da95d5591a8dc09dafbf356d13b1e22972db292651a5bbc3366f8",
-      "hash": "d9a5f9a64b9939b5b20d6b0420fe3dd365316fb9e219f1e4817e075ac48208f5",
+      "prev": "b0452b1b4d0a226377170822020a11fcc909e1afdb2ace609603d82c7b6122a1",
+      "hash": "f4cc79b0263e20d3a7230f7a12ee718f5b855dd4c695520c8f2e2bcdc13dd44a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
-      "kind": "contradiction.backfill_completed",
+      "kind": "conflict.comparison_registered",
       "body": {
         "schema": 1,
         "batch_id": null,
@@ -2035,10 +2012,43 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "00000000000000000000000000000022",
-        "source_relation_count": 4,
-        "resolved_count": 3,
-        "opened_count": 1,
+        "comparison_id": "c62b24abf858fa4a4ea1f826e41d01b7",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000024",
+        "reason": "declared_contradicts_relation",
         "rule_version": "contradiction-backfill-v1"
       }
     },
@@ -2046,8 +2056,405 @@
       "v": 0,
       "seq": 39,
       "event_id": "00000000000000000000000000000027",
-      "prev": "d9a5f9a64b9939b5b20d6b0420fe3dd365316fb9e219f1e4817e075ac48208f5",
-      "hash": "6330c14997124756cdaa3da09ab3fb2886ae91cc8f906eb2093ba72b833e843d",
+      "prev": "f4cc79b0263e20d3a7230f7a12ee718f5b855dd4c695520c8f2e2bcdc13dd44a",
+      "hash": "0519ed4a9c2c3b5e2081e6e86be847c990afeb02bc8506215eb2990c5360cb91",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.comparison_registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "c62b24abf858fa4a4ea1f826e41d01b7",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000024",
+        "reason": "declared_contradicts_relation",
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 40,
+      "event_id": "00000000000000000000000000000028",
+      "prev": "0519ed4a9c2c3b5e2081e6e86be847c990afeb02bc8506215eb2990c5360cb91",
+      "hash": "0d66852080c0ef3d0d1babb4b0f4882fb68ee155a5d81a3d2b5a6a5bdb5d52df",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.classified",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "c62b24abf858fa4a4ea1f826e41d01b7",
+        "left": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "dfb417454d7432715ecfaa33d89abdaba4457c3b2cbd85a4a20620d0cd806da6",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "outcome": "resolved_by_stage",
+        "classification": {
+          "kind": "deterministic",
+          "rule_version": "gauntlet-v1"
+        },
+        "evidence_event_ids": [],
+        "reason_codes": [
+          "stage_disjoint"
+        ],
+        "classified_at": "2026-08-12T09:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 41,
+      "event_id": "00000000000000000000000000000029",
+      "prev": "0d66852080c0ef3d0d1babb4b0f4882fb68ee155a5d81a3d2b5a6a5bdb5d52df",
+      "hash": "2c4724928af81a8f90891806a1105a3db5984fb8165be67cd91714ac22fec410",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.relation",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000004",
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "relation_id": "e27249953ebe9e452b1e8f62382da464",
+        "action": "add",
+        "from": "ffffffffffffffffffffffffffffffff",
+        "to": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "relation": "contradicts"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 42,
+      "event_id": "0000000000000000000000000000002a",
+      "prev": "2c4724928af81a8f90891806a1105a3db5984fb8165be67cd91714ac22fec410",
+      "hash": "0f104829249a0a02cd3ed4dcb040abdca2a234d60f33d0dbc511d3faacd12c83",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.comparison_registered",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000004",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "fdbc853eaac83557c48ca5bd19dbcad1",
+        "left": {
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "352302489bc2fcf025cf00cda8308033f97ac87712ce90b4d7cd72c58e4c3af9",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "source_relation_event_id": "00000000000000000000000000000029",
+        "reason": "declared_contradicts_relation",
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 43,
+      "event_id": "0000000000000000000000000000002b",
+      "prev": "0f104829249a0a02cd3ed4dcb040abdca2a234d60f33d0dbc511d3faacd12c83",
+      "hash": "27015e422bf6cba7562d8d5f3e45c2b7a6560393b6fbf814adabefd237f2cbfc",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000004",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "00000000000000000000000000000029",
+          "0000000000000000000000000000002a"
+        ],
+        "member_count": 2,
+        "members_digest": "56d3b8ae8fb75a2f569691ec24b7a8663610317497cdda5f2987a46cf5f35825",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 44,
+      "event_id": "0000000000000000000000000000002c",
+      "prev": "27015e422bf6cba7562d8d5f3e45c2b7a6560393b6fbf814adabefd237f2cbfc",
+      "hash": "9a5bb98f220816c525549bc3572afdd2b8bd9e1c948104aa316c1111157e2f4f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "conflict.classified",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000005",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "comparison_id": "fdbc853eaac83557c48ca5bd19dbcad1",
+        "left": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "352302489bc2fcf025cf00cda8308033f97ac87712ce90b4d7cd72c58e4c3af9",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "outcome": "genuine_direct",
+        "classification": {
+          "kind": "deterministic",
+          "rule_version": "gauntlet-v1"
+        },
+        "evidence_event_ids": [],
+        "reason_codes": [
+          "incompatible_values"
+        ],
+        "classified_at": "2026-08-12T09:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 45,
+      "event_id": "0000000000000000000000000000002d",
+      "prev": "9a5bb98f220816c525549bc3572afdd2b8bd9e1c948104aa316c1111157e2f4f",
+      "hash": "c6d40547b5801a05df04cd738819f34058fb1ebd6aeee4108abb7b1b35ab0856",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.opened",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000005",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:conflict-classifier"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "edge_id": "f658658f3698ca746745ece26f381a11",
+        "comparison_id": "fdbc853eaac83557c48ca5bd19dbcad1",
+        "left": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "bdb339768bc5e4fecbe55a442056919b2b325907d49bcbf3bf8de13781996a83",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "right": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "relation_origin": "legacy_migration",
+          "subject_id": "cccccccccccccccccccccccccccccccc",
+          "content_hash": "352302489bc2fcf025cf00cda8308033f97ac87712ce90b4d7cd72c58e4c3af9",
+          "scope": {
+            "kind": "unknown"
+          },
+          "state_stage": {
+            "kind": "unknown"
+          },
+          "valid_time": {
+            "kind": "unknown"
+          }
+        },
+        "kind": "genuine_direct",
+        "classified_event_id": "0000000000000000000000000000002c"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 46,
+      "event_id": "0000000000000000000000000000002e",
+      "prev": "c6d40547b5801a05df04cd738819f34058fb1ebd6aeee4108abb7b1b35ab0856",
+      "hash": "36a556ecf91f771298f6a13873c953885bcff8d075d38107eca1b9d671d4dbdf",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000005",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "0000000000000000000000000000002c",
+          "0000000000000000000000000000002d"
+        ],
+        "member_count": 2,
+        "members_digest": "1f23091441f4586a82010a1258312ab0f7c1ef2188c608afcc84af61ad67a40c",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 47,
+      "event_id": "0000000000000000000000000000002f",
+      "prev": "36a556ecf91f771298f6a13873c953885bcff8d075d38107eca1b9d671d4dbdf",
+      "hash": "4875af5c5521b3f638159870686970fa6a8adb3bda8cdd3526df21fa3bd0e9b2",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -2061,7 +2468,7 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "00000000000000000000000000000022",
+        "through_event_id": "00000000000000000000000000000024",
         "source_relation_count": 4,
         "resolved_count": 3,
         "opened_count": 1,
@@ -2070,10 +2477,10 @@
     },
     {
       "v": 0,
-      "seq": 40,
-      "event_id": "00000000000000000000000000000028",
-      "prev": "6330c14997124756cdaa3da09ab3fb2886ae91cc8f906eb2093ba72b833e843d",
-      "hash": "b4e4eaa659451ff3a053f8c7fa458f3405d841e6f4190ec338dd08e27a12dd48",
+      "seq": 48,
+      "event_id": "00000000000000000000000000000030",
+      "prev": "4875af5c5521b3f638159870686970fa6a8adb3bda8cdd3526df21fa3bd0e9b2",
+      "hash": "897612ae21aec09a55db253ae771371a484d336dd72067bcf8e6c98836a4d621",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -2087,7 +2494,33 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "00000000000000000000000000000021",
+        "through_event_id": "00000000000000000000000000000024",
+        "source_relation_count": 4,
+        "resolved_count": 3,
+        "opened_count": 1,
+        "rule_version": "contradiction-backfill-v1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 49,
+      "event_id": "00000000000000000000000000000031",
+      "prev": "897612ae21aec09a55db253ae771371a484d336dd72067bcf8e6c98836a4d621",
+      "hash": "240d7934595270fe31997d7006b338613b401f81597bd4240b2522634648b6d1",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "contradiction.backfill_completed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:contradiction-backfill"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "through_event_id": "00000000000000000000000000000023",
         "source_relation_count": 9,
         "resolved_count": 3,
         "opened_count": 1,
@@ -2096,10 +2529,10 @@
     },
     {
       "v": 0,
-      "seq": 41,
-      "event_id": "00000000000000000000000000000029",
-      "prev": "b4e4eaa659451ff3a053f8c7fa458f3405d841e6f4190ec338dd08e27a12dd48",
-      "hash": "37d56895022732b6f753b7fb1f3a1f219d0a0c0bee743bd6437adb1084de08ee",
+      "seq": 50,
+      "event_id": "00000000000000000000000000000032",
+      "prev": "240d7934595270fe31997d7006b338613b401f81597bd4240b2522634648b6d1",
+      "hash": "7e73b809efc9224757293378d349508f5ac27b22aa956d50750c649e8bff450b",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -2113,7 +2546,7 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "00000000000000000000000000000021",
+        "through_event_id": "00000000000000000000000000000023",
         "source_relation_count": 2,
         "resolved_count": 2,
         "opened_count": 0,
@@ -2122,10 +2555,10 @@
     },
     {
       "v": 0,
-      "seq": 42,
-      "event_id": "0000000000000000000000000000002a",
-      "prev": "37d56895022732b6f753b7fb1f3a1f219d0a0c0bee743bd6437adb1084de08ee",
-      "hash": "21492dfe1650be1751bc991cf738318c25574ad8507500fb02659a59f7b8a0c2",
+      "seq": 51,
+      "event_id": "00000000000000000000000000000033",
+      "prev": "7e73b809efc9224757293378d349508f5ac27b22aa956d50750c649e8bff450b",
+      "hash": "9bde8424c16e68bb74d06600bc63826d285a3a74d8aafec2fce0316afd827fb0",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "contradiction.backfill_completed",
@@ -2139,7 +2572,7 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "through_event_id": "00000000000000000000000000000021",
+        "through_event_id": "00000000000000000000000000000023",
         "source_relation_count": 9,
         "resolved_count": 7,
         "opened_count": 2,
@@ -2267,8 +2700,8 @@
         ],
         "projection": {
           "path": null,
-          "generating_event": "00000000000000000000000000000022",
-          "state_digest": "4843ed19753d8835a325348450b7cee9e0e0098e381da827fd83d734a079bcc2",
+          "generating_event": "00000000000000000000000000000024",
+          "state_digest": "dc9767074eae589c11d20ac6ba8610e8599772656885e4cc4e7e98fad748f0ef",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -2301,12 +2734,12 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000006",
-          "0000000000000000000000000000001b"
+          "0000000000000000000000000000001d"
         ],
         "projection": {
           "path": null,
-          "generating_event": "0000000000000000000000000000001b",
-          "state_digest": "42068d052079d46e82e8fd887f39fa326f066dc15411fbb441c580b473ad17a8",
+          "generating_event": "00000000000000000000000000000029",
+          "state_digest": "0b566223cdc2dd10347a5d99304a1238653a1f6ac9b3a7086d1c7d242c0b9177",
           "content_hash": "065f46930c13ea3b017e704eb4996564de1848e194716af0bdea660401da321f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -2338,19 +2771,26 @@
         "to": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "relation": "contradicts",
         "live": true
+      },
+      "e27249953ebe9e452b1e8f62382da464": {
+        "from": "ffffffffffffffffffffffffffffffff",
+        "to": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "relation": "contradicts",
+        "live": true
       }
     },
     "resolutions": [],
     "independence": [],
     "derived_belief_sources": [],
     "versions": {
-      "belief:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 3,
+      "belief:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": 4,
       "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
-      "belief:ffffffffffffffffffffffffffffffff": 4,
+      "belief:ffffffffffffffffffffffffffffffff": 5,
       "comparison:2822c2c578c15128199506ec0d7c56a9": 4,
-      "comparison:4b934ede102d665fe7ab9689c75c3e89": 1,
       "comparison:be9316ae01f23bbcd30971fb0afb298b": 2,
+      "comparison:c62b24abf858fa4a4ea1f826e41d01b7": 2,
       "comparison:d16fe4449194774a8ca629c3c34597de": 2,
+      "comparison:fdbc853eaac83557c48ca5bd19dbcad1": 3,
       "entity:cccccccccccccccccccccccccccccccc": 1,
       "observation:00000000000000000000000000000002": 1,
       "observation:00000000000000000000000000000003": 1,
@@ -2358,6 +2798,7 @@
       "proposal:1111111111111111111111111111111b": 1,
       "relation:1b9e254efbfb3f4bbb89be2e72fe7b64": 1,
       "relation:a0ac1531a7430447fa1328669a9bc6c6": 1,
+      "relation:e27249953ebe9e452b1e8f62382da464": 1,
       "source:c8147897afd510dad9278f297ba49115": 4
     },
     "batches": [
@@ -2374,6 +2815,16 @@
       [
         "b0000000000000000000000000000003",
         "refused",
+        2
+      ],
+      [
+        "b0000000000000000000000000000004",
+        "committed",
+        2
+      ],
+      [
+        "b0000000000000000000000000000005",
+        "committed",
         2
       ]
     ],
@@ -2416,28 +2867,6 @@
           "subject_id": "cccccccccccccccccccccccccccccccc"
         }
       },
-      "4b934ede102d665fe7ab9689c75c3e89": {
-        "registered_by": "00000000000000000000000000000024",
-        "origin": {
-          "kind": "declared",
-          "source_relation_event_id": "00000000000000000000000000000022",
-          "rule_version": "contradiction-backfill-v1"
-        },
-        "left": {
-          "kind": "declared_relation",
-          "relation_event_id": "00000000000000000000000000000022",
-          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "belief_revision_event_id": "00000000000000000000000000000007",
-          "subject_id": "cccccccccccccccccccccccccccccccc"
-        },
-        "right": {
-          "kind": "declared_relation",
-          "relation_event_id": "00000000000000000000000000000022",
-          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-          "belief_revision_event_id": "00000000000000000000000000000005",
-          "subject_id": "cccccccccccccccccccccccccccccccc"
-        }
-      },
       "be9316ae01f23bbcd30971fb0afb298b": {
         "registered_by": "0000000000000000000000000000000a",
         "origin": {
@@ -2462,6 +2891,28 @@
           "subject_id": "cccccccccccccccccccccccccccccccc"
         }
       },
+      "c62b24abf858fa4a4ea1f826e41d01b7": {
+        "registered_by": "00000000000000000000000000000026",
+        "origin": {
+          "kind": "declared",
+          "source_relation_event_id": "00000000000000000000000000000024",
+          "rule_version": "contradiction-backfill-v1"
+        },
+        "left": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        },
+        "right": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000024",
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000005",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        }
+      },
       "d16fe4449194774a8ca629c3c34597de": {
         "registered_by": "00000000000000000000000000000008",
         "origin": {
@@ -2481,6 +2932,28 @@
         "right": {
           "kind": "asserted",
           "assertion_event_id": "00000000000000000000000000000003",
+          "belief_id": "ffffffffffffffffffffffffffffffff",
+          "belief_revision_event_id": "00000000000000000000000000000006",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        }
+      },
+      "fdbc853eaac83557c48ca5bd19dbcad1": {
+        "registered_by": "0000000000000000000000000000002a",
+        "origin": {
+          "kind": "declared",
+          "source_relation_event_id": "00000000000000000000000000000029",
+          "rule_version": "contradiction-backfill-v1"
+        },
+        "left": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
+          "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "belief_revision_event_id": "00000000000000000000000000000007",
+          "subject_id": "cccccccccccccccccccccccccccccccc"
+        },
+        "right": {
+          "kind": "declared_relation",
+          "relation_event_id": "00000000000000000000000000000029",
           "belief_id": "ffffffffffffffffffffffffffffffff",
           "belief_revision_event_id": "00000000000000000000000000000006",
           "subject_id": "cccccccccccccccccccccccccccccccc"
@@ -2516,6 +2989,18 @@
           "00000000000000000000000000000002"
         ]
       },
+      "c62b24abf858fa4a4ea1f826e41d01b7": {
+        "classified_by": "00000000000000000000000000000028",
+        "outcome": "resolved_by_stage",
+        "classification": {
+          "kind": "deterministic",
+          "rule_version": "gauntlet-v1"
+        },
+        "reason_codes": [
+          "stage_disjoint"
+        ],
+        "evidence_event_ids": []
+      },
       "d16fe4449194774a8ca629c3c34597de": {
         "classified_by": "0000000000000000000000000000000b",
         "outcome": "resolved_by_stage",
@@ -2525,6 +3010,18 @@
         },
         "reason_codes": [
           "stage_disjoint"
+        ],
+        "evidence_event_ids": []
+      },
+      "fdbc853eaac83557c48ca5bd19dbcad1": {
+        "classified_by": "0000000000000000000000000000002c",
+        "outcome": "genuine_direct",
+        "classification": {
+          "kind": "deterministic",
+          "rule_version": "gauntlet-v1"
+        },
+        "reason_codes": [
+          "incompatible_values"
         ],
         "evidence_event_ids": []
       }
@@ -2538,18 +3035,27 @@
         "opened_by": "00000000000000000000000000000017",
         "classified_event_id": "00000000000000000000000000000016",
         "closed": {
-          "closed_by": "0000000000000000000000000000001c",
-          "addressed_by_event_id": "0000000000000000000000000000001b",
+          "closed_by": "0000000000000000000000000000001e",
+          "addressed_by_event_id": "0000000000000000000000000000001d",
           "disposition": "resolved_with_evidence",
           "evidence_event_ids": [
             "00000000000000000000000000000003"
           ]
         }
+      },
+      "f658658f3698ca746745ece26f381a11": {
+        "comparison_id": "fdbc853eaac83557c48ca5bd19dbcad1",
+        "kind": "genuine_direct",
+        "left_belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "right_belief_id": "ffffffffffffffffffffffffffffffff",
+        "opened_by": "0000000000000000000000000000002d",
+        "classified_event_id": "0000000000000000000000000000002c",
+        "closed": null
       }
     },
     "contradiction_backfill": {
-      "event_id": "00000000000000000000000000000029",
-      "through_event_id": "00000000000000000000000000000021",
+      "event_id": "00000000000000000000000000000032",
+      "through_event_id": "00000000000000000000000000000023",
       "source_relation_count": 2,
       "resolved_count": 2,
       "opened_count": 0,
@@ -2631,56 +3137,70 @@
       "event_id": "0000000000000000000000000000001a",
       "batch_id": null,
       "code": "refused",
+      "detail": "comparison 2822c2c578c15128199506ec0d7c56a9 classified genuine_direct, which opens a genuine_direct edge, and this opens a partial — the kind is in the edge id, so these are two different edges"
+    },
+    {
+      "seq": 27,
+      "event_id": "0000000000000000000000000000001b",
+      "batch_id": null,
+      "code": "refused",
       "detail": "addressed_by_event_id 00000000000000000000000000000002 is not a member of this batch — a close travels with the mutation that addressed the edge, and there is no standalone close path"
     },
     {
-      "seq": 31,
-      "event_id": "0000000000000000000000000000001f",
-      "batch_id": "b0000000000000000000000000000003",
+      "seq": 28,
+      "event_id": "0000000000000000000000000000001c",
+      "batch_id": null,
       "code": "refused",
-      "detail": "batch member 1: edge a51b3fd02a735bd0c3705441ef296aa9 was already closed by event 0000000000000000000000000000001c — a closed edge never reopens, and a second close would be a second answer to a question that has one"
+      "detail": "addressed_by_event_id is this close's own event — a close cannot be what addressed the contradiction"
     },
     {
-      "seq": 32,
-      "event_id": "00000000000000000000000000000020",
+      "seq": 33,
+      "event_id": "00000000000000000000000000000021",
+      "batch_id": "b0000000000000000000000000000003",
+      "code": "refused",
+      "detail": "batch member 1: edge a51b3fd02a735bd0c3705441ef296aa9 was already closed by event 0000000000000000000000000000001e — a closed edge never reopens, and a second close would be a second answer to a question that has one"
+    },
+    {
+      "seq": 34,
+      "event_id": "00000000000000000000000000000022",
       "batch_id": "b0000000000000000000000000000003",
       "code": "batch",
       "detail": "member 1 refused — whole batch has no effect"
-    },
-    {
-      "seq": 35,
-      "event_id": "00000000000000000000000000000023",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "relation 1b9e254efbfb3f4bbb89be2e72fe7b64 is a Supersedes, not a contradicts — registering a comparison from it would put a conflict in the ledger that nobody declared"
     },
     {
       "seq": 37,
       "event_id": "00000000000000000000000000000025",
       "batch_id": null,
       "code": "refused",
-      "detail": "comparison 4b934ede102d665fe7ab9689c75c3e89 already exists (event 00000000000000000000000000000024) — registration is the one creation, and an exact retry is deduplicated at the door by its idempotency key"
+      "detail": "relation 1b9e254efbfb3f4bbb89be2e72fe7b64 is a Supersedes, not a contradicts — registering a comparison from it would put a conflict in the ledger that nobody declared"
     },
     {
       "seq": 39,
       "event_id": "00000000000000000000000000000027",
       "batch_id": null,
       "code": "refused",
-      "detail": "a checkpoint through 00000000000000000000000000000022 is already recorded (event 00000000000000000000000000000026) — the same coverage claimed twice"
+      "detail": "comparison c62b24abf858fa4a4ea1f826e41d01b7 already exists (event 00000000000000000000000000000026) — registration is the one creation, and an exact retry is deduplicated at the door by its idempotency key"
     },
     {
-      "seq": 40,
-      "event_id": "00000000000000000000000000000028",
+      "seq": 48,
+      "event_id": "00000000000000000000000000000030",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "a checkpoint through 00000000000000000000000000000024 is already recorded (event 0000000000000000000000000000002f) — the same coverage claimed twice"
+    },
+    {
+      "seq": 49,
+      "event_id": "00000000000000000000000000000031",
       "batch_id": null,
       "code": "refused",
       "detail": "the backfill saw 9 relations and accounts for 4 — every relation it read is either resolved apart or has an open edge, and a marker that does not add up is a marker that stopped early"
     },
     {
-      "seq": 42,
-      "event_id": "0000000000000000000000000000002a",
+      "seq": 51,
+      "event_id": "00000000000000000000000000000033",
       "batch_id": null,
       "code": "refused",
-      "detail": "a checkpoint through 00000000000000000000000000000021 is already recorded (event 00000000000000000000000000000029) — the same coverage claimed twice"
+      "detail": "a checkpoint through 00000000000000000000000000000023 is already recorded (event 00000000000000000000000000000032) — the same coverage claimed twice"
     }
   ]
 }

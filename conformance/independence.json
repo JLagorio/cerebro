@@ -1,6 +1,6 @@
 {
   "name": "independence",
-  "description": "Positive firsthand and direct-artifact proofs record the unordered pair; shared ancestry, same actors, mismatched refs, duplicates, and the reserved human proof are refused; a human_confirmed proof citing an approval that was not a confirmation, or a confirmation of a different pair, is refused too; absence of any fact stays unknown.",
+  "description": "Positive firsthand and direct-artifact proofs record the unordered pair; shared ancestry, same actors, mismatched refs, duplicates, and the reserved human proof are refused; a human_confirmed proof citing an approval that was not a confirmation, a confirmation of a different pair, or a decision that could not land because its proposal was never queued, is refused too; absence of any fact stays unknown.",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -1507,6 +1507,266 @@
         },
         "reason": "conformance proof"
       }
+    },
+    {
+      "v": 0,
+      "seq": 37,
+      "event_id": "00000000000000000000000000000025",
+      "prev": "0aa150a47fc55471f5ff8a1e26530fdbc0e6e4964ed549abea03320baadfbdc0",
+      "hash": "9229dad4a10a599093d1e1f3a3ea5dab0aa27a29ac93a6e0952da81d651436d0",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "extracted_assertion",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000003",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [
+          {
+            "edge": "derived_from",
+            "parent_observation_event_id": "00000000000000000000000000000013"
+          }
+        ],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "registered_direct_artifact",
+          "absence": null,
+          "extracted_text": "status is active",
+          "source_artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "extractor_version": "x1",
+          "raw_pointer": "mail/1"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 38,
+      "event_id": "00000000000000000000000000000026",
+      "prev": "9229dad4a10a599093d1e1f3a3ea5dab0aa27a29ac93a6e0952da81d651436d0",
+      "hash": "6a46955610a8a0b9619d153c723dbf0ef0a5bd4c77dae5919ff8ef1f5e9685b6",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "extracted_assertion",
+        "source_id": "320b2531116f6f38049b18a8f916893f",
+        "source_registration_event_id": "00000000000000000000000000000004",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [
+          {
+            "edge": "derived_from",
+            "parent_observation_event_id": "00000000000000000000000000000014"
+          }
+        ],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "registered_direct_artifact",
+          "absence": null,
+          "extracted_text": "status is active",
+          "source_artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "extractor_version": "x1",
+          "raw_pointer": "mail/1"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 39,
+      "event_id": "00000000000000000000000000000027",
+      "prev": "6a46955610a8a0b9619d153c723dbf0ef0a5bd4c77dae5919ff8ef1f5e9685b6",
+      "hash": "1af123ca16a3cf92f041c25c61e0e1bcaddabf0e24bcc67121582900703f6d58",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal": {
+          "schema": 1,
+          "proposal_id": "cccc0000cccc0000cccc0000cccc0003",
+          "run_id": "4444444444444444444444444444444a",
+          "targets": [
+            {
+              "target_id": "00000000000000000000000000000025",
+              "target_class": "observation",
+              "expected_version": null
+            },
+            {
+              "target_id": "00000000000000000000000000000026",
+              "target_class": "observation",
+              "expected_version": null
+            }
+          ],
+          "op": {
+            "kind": "confirm_observation_independence",
+            "payload": {
+              "left_observation_event_id": "00000000000000000000000000000025",
+              "right_observation_event_id": "00000000000000000000000000000026",
+              "basis_event_ids": [
+                "00000000000000000000000000000025",
+                "00000000000000000000000000000026"
+              ],
+              "reason": "an auto-applied confirmation confirms nothing"
+            }
+          },
+          "intended_use": {
+            "kind": "reversible_work",
+            "stakes": "LOW",
+            "predicate_class": null
+          },
+          "basis": {
+            "transition_cause": "maintenance",
+            "evidence_refs": [],
+            "coverage_refs": [],
+            "authority_refs": [],
+            "authority_route_refs": [],
+            "addressed_contradictions": [],
+            "absence_claim": false
+          },
+          "declared_risk": "LOW",
+          "reason": "an auto-applied confirmation confirms nothing",
+          "candidate_search_receipt": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 40,
+      "event_id": "00000000000000000000000000000028",
+      "prev": "1af123ca16a3cf92f041c25c61e0e1bcaddabf0e24bcc67121582900703f6d58",
+      "hash": "9146ea57582e38a6ab7eb36f43bcc7d9ae37189e2bb0442483333b3ee4c17a3f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.decision_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "decision_id": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3",
+        "proposal_id": "cccc0000cccc0000cccc0000cccc0003",
+        "decision": "approve",
+        "reviewer": "human:josef",
+        "decided_at": "2026-08-07T12:00:00.000Z",
+        "reason": null,
+        "reviewed_target_versions": []
+      }
+    },
+    {
+      "v": 0,
+      "seq": 41,
+      "event_id": "00000000000000000000000000000029",
+      "prev": "9146ea57582e38a6ab7eb36f43bcc7d9ae37189e2bb0442483333b3ee4c17a3f",
+      "hash": "63316712a2a6da67dcb70e80319a676bf54fe3d60a012811a6e5bea6dca84746",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.independence_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "left_observation_event_id": "00000000000000000000000000000025",
+        "right_observation_event_id": "00000000000000000000000000000026",
+        "proof": {
+          "kind": "human_confirmed",
+          "left_source_registration_event_id": "00000000000000000000000000000003",
+          "right_source_registration_event_id": "00000000000000000000000000000004",
+          "proposal_id": "cccc0000cccc0000cccc0000cccc0003",
+          "decision_event_id": "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3"
+        },
+        "reason": "conformance proof"
+      }
     }
   ],
   "expected_state": {
@@ -1739,6 +1999,42 @@
             "0000000000000000000000000000000c"
           ]
         ]
+      },
+      "00000000000000000000000000000025": {
+        "seq": 37,
+        "kind": "extracted_assertion",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": "registered_direct_artifact",
+        "lineage": [
+          [
+            "derived_from",
+            "00000000000000000000000000000013"
+          ]
+        ]
+      },
+      "00000000000000000000000000000026": {
+        "seq": 38,
+        "kind": "extracted_assertion",
+        "source_id": "320b2531116f6f38049b18a8f916893f",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": "registered_direct_artifact",
+        "lineage": [
+          [
+            "derived_from",
+            "00000000000000000000000000000014"
+          ]
+        ]
       }
     },
     "beliefs": {},
@@ -1777,12 +2073,15 @@
       "observation:00000000000000000000000000000015": 2,
       "observation:00000000000000000000000000000016": 2,
       "observation:00000000000000000000000000000023": 1,
+      "observation:00000000000000000000000000000025": 1,
+      "observation:00000000000000000000000000000026": 1,
       "proposal:cccc0000cccc0000cccc0000cccc0001": 3,
       "proposal:cccc0000cccc0000cccc0000cccc0002": 3,
-      "source:320b2531116f6f38049b18a8f916893f": 6,
+      "proposal:cccc0000cccc0000cccc0000cccc0003": 1,
+      "source:320b2531116f6f38049b18a8f916893f": 7,
       "source:3ca30a9a34ebe478c5c8891097777062": 2,
       "source:c8147897afd510dad9278f297ba49115": 3,
-      "source:d89318cdd73ee2a9db48ab151c0445eb": 6
+      "source:d89318cdd73ee2a9db48ab151c0445eb": 7
     },
     "batches": [],
     "proposals": {
@@ -1803,6 +2102,13 @@
           "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
           "approve"
         ],
+        "applied_event_id": null,
+        "has_revert_plan": false
+      },
+      "cccc0000cccc0000cccc0000cccc0003": {
+        "state": "submitted",
+        "commit_set_id": null,
+        "decision": null,
         "applied_event_id": null,
         "has_revert_plan": false
       }
@@ -1893,6 +2199,20 @@
       "batch_id": null,
       "code": "refused",
       "detail": "independence for this pair is already recorded"
+    },
+    {
+      "seq": 40,
+      "event_id": "00000000000000000000000000000028",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "proposal cccc0000cccc0000cccc0000cccc0003 is Submitted, not queued — there is nothing to decide"
+    },
+    {
+      "seq": 41,
+      "event_id": "00000000000000000000000000000029",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "human_confirmed independence names proposal cccc0000cccc0000cccc0000cccc0003, which nobody                          has decided — silence is not confirmation"
     }
   ]
 }
