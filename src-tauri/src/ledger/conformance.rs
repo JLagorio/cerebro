@@ -5158,7 +5158,7 @@ fn scenario_contradiction() -> (&'static str, &'static str, Vec<Frame>) {
         "contradiction",
         "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one \
          batched with its edge, the close that must travel with its mutation, the matrix both \
-         ways round, the declared road in, and a checkpoint that cannot shrink",
+         ways round, the declared road in, and a checkpoint that refuses the same coverage twice",
         b.frames,
     )
 }

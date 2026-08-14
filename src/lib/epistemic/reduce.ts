@@ -1471,13 +1471,10 @@ function applyBackfillCompleted(
           'same coverage claimed twice',
       );
     }
-    if (seen < previous.sourceRelationCount) {
-      throw new RefusedError(
-        `this checkpoint saw ${seen} relations and the previous one saw ` +
-          `${previous.sourceRelationCount} — the backfill reads a growing prefix, so a ` +
-          'shrinking count is a run that lost its place',
-      );
-    }
+    // A SHRINKING count is not a run that lost its place, and M27.5a removed
+    // the refusal that said it was: the count is of relations still LIVE, and
+    // withdrawing a `contradicts` is ordinary — the old rule wedged the
+    // checkpoint permanently on the first withdrawal.
   }
   state.contradictionBackfill = {
     eventId: frame.event_id,

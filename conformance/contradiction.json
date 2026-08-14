@@ -1,6 +1,6 @@
 {
   "name": "contradiction",
-  "description": "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one batched with its edge, the close that must travel with its mutation, the matrix both ways round, the declared road in, and a checkpoint that cannot shrink",
+  "description": "the resolution pipeline: a resolved verdict that opens nothing, an unresolved one batched with its edge, the close that must travel with its mutation, the matrix both ways round, the declared road in, and a checkpoint that refuses the same coverage twice",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -2548,11 +2548,11 @@
       }
     },
     "contradiction_backfill": {
-      "event_id": "0000000000000000000000000000002a",
+      "event_id": "00000000000000000000000000000029",
       "through_event_id": "00000000000000000000000000000021",
-      "source_relation_count": 9,
-      "resolved_count": 7,
-      "opened_count": 2,
+      "source_relation_count": 2,
+      "resolved_count": 2,
+      "opened_count": 0,
       "rule_version": "contradiction-backfill-v1"
     },
     "freshness": {},
@@ -2676,11 +2676,11 @@
       "detail": "the backfill saw 9 relations and accounts for 4 — every relation it read is either resolved apart or has an open edge, and a marker that does not add up is a marker that stopped early"
     },
     {
-      "seq": 41,
-      "event_id": "00000000000000000000000000000029",
+      "seq": 42,
+      "event_id": "0000000000000000000000000000002a",
       "batch_id": null,
       "code": "refused",
-      "detail": "this checkpoint saw 2 relations and the previous one saw 4 — the backfill reads a growing prefix, so a shrinking count is a run that lost its place"
+      "detail": "a checkpoint through 00000000000000000000000000000021 is already recorded (event 00000000000000000000000000000029) — the same coverage claimed twice"
     }
   ]
 }

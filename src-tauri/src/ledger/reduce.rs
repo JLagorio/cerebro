@@ -2542,13 +2542,15 @@ fn apply_backfill_completed(
                 body.through_event_id, previous.event_id
             )));
         }
-        if body.source_relation_count < previous.source_relation_count {
-            return Err(refused(format!(
-                "this checkpoint saw {} relations and the previous one saw {} — the backfill \
-                 reads a growing prefix, so a shrinking count is a run that lost its place",
-                body.source_relation_count, previous.source_relation_count
-            )));
-        }
+        // A SHRINKING count is not a run that lost its place, and M27.5a
+        // removed the refusal that said it was. The count is of relations
+        // still LIVE, and withdrawing a `contradicts` is an ordinary thing to
+        // do — under the old rule the first withdrawal wedged the checkpoint
+        // permanently, because every later marker was refused while the
+        // backfill went on reporting success. What the rule was reaching for
+        // — a run that read a shorter prefix — is already impossible: the
+        // prefix only grows, and a repeat of the same `through_event_id`
+        // refuses above.
     }
     state.contradiction_backfill = Some(BackfillCheckpoint {
         event_id: frame.event_id.clone(),
@@ -7270,7 +7272,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backfill_checkpoint_never_claims_less_than_the_one_before() {
+    fn a_backfill_checkpoint_refuses_the_same_coverage_twice_and_accepts_a_shrink() {
         let mut rig = Rig::new("m27-backfill");
         let marker = |through: &str, seen: u64, resolved: u64, opened: u64| {
             schema::ContradictionBackfillCompleted {
@@ -7301,24 +7303,26 @@ mod tests {
             schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
             &marker(&first, 4, 3, 1),
         );
-        // A later checkpoint that saw FEWER relations — a run that lost its
-        // place, not progress.
+        // A later checkpoint that saw FEWER relations. M27.5a made this
+        // ACCEPTED: the count is of relations still live, and withdrawing a
+        // `contradicts` is an ordinary thing to do — the old refusal wedged
+        // the checkpoint permanently on the first withdrawal, because every
+        // later marker was rejected while the backfill reported success.
         rig.append(
             schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
             &marker(&second, 2, 2, 0),
         );
-        // Progress.
+        let third = "3".repeat(32);
         rig.append(
             schema::KIND_CONTRADICTION_BACKFILL_COMPLETED,
-            &marker(&second, 9, 7, 2),
+            &marker(&third, 9, 7, 2),
         );
 
         let state = rig.state();
-        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert_eq!(state.anomalies.len(), 1, "{:?}", state.anomalies);
         assert!(state.anomalies[0].detail.contains("claimed twice"));
-        assert!(state.anomalies[1].detail.contains("lost its place"));
         let checkpoint = state.contradiction_backfill.expect("a checkpoint");
-        assert_eq!(checkpoint.through_event_id, second);
+        assert_eq!(checkpoint.through_event_id, third);
         assert_eq!(checkpoint.source_relation_count, 9);
     }
 }

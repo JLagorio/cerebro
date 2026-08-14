@@ -612,11 +612,26 @@ impl<'a> Plan<'a> {
                 ),
             ));
         }
+        let opens_an_edge = schema::EdgeKind::of(planned.outcome).is_some();
         self.members.extend(planned.members);
         // Server-derived, so the target-binding predicate skips it: the caller
         // could not have named an id that follows from an event this batch is
-        // about to mint. It is still a target this plan advances.
+        // about to mint. It is still a target this plan advances — the
+        // registration CREATES the comparison at v1, then the classification
+        // advances it, and an open edge advances it again.
         self.touches(TargetClass::Comparison, &planned.comparison_id);
+        if opens_an_edge {
+            self.touches(TargetClass::Comparison, &planned.comparison_id);
+            // And `contradiction.opened` advances each DISTINCT endpoint
+            // Belief (reduce.rs, `apply_contradiction_opened`). Those the
+            // caller DID declare as targets, so leaving them out of the
+            // arithmetic hands back a version its next proposal would fail
+            // CAS against.
+            self.touches(TargetClass::Belief, from);
+            if to != from {
+                self.touches(TargetClass::Belief, to);
+            }
+        }
         Ok(())
     }
 
@@ -692,11 +707,16 @@ impl<'a> Plan<'a> {
                     },
                 },
             )?;
-            // The comparison and both endpoint Beliefs advance through the
-            // close, exactly as the version matrix says.
+            // The comparison and each DISTINCT endpoint Belief advance
+            // through the close, exactly as the version matrix says — and the
+            // reducer bumps `distinct_endpoints`, so a self-contradiction
+            // (one Belief on both sides, which M27.3b allows on purpose)
+            // advances that Belief once, not twice.
             self.touches(TargetClass::Comparison, &entry.comparison_id);
             self.touches(TargetClass::Belief, &edge.left_belief_id);
-            self.touches(TargetClass::Belief, &edge.right_belief_id);
+            if edge.right_belief_id != edge.left_belief_id {
+                self.touches(TargetClass::Belief, &edge.right_belief_id);
+            }
         }
         Ok(())
     }

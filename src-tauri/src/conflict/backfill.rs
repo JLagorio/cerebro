@@ -248,11 +248,28 @@ where
     let Some(head) = frames.last().map(|frame| frame.event_id.clone()) else {
         return out;
     };
-    if state
+    // THE FIXED POINT, and it cannot be positional. A marker naming
+    // `frames.last()` BECOMES the last frame, so "is the stored checkpoint's
+    // head the current head?" is false on every tick after the first — and
+    // the pass would append one checkpoint every 300 seconds, forever, into
+    // an append-only in-vault ledger.
+    //
+    // What a checkpoint claims is coverage: this many live declarations, this
+    // many resolved, this many left open, under this rule version. A run that
+    // would claim exactly what the store already claims has nothing to say,
+    // whatever the head has moved to since. The head check stays as the
+    // cheaper half of the same question.
+    let already_claimed = state
         .contradiction_backfill
         .as_ref()
-        .is_some_and(|checkpoint| checkpoint.through_event_id == head)
-    {
+        .is_some_and(|checkpoint| {
+            checkpoint.through_event_id == head
+                || (checkpoint.rule_version == BACKFILL_VERSION
+                    && checkpoint.source_relation_count == sweep.source_relation_count
+                    && checkpoint.resolved_count == sweep.resolved_count
+                    && checkpoint.opened_count == sweep.opened_count)
+        });
+    if already_claimed {
         return out;
     }
     let marker = ContradictionBackfillCompleted {
@@ -671,6 +688,141 @@ mod tests {
             spy.solo.borrow()[0].1,
             KIND_CONTRADICTION_BACKFILL_COMPLETED
         );
+    }
+
+    /// One ambient tick against a REAL writer: re-read the ledger, re-fold,
+    /// run. The spy-backed tests cannot see this class of bug, because the
+    /// marker only becomes the head when it is actually written.
+    fn tick(rig: &mut Rig) -> Ran {
+        let frames = rig.frames();
+        let store_id = rig.store_id.clone();
+        let state = reduce(&frames, &store_id);
+        let commit = Direct {
+            writer: std::cell::RefCell::new(&mut rig.writer),
+        };
+        run(&frames, &state, &store_id, AS_OF, &commit, &commit)
+    }
+
+    /// A `Commit`/`Append` pair that writes to a real ledger, so the marker
+    /// this run appends is the head the next run reads.
+    struct Direct<'a> {
+        writer: std::cell::RefCell<&'a mut LedgerWriter>,
+    }
+
+    impl crate::ingest::pass::Commit for Direct<'_> {
+        fn append_batch(
+            &self,
+            events: Vec<(String, serde_json::Value)>,
+            operation_key: &str,
+        ) -> Result<(), String> {
+            self.writer
+                .borrow_mut()
+                .append_batch(events, Some(operation_key))
+                .map(|_| ())
+        }
+    }
+
+    impl super::super::emit::Append for Direct<'_> {
+        fn append_once(
+            &self,
+            key: &str,
+            kind: &str,
+            body: serde_json::Value,
+        ) -> Result<super::super::emit::Wrote, String> {
+            self.writer
+                .borrow_mut()
+                .append_once(key, kind, body)
+                .map(|_| super::super::emit::Wrote::Appended)
+        }
+    }
+
+    #[test]
+    fn the_checkpoint_reaches_a_fixed_point_instead_of_one_marker_per_tick() {
+        // THE BUG THIS EXISTS FOR (M27.5a): the marker names `frames.last()`
+        // and then BECOMES `frames.last()`, so a positional skip is false on
+        // every tick after the first. The ambient pass runs every 300s
+        // unconditionally, so the ledger grew by one frame forever.
+        let mut rig = Rig::new("m27-backfill-fixed-point");
+        belief(&mut rig, BELIEF, unsupported());
+        belief(&mut rig, BELIEF_B, unsupported());
+        contradicts(&mut rig, schema::ACTOR_MIGRATOR);
+
+        let first = tick(&mut rig);
+        assert_eq!(first.classified, 1);
+        assert!(first.marker.is_some(), "the first run checkpoints");
+        let markers = |rig: &Rig| {
+            rig.frames()
+                .iter()
+                .filter(|f| f.kind == KIND_CONTRADICTION_BACKFILL_COMPLETED)
+                .count()
+        };
+        assert_eq!(markers(&rig), 1);
+
+        for _ in 0..4 {
+            let again = tick(&mut rig);
+            assert_eq!(again.classified, 0);
+            assert_eq!(again.already_done, 1);
+            assert!(again.failed.is_empty(), "{:?}", again.failed);
+            assert!(
+                again.marker.is_none(),
+                "a run that claims what the store already claims writes nothing"
+            );
+        }
+        assert_eq!(markers(&rig), 1, "one marker, however many ticks");
+        assert!(reduce(&rig.frames(), &rig.store_id).anomalies.is_empty());
+    }
+
+    #[test]
+    fn withdrawing_a_declaration_does_not_wedge_the_checkpoint() {
+        // The second half of the same bug (M27.5a). `source_relation_count`
+        // counts LIVE relations, so a withdrawal legitimately shrinks it —
+        // and the reducer used to refuse every later marker on that ground,
+        // freezing coverage at a number the store had moved past.
+        let mut rig = Rig::new("m27-backfill-withdrawn-checkpoint");
+        belief(&mut rig, BELIEF, unsupported());
+        belief(&mut rig, BELIEF_B, unsupported());
+        contradicts(&mut rig, schema::ACTOR_MIGRATOR);
+        tick(&mut rig);
+        assert_eq!(
+            reduce(&rig.frames(), &rig.store_id)
+                .contradiction_backfill
+                .unwrap()
+                .source_relation_count,
+            1
+        );
+
+        let removal = BeliefRelation {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "human:josef".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            relation_id: derive_relation_id(BELIEF, BELIEF_B, RelationKind::Contradicts),
+            from: BELIEF.into(),
+            to: BELIEF_B.into(),
+            relation: RelationKind::Contradicts,
+            action: RelationAction::Remove,
+        };
+        rig.append(schema::KIND_BELIEF_RELATION, &removal);
+
+        let after = tick(&mut rig);
+        assert!(after.failed.is_empty(), "{:?}", after.failed);
+        assert!(
+            after.marker.is_some(),
+            "the shrink is a real coverage claim"
+        );
+        let state = reduce(&rig.frames(), &rig.store_id);
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        assert_eq!(
+            state.contradiction_backfill.unwrap().source_relation_count,
+            0
+        );
+        // ...and it settles again rather than re-checkpointing forever.
+        assert!(tick(&mut rig).marker.is_none());
     }
 
     #[test]

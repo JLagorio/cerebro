@@ -479,6 +479,39 @@ pub fn check(
     let Some(rule) = table.op(proposal.op.kind()) else {
         return Ok(()); // the tripwire already proves this cannot happen
     };
+    // UNCONDITIONAL, and that is the whole point of it (M27.5a). Every check
+    // below runs because an op's `requires` list asked for it — which is
+    // exactly the wrong shape for this one, because the hole it closes is an
+    // op that does NOT ask.
+    //
+    // The expansion emits `contradiction.closed` for whatever
+    // `basis.addressed_contradictions` names, for EVERY op, since a close has
+    // to travel with the mutation that addressed it. Only five ops require
+    // `open_contradictions_addressed`, so without this any cheap LOW-risk
+    // edit could carry an entry and retire an open edge over a Belief it does
+    // not touch — the preservation gate walked around rather than through.
+    if !proposal.basis.addressed_contradictions.is_empty()
+        && !table
+            .contradiction_addressing
+            .required_for_ops
+            .iter()
+            .any(|op| op == proposal.op.kind())
+    {
+        return Err(Box::new(PreconditionFailure {
+            code: "illegal_transition",
+            rule: "addressing_is_entitled",
+            expected: TypedValue::string(&format!(
+                "one of {}",
+                table.contradiction_addressing.required_for_ops.join(", ")
+            )),
+            actual: TypedValue::string(&format!(
+                "{} addressing {} contradiction(s) — only an op the table binds \
+                 addressing to may retire an edge",
+                proposal.op.kind(),
+                proposal.basis.addressed_contradictions.len()
+            )),
+        }));
+    }
     for predicate in &rule.requires {
         match predicate.as_str() {
             "versions_current" => versions_current(state, proposal)?,
@@ -1398,6 +1431,47 @@ mod tests {
             disposition: crate::ledger::schema::ContradictionDisposition::ResolvedWithEvidence,
             evidence_refs: vec![EVIDENCE.into()],
         }
+    }
+
+    #[test]
+    fn an_op_the_table_does_not_bind_addressing_to_cannot_retire_an_edge() {
+        // THE BYPASS THIS CLOSES (M27.5a). The expansion emits
+        // `contradiction.closed` for whatever `basis.addressed_contradictions`
+        // names, for EVERY op — a close has to travel with its mutation. But
+        // `open_contradictions_addressed`, the only thing that checks those
+        // entries, is in the `requires` list of five ops. So a LOW-risk
+        // `update_belief` on an unrelated Belief could carry an entry and
+        // retire any open edge in the base, with nothing looking at it.
+        //
+        // The entitlement check is therefore UNCONDITIONAL in `check`, not a
+        // predicate an op opts into — an op that does not opt in is exactly
+        // the case.
+        let table = PolicyTable::load().unwrap();
+        let catalog = super::super::qualification::Catalog::of(B, vec![]);
+        let state = world_with_open_edge();
+        let binding = TargetBinding {
+            actor: &crate::ledger::schema::Actor { id: A.into() },
+            staged_beliefs: &Default::default(),
+            staged_entities: &Default::default(),
+            decision_event_id: None,
+        };
+
+        // `superseding` builds an `update_belief`, which the table does NOT
+        // bind addressing to.
+        let proposal = superseding(vec![entry(EDGE, COMPARISON)]);
+        assert_eq!(proposal.op.kind(), "update_belief", "the fixture's op");
+        let failure = check(&table, &state, &catalog, &proposal, &binding).unwrap_err();
+        assert_eq!(failure.code, "illegal_transition");
+        assert_eq!(failure.rule, "addressing_is_entitled");
+
+        // The same op carrying nothing is untouched: this rule is about
+        // closing edges, never about editing a Belief that happens to have
+        // one.
+        let clean = check(&table, &state, &catalog, &superseding(vec![]), &binding);
+        assert!(
+            clean.as_ref().err().map(|f| f.rule) != Some("addressing_is_entitled"),
+            "{clean:?}"
+        );
     }
 
     #[test]
