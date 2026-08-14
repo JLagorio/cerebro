@@ -1,30 +1,23 @@
-//! R7 — same-store cross-source qualification (M28.0e).
+//! R7 — same-store cross-source qualification (M28.0e, extractor M28.0h).
 //!
 //! Two distinct connector sources, continuously connected and healthy for a
 //! full 30-day window, each contributing at least a hundred distinct
 //! committed assertion-bearing Observations against ONE declared
 //! subject/predicate/scope digest. The registration, connection, and health
 //! halves come off the M25 portable cache and live-signal tables here; the
-//! OBSERVATION ids arrive injected.
-//!
-//! **The observation extractor is a named seam, deliberately.** Which
-//! Observations qualify — assertion-bearing, carrying the M22
-//! scope/relationship/basis metadata D11 needs, matching the declared scope
-//! digest, with a pinned `source_registration_event_id` that agrees with the
-//! joined cache row — is a walk over reducer state whose misclassification
-//! would silently miscount a GATE. That modelling deserves the M22 schema
-//! open and its own review, exactly as `recovery::receipts_in_ledger` was
-//! the M25.3 seam: the protocol arithmetic here is complete and tested
-//! against injected ids, and the extractor slots in without touching it.
-//! With no live connectors registered anywhere (R14's registered list is
-//! empty), no production population exists for it to miss.
+//! observation ids come from `trigger::observations` — the extractor that
+//! was M28.0e's named seam, made real in M28.0h — walking reducer state
+//! against the declared [`VerificationScope`].
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use rusqlite::Connection;
 
+use crate::dynamics::freshness;
+use crate::ledger::reduce::EpistemicState;
 use crate::trigger::evaluate::{MeasurableOutcome, Recorded, VaultScope};
 use crate::trigger::evaluation::{MetricSeriesKey, TriggerMetric, TriggerResult};
+use crate::trigger::observations::{self, CacheRegistration, VerificationScope};
 use crate::trigger::registry::Registry;
 
 /// One registered source, as the M25 cache and live signals describe it.
@@ -106,19 +99,17 @@ pub fn r7_outcome(
 
 /// Evaluate R7 over one vault store.
 ///
-/// `observations_by_source` is the extractor seam: distinct committed
-/// assertion-bearing Observation event ids per source id, already filtered
-/// to the declared `verification_scope_digest` per the module doc. The
-/// digest itself rides in the payload so the evaluation names what it was
-/// scoped to.
+/// `state` is the reduced ledger the observations are counted from;
+/// `verification` is the declared scope, whose canonical digest rides in the
+/// payload so the evaluation names what it was scoped to.
 pub fn evaluate_r7(
     conn: &Connection,
     registry: &Registry,
     scope: &VaultScope,
     evaluated_at: chrono::DateTime<chrono::Utc>,
     timezone: &str,
-    verification_scope_digest: &str,
-    observations_by_source: &BTreeMap<String, BTreeSet<String>>,
+    state: &EpistemicState,
+    verification: &VerificationScope,
 ) -> Result<Recorded, String> {
     let outcome = MeasurableOutcome::vault(registry, "R7:root", scope, evaluated_at, timezone)?;
 
@@ -150,11 +141,35 @@ pub fn evaluate_r7(
         .map_err(|e| e.to_string())?;
     let mut sources = Vec::new();
     for source in fetched {
-        let mut source = source.map_err(|e| e.to_string())?;
-        if let Some(ids) = observations_by_source.get(&source.source_id) {
+        sources.push(source.map_err(|e| e.to_string())?);
+    }
+
+    // The M25 cache rows ARE the join the extractor checks against.
+    let cache: std::collections::BTreeMap<String, CacheRegistration> = sources
+        .iter()
+        .map(|s| {
+            (
+                s.source_id.clone(),
+                CacheRegistration {
+                    registration_event_id: s.registration_event_id.clone(),
+                    kind: s.kind.clone(),
+                },
+            )
+        })
+        .collect();
+    let (window_start, window_end) = outcome.bounds();
+    let counted = observations::qualifying_observations(
+        state,
+        verification,
+        &freshness::load()?,
+        &cache,
+        window_start,
+        window_end,
+    )?;
+    for source in &mut sources {
+        if let Some(ids) = counted.get(&source.source_id) {
             source.observation_event_ids = ids.clone();
         }
-        sources.push(source);
     }
 
     let window_start_utc = outcome.window_start_utc();
@@ -168,7 +183,8 @@ pub fn evaluate_r7(
     outcome.persist(
         conn,
         &serde_json::json!({
-            "verification_scope_digest": verification_scope_digest,
+            "verification_scope": verification,
+            "verification_scope_digest": verification.digest()?,
             "sources": sources,
         }),
         metrics,
@@ -244,5 +260,188 @@ mod tests {
             TriggerResult::NotReady,
             "no connector population exists"
         );
+    }
+
+    #[test]
+    fn r7_end_to_end_counts_reduced_observations_against_the_cache_and_replays() {
+        use crate::ledger::reduce::{
+            AssertionFacet, EpistemicState, ObservationState, SourceState,
+        };
+        use crate::ledger::schema::{
+            AssertionBasis, AuthorityCapability, ObservationKind, Scope, SourceRegistration,
+            SubjectRef, TypedValue, ValidInterval,
+        };
+        use crate::trigger::evaluate::VaultScope;
+        use crate::trigger::observations::VerificationScope;
+        use crate::vault::testutil;
+
+        let dir = testutil::temp_vault("trigger-evaluate-r7");
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        let store = "feedfacefeedfacefeedfacefeedface";
+        let scope = VaultScope {
+            vault_id: vault.clone(),
+            store_uuid: store.to_string(),
+        };
+        let falcon = "e0000000000000000000000000000001";
+
+        let mut state = EpistemicState::default();
+        for (n, (source_id, registration)) in [
+            (
+                "50000000000000000000000000000001",
+                "60000000000000000000000000000001",
+            ),
+            (
+                "50000000000000000000000000000002",
+                "60000000000000000000000000000002",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO source_registration (store_uuid, source_id, \
+                 registration_event_id, kind, source_key, authority_capability) \
+                 VALUES (?1, ?2, ?3, 'connector', ?4, 'direct_system_artifact')",
+                rusqlite::params![store, source_id, registration, format!("connector:{n}")],
+            )
+            .unwrap();
+            for (table, good) in [
+                ("source_connection", "connected"),
+                ("source_health", "healthy"),
+            ] {
+                conn.execute(
+                    &format!(
+                        "INSERT INTO {table} (store_uuid, source_id, state, since) \
+                         VALUES (?1, ?2, ?3, '2026-07-01T00:00:00.000Z')"
+                    ),
+                    rusqlite::params![store, source_id, good],
+                )
+                .unwrap();
+            }
+            state.sources.insert(
+                source_id.to_string(),
+                SourceState {
+                    source_id: source_id.to_string(),
+                    registration_event_id: registration.to_string(),
+                    registration: SourceRegistration::Connector {
+                        source_key: format!("connector:{n}"),
+                        connector_instance_id: "ci".into(),
+                        logical_scope_id: "repo".into(),
+                        authority_capability: AuthorityCapability::DirectSystemArtifact,
+                        independence_domain_id: None,
+                    },
+                    canonical: "{}".into(),
+                },
+            );
+            for i in 0..100 {
+                let event_id = format!("{n}{i:031}");
+                state.observations.insert(
+                    event_id.clone(),
+                    ObservationState {
+                        event_id: event_id.clone(),
+                        seq: i,
+                        kind: ObservationKind::ExtractedAssertion,
+                        source_id: source_id.to_string(),
+                        source_registration_event_id: registration.to_string(),
+                        subject: SubjectRef::Resolved {
+                            entity_id: falcon.into(),
+                            aliases: vec![],
+                        },
+                        effective_entity: Some(falcon.into()),
+                        effective_resolution_event: None,
+                        authority: None,
+                        assertion_basis: Some(AssertionBasis::Firsthand),
+                        absence: None,
+                        actor: "system:connector".into(),
+                        lineage_parents: vec![],
+                    },
+                );
+                state.assertion_facets.insert(
+                    event_id,
+                    AssertionFacet {
+                        predicate: "ci_status".into(),
+                        value_hash: "f".repeat(64),
+                        value: TypedValue::string("green"),
+                        scope: Scope::empty(),
+                        valid_time: ValidInterval {
+                            from: None,
+                            to: None,
+                        },
+                        recorded_at: "2026-08-01T10:00:00.000Z".into(),
+                        observed_at: None,
+                        relationship_role: crate::ledger::schema::SubjectRole::Unknown,
+                        source_artifact_hash: Some("a".repeat(64)),
+                        raw_pointer: Some("repo/ci.json#L1".into()),
+                    },
+                );
+            }
+        }
+
+        let verification = VerificationScope {
+            subjects: vec![falcon.to_string()],
+            predicate_classes: vec!["ci_status".to_string()],
+            stage: None,
+            environment: None,
+            geography: None,
+        };
+        let registry = crate::trigger::registry::load().unwrap();
+        let evaluated_at = chrono::DateTime::parse_from_rfc3339("2026-08-14T09:30:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let recorded = evaluate_r7(
+            &conn,
+            &registry,
+            &scope,
+            evaluated_at,
+            "UTC",
+            &state,
+            &verification,
+        )
+        .unwrap();
+        assert_eq!(recorded.evaluation.result, TriggerResult::Fired);
+
+        // The rerun replays byte-identically, and the stored record still
+        // validates against the shared registry.
+        let rerun = evaluate_r7(
+            &conn,
+            &registry,
+            &scope,
+            evaluated_at,
+            "UTC",
+            &state,
+            &verification,
+        )
+        .unwrap();
+        assert_eq!(rerun.evaluation, recorded.evaluation);
+        assert_eq!(
+            rerun.evaluation_put,
+            crate::runtime::triggers::Put::Replayed
+        );
+        crate::trigger::evaluation::validate(&recorded.evaluation, &registry).unwrap();
+
+        // One observation short on ONE source and the gate closes — the
+        // floor is per source, never pooled across the pair. A different
+        // sample is a different snapshot, so this records as its own
+        // evaluation rather than disturbing the one above.
+        let mut short = state.clone();
+        let victim = format!("0{:031}", 99);
+        assert!(
+            short.observations.remove(&victim).is_some(),
+            "the victim exists"
+        );
+        let recorded = evaluate_r7(
+            &conn,
+            &registry,
+            &scope,
+            evaluated_at,
+            "UTC",
+            &short,
+            &verification,
+        )
+        .unwrap();
+        assert_eq!(recorded.evaluation.result, TriggerResult::NotFired);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

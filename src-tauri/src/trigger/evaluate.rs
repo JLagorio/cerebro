@@ -356,6 +356,11 @@ impl<'a> MeasurableOutcome<'a> {
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
     }
 
+    /// The window's UTC bounds, start inclusive and end exclusive.
+    pub fn bounds(&self) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+        (self.start, self.end)
+    }
+
     /// Record the outcome — see [`persist`].
     pub fn persist(
         self,
