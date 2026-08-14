@@ -10,7 +10,8 @@ import { todayIso } from '@/lib/templates';
 import { ConceptBody } from '@/knowledge/ConceptBody';
 import { KnowledgeLog } from '@/knowledge/KnowledgeLog';
 import { KnowledgePanel } from '@/knowledge/KnowledgePanel';
-import { TrustChip } from '@/knowledge/TrustChip';
+import { ReviewChip } from '@/knowledge/ReviewChip';
+import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import { readNote, verifyConcept } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -89,7 +90,7 @@ function ConceptRow({
             Replaced
           </span>
         )}
-        <TrustChip tier={concept.trust} size="sm" />
+        <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
         {concept.stale && (
           <span className="inline-flex items-center gap-1 text-2xs text-warn-600">
             <Icon name="clock-alert" size={10} />
@@ -118,6 +119,10 @@ export function KnowledgePage({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [body, setBody] = useState<string>('');
   const [verifying, setVerifying] = useState(false);
+  // Loaded once for the page rather than once per concept: the axes are a
+  // fold of the whole ledger either way, and asking again on every selection
+  // would re-read it to answer about one row.
+  const chipIndex = useBeliefChips(vaultPath);
 
   /**
    * How much room the three columns actually have (M15).
@@ -438,6 +443,7 @@ export function KnowledgePage({
               today={today}
               verifying={verifying}
               verifiedToday={verifiedToday}
+              chips={chipsFor(chipIndex, selected.entry.path)}
               className={
                 narrow
                   ? 'absolute inset-y-0 right-0 z-20 w-[300px] max-w-full shadow-[var(--shadow-lg)]'

@@ -1,0 +1,309 @@
+{
+  "name": "derived-sources",
+  "description": "Belief-revision inputs must name earlier committed creations/revisions; the reducer indexes them read-only with no version effect on the Belief.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "44173197f780dbd849569926faa0faef4094b147eb32510ff4b5ad06ae8086df",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "source.registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:source-registry"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "source_id": "f93f1bb04a4866c64021368363b52caa",
+        "registration": {
+          "kind": "builtin",
+          "source_key": "builtin:577815c55bc94e86fdf0bb208c103db84bdb2309048b45753a795e6d06c5aa98",
+          "service_id": "svc.distill",
+          "authority_capability": "content_only",
+          "independence_domain_id": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "44173197f780dbd849569926faa0faef4094b147eb32510ff4b5ad06ae8086df",
+      "hash": "b7ba17fd8bf82574464329bcf7f10c2dfbf1d21df8cc2af003c703b82e3c1cf6",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "b7ba17fd8bf82574464329bcf7f10c2dfbf1d21df8cc2af003c703b82e3c1cf6",
+      "hash": "8088499166c1deb16e9bced6e00fa910168e5c06bcae3d77893d7efbc15a4609",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "derived_content",
+        "source_id": "f93f1bb04a4866c64021368363b52caa",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "inferred",
+          "authority_provenance": "agent_inferred",
+          "absence": null,
+          "rendered_text": "Acme is active.",
+          "generator_version": "g1",
+          "source_belief_revision_event_ids": [
+            "00000000000000000000000000000002"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "8088499166c1deb16e9bced6e00fa910168e5c06bcae3d77893d7efbc15a4609",
+      "hash": "6fcb3069f834b4a00d42954c38f2b44a79cce053b54bbbdcb340ffcb6c126244",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "derived_content",
+        "source_id": "f93f1bb04a4866c64021368363b52caa",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "inferred",
+          "authority_provenance": "agent_inferred",
+          "absence": null,
+          "rendered_text": "Acme is active.",
+          "generator_version": "g1",
+          "source_belief_revision_event_ids": [
+            "00000000000000000000000000000001"
+          ]
+        }
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {
+      "f93f1bb04a4866c64021368363b52caa": {
+        "source_key": "builtin:577815c55bc94e86fdf0bb208c103db84bdb2309048b45753a795e6d06c5aa98",
+        "kind": "builtin",
+        "capability": "content_only",
+        "independence_domain_id": null,
+        "registration_event_id": "00000000000000000000000000000001"
+      }
+    },
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {
+      "00000000000000000000000000000003": {
+        "seq": 3,
+        "kind": "derived_content",
+        "source_id": "f93f1bb04a4866c64021368363b52caa",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": "agent_inferred",
+        "lineage": []
+      }
+    },
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000002",
+          "state_digest": "b98dcd1a32ba123df215e566162b776669c3ced8db605a3efb7c842d80e9e9bd",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [
+      [
+        "00000000000000000000000000000003",
+        "00000000000000000000000000000002"
+      ]
+    ],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "observation:00000000000000000000000000000003": 1,
+      "source:f93f1bb04a4866c64021368363b52caa": 2
+    },
+    "batches": [],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "belief-revision source 00000000000000000000000000000001 names no committed belief.created/belief.revised"
+    }
+  ]
+}

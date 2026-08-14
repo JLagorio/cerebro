@@ -70,6 +70,18 @@ export function verifyConcept(
     : mock.verifyConcept(vault, path, patch);
 }
 
+/**
+ * The M23.5 capture boundary: a structured edit to a knowledge projection
+ * becomes an assertion+revision batch; an editorial edit becomes a
+ * projection override. The M23.7 valve routes in-app projection edits here
+ * instead of the guard refusal. `request.kind` selects the channel.
+ */
+export function captureConceptEdit(vault: string, request: Record<string, unknown>): Promise<void> {
+  return inTauri()
+    ? invokeTauri('capture_concept_edit', { vault, request })
+    : mock.captureConceptEdit(vault, request);
+}
+
 export function createNote(
   vault: string,
   folder: string,
@@ -243,4 +255,325 @@ export function exportPng(defaultName: string, bytes: Uint8Array): Promise<strin
   return inTauri()
     ? invokeTauri('export_png', { defaultName, bytesBase64 })
     : mock.exportPng(defaultName, bytes);
+}
+
+/** The ledger chain head, as `{ seq, hash }` — or null when the vault has no
+ * readable ledger. Best-effort by design (M21.7): checkpoint trailers are
+ * periodic anchoring, and a missing head must change nothing about a commit. */
+export interface LedgerHead {
+  seq: number | null;
+  hash: string;
+}
+
+export function ledgerHead(vault: string): Promise<LedgerHead | null> {
+  return inTauri() ? invokeTauri('ledger_head', { vault }) : mock.ledgerHead(vault);
+}
+
+/** Shadow-mode diagnostics (M21.8): the live verdict on a vault's ledger.
+ * Verdict tags are the Rust recovery states (kebab-case); no UI consumes
+ * this yet — it exists so a human can ask. */
+export interface LedgerStatus {
+  verdict: string;
+  detail: string;
+  head: string | null;
+  seq: number | null;
+  segments: number;
+  anomalies: number;
+  /** The M23.6 circuit breaker: the named reconciliation mode is open. */
+  reconciliation_open: boolean;
+  /** Unresolved divergence detection keys while the mode is open. */
+  divergences: string[];
+}
+
+/** The M23.7 reconciliation exits. `action` is `accept_current_files` or
+ * `restore_ledger_authority`; only the Tauri backend can resolve (the
+ * browser has no ledger). */
+export function resolveReconciliation(vault: string, action: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('resolve_reconciliation', { vault, action })
+    : mock.resolveReconciliation(vault, action);
+}
+
+export function ledgerStatus(vault: string): Promise<LedgerStatus> {
+  return inTauri() ? invokeTauri('ledger_status', { vault }) : mock.ledgerStatus(vault);
+}
+
+// --- The review surface (M24.9) --------------------------------------------
+
+// The card shapes live in mockIpc so the module graph stays a tree: ipc
+// imports the mock, and a type import pointing back would close a cycle that
+// vitest's module ordering can trip over. Re-exported here because the app
+// imports its IPC types from the IPC module.
+import type {
+  BeliefChips,
+  CardTarget,
+  ChangesView,
+  LanesView,
+  ReviewCard,
+  RevertableApplication,
+} from './mockIpc';
+
+export type { CardTarget, ReviewCard, RevertableApplication };
+export type {
+  AuthorityScope,
+  BeliefChips,
+  BeliefFacetKey,
+  ChangeLine,
+  ChangeSection,
+  ChangesView,
+  Coverage,
+  FacetChips,
+  FacetPredicate,
+  FreshnessBasis,
+  LaneItem,
+  LanesView,
+  LaneView,
+  ReviewStatus,
+  Support,
+  SupportFamily,
+  Validity,
+} from './mockIpc';
+
+/** Cards awaiting a human. Rebuilt from the ledger on every call — nothing
+ * is cached, so a wiped app-data directory cannot lose one. */
+export function reviewQueue(vault: string): Promise<ReviewCard[]> {
+  return inTauri() ? invokeTauri('review_queue', { vault }) : mock.reviewQueue(vault);
+}
+
+/** Support/Coverage/Validity per belief facet (M27.5b).
+ *
+ * Rebuilt from the ledger on every call, and derived nowhere else: the `line`
+ * each row carries is composed in Rust so the sentence exists once. A vault
+ * with no ledger REFUSES rather than answering `[]` — "there is no ledger
+ * here" and "nothing rests under anything" are opposite sentences, and the
+ * caller decides which one to show. */
+export function beliefChips(vault: string): Promise<BeliefChips[]> {
+  return inTauri() ? invokeTauri('belief_chips', { vault }) : mock.beliefChips(vault);
+}
+
+/** The four attention lanes, after §33's firewall (M27.8b).
+ *
+ * Every lane the artifact declares comes back whether or not it holds
+ * anything, and every sentence in it was composed beside the rule that
+ * produced it. A vault with no ledger REFUSES — the caller renders that
+ * differently from four empty lanes, because it is a different fact. */
+export function attentionLanes(vault: string): Promise<LanesView> {
+  return inTauri() ? invokeTauri('attention_lanes', { vault }) : mock.attentionLanes(vault);
+}
+
+/** What changed since the last time anybody looked (M26.8, read aloud in
+ * M27.8b). `fromSeq` omitted means "since the last stored run", which is the
+ * question a person actually asks. */
+export function converge(vault: string, fromSeq?: number): Promise<ChangesView> {
+  return inTauri()
+    ? invokeTauri('converge', { vault, fromSeq: fromSeq ?? null })
+    : mock.converge(vault, fromSeq);
+}
+
+export function revertableApplications(vault: string): Promise<RevertableApplication[]> {
+  return inTauri()
+    ? invokeTauri('revertable_applications', { vault })
+    : mock.revertableApplications(vault);
+}
+
+/** Approve or reject one card. A rejection REQUIRES a reason — the server
+ * refuses without one, and the caller is expected to read the result rather
+ * than fire and forget (the proposal-channel carve-out in AGENTS.md).
+ * Resolves to the set's transition code once its last member is decided,
+ * or null while the set is still waiting on its peers. */
+export function decideProposal(
+  vault: string,
+  proposalId: string,
+  approve: boolean,
+  reviewer: string,
+  reason: string | null,
+): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('decide_proposal', {
+        vault,
+        proposalId,
+        approve,
+        reviewer,
+        reason,
+      })
+    : mock.decideProposal(vault, proposalId, approve, reviewer, reason);
+}
+
+/** Undo an applied change by appending a NEW forward mutation. The applied
+ * event ids are the ones the card showed: handing back anything else is
+ * `revert_not_current`. History is never rewound. */
+export function revertApplication(
+  vault: string,
+  proposalId: string,
+  appliedEventIds: string[],
+  reviewer: string,
+): Promise<string> {
+  return inTauri()
+    ? invokeTauri('revert_application', {
+        vault,
+        proposalId,
+        appliedEventIds,
+        reviewer,
+      })
+    : mock.revertApplication(vault, proposalId, appliedEventIds, reviewer);
+}
+
+// --- The control surface (M25.7) -------------------------------------------
+
+// Same module-graph rule as the review surface: the shapes live in mockIpc so
+// ipc imports it one way only.
+import type {
+  PipelineActivity,
+  PipelineBanner,
+  PipelineHeld,
+  PipelineLane,
+  PipelineMeter,
+  PipelineOverview,
+  ItemState,
+  Asked,
+  AskRefusal,
+  QueryIntendedUse,
+} from './mockIpc';
+
+export type {
+  PipelineActivity,
+  PipelineBanner,
+  PipelineHeld,
+  PipelineLane,
+  PipelineMeter,
+  PipelineOverview,
+  ItemState,
+  Asked,
+  AskRefusal,
+  QueryIntendedUse,
+};
+
+/** The pause, the meter, the lanes, recent activity, and every banner — one
+ * query, so the panel cannot render a paused pipeline beside a budget it read
+ * a second earlier. */
+export function pipelineOverview(vault: string): Promise<PipelineOverview> {
+  return inTauri() ? invokeTauri('pipeline_overview', { vault }) : mock.pipelineOverview(vault);
+}
+
+/**
+ * Where the ingest scheduler holds one item (M26.4j).
+ *
+ * `null` means the scheduler has never seen it — an unscanned vault, or
+ * ambient ingest that has never been turned on. That is a real answer and
+ * renders as "not queued", never as an error.
+ */
+export function ingestItemState(vault: string, path: string): Promise<ItemState | null> {
+  return inTauri()
+    ? invokeTauri('ingest_item_state', { vault, path })
+    : mock.ingestItemState(vault, path);
+}
+
+/**
+ * Ask the base a question, attended (M26.5e).
+ *
+ * The refusal is a RESULT, not a thrown error: `cap_conflict` means accessible
+ * counterevidence would not fit under the caps and nothing was synthesized,
+ * which is a card the person who asked has to see rather than a toast to
+ * dismiss. Read the `state` field.
+ */
+export function askQuestion(
+  vault: string,
+  question: string,
+  aliases: string[],
+  intendedUse: QueryIntendedUse,
+): Promise<Asked> {
+  return inTauri()
+    ? invokeTauri('ask_question', { vault, question, aliases, intendedUse })
+    : mock.askQuestion(vault, question, aliases, intendedUse);
+}
+
+/** Subscription-wide, and persisted: one CLI account, one pause. */
+export function setGlobalPause(paused: boolean): Promise<void> {
+  return inTauri() ? invokeTauri('set_global_pause', { paused }) : mock.setGlobalPause(paused);
+}
+
+/** Per vault, because somebody may want scheduled agents at work and nothing
+ * at all in their journal. */
+export function setLaneEnabled(vault: string, lane: string, enabled: boolean): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_lane_enabled', { vault, lane, enabled })
+    : mock.setLaneEnabled(vault, lane, enabled);
+}
+
+/** Resolve a held pile: `baseline` accepts today's content as accounted for,
+ * `process` queues it. Either way the question is asked once. */
+export function resolveHeldItems(
+  vault: string,
+  which: 'baseline_held' | 'recovery_held',
+  choice: 'baseline' | 'process',
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('resolve_held_items', { vault, which, choice })
+    : mock.resolveHeldItems(vault, which, choice);
+}
+
+// --- The deferral gates (M28.1) ---------------------------------------------
+
+import type {
+  TriggerEntryStatus,
+  TriggerGateOutcome,
+  TriggerGateRun,
+  TriggerGateStatus,
+  TriggerLatest,
+  TriggerRunReport,
+  VerificationScope,
+} from './mockIpc';
+
+export type {
+  TriggerEntryStatus,
+  TriggerGateOutcome,
+  TriggerGateRun,
+  TriggerGateStatus,
+  TriggerLatest,
+  TriggerRunReport,
+  VerificationScope,
+};
+
+/** The board: every gate the shared artifact declares, with its newest
+ * recorded evaluation or an explicit never-evaluated. */
+export function triggerStatus(vault: string): Promise<TriggerEntryStatus[]> {
+  return inTauri() ? invokeTauri('trigger_status', { vault }) : mock.triggerStatus(vault);
+}
+
+/** One pass over every gate with a measurable leg. Safe whenever the surface
+ * opens — a same-day rerun replays byte-identically. */
+export function triggerRun(vault: string): Promise<TriggerRunReport> {
+  return inTauri() ? invokeTauri('trigger_run', { vault }) : mock.triggerRun(vault);
+}
+
+/** Declare what R7 should count for this vault; returns the canonical digest
+ * recorded evaluations will carry. */
+export function triggerDeclareR7Scope(vault: string, scopeJson: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('trigger_declare_r7_scope', { vault, scopeJson })
+    : mock.triggerDeclareR7Scope(vault, scopeJson);
+}
+
+/** The declared R7 scope, if any. `null` is "nothing declared"; a rejection
+ * is "cannot tell" — the two are never conflated. */
+export function triggerR7Scope(vault: string): Promise<VerificationScope | null> {
+  return inTauri() ? invokeTauri('trigger_r7_scope', { vault }) : mock.triggerR7Scope(vault);
+}
+
+import type { PackRecorded } from './mockIpc';
+export type { PackRecorded };
+
+/** Record an owner evidence pack (M28.2): the discretionary road, or R2's
+ * hybrid assembly, dispatched on the pack's own gate. `result` is required
+ * for discretionary packs ("fired" | "not_fired") and refused for R2, whose
+ * result is measured. */
+export function triggerRecordPack(
+  vault: string,
+  repoRoot: string,
+  packPath: string,
+  result: string | null,
+): Promise<PackRecorded> {
+  return inTauri()
+    ? invokeTauri('trigger_record_pack', { vault, repoRoot, packPath, result })
+    : mock.triggerRecordPack(vault, repoRoot, packPath, result);
 }

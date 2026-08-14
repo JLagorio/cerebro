@@ -1,0 +1,32 @@
+{
+  "name": "exactly 72 hours out is inside the window and one second later is not",
+  "description": "Two candidates, one boundary. The window is as_of < expires_at <= as_of + 259200s, so the certificate at exactly 72h fires and the one a second past it does not.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-at-boundary",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-15T00:00:00Z"
+      }
+    },
+    {
+      "id": "cert-past-boundary",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-15T00:00:01Z"
+      }
+    }
+  ],
+  "replacements": [],
+  "expected": [
+    {
+      "trigger_id": "production_signing_certificate_expiring",
+      "candidate_id": "cert-at-boundary"
+    }
+  ]
+}

@@ -1,0 +1,357 @@
+{
+  "name": "attestation",
+  "description": "The id/hash pair must name one committed revision of the named Belief, hashed over its byte-stable projection; a later revision renders the predating review notice, never silence.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "0569dc66b295cc929a55fd2fa0e7e1fcf4049fd7932d9541f1391bac70b14335",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "0569dc66b295cc929a55fd2fa0e7e1fcf4049fd7932d9541f1391bac70b14335",
+      "hash": "0b0d1181bbbb294039a93faebf2b6fa096f5127d0a9b19f237829fd3dcecf7d2",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.attested",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attested_belief_revision_event_id": "00000000000000000000000000000001",
+        "attested_content_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "0b0d1181bbbb294039a93faebf2b6fa096f5127d0a9b19f237829fd3dcecf7d2",
+      "hash": "aad49fc4f734d5170e9567f3dba4c525bdea67dcb58dc952513a7a13cb2989cb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.attested",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attested_belief_revision_event_id": "00000000000000000000000000000001",
+        "attested_content_hash": "d89a6ee2a7e5090eaf810d34ce13f2043a333e5a9cfcc8c452cf0615ae0a5c1b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "aad49fc4f734d5170e9567f3dba4c525bdea67dcb58dc952513a7a13cb2989cb",
+      "hash": "9e209850244d01c07627eb9f551b214851021bd1faeb6aa30c1203389f593245",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "9e209850244d01c07627eb9f551b214851021bd1faeb6aa30c1203389f593245",
+      "hash": "de7e8b8f91a27e8e913bed30c9e7df04ed8b1a75ea7875ee7f34c6ddc06ff013",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.attested",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attested_belief_revision_event_id": "00000000000000000000000000000004",
+        "attested_content_hash": "d89a6ee2a7e5090eaf810d34ce13f2043a333e5a9cfcc8c452cf0615ae0a5c1b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "de7e8b8f91a27e8e913bed30c9e7df04ed8b1a75ea7875ee7f34c6ddc06ff013",
+      "hash": "723fe7d1514eb70c02243d4bc01fce39fa3f7b1b502c0919dade93247e157a69",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.attested",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "attested_belief_revision_event_id": "0123456789abcdef0123456789abcdef",
+        "attested_content_hash": "d89a6ee2a7e5090eaf810d34ce13f2043a333e5a9cfcc8c452cf0615ae0a5c1b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "723fe7d1514eb70c02243d4bc01fce39fa3f7b1b502c0919dade93247e157a69",
+      "hash": "e3b9b800ed483d94d4d408961b07c68f5a6415451a028f9e14085ddb7c9a92bb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.revised",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "patch": [
+          {
+            "field_path": "/fields/status",
+            "before": {
+              "type": "string",
+              "value": "active"
+            },
+            "after": {
+              "type": "string",
+              "value": "paused"
+            }
+          }
+        ],
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001",
+      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000004"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 2,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "paused"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": [
+          "00000000000000000000000000000003",
+          "00000000000000000000000000000001"
+        ],
+        "revision_events": [
+          "00000000000000000000000000000001",
+          "00000000000000000000000000000007"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000007",
+          "state_digest": "df2deae5ee30708d9350d5f619240beeed74191c6cf576da1d956884cabefbf5",
+          "content_hash": "11843ea779097af8f8dc861ee57a9c7a4cf8daf914d37cb862e7416f75d3381a",
+          "review_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "ffffffffffffffffffffffffffffffff": {
+        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000004"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000004",
+          "state_digest": "2f4c51910518fc0f6cfc4f547aec0693b01b9b0923fd3f4a655e3566b225541d",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 3,
+      "belief:ffffffffffffffffffffffffffffffff": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "entity:dddddddddddddddddddddddddddddddd": 1
+    },
+    "batches": [],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "attested_content_hash does not match the projection of the pinned revision — the id/hash pair must name the same committed revision"
+    },
+    {
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "the pinned revision belongs to a different Belief"
+    },
+    {
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "attested_belief_revision_event_id names no committed revision"
+    }
+  ]
+}

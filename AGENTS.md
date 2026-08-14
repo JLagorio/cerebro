@@ -36,19 +36,40 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
-- **`docs/` is gitignored vendored reference, NOT documentation** —
-  `tolaria-main/` and friends are third-party repos kept for study. Never lint,
-  test, or grep them as project code. Milestone plan docs live in
-  `docs/archive/superpowers/plans/` and are force-added (`git add -f`).
+- **`docs/archive/` and `docs/examples/` are gitignored vendored reference,
+  NOT documentation** — third-party repos and material kept for study. Never
+  lint, test, or grep them as project code. Milestone plan and spec docs live
+  in `docs/superpowers/plans/` and `docs/superpowers/specs/` and are tracked
+  normally (the old `docs/archive/superpowers/` path and its `git add -f`
+  ritual are gone).
 - `scripts/` — seeders and mac packaging. Typechecked via `tsconfig.tools.json`.
 
 ## Conventions that will bite you
 
 - **Commits**: `type(scope): sentence (M<milestone>.<n>)` — see `git log`. One
   milestone phase per commit where possible.
-- **Store-layer error invariant**: actions never throw. They catch, `toast()`,
-  and return `null`/`false`; call sites may fire-and-forget with `void`.
-  Anything that breaks this needs a written reason at the call site.
+- **Store-layer error invariant — human-UI actions only** (re-scoped M24.2):
+  actions behind a human action never throw. They catch, `toast()`, and
+  return `null`/`false`; call sites may fire-and-forget with `void`. Anything
+  that breaks this needs a written reason at the call site.
+  **Proposal channels are exempt, and must be.** They return a typed
+  `applied | queued | rejected { code, rule, expected, actual }` result that
+  the caller is expected to READ and act on — a queued HIGH-risk mutation is
+  not an error to toast away, and a `stale_target_version` rejection is a
+  card the user has to see. Collapsing those into `null` would throw away
+  the whole point of typing them.
+- **Policy is data**: `shared/policy/` is loaded by Rust (`include_str!`) and
+  TS (vite) from the SAME files. A policy rule implemented as twin Rust and
+  TS code is a review-blocking defect — grow the table format instead.
+  Parity is the shared artifact plus `shared/policy/goldens/`; see that
+  directory's README before editing either artifact (both have regeneration
+  steps that are deliberate, `#[ignore]`d tests).
+- **Two records, two destinies**: every refusal names a code whose
+  ledger-or-operational destiny is declared in `policy.v1.json`. Epistemic
+  history goes in the vault ledger; schema mistakes, malformed arguments,
+  and capability gaps go in `<app-data>/runtime.db`. When in doubt:
+  operational. Promoting a code into the ledger needs a
+  coverage-materiality argument in review.
 - **Knowledge is guarded**: `knowledge/` is agent-written, human-VERIFIED.
   Writes go through `write_concept`/`verify_concept` only; the mock backend
   (`src/lib/mockIpc.ts`) must mirror every Rust-side guard, and that parity is
@@ -77,7 +98,17 @@ under `src/` stays pure string code or mocks `../render` with a fixture svg
 a component test that flakes under load.
 
 Playwright specs use `getByTestId`/`getByRole` against the mock backend
-(`window.__cerebroMockFs` exposes the fake disk). The background distiller is
-disabled via localStorage in `boot()` — copy an existing spec's boot. For live
-checks, chrome-devtools MCP against `pnpm dev` works; synthetic `blur` events
-don't fire React `onBlur` (call `el.blur()`).
+(`window.__cerebroMockFs` exposes the fake disk). **Import `boot` from
+`e2e/boot.ts`; never write your own.** It disables the background distiller,
+pins the theme, and pins the CLOCK to `VAULT_TODAY` — the day the demo vault
+was written to be read on. That last one is not optional: the corpus has
+absolute dates and the app has relative-time logic, so an unpinned spec has a
+shelf life. One expired in M26 and failed on every tree for days. The
+browser timezone is fixed to UTC in `playwright.config.ts` for the same
+reason. For live checks, chrome-devtools MCP against `pnpm dev` works;
+synthetic `blur` events don't fire React `onBlur` (call `el.blur()`).
+
+**Check the e2e port is FREE before running.** `reuseExistingServer` is on
+outside CI, so a port held by another worktree is silently reused and the
+suite runs against a different branch's app — producing confident, wrong
+failures. `lsof -iTCP:5173 -sTCP:LISTEN` first, then `PORT=<free> pnpm e2e`.

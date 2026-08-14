@@ -1,4 +1,14 @@
 //! Vault file watcher: notify-based, 350 ms debounce, own-write suppression.
+//!
+//! Own-write recognition is content-hash-first since M21.6: the write
+//! funnel records the SHA-256 of what it wrote, and a change event on a
+//! path whose CURRENT bytes hash to that record is a no-op regardless of
+//! timing — a projection burst that outlives any window is still our own
+//! write, and a foreign write two seconds after ours is still foreign. The
+//! 4-second window survives only for own-writes that have no meaningful
+//! content hash (renames, deletes, attachment copies) — a UI-refresh
+//! debounce heuristic, no longer the authority. Groundwork for the M23
+//! projection manifest; no capture behavior yet.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +39,34 @@ pub fn own_write_active(registered: Instant, now: Instant, window: Duration) -> 
     now.duration_since(registered) < window
 }
 
+/// One registered own-write: when it happened, and — for content writes —
+/// the SHA-256 of exactly what was written.
+#[derive(Debug, Clone)]
+pub struct OwnWrite {
+    pub at: Instant,
+    pub content_hash: Option<String>,
+}
+
+/// Pure suppression decision for one registered own-write (M21.6).
+///
+/// A hashed record is matched by CONTENT, never by clock: the event is ours
+/// iff the file's current bytes hash to what we wrote — however much later
+/// the event arrives, and never when the bytes differ (the exact hole the
+/// time window had: a foreign write landing inside it was swallowed).
+/// An unhashed record (rename, delete, attachment copy) keeps the window
+/// heuristic.
+pub fn own_write_suppresses(
+    own: &OwnWrite,
+    current_hash: Option<&str>,
+    now: Instant,
+    window: Duration,
+) -> bool {
+    match &own.content_hash {
+        Some(written) => current_hash == Some(written.as_str()),
+        None => own_write_active(own.at, now, window),
+    }
+}
+
 /// Vault-relative paths that should trigger a rescan: `.md`, `.mmd`, or
 /// `.yml` files with no dot-prefixed component.
 pub fn is_relevant_path(path: &Path) -> bool {
@@ -44,8 +82,8 @@ pub fn is_relevant_path(path: &Path) -> bool {
     )
 }
 
-fn own_writes() -> &'static Mutex<HashMap<PathBuf, Instant>> {
-    static MAP: OnceLock<Mutex<HashMap<PathBuf, Instant>>> = OnceLock::new();
+fn own_writes() -> &'static Mutex<HashMap<PathBuf, OwnWrite>> {
+    static MAP: OnceLock<Mutex<HashMap<PathBuf, OwnWrite>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -55,22 +93,65 @@ fn normalize(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Record that this process just wrote `path` (called from write.rs).
-pub fn note_own_write(path: &Path) {
+fn insert_own_write(path: &Path, content_hash: Option<String>) {
     if let Ok(mut map) = own_writes().lock() {
         let now = Instant::now();
-        map.retain(|_, t| own_write_active(*t, now, OWN_WRITE_WINDOW));
-        map.insert(normalize(path), now);
+        // Prune expired WINDOW entries only: a hashed record's authority is
+        // content, not clock, so it stays until overwritten (one entry per
+        // path — the map is bounded by paths written this session).
+        map.retain(|_, own| {
+            own.content_hash.is_some() || own_write_active(own.at, now, OWN_WRITE_WINDOW)
+        });
+        map.insert(
+            normalize(path),
+            OwnWrite {
+                at: now,
+                content_hash,
+            },
+        );
     }
 }
 
-/// True while `path` is inside the own-write suppression window.
+/// Record a structural own-write (rename, delete, attachment copy) — no
+/// meaningful content hash, so only the time window suppresses its echo.
+pub fn note_own_write(path: &Path) {
+    insert_own_write(path, None);
+}
+
+/// Record a content own-write with the SHA-256 of exactly what was written
+/// (called from the write funnel). Its echo is recognized by hash,
+/// regardless of timing.
+pub fn note_own_write_hashed(path: &Path, content_hash: String) {
+    insert_own_write(path, Some(content_hash));
+}
+
+/// Is this change event our own write coming back? Hashed records compare
+/// the file's CURRENT bytes against what we wrote; unhashed records fall
+/// back to the window.
 pub fn is_suppressed(path: &Path) -> bool {
-    let Ok(map) = own_writes().lock() else {
+    let normalized = normalize(path);
+    let own = {
+        let Ok(map) = own_writes().lock() else {
+            return false;
+        };
+        map.get(&normalized).cloned()
+        // Lock released before any disk IO below.
+    };
+    let Some(own) = own else {
         return false;
     };
-    map.get(&normalize(path))
-        .is_some_and(|t| own_write_active(*t, Instant::now(), OWN_WRITE_WINDOW))
+    let current_hash = match own.content_hash {
+        Some(_) => std::fs::read(&normalized)
+            .ok()
+            .map(|bytes| crate::ledger::sha256_hex(&bytes)),
+        None => None,
+    };
+    own_write_suppresses(
+        &own,
+        current_hash.as_deref(),
+        Instant::now(),
+        OWN_WRITE_WINDOW,
+    )
 }
 
 /// True when notify reports the OS event queue overflowed and changes were
@@ -143,6 +224,8 @@ fn relevant_change(vault: &Path, path: &Path) -> bool {
 fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<WatchSignal>) {
     let mut pending = false;
     let mut last_event: Option<Instant> = None;
+    let mut knowledge_pending: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     loop {
         match rx.recv_timeout(POLL) {
             Ok(WatchSignal::Force) => {
@@ -154,6 +237,14 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
                     pending = true;
                     last_event = Some(Instant::now());
                 }
+                for path in &paths {
+                    if let Ok(rel) = path.strip_prefix(&vault) {
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        if rel.starts_with("knowledge/") && rel.ends_with(".md") {
+                            knowledge_pending.insert(rel);
+                        }
+                    }
+                }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
@@ -161,6 +252,13 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
         if should_flush(pending, last_event, Instant::now(), DEBOUNCE) {
             pending = false;
             last_event = None;
+            // M23.7: live out-of-band capture for knowledge projections.
+            // Hash-based and best-effort — a file equal to its projection
+            // no-ops, a half-saved file errors quietly and the next event
+            // (or the launch scan) retries; mtime is never consulted.
+            for rel in std::mem::take(&mut knowledge_pending) {
+                let _ = crate::ledger::capture::capture_out_of_band(&vault, &rel);
+            }
             let _ = app.emit(VAULT_CHANGED_EVENT, ());
         }
     }
@@ -224,6 +322,84 @@ mod tests {
         assert!(!is_suppressed(&file));
         note_own_write(&file);
         assert!(is_suppressed(&file));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The M21.6 test the plan names: the exact hole the time window has —
+    // a FOREIGN write landing inside the 4s window after an app write used
+    // to be swallowed as our own echo. Content-hash recognition must not
+    // swallow it.
+    #[test]
+    fn a_foreign_write_inside_the_window_is_not_suppressed() {
+        let dir = crate::vault::testutil::temp_vault("watcher-foreign");
+        let file = dir.join("note.md");
+        std::fs::write(&file, "app content").unwrap();
+        note_own_write_hashed(&file, crate::ledger::sha256_hex(b"app content"));
+        assert!(is_suppressed(&file), "our own echo is recognized");
+        // An external editor rewrites the file two ticks later — well
+        // inside the old window.
+        std::fs::write(&file, "foreign edit").unwrap();
+        assert!(
+            !is_suppressed(&file),
+            "a foreign write must surface no matter how soon it lands"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hashed_recognition_ignores_the_clock_entirely() {
+        let t0 = Instant::now();
+        let far_beyond_window = t0 + Duration::from_secs(600);
+        let own = OwnWrite {
+            at: t0,
+            content_hash: Some("abc123".to_string()),
+        };
+        // Ten minutes later — a projection burst no window survives — the
+        // matching echo is still ours…
+        assert!(own_write_suppresses(
+            &own,
+            Some("abc123"),
+            far_beyond_window,
+            OWN_WRITE_WINDOW
+        ));
+        // …and a mismatch is foreign even INSIDE the window.
+        assert!(!own_write_suppresses(
+            &own,
+            Some("other"),
+            t0,
+            OWN_WRITE_WINDOW
+        ));
+        assert!(!own_write_suppresses(&own, None, t0, OWN_WRITE_WINDOW));
+        // Unhashed records (rename, delete) keep the window heuristic.
+        let structural = OwnWrite {
+            at: t0,
+            content_hash: None,
+        };
+        assert!(own_write_suppresses(
+            &structural,
+            None,
+            t0 + Duration::from_secs(3),
+            OWN_WRITE_WINDOW
+        ));
+        assert!(!own_write_suppresses(
+            &structural,
+            None,
+            far_beyond_window,
+            OWN_WRITE_WINDOW
+        ));
+    }
+
+    #[test]
+    fn a_missing_file_under_a_hashed_record_is_a_real_change() {
+        let dir = crate::vault::testutil::temp_vault("watcher-gone");
+        let file = dir.join("note.md");
+        std::fs::write(&file, "here").unwrap();
+        note_own_write_hashed(&file, crate::ledger::sha256_hex(b"here"));
+        std::fs::remove_file(&file).unwrap();
+        assert!(
+            !is_suppressed(&file),
+            "a deletion under a content record must surface"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

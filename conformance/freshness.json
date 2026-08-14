@@ -1,0 +1,789 @@
+{
+  "name": "freshness",
+  "description": "recorded freshness crossings: one facet going stale and coming back at an earlier effective time, the exact retry that changes nothing, the same dedupe key telling a different story, a broken chain, a second facet on the same revision, every structural refusal, a transition pinned to its own batch's staged revision, and a tombstoned Belief whose claims cannot go stale",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "source.registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:source-registry"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "registration": {
+          "kind": "human_actor",
+          "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+          "actor_id": "human:josef",
+          "authority_capability": "human_assertion",
+          "independence_domain_id": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "hash": "cdea028bd0f98186d5a339a525a8cdee354f40e20b003a2d92f5e9140dc51c49",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "firsthand",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "cdea028bd0f98186d5a339a525a8cdee354f40e20b003a2d92f5e9140dc51c49",
+      "hash": "c1343bcfa9df20384d4bcb1497a6ccf7c0935ac832ce9bf2d1dd98d948d2eb5c",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "00000000000000000000000000000002",
+              "role": "supports"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "c1343bcfa9df20384d4bcb1497a6ccf7c0935ac832ce9bf2d1dd98d948d2eb5c",
+      "hash": "8872be9d027d4bae5926db10c88bf6f1168fe933ff4ba076efda99fe3306fab9",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "22bec5eb4c8716afa910b4d0006c463b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "8872be9d027d4bae5926db10c88bf6f1168fe933ff4ba076efda99fe3306fab9",
+      "hash": "f52c17cbf30d8188842776b94d5a591a2d692150874171d45a9dd21c8a2d7fc4",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "22bec5eb4c8716afa910b4d0006c463b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "f52c17cbf30d8188842776b94d5a591a2d692150874171d45a9dd21c8a2d7fc4",
+      "hash": "7ac9839ce021febfaaf55d3bade73cdfc76a85e5321ba851cd1a9b83be41eb81",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "unknown",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "22bec5eb4c8716afa910b4d0006c463b"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "7ac9839ce021febfaaf55d3bade73cdfc76a85e5321ba851cd1a9b83be41eb81",
+      "hash": "bd1f700b8bc8f936ef568f0bb0c2e30ce5d849f0a6fbcd85095e15b9647a3033",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "fresh",
+        "to": "unknown",
+        "effective_at": "2026-08-13T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "7f1f2b02ebc8e3d66d8b6beab25aafd1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "bd1f700b8bc8f936ef568f0bb0c2e30ce5d849f0a6fbcd85095e15b9647a3033",
+      "hash": "bef8a1427488258950e427e17a83bfd7c46f2ee10822759e4767c71aa8ffafed",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "stale",
+        "to": "fresh",
+        "effective_at": "2026-08-12T08:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "1ea3e0efd862331885e323ec7d2344dc"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "bef8a1427488258950e427e17a83bfd7c46f2ee10822759e4767c71aa8ffafed",
+      "hash": "cf82e2c70789ba4e5107bbbe0a3a3d525479645d5f325a63e4587bde9c53053e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "shipping"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "45ab59f21649787a57911129b72af7c1"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "cf82e2c70789ba4e5107bbbe0a3a3d525479645d5f325a63e4587bde9c53053e",
+      "hash": "d4cf47c86a6ffec308402f91ebe34f2dc80c2dfd3ecf85bbd430283a67cbb85e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "99999999999999999999999999999999",
+          "predicate": {
+            "kind": "unknown"
+          },
+          "state_stage": "unknown"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "b81f011ec84f087472af82a93adde8a5"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "d4cf47c86a6ffec308402f91ebe34f2dc80c2dfd3ecf85bbd430283a67cbb85e",
+      "hash": "bae346682d0e285675f414aa0600cad2b6508069c89bce0c2a3f1f066abf3705",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "unknown"
+          },
+          "state_stage": "unknown"
+        },
+        "from": "stale",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "cb23984e7bfa2c8086ef23041ae77cd5"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "bae346682d0e285675f414aa0600cad2b6508069c89bce0c2a3f1f066abf3705",
+      "hash": "232f984a2d73a975b0985f1db58eb8689e45b86583395e1fdd3b680985bc4e19",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "unknown"
+          },
+          "state_stage": "unknown"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "00000000000000000000000000000000"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "232f984a2d73a975b0985f1db58eb8689e45b86583395e1fdd3b680985bc4e19",
+      "hash": "d51754f7cf6d95a96d8580e4e9b1f8b23288cd61d2737cccf95022336f2d0302",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.revised",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000001",
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "patch": [],
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "prev": "d51754f7cf6d95a96d8580e4e9b1f8b23288cd61d2737cccf95022336f2d0302",
+      "hash": "8d2dd156beed888a638bff0310f4a8974c8c91d792a93b34c0012868a585e216",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000001",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "0000000000000000000000000000000d",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "implemented"
+        },
+        "from": "fresh",
+        "to": "stale",
+        "effective_at": "2026-08-14T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "cd8407ba733296b0fad864c5f08eb163"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "prev": "8d2dd156beed888a638bff0310f4a8974c8c91d792a93b34c0012868a585e216",
+      "hash": "d45454838b814d91b1eaa55318a7afb35e2a70574bdcd71c1e7fad0b1a938593",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "b0000000000000000000000000000001",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "0000000000000000000000000000000d",
+          "0000000000000000000000000000000e"
+        ],
+        "member_count": 2,
+        "members_digest": "256c03e3d702c09ed33d1d6d607b895283affbf7007fabff57d9c6387d9c0d7e",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 16,
+      "event_id": "00000000000000000000000000000010",
+      "prev": "d45454838b814d91b1eaa55318a7afb35e2a70574bdcd71c1e7fad0b1a938593",
+      "hash": "14531babe58db9851cb20a5c4895560779f771bffeee1cac996ff6af1ea79f3c",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.tombstoned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "replacement_id": null,
+        "reason_code": "invalid"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "prev": "14531babe58db9851cb20a5c4895560779f771bffeee1cac996ff6af1ea79f3c",
+      "hash": "d44b294d7249762e1bd4040dbe56bf5b793f5a723c221fbd80f0dd984e019e69",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "freshness.transitioned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:freshness"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "facet": {
+          "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "belief_revision_event_id": "00000000000000000000000000000003",
+          "predicate": {
+            "kind": "known",
+            "value": "ci_status"
+          },
+          "state_stage": "shipping"
+        },
+        "from": "stale",
+        "to": "unknown",
+        "effective_at": "2026-08-14T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "dedupe_key": "4ef1d70e833a164f52399d9d94df7bd4"
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {
+      "c8147897afd510dad9278f297ba49115": {
+        "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+        "kind": "human_actor",
+        "capability": "human_assertion",
+        "independence_domain_id": null,
+        "registration_event_id": "00000000000000000000000000000001"
+      }
+    },
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {
+      "00000000000000000000000000000002": {
+        "seq": 2,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": "trusted_human_capture",
+        "lineage": []
+      }
+    },
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "00000000000000000000000000000002",
+              "role": "supports"
+            }
+          ]
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000003"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000010",
+          "state_digest": "eb200194b4669f14b4257d143d7d59709ee99edc85d59fce0cacbfe8b5b6d3a6",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": "00000000000000000000000000000010",
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": true,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 5,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "observation:00000000000000000000000000000002": 1,
+      "source:c8147897afd510dad9278f297ba49115": 2
+    },
+    "batches": [
+      [
+        "b0000000000000000000000000000001",
+        "refused",
+        2
+      ]
+    ],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {
+      "a2e097292b7f8f1165a7247b4974dc16": {
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "belief_revision_event_id": "00000000000000000000000000000003",
+        "predicate": "ci_status",
+        "state_stage": "shipping",
+        "state": "stale",
+        "effective_at": "2026-08-12T09:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "transitioned_by": "00000000000000000000000000000009"
+      },
+      "bc1ab2c157428d619ef002fe3045a91a": {
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "belief_revision_event_id": "00000000000000000000000000000003",
+        "predicate": "ci_status",
+        "state_stage": "implemented",
+        "state": "fresh",
+        "effective_at": "2026-08-12T08:00:00.000Z",
+        "rule_version": "freshness-v1",
+        "transitioned_by": "00000000000000000000000000000008"
+      }
+    },
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "dedupe key 22bec5eb4c8716afa910b4d0006c463b was already folded by event 00000000000000000000000000000004 as fresh→stale, and this event says unknown→stale — the key covers the transition that was DUE, so a disagreement about what happened is two producers disagreeing, not a retry"
+    },
+    {
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "this facet is stale (event 00000000000000000000000000000004), and the transition says it was fresh — a chain whose links do not meet is not a history"
+    },
+    {
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "facet.belief_revision_event_id 99999999999999999999999999999999 names no committed revision"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "from and to are both stale — a transition that changed nothing is not a transition, and recording one would put a crossing in history that never happened"
+    },
+    {
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "dedupe_key 00000000000000000000000000000000 does not follow from this transition (expected cb23984e7bfa2c8086ef23041ae77cd5)"
+    },
+    {
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "batch_id": "b0000000000000000000000000000001",
+      "code": "refused",
+      "detail": "batch member 1: facet.belief_revision_event_id pins a STAGED event — a freshness transition is about what the store already holds, not about what this batch is still writing"
+    },
+    {
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "batch_id": "b0000000000000000000000000000001",
+      "code": "batch",
+      "detail": "member 1 refused — whole batch has no effect"
+    },
+    {
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "belief eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is tombstoned — a tombstone is terminal, and a claim nobody may act on does not go stale"
+    }
+  ]
+}

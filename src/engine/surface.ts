@@ -256,6 +256,18 @@ export function resolveSurface(
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.
       return { title: 'Changes', entries: [], presentation: defaultPresentation() };
+    case 'review':
+      // Same: review cards are proposals, not records, and nothing in the
+      // vault's filter vocabulary applies to them.
+      return { title: 'Needs review', entries: [], presentation: defaultPresentation() };
+    case 'pipeline':
+      // Runs and token counts are operational, not records — nothing in the
+      // vault's filter vocabulary applies to them either.
+      return { title: 'Background', entries: [], presentation: defaultPresentation() };
+    case 'status':
+      // Lanes and convergence lines are derived from the ledger and never
+      // from the scanned entries, so the same carve-out applies again.
+      return { title: 'Epistemic status', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     // Neither holds records. Listed rather than defaulted so that the next

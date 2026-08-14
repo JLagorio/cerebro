@@ -1,0 +1,21 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 8421,
+  "duration_api_ms": 7994,
+  "num_turns": 3,
+  "result": "Filed the note under records/ and linked it to the project.",
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "total_cost_usd": 0.0412,
+  "usage": {
+    "input_tokens": 4,
+    "cache_creation_input_tokens": 1205,
+    "cache_read_input_tokens": 14678,
+    "output_tokens": 271,
+    "server_tool_use": { "web_search_requests": 0 },
+    "service_tier": "standard"
+  },
+  "permission_denials": [],
+  "uuid": "00000000-0000-4000-8000-0000000000aa"
+}

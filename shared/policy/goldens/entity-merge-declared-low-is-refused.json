@@ -1,0 +1,64 @@
+{
+  "name": "entity-merge-declared-low-is-refused",
+  "why": "Agent-declared risk may only RAISE. Understating is REFUSED, not clamped: the attempt is epistemic history, so it lands in the ledger.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dee0000000000000000000000000000",
+    "run_id": "cdee0000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "e1717710000000000000000000000000",
+        "target_class": "entity",
+        "expected_version": 7
+      },
+      {
+        "target_id": "e1717720000000000000000000000000",
+        "target_class": "entity",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "merge_entities",
+      "payload": {
+        "survivor_id": "e1717700000000000000000000000000",
+        "merged_ids": [
+          "e1717720000000000000000000000000"
+        ],
+        "reassignment_plan": {
+          "survivor_id": "e1717700000000000000000000000000",
+          "merged_ids": [
+            "e1717720000000000000000000000000"
+          ],
+          "affected_belief_ids": [],
+          "live_aliases": [],
+          "affected_relation_ids": [],
+          "plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "LOW",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "risk_lowered",
+    "destiny": "ledger"
+  }
+}

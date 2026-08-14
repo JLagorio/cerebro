@@ -10,6 +10,21 @@ const CONFIG_FILE: &str = "config.json";
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub last_vault: Option<String>,
+    /// **The proposal kill switch** (M26.3c). While this is false, the live
+    /// loopback MCP server serves its twelve read/write tools and NO
+    /// proposal tools at all — a model cannot call a mutation surface it
+    /// cannot see.
+    ///
+    /// `bool` with `Default` = **false**, and that is the load-bearing part:
+    /// an existing `config.json` written before this field existed, a
+    /// corrupt one, a missing directory, and a fresh install all read as
+    /// OFF. The failure modes of a config file all point the safe way, which
+    /// is the only reason a config file is an acceptable home for a switch
+    /// like this.
+    ///
+    /// M26.3c registers the tools and proves the gates; this is what M26.9
+    /// flips. Registration is not activation.
+    pub agent_proposals_enabled: bool,
 }
 
 fn config_path(dir: &Path) -> PathBuf {
@@ -48,6 +63,7 @@ mod tests {
         let dir = testutil::temp_vault("config-roundtrip");
         let config = AppConfig {
             last_vault: Some("/Users/me/vault".to_string()),
+            agent_proposals_enabled: false,
         };
         save(&dir, &config).unwrap();
         assert_eq!(load(&dir), config);
@@ -66,8 +82,37 @@ mod tests {
     fn config_serializes_last_vault_as_camel_case() {
         let raw = serde_json::to_string(&AppConfig {
             last_vault: Some("/v".into()),
+            agent_proposals_enabled: false,
         })
         .unwrap();
         assert!(raw.contains("\"lastVault\""));
+    }
+
+    #[test]
+    fn the_proposal_switch_is_off_unless_a_config_says_otherwise() {
+        // EVERY failure path points the safe way, which is the only reason a
+        // config file is an acceptable home for this switch: a missing
+        // directory, a missing key, and unparseable JSON all read as OFF.
+        let dir = testutil::temp_vault("config-proposal-switch");
+        assert!(!load(&dir).agent_proposals_enabled, "missing file");
+
+        save(
+            &dir,
+            &AppConfig {
+                last_vault: None,
+                agent_proposals_enabled: false,
+            },
+        )
+        .unwrap();
+        // A config written before this field existed.
+        std::fs::write(dir.join("config.json"), r#"{"lastVault":"/v"}"#).unwrap();
+        assert!(!load(&dir).agent_proposals_enabled, "older config");
+
+        std::fs::write(dir.join("config.json"), "{not json").unwrap();
+        assert!(!load(&dir).agent_proposals_enabled, "corrupt config");
+
+        std::fs::write(dir.join("config.json"), r#"{"agentProposalsEnabled":true}"#).unwrap();
+        assert!(load(&dir).agent_proposals_enabled, "explicitly on");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

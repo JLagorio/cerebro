@@ -1,0 +1,46 @@
+{
+  "name": "tombstone-queues-a-human-card",
+  "why": "HIGH queues. Tombstone is the one lifecycle transition with no provenance-preserving inverse, so a person sees it before it happens.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dbe0000000000000000000000000000",
+    "run_id": "cdbe0000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "tombstone_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "replacement_id": null,
+        "reason_code": "invalid"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "HIGH",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "queued",
+    "effective_risk": "HIGH",
+    "escalated_by": []
+  }
+}

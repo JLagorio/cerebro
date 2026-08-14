@@ -1,0 +1,523 @@
+//! Tamper-evident event ledger (M21): hash-chained, append-only NDJSON
+//! segments under `<vault>/.cerebro/ledger/`, per master-doc D2/D3.
+//!
+//! M21.2 is the pure data layer: envelope framing, canonical serialization,
+//! record hashing, chain verification, segment read/write/seal, and the
+//! store identity. No policy, no scheduling, no event semantics — bodies are
+//! opaque JSON until M22 gives them a schema.
+//!
+//! Not git-tracked (the `.cerebro/` blanket ignore and its `rm --cached`
+//! self-heal in git/commit.rs stand). Invisible to the scanner (dot-dir) and
+//! the watcher (`is_relevant_path` wants `.md`/`.yml`).
+//!
+//! Durability: every fsync in this module is `File::sync_all`. Verified
+//! against the pinned toolchain (rustc 1.95.0, Homebrew): on Apple targets
+//! `sync_all` issues `fcntl(F_FULLFSYNC)` — a real flush through the drive
+//! cache — with NO silent `fsync` fallback; an unsupported filesystem
+//! surfaces an error instead of a fake sync
+//! (library/std/src/sys/fs/unix.rs:1381-1388). Exactly what a commit
+//! acknowledgement wants. Re-verify on toolchain bumps.
+
+pub mod arm;
+pub mod capture;
+pub mod concepts;
+#[cfg(test)]
+mod conformance;
+pub mod frame;
+pub mod index;
+pub mod manifest;
+pub mod migrate;
+pub mod project;
+pub mod reconcile;
+pub mod recovery;
+pub mod reduce;
+pub mod schema;
+pub mod segment;
+pub mod shadow;
+#[cfg(test)]
+mod soak;
+pub mod store;
+pub mod writer;
+
+use std::path::{Path, PathBuf};
+
+/// Vault-relative home of the ledger.
+pub const LEDGER_DIR: &str = ".cerebro/ledger";
+
+pub fn ledger_dir(vault: &Path) -> PathBuf {
+    vault.join(LEDGER_DIR)
+}
+
+/// Lowercase-hex SHA-256, the one digest format the ledger speaks.
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// 128-bit random lowercase hex via the existing `rand` crate — store ids,
+/// writer ids, event ids. No uuid dependency (house rule: justify every
+/// crate; random hex needs none).
+pub(crate) fn new_id128() -> String {
+    format!("{:032x}", rand::random::<u128>())
+}
+
+/// A durable run id for the runtime DB (M25.2).
+///
+/// The same 128-bit shape as every other derived id here, minted rather than
+/// derived because a run has no content to hash. Deliberately NOT the
+/// process-local `u64` that tags stream events: that counter restarts at zero
+/// on every launch, so two sessions would collide on their first run.
+pub fn new_run_id() -> String {
+    new_id128()
+}
+
+/// SHA-256 over the canonical member frame lines in order, each terminated
+/// with a newline — exactly the bytes the segment holds for them. Shared by
+/// the writer (stamping `batch.committed`) and the reducer (verifying it);
+/// one definition so they can never drift.
+pub(crate) fn members_digest<'a>(
+    frames: impl Iterator<Item = &'a frame::Frame>,
+) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    for frame in frames {
+        bytes.extend_from_slice(frame.to_line()?.as_bytes());
+        bytes.push(b'\n');
+    }
+    Ok(sha256_hex(&bytes))
+}
+
+/// Fsync a directory so a create/seal/rename inside it is durable, not just
+/// the file bytes.
+pub(crate) fn fsync_dir(dir: &Path) -> Result<(), String> {
+    std::fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(|e| format!("fsync {}: {e}", dir.display()))
+}
+
+/// Everything one pass over a ledger directory can know (M21.2 mechanism —
+/// M21.4 recovery builds its typed classification on top of this and of the
+/// errors it returns).
+#[derive(Debug)]
+pub struct LedgerRead {
+    pub store: store::StoreInfo,
+    /// Seq of the last committed record; None when no records exist yet.
+    pub head_seq: Option<u64>,
+    /// Hash of the last committed record; the store id when none exist (the
+    /// same anchor the first record's `prev` must carry).
+    pub head_hash: String,
+    /// Committed records across all segments.
+    pub records: u64,
+    pub frames: Vec<frame::Frame>,
+    pub segments: Vec<segment::SegmentName>,
+    /// Tail state of the final (open) segment; `Clean` when none exist.
+    pub tail: segment::Tail,
+}
+
+/// The current chain head, as git cross-attestation consumes it (M21.7).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct LedgerHead {
+    /// None when the ledger exists but holds no records yet.
+    pub seq: Option<u64>,
+    /// Hash of the last committed record; the store id when none exist.
+    pub hash: String,
+}
+
+/// Best-effort read of the vault ledger's committed head — for checkpoint
+/// trailers, which are PERIODIC ANCHORING (D2), never a dependency: an
+/// absent, locked-out-of-nothing, torn-tailed (the committed prefix still
+/// anchors) or outright faulted ledger yields None and the checkpoint
+/// proceeds identically. Ledger correctness must not depend on git, and
+/// git behavior must not depend on the ledger.
+pub fn head(vault: &Path) -> Option<LedgerHead> {
+    read_ledger(&ledger_dir(vault)).ok().map(|read| LedgerHead {
+        seq: read.head_seq,
+        hash: read.head_hash,
+    })
+}
+
+/// Why a ledger cannot be read as one coherent committed history. Typed so
+/// M21.4's `recovery::classify` can name each state instead of collapsing
+/// them into a string — a torn tail on the final open segment is NOT here
+/// (it is a recoverable state, reported in `LedgerRead::tail`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LedgerFault {
+    /// No store.json — nothing has ever been recorded here.
+    NoStore,
+    /// store.json exists but cannot be trusted (torn, alien format).
+    StoreUnreadable(String),
+    /// Segments from more than one writer id sit in one ledger — a foreign
+    /// fork on disk (a second Mac's sync debris). Diagnosable, never merged.
+    MultipleWriters(Vec<String>),
+    /// An open segment followed by later segments — a shape the single
+    /// writer can never produce.
+    OpenSegmentNotLast { file: String },
+    /// A seq range is missing between segments.
+    SeqGap {
+        file: String,
+        expected: u64,
+        found: u64,
+    },
+    /// Two segments claim overlapping seq ranges — a fork.
+    SeqOverlap {
+        file: String,
+        expected: u64,
+        found: u64,
+    },
+    /// Damage inside a segment: bad hash, broken link, malformed terminated
+    /// line, seal mismatch, torn SEALED segment… Integrity state, never
+    /// silently truncated.
+    SegmentCorrupt { file: String, detail: String },
+}
+
+impl std::fmt::Display for LedgerFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LedgerFault::NoStore => write!(f, "no store.json — no ledger exists here"),
+            LedgerFault::StoreUnreadable(detail) => write!(f, "{detail}"),
+            LedgerFault::MultipleWriters(ids) => write!(
+                f,
+                "segments from multiple writers ({}) — foreign fork, never merged",
+                ids.join(", ")
+            ),
+            LedgerFault::OpenSegmentNotLast { file } => {
+                write!(f, "open segment {file} is not the last segment")
+            }
+            LedgerFault::SeqGap {
+                file,
+                expected,
+                found,
+            } => write!(
+                f,
+                "segment {file} starts at seq {found} where {expected} was expected — a gap"
+            ),
+            LedgerFault::SeqOverlap {
+                file,
+                expected,
+                found,
+            } => write!(
+                f,
+                "segment {file} starts at seq {found} where {expected} was expected — a fork"
+            ),
+            LedgerFault::SegmentCorrupt { file, detail } => write!(f, "{file}: {detail}"),
+        }
+    }
+}
+
+/// Read and chain-verify the whole ledger. `Err` is a typed fault this
+/// layer refuses to guess about; a torn tail on the final open segment is
+/// NOT an error — it is a state, reported in `tail`, recovered at
+/// writer-open and classified by `recovery::classify`.
+pub fn read_ledger(dir: &Path) -> Result<LedgerRead, LedgerFault> {
+    let store = match store::load(dir) {
+        Ok(Some(store)) => store,
+        Ok(None) => return Err(LedgerFault::NoStore),
+        Err(detail) => return Err(LedgerFault::StoreUnreadable(detail)),
+    };
+
+    let mut names: Vec<segment::SegmentName> = Vec::new();
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| LedgerFault::StoreUnreadable(format!("{}: {e}", dir.display())))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| LedgerFault::StoreUnreadable(e.to_string()))?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if let Some(parsed) = segment::parse_segment_name(name) {
+            names.push(parsed);
+        }
+        // Anything else (store.json, lock, temps, foreign debris) is not a
+        // segment; recovery::classify names debris states, this layer skips.
+    }
+    names.sort_by_key(|n| n.start_seq);
+
+    // v1 is single-writer: every segment must carry one writer id. A second
+    // id is a foreign fork — diagnosable, never merged (D2).
+    let writer_ids: std::collections::BTreeSet<&str> =
+        names.iter().map(|n| n.writer_id.as_str()).collect();
+    if writer_ids.len() > 1 {
+        return Err(LedgerFault::MultipleWriters(
+            writer_ids.into_iter().map(str::to_string).collect(),
+        ));
+    }
+
+    let mut frames: Vec<frame::Frame> = Vec::new();
+    let mut anchor = store.store_id.clone();
+    let mut next_seq: Option<u64> = None; // None until the first segment names it
+    let mut tail = segment::Tail::Clean;
+
+    for (i, name) in names.iter().enumerate() {
+        let last = i + 1 == names.len();
+        if !last && !name.sealed {
+            return Err(LedgerFault::OpenSegmentNotLast {
+                file: name.file_name(),
+            });
+        }
+        if let Some(expected) = next_seq {
+            if name.start_seq > expected {
+                return Err(LedgerFault::SeqGap {
+                    file: name.file_name(),
+                    expected,
+                    found: name.start_seq,
+                });
+            }
+            if name.start_seq < expected {
+                return Err(LedgerFault::SeqOverlap {
+                    file: name.file_name(),
+                    expected,
+                    found: name.start_seq,
+                });
+            }
+        }
+        let read =
+            segment::read_segment(&dir.join(name.file_name()), name, &anchor, name.start_seq)
+                .map_err(|detail| LedgerFault::SegmentCorrupt {
+                    file: name.file_name(),
+                    detail,
+                })?;
+        if let Some(frame) = read.frames.last() {
+            anchor = frame.hash.clone();
+        }
+        next_seq = Some(name.start_seq + read.frames.len() as u64);
+        frames.extend(read.frames);
+        tail = read.tail;
+    }
+
+    Ok(LedgerRead {
+        head_seq: frames.last().map(|f| f.seq),
+        head_hash: anchor,
+        records: frames.len() as u64,
+        frames,
+        segments: names,
+        tail,
+        store,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use frame::tests::fixture;
+
+    const WRITER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+    const OTHER_WRITER: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef";
+
+    /// A minted ledger dir plus a chain of `n` frames anchored on its store
+    /// id (not yet written into any segment).
+    fn minted(label: &str, n: u64) -> (std::path::PathBuf, store::StoreInfo, Vec<frame::Frame>) {
+        let vault = crate::vault::testutil::temp_vault(label);
+        let dir = ledger_dir(&vault);
+        let store = store::load_or_mint(&dir).unwrap();
+        let frames = frame::tests::chain(&store.store_id, n);
+        (vault, store, frames)
+    }
+
+    #[test]
+    fn an_empty_ledger_reads_as_its_anchor() {
+        let (vault, store, _) = minted("ledger-empty", 0);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.head_seq, None);
+        assert_eq!(read.head_hash, store.store_id);
+        assert_eq!(read.records, 0);
+        assert!(read.segments.is_empty());
+        assert_eq!(read.tail, segment::Tail::Clean);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_chain_verifies_across_a_segment_boundary() {
+        let (vault, store, frames) = minted("ledger-cross", 5);
+        let dir = ledger_dir(&vault);
+        // Seal seq 1-3; leave seq 4-5 open — prev of frame 4 is frame 3's
+        // hash, so the chain crosses the boundary record-to-record.
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames[..3] {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        writer.seal().unwrap();
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 4, &frames[2].hash).unwrap();
+        for frame in &frames[3..] {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+
+        let read = read_ledger(&dir).unwrap();
+        assert_eq!(read.head_seq, Some(5));
+        assert_eq!(read.head_hash, frames[4].hash);
+        assert_eq!(read.records, 5);
+        assert_eq!(read.frames, frames);
+        assert_eq!(read.segments.len(), 2);
+        assert_eq!(read.tail, segment::Tail::Clean);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_segment_that_does_not_link_to_its_predecessor_is_refused() {
+        let (vault, store, frames) = minted("ledger-splice", 3);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        writer.seal().unwrap();
+        // Segment 2 chains from a FORGED anchor — a spliced history.
+        let forged = fixture(4, "0000forged", "vault.write", serde_json::json!({}));
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 4, "0000forged").unwrap();
+        writer.append(&forged).unwrap();
+        writer.sync().unwrap();
+        let err = read_ledger(&dir).unwrap_err().to_string();
+        assert!(err.contains("broken chain link at seq 4"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_seq_gap_between_segments_is_refused() {
+        let (vault, store, frames) = minted("ledger-gap", 3);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        writer.seal().unwrap();
+        // Next segment claims to start at 5 — seq 4 is missing.
+        segment::SegmentWriter::create(&dir, WRITER, 5, &frames[2].hash).unwrap();
+        let err = read_ledger(&dir).unwrap_err().to_string();
+        assert!(err.contains("starts at seq 5 where 4"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn segments_from_a_second_writer_are_refused_never_merged() {
+        let (vault, store, frames) = minted("ledger-foreign", 2);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        writer.append(&frames[0]).unwrap();
+        writer.sync().unwrap();
+        writer.seal().unwrap();
+        // The same vault synced from a second Mac: same store, different
+        // writer — diagnosable, never merged (D2).
+        segment::SegmentWriter::create(&dir, OTHER_WRITER, 2, &frames[0].hash).unwrap();
+        let err = read_ledger(&dir).unwrap_err().to_string();
+        assert!(err.contains("multiple writers"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_open_segment_anywhere_but_last_is_refused() {
+        let (vault, store, frames) = minted("ledger-openmid", 3);
+        let dir = ledger_dir(&vault);
+        // Open segment covering 1-2, then a SEALED one at 3 — a shape the
+        // single writer can never produce.
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        writer.append(&frames[0]).unwrap();
+        writer.append(&frames[1]).unwrap();
+        writer.sync().unwrap();
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 3, &frames[1].hash).unwrap();
+        writer.append(&frames[2]).unwrap();
+        writer.sync().unwrap();
+        writer.seal().unwrap();
+        let err = read_ledger(&dir).unwrap_err().to_string();
+        assert!(err.contains("not the last segment"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_missing_store_json_is_an_error() {
+        let vault = crate::vault::testutil::temp_vault("ledger-nostore");
+        let dir = ledger_dir(&vault);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(read_ledger(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("no store.json"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_torn_tail_in_the_final_open_segment_is_a_state_not_an_error() {
+        let (vault, store, frames) = minted("ledger-tail", 2);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        let path = dir.join(
+            segment::SegmentName {
+                writer_id: WRITER.to_string(),
+                start_seq: 1,
+                sealed: false,
+            }
+            .file_name(),
+        );
+        // Tear the tail: drop the last 5 bytes of the final record.
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() - 5]).unwrap();
+        let read = read_ledger(&dir).unwrap();
+        assert_eq!(read.head_seq, Some(1));
+        assert_eq!(read.records, 1);
+        assert!(matches!(read.tail, segment::Tail::Torn { .. }));
+        // The anchoring head still names the committed prefix (M21.7).
+        assert_eq!(
+            head(&vault),
+            Some(LedgerHead {
+                seq: Some(1),
+                hash: frames[0].hash.clone()
+            })
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M21.7: the head read is best-effort BY DESIGN — checkpoints are
+    // periodic anchoring, never a ledger dependency.
+    #[test]
+    fn the_anchoring_head_is_best_effort_never_an_error() {
+        // No ledger at all → None, no error.
+        let bare = crate::vault::testutil::temp_vault("ledger-head-none");
+        assert_eq!(head(&bare), None);
+        // A healthy ledger → the committed head.
+        let (vault, store, frames) = minted("ledger-head-ok", 2);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        assert_eq!(
+            head(&vault),
+            Some(LedgerHead {
+                seq: Some(2),
+                hash: frames[1].hash.clone()
+            })
+        );
+        // An empty ledger anchors its store identity.
+        let (empty, empty_store, _) = minted("ledger-head-empty", 0);
+        assert_eq!(
+            head(&empty),
+            Some(LedgerHead {
+                seq: None,
+                hash: empty_store.store_id
+            })
+        );
+        // A corrupted ledger → None, never an error into the checkpoint path.
+        let corrupt_path = dir.join(
+            segment::SegmentName {
+                writer_id: WRITER.to_string(),
+                start_seq: 1,
+                sealed: false,
+            }
+            .file_name(),
+        );
+        std::fs::write(&corrupt_path, "terminated garbage\n").unwrap();
+        assert_eq!(head(&vault), None);
+        for v in [bare, vault, empty] {
+            let _ = std::fs::remove_dir_all(&v);
+        }
+    }
+}

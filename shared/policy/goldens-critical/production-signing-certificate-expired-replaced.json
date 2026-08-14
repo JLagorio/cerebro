@@ -1,0 +1,25 @@
+{
+  "name": "a replaced certificate is silent",
+  "description": "An active supersedes from the replacement TO this candidate means somebody already rotated it. Direction is load-bearing: read backwards, this would silence the certificate that still needs the work.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-prod-signing",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-01T00:00:00Z"
+      }
+    }
+  ],
+  "replacements": [
+    {
+      "from": "cert-prod-signing-2027",
+      "to": "cert-prod-signing",
+      "relation": "supersedes",
+      "active": true
+    }
+  ],
+  "expected": []
+}

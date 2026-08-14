@@ -1,0 +1,629 @@
+{
+  "name": "ingest",
+  "description": "portable processing receipts: the closed route matrix, the atomic Observation+receipt batch, append-once bytes, supersession, and every association refusal",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "source.registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:source-registry"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "registration": {
+          "kind": "human_actor",
+          "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+          "actor_id": "human:josef",
+          "authority_capability": "human_assertion",
+          "independence_domain_id": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "hash": "68e90b5ed48cd54986c37a18a44c34573209268b67059d67d10dc60e46ada3d6",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0025",
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "firsthand",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "68e90b5ed48cd54986c37a18a44c34573209268b67059d67d10dc60e46ada3d6",
+      "hash": "71eb1a97397b8f69596d3b18e52a92508368583ef1bda4f3dccaf84ea4d6cf70",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0025",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "07bfdce451fde0a4355b4723ec843c11",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "needs_semantic_judgment",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "m26_queued",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-09",
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "71eb1a97397b8f69596d3b18e52a92508368583ef1bda4f3dccaf84ea4d6cf70",
+      "hash": "6b496b8798682ecd99a2304b7ef7ff69f6c037fbb64ed2882539b211e3d7c101",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0025",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "00000000000000000000000000000002",
+          "00000000000000000000000000000003"
+        ],
+        "member_count": 2,
+        "members_digest": "8d8aaf1fba416e0ef86b9a99d102e3d4dd6d871a4955c480bc14f6b4b56db95e",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "6b496b8798682ecd99a2304b7ef7ff69f6c037fbb64ed2882539b211e3d7c101",
+      "hash": "b3d2872c5c58e52590c61a84ce3394c8c66a58e094b43d0b38d45ae671fd2fa2",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "07bfdce451fde0a4355b4723ec843c11",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "needs_semantic_judgment",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "m26_queued",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-09",
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "b3d2872c5c58e52590c61a84ce3394c8c66a58e094b43d0b38d45ae671fd2fa2",
+      "hash": "932400ade37a131e0168bdb6acf0d306f366650f698de71f4d1cc53f8aa7ef4d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.semantic_assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:m26-ingest"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "semantic_assessment_id": "9ad266c65a8c5859b1db4c59570b0058",
+        "m26_batch_key": "batch-2026-08-09",
+        "input_receipt_ids": [
+          "07bfdce451fde0a4355b4723ec843c11"
+        ],
+        "outcome": "undetermined",
+        "disposition": "blocked_visible",
+        "evaluated_dimensions": [],
+        "material_dimensions": [],
+        "proposal_ids": [],
+        "blocked_reason": "runtime_unavailable",
+        "explanation": "the run's own words about this window",
+        "content_label": "agent_supplied"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "932400ade37a131e0168bdb6acf0d306f366650f698de71f4d1cc53f8aa7ef4d",
+      "hash": "6c87138080190384cbc9dff17976f7511a284c39d6ff4e05e08c04edbaded87a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "dbb510e1e041ba7ebb3f466895b27ed5",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "needs_semantic_judgment",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "failed_visible",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-09",
+        "m26_outcome_event_id": "00000000000000000000000000000006",
+        "supersedes_receipt_id": "07bfdce451fde0a4355b4723ec843c11"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "6c87138080190384cbc9dff17976f7511a284c39d6ff4e05e08c04edbaded87a",
+      "hash": "cba594751674a6d325d0b64bce9c547673fae8828cfd8c7219425f59902e9b25",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "58dce337048656270c49a1b00d6d487e",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "needs_semantic_judgment",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "m26_completed",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-09",
+        "m26_outcome_event_id": "cccccccccccccccccccccccccccccccc",
+        "supersedes_receipt_id": "07bfdce451fde0a4355b4723ec843c11"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "cba594751674a6d325d0b64bce9c547673fae8828cfd8c7219425f59902e9b25",
+      "hash": "59d03441d93fbac70950fa3d99591c3390a139223ad2e3e92bc803e48ebeca80",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "3c244d638c8e3f63c93fa5f09a4e547c",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "ffffffffffffffffffffffffffffffff",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "no_change",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "closed_no_change",
+        "observation_event_ids": [],
+        "proposal_ids": [],
+        "m26_batch_key": null,
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "59d03441d93fbac70950fa3d99591c3390a139223ad2e3e92bc803e48ebeca80",
+      "hash": "852e832ef051a6b7d85c9f99962a7af3d084f6014119b17d1283f83e35e90cde",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "c21ce094c1079fb81a480c02dcce39e1",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "non_material_change",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "closed_non_material",
+        "observation_event_ids": [
+          "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": null,
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "852e832ef051a6b7d85c9f99962a7af3d084f6014119b17d1283f83e35e90cde",
+      "hash": "191efac5bc9d569ab2e80a9f5d8298ab89d6a68d1583dcb4d7aa03ce13444d43",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "58dce337048656270c49a1b00d6d487e",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "needs_semantic_judgment",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "m26_completed",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": "batch-2026-08-09",
+        "m26_outcome_event_id": "cccccccccccccccccccccccccccccccc",
+        "supersedes_receipt_id": "dddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "191efac5bc9d569ab2e80a9f5d8298ab89d6a68d1583dcb4d7aa03ce13444d43",
+      "hash": "8df74ad64d5d490de7a932822531e9808b0d96b07241f58c450053595d061c85",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:prefilter"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "receipt_id": "577a33c6afcc784609cb5c6d03f10799",
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_record_id": null,
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalized_snapshot_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 1,
+        "assessed_against_chain_head": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "prefilter_verdict": "no_change",
+        "material_dimensions": [],
+        "independence": "independence_unknown",
+        "route": "closed_no_change",
+        "observation_event_ids": [
+          "00000000000000000000000000000002"
+        ],
+        "proposal_ids": [],
+        "m26_batch_key": null,
+        "m26_outcome_event_id": null,
+        "supersedes_receipt_id": null
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {
+      "c8147897afd510dad9278f297ba49115": {
+        "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+        "kind": "human_actor",
+        "capability": "human_assertion",
+        "independence_domain_id": null,
+        "registration_event_id": "00000000000000000000000000000001"
+      }
+    },
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {
+      "00000000000000000000000000000002": {
+        "seq": 2,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": "trusted_human_capture",
+        "lineage": []
+      }
+    },
+    "beliefs": {},
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "ingest_receipt:07bfdce451fde0a4355b4723ec843c11": 2,
+      "ingest_receipt:577a33c6afcc784609cb5c6d03f10799": 1,
+      "ingest_receipt:dbb510e1e041ba7ebb3f466895b27ed5": 1,
+      "observation:00000000000000000000000000000002": 1,
+      "source:c8147897afd510dad9278f297ba49115": 2
+    },
+    "batches": [
+      [
+        "beefbeefbeefbeefbeefbeefbeef0025",
+        "committed",
+        2
+      ]
+    ],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {
+      "07bfdce451fde0a4355b4723ec843c11": {
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "route": "m26_queued",
+        "superseded": true,
+        "m26_batch_key": "batch-2026-08-09"
+      },
+      "577a33c6afcc784609cb5c6d03f10799": {
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 1,
+        "route": "closed_no_change",
+        "superseded": false,
+        "m26_batch_key": null
+      },
+      "dbb510e1e041ba7ebb3f466895b27ed5": {
+        "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "artifact_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizer_version": "vault-entry-v1",
+        "processing_epoch": 0,
+        "route": "failed_visible",
+        "superseded": false,
+        "m26_batch_key": "batch-2026-08-09"
+      }
+    },
+    "semantic_assessments": {
+      "9ad266c65a8c5859b1db4c59570b0058": {
+        "m26_batch_key": "batch-2026-08-09",
+        "input_receipt_ids": [
+          "07bfdce451fde0a4355b4723ec843c11"
+        ],
+        "outcome": "undetermined",
+        "proposal_ids": []
+      }
+    },
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt 07bfdce451fde0a4355b4723ec843c11 is already recorded — identical bytes append once, never twice"
+    },
+    {
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt 07bfdce451fde0a4355b4723ec843c11 is already superseded — one successor, not a chain of them"
+    },
+    {
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt names source ffffffffffffffffffffffffffffffff which has no committed registration — a source reference is held or refused, never inferred"
+    },
+    {
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt names Observation eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee which is neither committed nor a member of this batch"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt supersedes dddddddddddddddddddddddddddddddd, which is not a committed receipt"
+    }
+  ]
+}

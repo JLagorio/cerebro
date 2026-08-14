@@ -1,0 +1,322 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "trigger-registry-v1",
+  "evaluation_id_domain": "cerebro-trigger-evaluation-v1",
+  "snapshot_hash_domain": "cerebro-trigger-snapshot-v1",
+  "evidence_root": "docs/superpowers/evidence/triggers",
+  "protected_names": [
+    "Skeptic",
+    "Scout",
+    "Curiosity",
+    "Claim",
+    "Discovery",
+    "Forecast",
+    "Narrative"
+  ],
+  "entries": [
+    {
+      "id": "R1",
+      "capability": "skeptic_pass",
+      "scope": "subscription_global",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R2",
+      "capability": "pattern_scout",
+      "scope": "subscription_global",
+      "subcapabilities": [{ "key": "root", "variant": "hybrid", "parent": null }]
+    },
+    {
+      "id": "R3",
+      "capability": "claims_as_objects",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R4",
+      "capability": "issues_risks_actions_decisions",
+      "scope": "vault_store",
+      "subcapabilities": [
+        { "key": "issue", "variant": "discretionary", "parent": null },
+        { "key": "risk", "variant": "discretionary", "parent": null },
+        { "key": "action", "variant": "discretionary", "parent": null },
+        { "key": "decision", "variant": "discretionary", "parent": null }
+      ]
+    },
+    {
+      "id": "R5",
+      "capability": "assumptions_discovery_hypotheses_forecasts",
+      "scope": "vault_store",
+      "subcapabilities": [
+        { "key": "assumption", "variant": "discretionary", "parent": null },
+        { "key": "causal_hypothesis", "variant": "discretionary", "parent": null },
+        { "key": "forecast", "variant": "discretionary", "parent": null },
+        {
+          "key": "discovery",
+          "variant": "measurable",
+          "parent": {
+            "kind": "measurable_alias",
+            "allowed": ["R13:root"],
+            "requires_result": "fired",
+            "byte_equal": [
+              "window",
+              "input_snapshot_refs",
+              "input_snapshot_hash",
+              "metrics",
+              "result"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "R6",
+      "capability": "learned_entity_resolution",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R7",
+      "capability": "cross_source_verification",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R8",
+      "capability": "primary_project_view",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "discretionary", "parent": null }]
+    },
+    {
+      "id": "R9",
+      "capability": "project_narrative",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "discretionary", "parent": null }]
+    },
+    {
+      "id": "R10",
+      "capability": "companion_service",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R11",
+      "capability": "multi_master_merge",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "discretionary", "parent": null }]
+    },
+    {
+      "id": "R12",
+      "capability": "section_level_tails",
+      "scope": "vault_store",
+      "subcapabilities": [
+        {
+          "key": "per_type_temporal_decay",
+          "variant": "discretionary",
+          "parent": {
+            "kind": "fired_parent",
+            "allowed": ["R4:issue", "R4:risk", "R4:action", "R4:decision"]
+          }
+        },
+        {
+          "key": "full_relation_vocabulary",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R4:issue", "R4:decision"] }
+        },
+        {
+          "key": "decision_urgency_blocker_lanes",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R4:decision"] }
+        },
+        {
+          "key": "decision_revisit_conditions",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R4:decision"] }
+        },
+        {
+          "key": "scope_collision_maintenance",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R6:root"] }
+        },
+        {
+          "key": "learned_aliases",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R6:root"] }
+        },
+        {
+          "key": "full_knowledge_fitness_review",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R8:root"] }
+        },
+        {
+          "key": "learned_preferences",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R8:root"] }
+        },
+        {
+          "key": "participant_workstream_metadata",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R8:root"] }
+        },
+        {
+          "key": "learned_authority_routes",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R7:root"] }
+        },
+        {
+          "key": "custom_predicate_freshness",
+          "variant": "discretionary",
+          "parent": {
+            "kind": "fired_parent",
+            "allowed": ["R4:issue", "R4:risk", "R4:action", "R4:decision"]
+          }
+        },
+        {
+          "key": "per_connector_scope_model",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R14:connector:*"] }
+        },
+        {
+          "key": "issue_theme_workstream_rungs",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R4:issue"] }
+        },
+        {
+          "key": "executive_narrative_rung",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R9:root"] }
+        },
+        {
+          "key": "advanced_graph_semantic_retrieval",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R1:root"] }
+        },
+        {
+          "key": "meeting_executive_prep",
+          "variant": "discretionary",
+          "parent": { "kind": "fired_parent", "allowed": ["R8:root", "R9:root"] }
+        }
+      ]
+    },
+    {
+      "id": "R13",
+      "capability": "curiosity_discovery_loop",
+      "scope": "vault_store",
+      "subcapabilities": [{ "key": "root", "variant": "measurable", "parent": null }]
+    },
+    {
+      "id": "R14",
+      "capability": "live_connectors",
+      "scope": "vault_store",
+      "subcapability_pattern": {
+        "prefix": "connector:",
+        "variant": "discretionary",
+        "parent": null,
+        "registered_connectors": []
+      },
+      "subcapabilities": []
+    }
+  ],
+  "metrics": {
+    "count_names": [
+      "sample_runs",
+      "high_stakes_runs",
+      "complete_runs",
+      "headroom_days",
+      "eligible_attempts",
+      "granularity_blocked_attempts",
+      "distinct_artifacts",
+      "emission_runs",
+      "qualifying_gap_days",
+      "unresolved_attempts",
+      "eligible_attachment_parked_items",
+      "unresolved_parked_items",
+      "qualifying_sources",
+      "qualifying_observations",
+      "gap_episodes",
+      "emitted_plans",
+      "pending_plans",
+      "pending_high_stakes_plans"
+    ],
+    "ratio_names": [
+      "component_completeness",
+      "unused_headroom",
+      "granularity_blocked_rate",
+      "unresolved_rate",
+      "unresolved_parked_rate"
+    ],
+    "quantity_units": {
+      "projected_input": "tokens",
+      "projected_output": "tokens",
+      "projected_calls": "calls",
+      "projected_cost": "micros",
+      "gap_duration": "seconds"
+    },
+    "component_units": {
+      "uncached_input_tokens": "tokens",
+      "cache_read_tokens": "tokens",
+      "cache_write_tokens": "tokens",
+      "output_tokens": "tokens",
+      "retrieval_calls": "calls",
+      "tool_calls": "calls",
+      "selected_context_bytes": "bytes",
+      "selected_context_tokens": "tokens",
+      "prompt_template_bytes": "bytes",
+      "prompt_template_tokens": "tokens"
+    }
+  },
+  "protocols": {
+    "R1:root": {
+      "window_days": 28,
+      "min_sample_runs": 30,
+      "min_high_stakes_runs": 10,
+      "min_component_completeness_ppm": 950000,
+      "cost_projection_artifact": "shared/policy/cost-projection.v1.json"
+    },
+    "R2:root": {
+      "window_days": 28,
+      "min_unused_ppm": 200000,
+      "min_qualifying_days": 21
+    },
+    "R3:root": {
+      "bucket_days": 7,
+      "bucket_count": 4,
+      "min_eligible_attempts": 200,
+      "min_distinct_artifacts": 50,
+      "min_attempts_per_bucket": 50,
+      "fire_min_blocked_ppm": 100000,
+      "fire_min_buckets": 3
+    },
+    "R6:root": {
+      "bucket_days": 7,
+      "bucket_count": 4,
+      "min_eligible_attempts": 200,
+      "min_distinct_artifacts": 50,
+      "min_attempts_per_bucket": 50,
+      "fire_min_unresolved_ppm": 150000,
+      "fire_min_unresolved_parked_ppm": 400000,
+      "fire_min_buckets": 3
+    },
+    "R7:root": {
+      "window_days": 30,
+      "required_sources": 2,
+      "min_observations_per_source": 100
+    },
+    "R10:root": {
+      "window_days": 30,
+      "min_episodes": 3,
+      "min_distinct_days": 3,
+      "min_episode_seconds": 14400,
+      "min_total_seconds": 43200
+    },
+    "R13:root": {
+      "window_days": 30,
+      "min_emitted_plans": 20,
+      "min_emission_runs": 10,
+      "fire_min_pending_plans": 12,
+      "min_pending_days": 14,
+      "fire_min_high_stakes_pending": 4
+    }
+  }
+}

@@ -43,7 +43,21 @@ import { useVaultStore } from '@/stores/vaultStore';
 /** Mirrors the runner's SETTLE_MS — how long a burst of edits gets to settle. */
 const SETTLE = 4_000;
 
-const note = makeEntry({ path: 'items/note.md', title: 'Note', snippet: 'facts' });
+/**
+ * The job this file drives the runner with.
+ *
+ * A SCHEDULED SKILL since M26.4j: the distillation lanes are gone, so an
+ * ordinary note produces no background job at all — reading one is the Rust
+ * ingest pass's, and nothing in this hook can start it. What is asserted here
+ * has never been about learning anyway; it is about who owns a stream.
+ */
+const note = makeEntry({
+  path: 'records/skills/digest.md',
+  title: 'Digest',
+  type: 'Skill',
+  snippet: 'playbook',
+  properties: { schedule: 'daily 09:00' },
+});
 
 /** Advance past the settle timer and flush the run's async start-up. */
 async function startJob(): Promise<void> {
@@ -76,7 +90,6 @@ describe('useJobRunner stream ownership', () => {
     });
     useUiStore.setState({
       autoLearn: true,
-      filedForLearning: ['items/note.md'],
       learnAttempts: {},
       skillRuns: {},
       runs: [],
@@ -98,7 +111,7 @@ describe('useJobRunner stream ownership', () => {
     // M17.7: the job is a RUN in the registry, carrying the note it reads and
     // the child it spawned — not a boolean plus a path anybody could set.
     const job = () => useUiStore.getState().runs.find((r) => r.owner === 'job') ?? null;
-    expect(job()?.path).toBe('items/note.md');
+    expect(job()?.path).toBe('records/skills/digest.md');
     expect(job()?.run).toBe(JOB_RUN);
 
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
@@ -115,7 +128,7 @@ describe('useJobRunner stream ownership', () => {
     renderHook(() => useJobRunner());
     await startJob();
     const reading = () => useUiStore.getState().runs.find((r) => r.owner === 'job')?.path ?? null;
-    expect(reading()).toBe('items/note.md');
+    expect(reading()).toBe('records/skills/digest.md');
 
     // A chat turn starts beside it and registers its own run.
     act(() =>
@@ -133,7 +146,7 @@ describe('useJobRunner stream ownership', () => {
 
     // The chat's own run finishes. Its Done is not this job's business.
     act(() => handlers.forEach((h) => h({ run: 99, kind: 'Done' })));
-    expect(reading()).toBe('items/note.md');
+    expect(reading()).toBe('records/skills/digest.md');
 
     // The job ends on ITS terminal event, and releases what it claimed.
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
@@ -182,7 +195,6 @@ describe('useJobRunner scheduled runs', () => {
     });
     useUiStore.setState({
       autoLearn: true,
-      filedForLearning: [],
       learnAttempts: {},
       skillRuns: {},
       runs: [],
@@ -326,7 +338,6 @@ describe('useJobRunner shell gating', () => {
     });
     useUiStore.setState({
       autoLearn: true,
-      filedForLearning: [],
       learnAttempts: {},
       skillRuns: {},
       runs: [],

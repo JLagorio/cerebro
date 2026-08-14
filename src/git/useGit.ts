@@ -9,6 +9,7 @@ import type {
 } from '@/engine/git';
 import { syncState, type SyncState } from '@/engine/git';
 import * as git from '@/lib/gitIpc';
+import { ledgerHead } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -288,7 +289,7 @@ export function useAutoCheckpoint(enabled: boolean, onCommitted: () => void): vo
       try {
         const files = await git.getModifiedFiles(vaultPath);
         if (files.length === 0) return;
-        const message = checkpointMessage(files);
+        const message = await withLedgerTrailer(vaultPath, checkpointMessage(files));
         const hash = await git.gitCommit(vaultPath, message);
         if (hash !== null) onCommitted();
       } catch {
@@ -306,6 +307,60 @@ export function useAutoCheckpoint(enabled: boolean, onCommitted: () => void): vo
       for (const e of events) window.removeEventListener(e, bump);
     };
   }, [enabled, vaultPath, onCommitted]);
+}
+
+/**
+ * Append the ledger chain head as a commit trailer (M21.7) — PERIODIC
+ * ANCHORING, per the master doc's honest language: git cross-attests the
+ * ledger when both happen to exist; it is not continuous rollback
+ * detection, and ledger correctness never depends on it. Symmetrically, a
+ * vault with no ledger, a failing command, or no head changes nothing
+ * about the checkpoint — the message goes through untouched.
+ */
+export async function withLedgerTrailer(vaultPath: string, message: string): Promise<string> {
+  try {
+    const head = await ledgerHead(vaultPath);
+    return head === null ? message : `${message}\n\nCerebro-Ledger-Head: ${head.hash}`;
+  } catch {
+    return message;
+  }
+}
+
+/**
+ * Commit everything one applied logical batch wrote, as ONE commit (M25.8).
+ *
+ * The unit of review is the batch, not the file and not the turn. An M22
+ * logical batch is atomic in the ledger — its members commit together or not
+ * at all — and a checkpoint that split it across commits would offer a revert
+ * that could leave the working tree describing half of an event that the
+ * ledger only ever holds whole.
+ *
+ * The batch id rides beside the chain head, so a commit can be joined back to
+ * the exact event that produced it.
+ */
+export function useBatchCheckpoint(
+  refresh: () => void,
+): (batchId: string, summary: string) => void {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const toast = useUiStore((s) => s.toast);
+
+  return useCallback(
+    (batchId: string, summary: string) => {
+      if (vaultPath === null) return;
+      void (async () => {
+        try {
+          const base = await withLedgerTrailer(vaultPath, `applied: ${summary}`);
+          const hash = await git.gitCommit(vaultPath, `${base}\nCerebro-Batch: ${batchId}`);
+          if (hash !== null) refresh();
+        } catch (err) {
+          // A failed checkpoint never fails the application it describes:
+          // the ledger already holds the batch, and git is the cross-attest.
+          toast(`Couldn't checkpoint the applied change: ${String(err)}`);
+        }
+      })();
+    },
+    [vaultPath, refresh, toast],
+  );
 }
 
 /** A message that says what changed, not just that something did. */
@@ -340,7 +395,8 @@ export function useAgentCheckpoint(refresh: () => void): (summary: string) => vo
       if (vaultPath === null) return;
       void (async () => {
         try {
-          const hash = await git.gitCommit(vaultPath, `assistant: ${summary}`);
+          const message = await withLedgerTrailer(vaultPath, `assistant: ${summary}`);
+          const hash = await git.gitCommit(vaultPath, message);
           if (hash !== null) refresh();
         } catch (err) {
           toast(`Couldn't checkpoint the assistant's edits: ${String(err)}`);

@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "critical-attention-v1",
+  "replacement": {
+    "relation": "supersedes",
+    "direction": "replacement_from_candidate_to"
+  },
+  "triggers": [
+    {
+      "id": "production_signing_certificate_expired",
+      "copy_key": "critical_attention.production_signing_certificate_expired",
+      "required_fields": [
+        {
+          "field": "kind",
+          "type": "string",
+          "equals": "production_signing_certificate"
+        },
+        { "field": "environment", "type": "string", "equals": "production" },
+        { "field": "expires_at", "type": "timestamp" }
+      ],
+      "conditions": [
+        { "field": "expires_at", "operator": "lte", "of": "as_of", "plus_seconds": 0 }
+      ]
+    },
+    {
+      "id": "production_signing_certificate_expiring",
+      "copy_key": "critical_attention.production_signing_certificate_expiring",
+      "required_fields": [
+        {
+          "field": "kind",
+          "type": "string",
+          "equals": "production_signing_certificate"
+        },
+        { "field": "environment", "type": "string", "equals": "production" },
+        { "field": "expires_at", "type": "timestamp" }
+      ],
+      "conditions": [
+        { "field": "expires_at", "operator": "gt", "of": "as_of", "plus_seconds": 0 },
+        { "field": "expires_at", "operator": "lte", "of": "as_of", "plus_seconds": 259200 }
+      ]
+    }
+  ]
+}

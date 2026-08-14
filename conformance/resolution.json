@@ -1,0 +1,1024 @@
+{
+  "name": "resolution",
+  "description": "All four tier proofs attach; corrections pin the current prior and preserve history; wrong-entity proofs, conflicting attaches, stale priors, and correction-before-attach are refused.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "source.registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:source-registry"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "registration": {
+          "kind": "human_actor",
+          "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+          "actor_id": "human:josef",
+          "authority_capability": "human_assertion",
+          "independence_domain_id": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "97a3db144a5dc8d0c18b86fc5dd4a53b2019e06e6d02fce7c3f4dbc84dee270d",
+      "hash": "3ea29c3a77db46729f44812a4fd1aa01882c9ec41eaf26d2f901be11d614f337",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "3ea29c3a77db46729f44812a4fd1aa01882c9ec41eaf26d2f901be11d614f337",
+      "hash": "20fc93aa130d6f402c1881c2cbf4672f7e9f8fb717fc51eb0e2ad1b8aa04d370",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "20fc93aa130d6f402c1881c2cbf4672f7e9f8fb717fc51eb0e2ad1b8aa04d370",
+      "hash": "b815e563f6d6dc589636c4b275cbe01700ac57868301e811ce00fbb38e0fcbfa",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "entity.alias_added",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "alias": "Acme Corp",
+        "normalized_alias": "acme corp"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "b815e563f6d6dc589636c4b275cbe01700ac57868301e811ce00fbb38e0fcbfa",
+      "hash": "0ad95b0b181f1c5e73856be240ef10d3bac501ce761eddc8b2e13ee1b8961ff5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "unresolved",
+          "raw_ref": "ACME corp",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "0ad95b0b181f1c5e73856be240ef10d3bac501ce761eddc8b2e13ee1b8961ff5",
+      "hash": "4eb1631cb4595e39c7d0700a314e1a7edb0da94301e9ed69ba5fb10057731b19",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "unresolved",
+          "raw_ref": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "4eb1631cb4595e39c7d0700a314e1a7edb0da94301e9ed69ba5fb10057731b19",
+      "hash": "f0d1d5e87cacb971e68d58b3ba578707030aacf5a424eeb88901b386be43b7a8",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "unresolved",
+          "raw_ref": "acme  CORP",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "f0d1d5e87cacb971e68d58b3ba578707030aacf5a424eeb88901b386be43b7a8",
+      "hash": "9e21ac01ad946c9363df4ac5b75e2798c9734383a3d7724a325edb56627d3e5e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "unresolved",
+          "raw_ref": "whatever mention",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "9e21ac01ad946c9363df4ac5b75e2798c9734383a3d7724a325edb56627d3e5e",
+      "hash": "fff4c489c762bc221b121556415abbec1e7d3eded91c65f104daa46d34627e54",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000005",
+        "change": {
+          "action": "attach",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "resolver_tier": "known_alias",
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "fff4c489c762bc221b121556415abbec1e7d3eded91c65f104daa46d34627e54",
+      "hash": "92224ee2cb24cb7f5c4446aca8176ffd06f607f89cd9183b690d7c5b9c6e4662",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000005",
+        "change": {
+          "action": "attach",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "resolver_tier": "known_alias",
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "92224ee2cb24cb7f5c4446aca8176ffd06f607f89cd9183b690d7c5b9c6e4662",
+      "hash": "62e04b00cc004a40698d920d8f4cf5f3e98568afb73c3931a729c498b39c2350",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000005",
+        "change": {
+          "action": "attach",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "resolver_tier": "known_alias",
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "62e04b00cc004a40698d920d8f4cf5f3e98568afb73c3931a729c498b39c2350",
+      "hash": "f4d943557958b9eecb8fa71d3a2fb2a97804b9bf55efcdee71f9509349ca2308",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000006",
+        "change": {
+          "action": "attach",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "resolver_tier": "exact_id",
+          "basis_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "f4d943557958b9eecb8fa71d3a2fb2a97804b9bf55efcdee71f9509349ca2308",
+      "hash": "22c26eac982e31a03765757205c2abd1803abccb77ebb50e3b45380d3c9ce915",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000007",
+        "change": {
+          "action": "attach",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "resolver_tier": "normalized_match",
+          "basis_event_ids": [
+            "00000000000000000000000000000002"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "prev": "22c26eac982e31a03765757205c2abd1803abccb77ebb50e3b45380d3c9ce915",
+      "hash": "1590a06a5acbb355dfac69b55322e05092a9bd0ad962bc737906ccf764f5927d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.relation",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "relation_id": "7f20b085c71802edf85f2a3390ff8ce0",
+        "action": "add",
+        "from": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "to": "ffffffffffffffffffffffffffffffff",
+        "relation": "refines"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "prev": "1590a06a5acbb355dfac69b55322e05092a9bd0ad962bc737906ccf764f5927d",
+      "hash": "a8980a3993ed641856acb8c0e8139442e02afab5ff339b7de188a47b7917b489",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000008",
+        "change": {
+          "action": "attach",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "resolver_tier": "explicit_relation",
+          "basis_event_ids": [
+            "0000000000000000000000000000000e"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 16,
+      "event_id": "00000000000000000000000000000010",
+      "prev": "a8980a3993ed641856acb8c0e8139442e02afab5ff339b7de188a47b7917b489",
+      "hash": "b01c872ca916db65793f78f9a79919ca5cd37ba86ff116e894d72789ce3dfe0f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000005",
+        "change": {
+          "action": "correct",
+          "prior_resolution_event_id": "0000000000000000000000000000000a",
+          "from_entity_id": "cccccccccccccccccccccccccccccccc",
+          "to_entity_id": "dddddddddddddddddddddddddddddddd",
+          "resolver_tier": "exact_id",
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "reason": "the mention names the subsidiary"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "prev": "b01c872ca916db65793f78f9a79919ca5cd37ba86ff116e894d72789ce3dfe0f",
+      "hash": "69aad6244956aa801f90909b4f78fa3a8b252e43b44c396d535fa3858bcf0125",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000005",
+        "change": {
+          "action": "correct",
+          "prior_resolution_event_id": "0000000000000000000000000000000a",
+          "from_entity_id": "cccccccccccccccccccccccccccccccc",
+          "to_entity_id": "dddddddddddddddddddddddddddddddd",
+          "resolver_tier": "exact_id",
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "reason": "the mention names the subsidiary"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 18,
+      "event_id": "00000000000000000000000000000012",
+      "prev": "69aad6244956aa801f90909b4f78fa3a8b252e43b44c396d535fa3858bcf0125",
+      "hash": "7131b73ae07ddf0648230d1e8558e6f5e59754590970c378db0d0f149a6c2a1c",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "unresolved",
+          "raw_ref": "never attached",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "assertion_kind": "presence",
+          "predicate": "status",
+          "value": {
+            "type": "string",
+            "value": "active"
+          },
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          },
+          "relationship_to_subject": {
+            "role": "unknown"
+          },
+          "assertion_basis": "reported",
+          "authority_provenance": "trusted_human_capture",
+          "absence": null,
+          "assertion_form": "standalone",
+          "intended_belief_id": null,
+          "corrects": null,
+          "reason": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "prev": "7131b73ae07ddf0648230d1e8558e6f5e59754590970c378db0d0f149a6c2a1c",
+      "hash": "542ad55d1916ac0f5968b59fdc4a5d4ecce40613f1928bd95afc20cca9b24daf",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.subject_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:resolver"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_event_id": "00000000000000000000000000000012",
+        "change": {
+          "action": "correct",
+          "prior_resolution_event_id": "0000000000000000000000000000000a",
+          "from_entity_id": "cccccccccccccccccccccccccccccccc",
+          "to_entity_id": "dddddddddddddddddddddddddddddddd",
+          "resolver_tier": "exact_id",
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "reason": "nothing to correct"
+        }
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {
+      "c8147897afd510dad9278f297ba49115": {
+        "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+        "kind": "human_actor",
+        "capability": "human_assertion",
+        "independence_domain_id": null,
+        "registration_event_id": "00000000000000000000000000000001"
+      }
+    },
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002",
+      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000003"
+    },
+    "aliases": {
+      "acme corp": {
+        "alias": "Acme Corp",
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "event_id": "00000000000000000000000000000004"
+      }
+    },
+    "observations": {
+      "00000000000000000000000000000005": {
+        "seq": 5,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "unresolved",
+          "ACME corp"
+        ],
+        "effective_entity": "dddddddddddddddddddddddddddddddd",
+        "effective_resolution_event": "00000000000000000000000000000010",
+        "authority": "trusted_human_capture",
+        "lineage": []
+      },
+      "00000000000000000000000000000006": {
+        "seq": 6,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "unresolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": "0000000000000000000000000000000c",
+        "authority": "trusted_human_capture",
+        "lineage": []
+      },
+      "00000000000000000000000000000007": {
+        "seq": 7,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "unresolved",
+          "acme  CORP"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": "0000000000000000000000000000000d",
+        "authority": "trusted_human_capture",
+        "lineage": []
+      },
+      "00000000000000000000000000000008": {
+        "seq": 8,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "unresolved",
+          "whatever mention"
+        ],
+        "effective_entity": "dddddddddddddddddddddddddddddddd",
+        "effective_resolution_event": "0000000000000000000000000000000f",
+        "authority": "trusted_human_capture",
+        "lineage": []
+      },
+      "00000000000000000000000000000012": {
+        "seq": 18,
+        "kind": "human_assertion",
+        "source_id": "c8147897afd510dad9278f297ba49115",
+        "subject": [
+          "unresolved",
+          "never attached"
+        ],
+        "effective_entity": null,
+        "effective_resolution_event": null,
+        "authority": "trusted_human_capture",
+        "lineage": []
+      }
+    },
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "0000000000000000000000000000000e",
+          "state_digest": "b0a38196f90201ca63dd64c3652682e465f84914cb1bfa038140878e95d80173",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "ffffffffffffffffffffffffffffffff": {
+        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000003"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000003",
+          "state_digest": "2259ada3a4a7e57ca4c18f9e893d166a5e11928ae3374f52982607285396d70e",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {
+      "7f20b085c71802edf85f2a3390ff8ce0": {
+        "from": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "to": "ffffffffffffffffffffffffffffffff",
+        "relation": "refines",
+        "live": true
+      }
+    },
+    "resolutions": [
+      [
+        "0000000000000000000000000000000a",
+        "00000000000000000000000000000005",
+        "attach",
+        null,
+        "cccccccccccccccccccccccccccccccc",
+        "known_alias"
+      ],
+      [
+        "0000000000000000000000000000000c",
+        "00000000000000000000000000000006",
+        "attach",
+        null,
+        "cccccccccccccccccccccccccccccccc",
+        "exact_id"
+      ],
+      [
+        "0000000000000000000000000000000d",
+        "00000000000000000000000000000007",
+        "attach",
+        null,
+        "cccccccccccccccccccccccccccccccc",
+        "normalized_match"
+      ],
+      [
+        "0000000000000000000000000000000f",
+        "00000000000000000000000000000008",
+        "attach",
+        null,
+        "dddddddddddddddddddddddddddddddd",
+        "explicit_relation"
+      ],
+      [
+        "00000000000000000000000000000010",
+        "00000000000000000000000000000005",
+        "correct",
+        "cccccccccccccccccccccccccccccccc",
+        "dddddddddddddddddddddddddddddddd",
+        "exact_id"
+      ]
+    ],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
+      "belief:ffffffffffffffffffffffffffffffff": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 2,
+      "entity:dddddddddddddddddddddddddddddddd": 1,
+      "observation:00000000000000000000000000000005": 3,
+      "observation:00000000000000000000000000000006": 2,
+      "observation:00000000000000000000000000000007": 2,
+      "observation:00000000000000000000000000000008": 2,
+      "observation:00000000000000000000000000000012": 1,
+      "relation:7f20b085c71802edf85f2a3390ff8ce0": 1,
+      "source:c8147897afd510dad9278f297ba49115": 6
+    },
+    "batches": [],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "known_alias basis names a different Entity"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "attach on an already attached Observation — correction is the explicit door"
+    },
+    {
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "correction pins prior resolution 0000000000000000000000000000000a, but the current effective resolution is 00000000000000000000000000000010 — stale prior"
+    },
+    {
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "correction before any attachment — nothing to correct"
+    }
+  ]
+}

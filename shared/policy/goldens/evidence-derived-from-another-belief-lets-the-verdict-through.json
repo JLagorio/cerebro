@@ -1,0 +1,63 @@
+{
+  "name": "evidence-derived-from-another-belief-lets-the-verdict-through",
+  "why": "THE CONTROL, and without it a gate that refused everything would look identical to one that works. Building on what the base already believes about something ELSE is ordinary reasoning, not a loop: the support here derives from a revision of a different Belief, the walk reaches no revision of the target, and the proposal goes on to be decided by the table like any other. rust_only because it declares a support graph, not because its expectation is exotic.",
+  "rust_only": true,
+  "ancestry": {
+    "belief_revisions": {
+      "1e70a5100000000000000000000000c1": "be11ef000000000000000000000000ff"
+    },
+    "derived_from": {
+      "0b5e00000000000000000000000000c1": ["1e70a5100000000000000000000000c1"]
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9d5e1f0000000000000000000000000c",
+    "run_id": "cd5e1f0000000000000000000000000c",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 1
+      }
+    ],
+    "op": {
+      "kind": "update_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "patch": [],
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "0b5e00000000000000000000000000c1",
+              "role": "supports"
+            }
+          ]
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": []
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "append-observation-auto-applies",
+  "why": "The cheapest rung: recording what an agent saw is LOW and journals. If this ever queued, every ingest pass would stall behind a human.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9daed000000000000000000000000000",
+    "run_id": "cdaed000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "0b5e4100000000000000000000000000",
+        "target_class": "observation",
+        "expected_version": null
+      },
+      {
+        "target_id": "50c3e100000000000000000000000000",
+        "target_class": "source",
+        "expected_version": 7
+      },
+      {
+        "target_id": "e1717710000000000000000000000000",
+        "target_class": "entity",
+        "expected_version": null
+      }
+    ],
+    "op": {
+      "kind": "append_observation",
+      "payload": {
+        "observation": "server-canonical M22 body, never an agent DTO"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "LOW",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "LOW",
+    "escalated_by": []
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "ordinary-relation-add-auto-applies",
+  "why": "The control for the conditional gate: same op, same shape, a relation that needs no contradiction machinery. If this ever refused, the gate would have grown from a payload condition into an op-wide block.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9ddaadd0000000000000000000000000",
+    "run_id": "cddaadd0000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "4e1a7000000000000000000000000000",
+        "target_class": "relation",
+        "expected_version": null
+      },
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "5cce5000000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "edit_relation",
+      "payload": {
+        "relation_id": "4e1a7000000000000000000000000000",
+        "action": "add",
+        "from": "5cce5000000000000000000000000000",
+        "to": "be11ef00000000000000000000000000",
+        "relation": "supersedes"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": []
+  }
+}

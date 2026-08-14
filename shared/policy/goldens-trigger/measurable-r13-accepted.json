@@ -1,0 +1,61 @@
+{
+  "name": "measurable-r13-accepted",
+  "description": "an ordinary measurable evaluation over one vault store",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "8f18bc9a4edb18436ca4cb2c5cb8bd2ddb81860d4e1c7de9fb1998a95547f0b1",
+    "gate_key": {
+      "registry_id": "R13",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "emitted_plans",
+          "series": "aggregate",
+          "value": 21
+        }
+      },
+      {
+        "count": {
+          "name": "pending_plans",
+          "series": "aggregate",
+          "value": 13
+        }
+      },
+      {
+        "count": {
+          "name": "pending_high_stakes_plans",
+          "series": "aggregate",
+          "value": 5
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": "accepted"
+}

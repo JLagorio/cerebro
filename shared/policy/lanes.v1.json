@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "artifact_version": 3,
+  "rule_version": "lanes-v1",
+  "lanes": [
+    {
+      "id": "contradiction",
+      "protected": true,
+      "reasons": [
+        "open_edge_genuine_direct",
+        "open_edge_partial",
+        "open_edge_conditional",
+        "legacy_unclassified"
+      ]
+    },
+    {
+      "id": "blindness",
+      "protected": true,
+      "reasons": [
+        "coverage_blind_assessed",
+        "coverage_unassessed"
+      ]
+    },
+    {
+      "id": "staleness",
+      "protected": false,
+      "reasons": [
+        "freshness_stale"
+      ]
+    },
+    {
+      "id": "epistemic_debt",
+      "protected": false,
+      "reasons": [
+        "unresolved_contradiction",
+        "descendant_only_reinforcement",
+        "circular_support",
+        "unsupported_inference",
+        "authority_route_unmatched",
+        "no_authority_route_declared",
+        "promotion_blocked",
+        "duplicated_lineage_family",
+        "stale_evidence",
+        "coverage_not_observed"
+      ]
+    }
+  ],
+  "reliance": [
+    "qualified",
+    "promotion_attempted",
+    "refined_by"
+  ],
+  "debt_requires_reliance": true
+}

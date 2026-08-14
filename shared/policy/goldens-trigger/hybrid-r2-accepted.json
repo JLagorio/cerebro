@@ -1,0 +1,60 @@
+{
+  "name": "hybrid-r2-accepted",
+  "description": "R2 is hybrid: the measurable half and the accepted pack together",
+  "record": {
+    "variant": "hybrid",
+    "evaluation_id": "6312eaaae46a3f35ff714853b2f792590dcaecf25c3747808c1346bd15f2f19d",
+    "gate_key": {
+      "registry_id": "R2",
+      "subcapability": "root"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R2/2026-07-16-novelty-definition.md"
+        }
+      },
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "headroom_days",
+          "series": "aggregate",
+          "value": 23
+        }
+      },
+      {
+        "ratio_ppm": {
+          "name": "unused_headroom",
+          "numerator": 21,
+          "denominator": 28,
+          "value_ppm": 750000,
+          "series": {
+            "day": {
+              "local_date": "2026-08-01"
+            }
+          }
+        }
+      }
+    ],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R2/2026-07-16-novelty-definition.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": null
+  },
+  "expected": "accepted"
+}

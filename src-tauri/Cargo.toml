@@ -31,3 +31,22 @@ rand = "0.8"
 sha2 = "0.10"
 # Decodes PNG bytes sent over the JSON invoke channel for export_png (M29.4).
 base64 = "0.22"
+# The ledger's disposable materialized index (M21.5): rebuildable from
+# segments, lives in app-data, never synced, never authoritative. `bundled`
+# compiles SQLite in — no system dependency, and one pinned SQLite version
+# is what makes rebuild-from-zero byte-deterministic.
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+# `normalize_alias_v1` (M22.1): NFKC normalization tables. Rust/TS parity is
+# pinned by shared conformance vectors, not by trusting either runtime.
+unicode-normalization = "0.1"
+# Ordered maps for schema-v1 TypedValue objects (M22.1). Already in-tree as
+# serde_json's preserve_order backend; used directly for typed recursion.
+indexmap = { version = "2", features = ["serde"] }
+# The local-day budget window (M25.2). A "day" is the half-open interval
+# between consecutive LOCAL midnights converted to UTC, which needs the IANA
+# database to stay honest across DST (23- and 25-hour days are real) and to
+# honour a timezone the owner set that is not this machine's.
+# `iana-time-zone` reads the system zone ID once, at the first settings
+# version; `chrono-tz` resolves that ID's transitions.
+chrono-tz = "0.10"
+iana-time-zone = "0.1"

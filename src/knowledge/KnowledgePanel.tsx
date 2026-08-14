@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Tag } from '@/components/ui/Tag';
 import {
   conceptEdges,
+  humanReviewed,
   listConcepts,
   nearDuplicates,
   type Concept,
@@ -12,7 +13,9 @@ import {
 } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
-import { FlagChip, TrustChip } from '@/knowledge/TrustChip';
+import { FacetChips } from '@/knowledge/FacetChips';
+import { FlagChip, ReviewChip } from '@/knowledge/ReviewChip';
+import type { BeliefChips } from '@/lib/ipc';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -243,6 +246,7 @@ export function KnowledgePanel({
   onOpenConcept,
   verifying = false,
   verifiedToday = false,
+  chips = null,
   className = 'w-[320px] flex-none',
 }: {
   concept: Concept;
@@ -252,6 +256,9 @@ export function KnowledgePanel({
   onOpenEntity: (path: string) => void;
   onOpenConcept: (path: string) => void;
   verifying?: boolean;
+  /** The three axes for this concept's belief, or null when nobody derived
+   * them — a vault with no ledger, or a file the ledger does not hold. */
+  chips?: BeliefChips | null;
   /** This actor already stamped this concept today (M15) — a second identical
    * row in the ledger is noise, so the button says so instead of adding one. */
   verifiedToday?: boolean;
@@ -260,7 +267,7 @@ export function KnowledgePanel({
   className?: string;
 }) {
   const lastVerified = relativeDay(concept.lastVerified, today);
-  const alreadyReviewed = concept.trust === 'human-reviewed';
+  const alreadyReviewed = humanReviewed(concept);
 
   return (
     <aside
@@ -269,7 +276,7 @@ export function KnowledgePanel({
       className={`flex flex-col overflow-y-auto border-l border-n-200 bg-n-0 px-4 pb-5 pt-3.5 ${className}`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        <TrustChip tier={concept.trust} detail={lastVerified} />
+        <ReviewChip status={concept.review} by={concept.reviewedBy} detail={lastVerified} />
         {concept.stale && (
           <>
             <FlagChip icon="clock-alert" label={`Stale since ${concept.staleAfter}`} tone="warn" />
@@ -295,6 +302,19 @@ export function KnowledgePanel({
         )}
       </div>
 
+      {/* The three axes, per facet. They sit under the review chip and beside
+          it, never inside it: whether a person looked and what rests
+          underneath are different questions, and a migrated concept somebody
+          verified answers "yes" to the first and "nothing" to the second. */}
+      {chips !== null && (
+        <div className="mt-3" data-testid="belief-axes">
+          <div className={LABEL}>What this rests on</div>
+          <div className="mt-1.5">
+            <FacetChips chips={chips} />
+          </div>
+        </div>
+      )}
+
       <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
 
       <RelationsBlock concept={concept} today={today} onOpenConcept={onOpenConcept} />
@@ -317,6 +337,12 @@ export function KnowledgePanel({
             // Multiple entries capture INDEPENDENT checks — a human sign-off
             // and a nightly process are different claims, so both are shown.
             concept.verified.map((stamp, i) => <ActorLine key={i} stamp={stamp} today={today} />)
+          ) : concept.verifiedNotice !== null ? (
+            // M23.4: the review happened, the content moved on. Say so —
+            // never render a stale stamp, never pretend nobody reviewed it.
+            <span data-testid="verified-notice" className="text-xs text-n-600">
+              {concept.verifiedNotice}
+            </span>
           ) : (
             <span className="text-xs text-n-400">Nobody yet</span>
           )}

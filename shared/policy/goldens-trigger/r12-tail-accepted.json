@@ -1,0 +1,98 @@
+{
+  "name": "r12-tail-accepted",
+  "description": "a tail is discretionary AFTER its exact parent has fired",
+  "record": {
+    "variant": "discretionary",
+    "evaluation_id": "cd8d568aa1eefc935772723b6b305064b392fa4c0c887737e51f5413ec01aa01",
+    "gate_key": {
+      "registry_id": "R12",
+      "subcapability": "learned_aliases"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": "e00ed079bc1f9a28876f6eed6629c90f82875fc2d58afd505ebd00c7b48dda66"
+  },
+  "expected": "accepted",
+  "parent": {
+    "variant": "measurable",
+    "evaluation_id": "e00ed079bc1f9a28876f6eed6629c90f82875fc2d58afd505ebd00c7b48dda66",
+    "gate_key": {
+      "registry_id": "R6",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "eligible_attempts",
+          "series": {
+            "bucket": {
+              "ordinal": 1,
+              "start_date": "2026-07-17",
+              "end_date": "2026-07-23"
+            }
+          },
+          "value": 61
+        }
+      },
+      {
+        "ratio_ppm": {
+          "name": "unresolved_rate",
+          "numerator": 12,
+          "denominator": 61,
+          "value_ppm": 196721,
+          "series": {
+            "bucket": {
+              "ordinal": 1,
+              "start_date": "2026-07-17",
+              "end_date": "2026-07-23"
+            }
+          }
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  }
+}

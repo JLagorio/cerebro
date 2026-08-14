@@ -1,0 +1,23 @@
+{
+  "name": "an expired production signing certificate fires",
+  "description": "The shipping trust path is already broken. No score, no Risk object, no waiting for M28.",
+  "as_of": "2026-08-12T00:00:00Z",
+  "candidates": [
+    {
+      "id": "cert-prod-signing",
+      "active": true,
+      "fields": {
+        "kind": "production_signing_certificate",
+        "environment": "production",
+        "expires_at": "2026-08-11T23:59:59Z"
+      }
+    }
+  ],
+  "replacements": [],
+  "expected": [
+    {
+      "trigger_id": "production_signing_certificate_expired",
+      "candidate_id": "cert-prod-signing"
+    }
+  ]
+}

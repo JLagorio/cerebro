@@ -1,34 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
-
-declare global {
-  interface Window {
-    __cerebroMockFs: Map<string, string>;
-  }
-}
-
-async function readMockFile(page: Page, path: string): Promise<string> {
-  const text = await page.evaluate((p) => window.__cerebroMockFs.get(p), path);
-  if (text === undefined) throw new Error(`mock fs has no file at ${path}`);
-  return text;
-}
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-}
+import { test, expect } from '@playwright/test';
+import { boot, readMockFile } from './boot';
 
 const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
 
@@ -60,12 +31,17 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   await expect(panel).toContainText('claude-code');
   await expect(panel).toContainText('Nobody yet');
   await expect(panel).toContainText('42,000 uses');
-  await expect(panel.getByTestId('trust-chip')).toHaveAttribute('data-tier', 'unverified');
+  // M27.5c: the chip answers whether a review covers what this says NOW, and
+  // names who did it beside the status rather than ranking a person above a
+  // process. `data-tier` and its three rungs are gone.
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-by', 'nobody');
 
-  // -- Verify writes an OKF stamp and lifts the trust tier ---------------
+  // -- Verify writes an OKF stamp and the review becomes current ---------
   await page.getByRole('button', { name: /^Verify$/ }).click();
   await expect.poll(async () => readMockFile(page, CONCEPT)).toContain('human:me');
-  await expect(panel.getByTestId('trust-chip')).toHaveAttribute('data-tier', 'human-reviewed');
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-by', 'human');
 
   // Still queued — and that is the point. Verification and freshness are
   // INDEPENDENT signals: confirming a claim does not move its stale_after
@@ -77,6 +53,40 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
   await page.getByRole('button', { name: /^Verify$/ }).click();
   await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
+});
+
+test('knowledge: a verified concept revised later shows the predating notice (M23.4)', async ({
+  page,
+}) => {
+  await boot(page);
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
+
+  // The agent revised a previously verified concept: the projection renders
+  // the review notice instead of silently reverting to "Nobody yet".
+  await page.evaluate((p) => {
+    const text = window.__cerebroMockFs.get(p);
+    if (text === undefined) throw new Error(`no mock file at ${p}`);
+    const close = text.indexOf('\n---\n', 4);
+    const notice = 'verified: verified at r2; current is r3 — attestation predates revision\n';
+    window.__cerebroMockFs.set(p, text.slice(0, close + 1) + notice + text.slice(close + 1));
+  }, CONCEPT);
+  // The mock has no watcher; a store write (verifying another concept)
+  // triggers the rescan that picks the projection up.
+  await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
+  await page.getByRole('button', { name: /^Verify$/ }).click();
+
+  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
+  const panel = page.getByTestId('knowledge-panel');
+  await expect(panel.getByTestId('verified-notice')).toContainText(
+    'verified at r2; current is r3 — attestation predates revision',
+  );
+  // The stale review does NOT count as verification of the current content —
+  // and M27.5c says which of the two it is. `predates_current` keeps the fact
+  // that somebody looked, which `unverified` used to throw away.
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'predates_current');
 });
 
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
@@ -181,4 +191,151 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
   expect(inboxPaths.length).toBeGreaterThan(0);
   expect(inboxPaths.some((p) => p.startsWith('knowledge/'))).toBe(false);
+});
+
+/**
+ * One row per facet, three chips per row, and a review chip that is none of
+ * them (M27.5c).
+ *
+ * The browser mock has no ledger, so the axes are staged rather than derived —
+ * the same seam `review.spec.ts` uses for cards. What is under test here is
+ * the rendering contract: three orthogonal answers stay three, the scope of a
+ * multi-facet belief is named, and an attestation never moves Support.
+ */
+const AXES = [
+  {
+    belief_id: '1'.repeat(32),
+    path: 'metrics/sync-error-rate.md',
+    belief_revision_event_id: 'r'.repeat(32),
+    facets: [
+      {
+        key: {
+          belief_id: '1'.repeat(32),
+          belief_revision_event_id: 'r'.repeat(32),
+          predicate: { kind: 'known', value: 'bill_of_materials' },
+          state_stage: 'shipping',
+        },
+        support: {
+          level: 'unsupported',
+          ancestral_family_count: 0,
+          independent_family_count: 0,
+          independence_unknown_count: 0,
+        },
+        families: [],
+        independence_edges: [],
+        coverage: {
+          kind: 'assessed',
+          summary: 'blind',
+          assessment_ids: ['a'.repeat(32)],
+          fold_rule_version: 'coverage-fold-v1',
+          dimensions: {},
+        },
+        validity: { freshness: 'stale', conflict: 'contested', lifecycle: 'active' },
+        freshness_basis: {
+          predicate_class: 'shipping_bom',
+          anchor_event_id: 'o'.repeat(32),
+          anchor_at: '2026-07-01T00:00:00Z',
+          stale_after: '2026-07-08T00:00:00Z',
+        },
+        review: { status: 'unreviewed' },
+        support_text: 'unsupported',
+        coverage_text: 'blind coverage',
+        validity_text: 'stale and contested',
+        line: 'unsupported, blind coverage, stale and contested',
+      },
+      {
+        key: {
+          belief_id: '1'.repeat(32),
+          belief_revision_event_id: 'r'.repeat(32),
+          predicate: { kind: 'known', value: 'ci_status' },
+          state_stage: 'implemented',
+        },
+        support: {
+          level: 'corroborated',
+          ancestral_family_count: 2,
+          independent_family_count: 2,
+          independence_unknown_count: 0,
+        },
+        families: [],
+        independence_edges: [],
+        coverage: {
+          kind: 'assessed',
+          summary: 'observed',
+          assessment_ids: ['b'.repeat(32)],
+          fold_rule_version: 'coverage-fold-v1',
+          dimensions: {},
+        },
+        validity: { freshness: 'fresh', conflict: 'clear', lifecycle: 'active' },
+        freshness_basis: {
+          predicate_class: 'ci_status',
+          anchor_event_id: 'p'.repeat(32),
+          anchor_at: '2026-07-28T09:00:00Z',
+          stale_after: '2026-07-28T15:00:00Z',
+        },
+        review: { status: 'unreviewed' },
+        support_text: 'corroborated by 2 independent',
+        coverage_text: 'observed coverage',
+        validity_text: 'fresh',
+        line: 'corroborated by 2 independent, observed coverage, fresh',
+      },
+    ],
+  },
+];
+
+test('knowledge: the three axes render per facet, and review is not one of them', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.evaluate((rows) => window.__cerebroSeedChips(rows), AXES);
+
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
+  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
+
+  const panel = page.getByTestId('knowledge-panel');
+  const rows = panel.getByTestId('facet-chips');
+  await expect(rows).toHaveCount(2);
+
+  // Two claims on one revision, and they disagree. A single row about "the
+  // belief" would have to pick one and be wrong about the other.
+  await expect(rows.nth(0)).toHaveAttribute('data-facet', 'bill_of_materials at shipping');
+  await expect(rows.nth(1)).toHaveAttribute('data-facet', 'ci_status at implemented');
+
+  const bom = rows.nth(0).getByTestId('axis-chip');
+  await expect(bom).toHaveCount(3);
+  await expect(bom.nth(0)).toHaveText('unsupported');
+  await expect(bom.nth(1)).toHaveText('blind coverage');
+  await expect(bom.nth(2)).toHaveText('stale and contested');
+
+  const ci = rows.nth(1).getByTestId('axis-chip');
+  await expect(ci.nth(0)).toHaveText('corroborated by 2 independent');
+  await expect(ci.nth(1)).toHaveText('observed coverage');
+  await expect(ci.nth(2)).toHaveText('fresh');
+
+  // The review chip is beside the axes and stays out of them. Verifying the
+  // concept moves it to `current` and moves NOTHING on the Support chip —
+  // an attestation says a person looked, not that anything rests underneath.
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
+  await page.getByRole('button', { name: /^Verify$/ }).click();
+  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
+  await expect(rows.nth(0).getByTestId('axis-chip').nth(0)).toHaveText('unsupported');
+});
+
+test('knowledge: a vault with no ledger shows no axes rather than empty ones', async ({ page }) => {
+  // Nothing seeded, so nothing derived. Saying "unsupported" about a belief
+  // nobody folded would be inventing an answer, and an empty chip row would
+  // read as "we looked and found nothing".
+  await boot(page);
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
+  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
+
+  const panel = page.getByTestId('knowledge-panel');
+  await expect(panel.getByTestId('review-chip')).toBeVisible();
+  await expect(panel.getByTestId('belief-axes')).toHaveCount(0);
+  await expect(panel.getByTestId('axis-chip')).toHaveCount(0);
 });

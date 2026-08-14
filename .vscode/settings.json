@@ -23,7 +23,7 @@
     // tsconfigs. eslint.config.js, .prettierignore and .gitignore all already
     // exclude .claude/; this is the editor saying the same thing.
     ".claude": true,
-    "docs": true,
+    "docs": false,
     "dist": true,
     "dist-mac": true,
     "coverage": true,

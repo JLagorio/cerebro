@@ -54,15 +54,107 @@ fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
         .join("/"))
 }
 
+/// Marker every atomic-write temp file carries: `.{name}.cerebro-tmp-{hex}`.
+/// Dot-prefixed and non-`.md`, so the scanner and the watcher never see one.
+const TEMP_MARKER: &str = ".cerebro-tmp-";
+
+/// How old a temp must be before `clean_orphan_temps` may reap it. The engine
+/// is stateless and concurrent commands re-scan constantly, so an in-flight
+/// write's temp must never be reaped — age is the only guard.
+const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Single funnel for all vault file writes; registers each write with the
 /// watcher so our own saves don't bounce back as `vault-changed` events.
+///
+/// Atomic since M21.1: content lands in a same-directory temp, is fsynced,
+/// then renamed over the destination, and the parent directory is fsynced so
+/// the rename itself is durable. A crash at any point leaves either the old
+/// bytes or the new bytes at the destination, never a truncated mix. Known
+/// limitations (the same trade-off every atomic-save editor makes): xattrs
+/// are not preserved across the rename, and a symlinked destination is
+/// replaced by a regular file; plain permissions are preserved.
 fn write_file(abs: &Path, content: &str) -> Result<(), String> {
-    if let Some(parent) = abs.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let parent = abs
+        .parent()
+        .ok_or_else(|| format!("no parent directory: {}", abs.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let name = abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("unusable file name: {}", abs.display()))?;
+    let temp = parent.join(format!(
+        ".{name}{TEMP_MARKER}{:016x}",
+        rand::random::<u64>()
+    ));
+    let result = write_via_temp(abs, parent, &temp, content);
+    if result.is_err() {
+        // Best-effort: after a successful rename the temp no longer exists,
+        // and a failure here still gets reaped by clean_orphan_temps later.
+        let _ = std::fs::remove_file(&temp);
     }
-    std::fs::write(abs, content).map_err(|e| e.to_string())?;
-    super::watcher::note_own_write(abs);
-    Ok(())
+    result
+}
+
+/// The commit sequence for one atomic write. Split out so `write_file` owns
+/// exactly one job: cleaning up the temp on any error path.
+fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(temp).map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())?;
+    // Re-point permissions at the temp BEFORE the rename, so replacing the
+    // destination cannot widen a user-tightened mode (chmod 600 stays 600).
+    match std::fs::metadata(abs) {
+        Ok(meta) => file
+            .set_permissions(meta.permissions())
+            .map_err(|e| e.to_string())?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    file.sync_all().map_err(|e| e.to_string())?;
+    crate::crash::crash_point("temp-written");
+    // Register BEFORE the rename: the suppression entry must exist by the
+    // time the OS can deliver a change event for the destination path. With
+    // the content hash (M21.6), so the echo is recognized by bytes, not by
+    // clock.
+    super::watcher::note_own_write_hashed(abs, crate::ledger::sha256_hex(content.as_bytes()));
+    std::fs::rename(temp, abs).map_err(|e| e.to_string())?;
+    crate::crash::crash_point("renamed-pre-dirsync");
+    // The rename is durable only once the directory entry itself is on disk.
+    std::fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| e.to_string())
+}
+
+/// Reap atomic-write temps abandoned by a crash, anywhere in the vault
+/// (skipping dot-directories, where `write_file` never writes). Best-effort
+/// janitor run once per `scan_vault` command; temps younger than
+/// [`ORPHAN_TEMP_MAX_AGE`] are spared — they may belong to a write in flight.
+pub fn clean_orphan_temps(vault: &Path) {
+    let walker = walkdir::WalkDir::new(vault)
+        .into_iter()
+        .filter_entry(|e| {
+            e.depth() == 0
+                || e.file_type().is_file()
+                || !e.file_name().to_string_lossy().starts_with('.')
+        })
+        .filter_map(Result::ok);
+    for item in walker {
+        if !item.file_type().is_file() || !item.file_name().to_string_lossy().contains(TEMP_MARKER)
+        {
+            continue;
+        }
+        let stale = item
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age >= ORPHAN_TEMP_MAX_AGE);
+        if stale {
+            let _ = std::fs::remove_file(item.path());
+        }
+    }
 }
 
 /// Join a vault-relative path onto the vault root, rejecting empty paths,
@@ -139,20 +231,27 @@ fn json_to_yaml(value: &serde_json::Value) -> serde_yaml::Value {
     }
 }
 
-/// Apply a JSON patch to a note's frontmatter. `null` deletes a key; existing
-/// keys keep their position; new keys append; unknown keys and the body are
-/// untouched.
-///
-/// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
-/// top of parse.rs) are normalized: the frontmatter block is reserialized and
-/// the fences rewritten in LF form. The body is preserved byte-for-byte.
-/// YAML comments and the original scalar quoting style inside the frontmatter
-/// block are not preserved through reserialization.
-pub fn update_frontmatter(
+/// Shadow-record one committed write (M21.8). Best-effort and invisible:
+/// shadow mode observes writes, it never gates them — see ledger::shadow.
+fn shadow_write(vault: &Path, rel: &str, content: &str, kind: &str, actor: Option<&str>) {
+    let mut body = serde_json::json!({
+        "path": rel,
+        "content_hash": crate::ledger::sha256_hex(content.as_bytes()),
+    });
+    if let Some(actor) = actor {
+        body["actor"] = serde_json::Value::String(actor.to_string());
+    }
+    crate::ledger::shadow::record(vault, kind, body);
+}
+
+/// The shared patch → composed-file step behind `update_frontmatter` and
+/// `verify_frontmatter` — same bytes on disk either way; only the shadow
+/// event kind differs.
+fn patched_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     // A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
     // mermaid config — valid YAML, so without this guard a patch (including
     // the agent's MCP update_frontmatter) would merge into the diagram's
@@ -179,10 +278,48 @@ pub fn update_frontmatter(
         }
     }
     let new_block = serialize_mapping(&mapping)?;
-    write_file(
-        &safe_join(vault, rel)?,
-        &compose(new_block.as_deref(), body),
-    )
+    Ok(compose(new_block.as_deref(), body))
+}
+
+/// Apply a JSON patch to a note's frontmatter. `null` deletes a key; existing
+/// keys keep their position; new keys append; unknown keys and the body are
+/// untouched.
+///
+/// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
+/// top of parse.rs) are normalized: the frontmatter block is reserialized and
+/// the fences rewritten in LF form. The body is preserved byte-for-byte.
+/// YAML comments and the original scalar quoting style inside the frontmatter
+/// block are not preserved through reserialization.
+pub fn update_frontmatter(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let content = patched_frontmatter(vault, rel, patch)?;
+    write_file(&safe_join(vault, rel)?, &content)?;
+    shadow_write(vault, rel, &content, "vault.write", None);
+    Ok(())
+}
+
+/// The verify path (M21.8): byte-identical writes to `update_frontmatter`,
+/// but the shadow event says what actually happened — a human confirmed a
+/// concept — instead of "a file changed". The lib.rs `verify_concept`
+/// command is the only caller.
+pub fn verify_frontmatter(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    // The M23.4 flip: with an active writer, the stamp is a field revision
+    // plus a belief.attested pinned to the reviewed revision event and its
+    // projection hash, and the file regenerates as the projection.
+    if let Some(result) = crate::ledger::concepts::verify_concept(vault, rel, patch) {
+        return result;
+    }
+    let content = patched_frontmatter(vault, rel, patch)?;
+    write_file(&safe_join(vault, rel)?, &content)?;
+    shadow_write(vault, rel, &content, "knowledge.verify", None);
+    Ok(())
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
@@ -196,7 +333,10 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
     }
     let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
-    write_file(&safe_join(vault, rel)?, &compose(block, body))
+    let composed = compose(block, body);
+    write_file(&safe_join(vault, rel)?, &composed)?;
+    shadow_write(vault, rel, &composed, "vault.write", None);
+    Ok(())
 }
 
 /// The `type` a note's frontmatter declares, if the file exists and parses.
@@ -390,6 +530,7 @@ pub fn create_note(
         None => body,
     };
     write_file(&vault.join(&rel), &content)?;
+    shadow_write(vault, &rel, &content, "vault.write", None);
     Ok(rel)
 }
 
@@ -405,6 +546,36 @@ pub fn write_concept(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
+    // The M23.3 flip: with an active ledger writer, the concept write is a
+    // committed Belief transition and the file is its byte-stable
+    // projection, written through the manifest-first protocol.
+    if let Some(result) = crate::ledger::concepts::write_concept(vault, rel, frontmatter, body) {
+        return result;
+    }
+    // Legacy file-first path — no active writer for this vault (unit
+    // fixtures, browser builds, a ledger the startup verdict refused; the
+    // refusal is visible through ledger_status, and the M23.6 scan
+    // reconciles once a writer returns).
+    let content = concept_write(vault, rel, frontmatter, body)?;
+    // "Actor where the call site knows it" (M21.8): the MCP layer already
+    // server-stamps `generated.by` into the frontmatter it passes here, so
+    // the actor rides the data — no new plumbing, and nothing an agent can
+    // separately claim.
+    let actor = frontmatter
+        .get("generated")
+        .and_then(|g| g.get("by"))
+        .and_then(|by| by.as_str());
+    shadow_write(vault, rel, &content, "knowledge.write_concept", actor);
+    Ok(())
+}
+
+/// The shared exact-path writer behind `write_concept` and `write_source`.
+fn concept_write(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<String, String> {
     let target = safe_join(vault, rel)?;
     if !rel.ends_with(".md") {
         return Err(format!("a concept path must end in .md: {rel}"));
@@ -425,7 +596,8 @@ pub fn write_concept(
         Some(b) => format!("---\n{b}---\n\n{body}\n"),
         None => format!("{body}\n"),
     };
-    write_file(&target, &content)
+    write_file(&target, &content)?;
+    Ok(content)
 }
 
 /// Cached copies of fetched external material. Mirrors SOURCES_DIR in
@@ -446,7 +618,11 @@ pub fn write_source(
             "cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"
         ));
     }
-    write_concept(vault, rel, frontmatter, body)
+    // A cached source is a vault write, not a knowledge event — the five
+    // M21.8 kinds reserve knowledge.* for the bundle.
+    let content = concept_write(vault, rel, frontmatter, body)?;
+    shadow_write(vault, rel, &content, "vault.write", None);
+    Ok(())
 }
 
 /// Does a concept already live at this path? Read BEFORE writing, so the log
@@ -462,6 +638,11 @@ pub fn append_knowledge_log(
     title: &str,
     existed: bool,
 ) -> Result<(), String> {
+    // M23.3: the log is a projection too — with an active writer, the
+    // append is a Belief body revision and the file is regenerated.
+    if let Some(result) = crate::ledger::concepts::append_log(vault, rel, title, existed) {
+        return result;
+    }
     let target = safe_join(vault, crate::knowledge::LOG_PATH)?;
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -472,7 +653,15 @@ pub fn append_knowledge_log(
         title,
         rel,
     );
-    write_file(&target, &next)
+    write_file(&target, &next)?;
+    shadow_write(
+        vault,
+        crate::knowledge::LOG_PATH,
+        &next,
+        "vault.write",
+        None,
+    );
+    Ok(())
 }
 
 /// Replace the H1 line that `parse::extract_h1_title` would read the title
@@ -501,7 +690,10 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
     let content = read_file(vault, rel)?;
     let (block, body) = parse::split_frontmatter(&content);
     let new_body = replace_h1(body, title);
-    write_file(&safe_join(vault, rel)?, &compose(block, &new_body))
+    let composed = compose(block, &new_body);
+    write_file(&safe_join(vault, rel)?, &composed)?;
+    shadow_write(vault, rel, &composed, "vault.write", None);
+    Ok(())
 }
 
 fn collect_views_dir(
@@ -643,7 +835,10 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 /// is rejected: the vault root is not a Collection.
 pub fn save_collection(vault: &Path, folder: &str, yaml: &str) -> Result<(), String> {
     let dir = safe_join(vault, folder)?;
-    write_file(&dir.join(COLLECTION_MARKER), yaml)
+    write_file(&dir.join(COLLECTION_MARKER), yaml)?;
+    let rel = format!("{folder}/{COLLECTION_MARKER}");
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 /// Write a List. `folder` empty means the vault root (a top-level List);
@@ -655,7 +850,14 @@ pub fn save_list(vault: &Path, folder: &str, id: &str, yaml: &str) -> Result<(),
     } else {
         safe_join(vault, folder)?
     };
-    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)
+    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)?;
+    let rel = if folder.is_empty() {
+        format!("{id}{LIST_SUFFIX}")
+    } else {
+        format!("{folder}/{id}{LIST_SUFFIX}")
+    };
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 /// Write `<folder>/views/<id>.yml` verbatim (vault-root `views/` when folder
@@ -667,7 +869,13 @@ pub fn save_view(vault: &Path, id: &str, yaml: &str, folder: Option<&str>) -> Re
         Some(f) => safe_join(vault, f)?,
         None => vault.to_path_buf(),
     };
-    write_file(&base.join("views").join(format!("{id}.yml")), yaml)
+    write_file(&base.join("views").join(format!("{id}.yml")), yaml)?;
+    let rel = match folder {
+        Some(f) => format!("{f}/views/{id}.yml"),
+        None => format!("views/{id}.yml"),
+    };
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---
@@ -693,6 +901,11 @@ pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
     std::fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))?;
     super::watcher::note_own_write(&src);
     super::watcher::note_own_write(&dst);
+    crate::ledger::shadow::record(
+        vault,
+        "vault.rename",
+        serde_json::json!({ "from": from, "to": to }),
+    );
     Ok(())
 }
 
@@ -705,6 +918,7 @@ pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
     }
     trash::delete(&abs).map_err(|e| e.to_string())?;
     super::watcher::note_own_write(&abs);
+    crate::ledger::shadow::record(vault, "vault.delete", serde_json::json!({ "path": rel }));
     Ok(())
 }
 
@@ -1367,5 +1581,172 @@ mod tests {
         assert!(crate::vault::scan::scan_vault(&vault).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    // --- Atomic writes (M21.1) ---------------------------------------------
+
+    /// Every atomic-write temp anywhere under the vault, dot-dirs included —
+    /// the assertion net must be wider than the janitor's walk.
+    fn temp_files(vault: &Path) -> Vec<std::path::PathBuf> {
+        walkdir::WalkDir::new(vault)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| e.file_name().to_string_lossy().contains(TEMP_MARKER))
+            .map(|e| e.into_path())
+            .collect()
+    }
+
+    fn backdate(path: &Path, secs: u64) {
+        let then = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(then)
+                .set_modified(then),
+        )
+        .unwrap();
+    }
+
+    fn assert_aborted(status: std::process::ExitStatus) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            // SIGABRT — the crash point fired. A plain test failure (panic)
+            // exits with a code instead, and must not pass as a crash.
+            assert_eq!(status.signal(), Some(6), "expected SIGABRT, got {status:?}");
+        }
+        #[cfg(not(unix))]
+        assert!(
+            !status.success(),
+            "expected an aborted child, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn writes_leave_no_temp_behind_on_success() {
+        let vault = vault_with_note("wfm-atomic-clean");
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nNew body.\n",
+        )
+        .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
+        create_note(&vault, "items", "fresh", &patch(&[]), "# Fresh\n").unwrap();
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_preserve_tightened_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let vault = vault_with_note("wfm-atomic-perms");
+        let path = vault.join("items/atl-1.md");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nPrivate.\n",
+        )
+        .unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn clean_orphan_temps_reaps_stale_and_spares_fresh() {
+        let vault = testutil::temp_vault("wfm-orphans");
+        testutil::write(&vault, "items/keep.md", "# Keep\n");
+        // A crashed write from two minutes ago, nested one level down…
+        let stale = vault.join(format!("items/.a.md{TEMP_MARKER}00000000deadbeef"));
+        // …and a vault-root temp young enough to be a write in flight.
+        let fresh = vault.join(format!(".b.yml{TEMP_MARKER}00000000cafebabe"));
+        std::fs::write(&stale, "half a note").unwrap();
+        std::fs::write(&fresh, "half a view").unwrap();
+        backdate(&stale, 120);
+        clean_orphan_temps(&vault);
+        assert!(!stale.exists(), "stale orphan must be reaped");
+        assert!(
+            fresh.exists(),
+            "a fresh temp may belong to an in-flight write"
+        );
+        assert!(vault.join("items/keep.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Child body for the crash tests below: rewrite the fixture note through
+    /// the atomic funnel. Ignored in normal runs — `run_crash_scenario`
+    /// spawns it in a child process with `CEREBRO_CRASH_POINT` armed.
+    #[test]
+    #[ignore = "crash-scenario child body, spawned by the crash tests"]
+    fn crash_scenario_overwrite_note() {
+        let Ok(vault) = std::env::var("CEREBRO_CRASH_VAULT") else {
+            return;
+        };
+        write_file(
+            &Path::new(&vault).join("items/atl-1.md"),
+            "# Rewritten by the crash scenario\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn crash_at_temp_written_leaves_destination_untouched() {
+        let vault = vault_with_note("wfm-crash-temp");
+        let status = testutil::run_crash_scenario(
+            "vault::write::tests::crash_scenario_overwrite_note",
+            "temp-written",
+            &vault,
+        );
+        assert_aborted(status);
+        // Old bytes intact; the half-finished write is only an orphan temp.
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        let orphans = temp_files(&vault);
+        assert_eq!(orphans.len(), 1, "{orphans:?}");
+        // The acceptance-matrix row ends "orphan reaped later": age it past
+        // the guard and let the janitor prove that.
+        backdate(&orphans[0], 120);
+        clean_orphan_temps(&vault);
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M21.6: the funnel registers WHAT it wrote, so the watcher recognizes
+    // the echo by content — and only the echo.
+    #[test]
+    fn the_write_funnel_registers_its_content_hash_with_the_watcher() {
+        let vault = vault_with_note("wfm-hashed-own-write");
+        save_note(&vault, "items/atl-1.md", "\n# Ship the scanner\n\nMine.\n").unwrap();
+        let path = vault.join("items/atl-1.md");
+        assert!(crate::vault::watcher::is_suppressed(&path));
+        // A foreign edit right afterwards is not ours, window or no window.
+        std::fs::write(&path, "someone else's bytes").unwrap();
+        assert!(!crate::vault::watcher::is_suppressed(&path));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn crash_after_rename_leaves_new_bytes_and_no_orphan() {
+        let vault = vault_with_note("wfm-crash-rename");
+        let status = testutil::run_crash_scenario(
+            "vault::write::tests::crash_scenario_overwrite_note",
+            "renamed-pre-dirsync",
+            &vault,
+        );
+        assert_aborted(status);
+        assert_eq!(
+            read(&vault, "items/atl-1.md"),
+            "# Rewritten by the crash scenario\n"
+        );
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

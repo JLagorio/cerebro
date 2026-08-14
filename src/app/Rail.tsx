@@ -95,6 +95,14 @@ export function Rail() {
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
+  // M24.9: what the base is holding until a person decides. A queued card
+  // outlives the session that made it, so it needs a door and not a toast.
+  const reviewActive = selection.kind === 'review';
+  const pipelineActive = selection.kind === 'pipeline';
+  // M27.8: what the base knows about itself. Deliberately NOT badged — a
+  // count of contradictions on the rail is the chrome telling you your
+  // understanding is broken before you have asked it anything.
+  const statusActive = selection.kind === 'status';
   const homeActive = HOME_KINDS.has(selection.kind);
   // M15: the badge counts what the page will SHOW. It used to be the unfiltered
   // total while the page opened on a persisted period, so a rail reading
@@ -124,6 +132,24 @@ export function Rail() {
         label="Home"
         active={homeActive}
         onClick={() => navigate({ kind: 'home' })}
+      />
+      <RailButton
+        icon="gavel"
+        label="Needs review"
+        active={reviewActive}
+        onClick={() => navigate({ kind: 'review' })}
+      />
+      <RailButton
+        icon="activity"
+        label="Background"
+        active={pipelineActive}
+        onClick={() => navigate({ kind: 'pipeline' })}
+      />
+      <RailButton
+        icon="scan-eye"
+        label="Epistemic status"
+        active={statusActive}
+        onClick={() => navigate({ kind: 'status' })}
       />
       {inboxEnabled && (
         <RailButton

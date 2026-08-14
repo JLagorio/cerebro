@@ -1,0 +1,54 @@
+{
+  "name": "fan-in-at-the-threshold-does-not-escalate",
+  "why": "Strictly ABOVE. Pinning the boundary stops a later reading of '>= threshold' from quietly queueing a whole class of ordinary edits.",
+  "signals": {
+    "lineage_fan_in": {
+      "count": 5
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dfaa000000000000000000000000000",
+    "run_id": "cdfaa000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "update_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "patch": [],
+        "basis": {
+          "state": "unsupported",
+          "reason": "synthetic fixture"
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": []
+  }
+}

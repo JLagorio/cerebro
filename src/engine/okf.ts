@@ -1,3 +1,4 @@
+import { addDays } from './dates';
 import type { Entry } from './types';
 import { resolveTarget } from './wikilink';
 
@@ -153,19 +154,71 @@ export function parseVerified(entry: Entry): Stamp[] {
   return items.map(parseStamp).filter((s): s is Stamp => s !== null);
 }
 
-export type TrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed';
+/**
+ * M23.4: when a verified concept is revised afterwards, the projection
+ * renders the review state as a plain string — "verified at r3; current is
+ * r5 — attestation predates revision" — instead of silently dropping the
+ * stamp. Surfaced verbatim; the concept still reads as unverified (the
+ * review no longer covers the current content).
+ */
+export function verifiedNotice(entry: Entry): string | null {
+  const raw = entry.properties.verified;
+  return typeof raw === 'string' ? raw : null;
+}
 
-export const TRUST_LABELS: Record<TrustTier, string> = {
-  unverified: 'Unverified',
-  'machine-confirmed': 'Machine-confirmed',
-  'human-reviewed': 'Human-reviewed',
+/**
+ * Whether a review covers what this concept currently says (M27.5c).
+ *
+ * This subsumes the old three-rung `trustTier`, which mixed two questions
+ * into one ladder: whether anybody reviewed, and who. They separate here
+ * because M27's three axes make the first one an axis of its own — D8's
+ * review channel, the same `ReviewStatus` `dynamics::review` derives from the
+ * ledger. The projection is what the ledger wrote, so the file-side answer
+ * and the ledger-side answer are the same answer read from two places.
+ *
+ * It is NEVER Support. An attestation says a human looked; Support says what
+ * rests underneath, and a concept can be reviewed and unsupported at once.
+ */
+export type ReviewState = 'unreviewed' | 'current' | 'predates_current';
+
+export const REVIEW_LABELS: Record<ReviewState, string> = {
+  unreviewed: 'Unreviewed',
+  current: 'Reviewed',
+  predates_current: 'Review predates this revision',
 };
 
-/** §5.3, lowest to highest. Advisory signal — never access control. */
-export function trustTier(entry: Entry): TrustTier {
+export function reviewStatus(entry: Entry): ReviewState {
+  if (parseVerified(entry).length > 0) return 'current';
+  // M23 r5: the stamp is there but names an older revision, so the projection
+  // rendered a notice instead of a stamp. Reviewed-but-not-of-this is its own
+  // answer, and collapsing it into `unreviewed` throws away the fact that
+  // somebody once looked.
+  return verifiedNotice(entry) !== null ? 'predates_current' : 'unreviewed';
+}
+
+/**
+ * Who attested, when anybody did. Carried BESIDE the status rather than
+ * folded into it: a nightly process confirming a claim and a person signing
+ * off on it are different events, and the old ladder could only say which by
+ * ranking one above the other.
+ */
+export function reviewedBy(entry: Entry): 'human' | 'agent' | null {
   const verified = parseVerified(entry);
-  if (verified.length === 0) return 'unverified';
-  return verified.some((v) => v.by.kind === 'human') ? 'human-reviewed' : 'machine-confirmed';
+  if (verified.length === 0) return null;
+  return verified.some((v) => v.by.kind === 'human') ? 'human' : 'agent';
+}
+
+/**
+ * Both facts, together — the question the review queue actually asks.
+ *
+ * The old `trust === 'human-reviewed'` said this in one comparison because
+ * the ladder had already decided that a person outranks a process. Splitting
+ * the ladder means the two callers that depend on the combination have to
+ * name it, which is the point: a nightly job confirming a claim does not
+ * take it off a human's list.
+ */
+export function humanReviewed(concept: Concept): boolean {
+  return concept.review === 'current' && concept.reviewedBy === 'human';
 }
 
 /** The most recent verification instant — "how recently" is the latest `at`. */
@@ -479,7 +532,12 @@ export interface Concept {
   sources: Source[];
   generated: Stamp | null;
   verified: Stamp[];
-  trust: TrustTier;
+  /** The predating-attestation notice the projection rendered, if any. */
+  verifiedNotice: string | null;
+  /** Does a review cover what this says NOW — D8 channel 1, never Support. */
+  review: ReviewState;
+  /** Who attested, when anybody did. Null when nobody has. */
+  reviewedBy: 'human' | 'agent' | null;
   lastVerified: string | null;
   lifecycle: Lifecycle;
   staleAfter: string | null;
@@ -514,7 +572,9 @@ export function toConcept(entry: Entry, today: string): Concept {
     sources: parseSources(entry),
     generated: parseGenerated(entry),
     verified: parseVerified(entry),
-    trust: trustTier(entry),
+    verifiedNotice: verifiedNotice(entry),
+    review: reviewStatus(entry),
+    reviewedBy: reviewedBy(entry),
     lastVerified: lastVerifiedAt(entry),
     lifecycle: lifecycleOf(entry),
     staleAfter: staleAfter(entry),
@@ -556,21 +616,27 @@ export function listConcepts(entries: Entry[], today: string): Concept[] {
  */
 export function recentlyLearned(
   concepts: Concept[],
-  now: Date,
+  today: string,
   { days = 14, limit = 3 }: { days?: number; limit?: number } = {},
 ): Concept[] {
-  const cutoff = now.getTime() - days * 86_400_000;
+  // Takes the SAME `today` string `listConcepts` does (M26.3e). It used to
+  // take a `Date` and its one caller passed a second, raw `new Date()`, so a
+  // render that straddled local midnight could stage concepts against one day
+  // and window them against another. Comparing calendar dates as strings also
+  // means the fortnight does not slide by the hour, and there is no timezone
+  // in the arithmetic to get wrong.
+  const cutoff = addDays(today, -days);
   return concepts
     .filter((c) => {
-      if (c.trust === 'human-reviewed') return false;
+      if (humanReviewed(c)) return false;
       // Never offer something that has already been replaced (M8.7) — Home
       // gets three slots and spending one on a retired claim is worse than
       // leaving it empty.
       if (c.supersededBy !== null) return false;
       const at = c.generated?.at ?? null;
       if (at === null) return false;
-      const stamped = Date.parse(at);
-      return !Number.isNaN(stamped) && stamped >= cutoff;
+      const stamped = at.slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(stamped) && stamped >= cutoff;
     })
     .sort((a, b) => (b.generated?.at ?? '').localeCompare(a.generated?.at ?? ''))
     .slice(0, limit);
@@ -591,7 +657,7 @@ export function reviewReasons(concept: Concept): ReviewReason[] {
   // and it is how a review queue fills up with things nobody should read.
   if (concept.supersededBy !== null) return [];
   const reasons: ReviewReason[] = [];
-  if (concept.trust !== 'human-reviewed') reasons.push('unverified');
+  if (!humanReviewed(concept)) reasons.push('unverified');
   if (concept.stale) reasons.push('stale');
   if (concept.lifecycle === 'deprecated') reasons.push('deprecated');
   return reasons;

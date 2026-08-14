@@ -1,0 +1,57 @@
+{
+  "name": "silence-cannot-supersede",
+  "why": "The class-(a) invariant, mechanically. 'Quiet for 30 days, so this is probably obsolete' is the easiest regression a future maintenance pass can introduce, and it dies here. Risk resolved before the refusal, so the card can still say how dangerous the attempt was.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9deeede0000000000000000000000000",
+    "run_id": "cdeeede0000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "5cce5000000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "4e1a7000000000000000000000000000",
+        "target_class": "relation",
+        "expected_version": null
+      }
+    ],
+    "op": {
+      "kind": "supersede_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "successor_id": "5cce5000000000000000000000000000"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "elapsed_time",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "no one has mentioned this in 30 days",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": "MEDIUM",
+    "escalated_by": [],
+    "rejection": "silence_transition_forbidden",
+    "destiny": "ledger"
+  }
+}

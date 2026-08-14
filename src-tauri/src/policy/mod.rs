@@ -1,0 +1,232 @@
+//! The M24 policy layer: mutation governance as DATA.
+//!
+//! `shared/policy/policy.v2.json` is the one table (`format: 2` since M26.3b;
+//! `policy.v1.json` is frozen beside it as the registration gate's negative
+//! control). `authority-routes.v1.json` and its content-addressed snapshots
+//! are the one authority artifact. Rust compiles them in with `include_str!`;
+//! the TS side imports the identical files through vite. Neither language
+//! holds a rule the other has to be trusted to have copied correctly —
+//! parity is the shared artifact plus the shared goldens in
+//! `shared/policy/goldens/`, and a rule written twice as Rust and TS code is
+//! a review-blocking defect.
+//!
+//! **Agents are no longer off by construction (M26.3c).** M24 built this
+//! whole skeleton with nothing registered as an MCP tool, and that absence
+//! was the guarantee. The proposal tools are now GENERATED from this table's
+//! agent-facing ops and served by the live loopback server — behind a switch
+//! that defaults off, and behind a registration gate that refuses to build
+//! them unless the preventive ancestry walk is bound and the candidate
+//! receipt is required. What replaced "nothing is registered" is
+//! `submit::the_live_proposal_inventory_is_the_policy_inventory`: the served
+//! surface is exactly what this artifact authorises, in both directions.
+
+pub mod ancestry;
+pub mod authority;
+pub mod candidates;
+pub mod commit;
+pub mod coverage;
+pub mod evals;
+pub mod expand;
+pub mod goldens;
+pub mod interpreter;
+pub mod preconditions;
+pub mod qualification;
+pub mod rejection;
+pub mod review;
+pub mod risk;
+pub mod submit;
+pub mod table;
+pub mod verdict;
+
+/// **The tripwire list** (the `write_target` pattern, mcp.rs:1362).
+///
+/// Every proposal op the codebase can construct, named once. The table must
+/// map exactly these — no more, no fewer. An op that ships unmapped would
+/// route around risk, transitions, and rejection destinies entirely while
+/// looking deliberate, which is the failure this list exists to make
+/// impossible.
+///
+/// M24.3's `ProposalOp` tagged union is checked against this same list, so
+/// adding a variant without adding a table row fails the suite rather than
+/// shipping ungoverned.
+pub const OP_INVENTORY: &[&str] = &[
+    "add_entity_alias",
+    "append_observation",
+    "archive_belief",
+    "cache_source",
+    "classify_conflict",
+    "confirm_observation_independence",
+    "contest_belief",
+    "correct_observation_subject",
+    "create_belief",
+    "deprecate",
+    "edit_relation",
+    "mass_supersede",
+    "merge_beliefs_exact",
+    "merge_entities",
+    "promote_draft",
+    "revert_proposal",
+    "split_belief",
+    "supersede_belief",
+    "tombstone_belief",
+    "update_belief",
+];
+
+/// Synthetic proposals, shared by every policy test.
+///
+/// M24 exercises the whole skeleton with agents OFF, so every proposal in
+/// the suite is built here rather than arriving from a tool. One builder
+/// keeps the fixtures honest: a test that needs a different proposal changes
+/// a field, and cannot accidentally construct a shape the validator would
+/// have refused from a real caller.
+#[cfg(test)]
+pub mod fixtures {
+    use crate::ledger::schema::{
+        IntendedUse, IntendedUseKind, ProposalBasis, ProposalOp, ProposalTarget, ProposalV1,
+        TargetClass, TransitionCause, PROPOSAL_SCHEMA,
+    };
+
+    use super::table::Risk;
+
+    pub fn proposal(
+        proposal_id: &str,
+        run_id: &str,
+        op: ProposalOp,
+        targets: Vec<ProposalTarget>,
+        declared_risk: Risk,
+    ) -> ProposalV1 {
+        ProposalV1 {
+            schema: PROPOSAL_SCHEMA,
+            proposal_id: proposal_id.to_string(),
+            run_id: run_id.to_string(),
+            targets,
+            op,
+            intended_use: IntendedUse {
+                kind: IntendedUseKind::ReversibleWork,
+                stakes: Risk::Low,
+                predicate_class: None,
+            },
+            basis: ProposalBasis {
+                transition_cause: TransitionCause::NewEvidence,
+                evidence_refs: vec![],
+                coverage_refs: vec![],
+                authority_refs: vec![],
+                authority_route_refs: vec![],
+                addressed_contradictions: vec![],
+                absence_claim: false,
+            },
+            declared_risk,
+            reason: "a synthetic proposal".to_string(),
+            candidate_search_receipt: None,
+        }
+    }
+
+    pub fn target(class: TargetClass, id: &str, expected_version: Option<u64>) -> ProposalTarget {
+        ProposalTarget {
+            target_id: id.to_string(),
+            target_class: class,
+            expected_version,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::table::PolicyTable;
+    use super::OP_INVENTORY;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn no_constructible_op_escapes_the_table() {
+        // THE TRIPWIRE. An op in the code with no table row has no risk, no
+        // legal transitions, and no declared rejection destinies — it would
+        // be a mutation path outside policy.
+        let table = PolicyTable::load().unwrap();
+        let mapped: BTreeSet<&str> = table.ops.keys().map(String::as_str).collect();
+        let constructible: BTreeSet<&str> = OP_INVENTORY.iter().copied().collect();
+        assert_eq!(
+            constructible.difference(&mapped).collect::<Vec<_>>(),
+            Vec::<&&str>::new(),
+            "op(s) the code can construct are unmapped in policy.v1.json"
+        );
+        assert_eq!(
+            mapped.difference(&constructible).collect::<Vec<_>>(),
+            Vec::<&&str>::new(),
+            "table row(s) for op(s) nothing can construct — dead policy"
+        );
+    }
+
+    #[test]
+    fn the_op_union_names_exactly_the_inventory() {
+        // The other half of the tripwire (M24.3). `OP_INVENTORY` is the
+        // list, `ProposalOp` is what the code can actually construct, and
+        // the table is what governs. All three must be the same set: a
+        // variant added without a row would be an ungoverned mutation path,
+        // and a row with no variant is dead policy.
+        use crate::ledger::schema::ProposalOp;
+        let constructible: BTreeSet<&str> = ProposalOp::ALL_KINDS.iter().copied().collect();
+        let inventory: BTreeSet<&str> = OP_INVENTORY.iter().copied().collect();
+        assert_eq!(constructible, inventory);
+    }
+
+    #[test]
+    fn the_target_classes_agree_between_the_schema_and_the_table() {
+        // `TargetClass` is a serde enum (the wire needs a type) and the
+        // table carries the same seven as data. One assertion binds them,
+        // the same way the op tripwire binds the op union.
+        use crate::ledger::schema::TargetClass;
+        let table = PolicyTable::load().unwrap();
+        let declared: Vec<&str> = TargetClass::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(declared, table.target_classes);
+    }
+
+    #[test]
+    fn every_silence_cause_is_a_transition_cause_the_schema_can_spell() {
+        // A cause in the table that no proposal could ever carry would be a
+        // rule that never fires while looking like protection.
+        use crate::ledger::schema::TransitionCause;
+        let table = PolicyTable::load().unwrap();
+        let spellable: BTreeSet<&str> = [
+            TransitionCause::NewEvidence,
+            TransitionCause::HumanCorrection,
+            TransitionCause::QualificationMet,
+            TransitionCause::ConflictResolution,
+            TransitionCause::Maintenance,
+            TransitionCause::Revert,
+            TransitionCause::ElapsedTime,
+            TransitionCause::AbsenceOfObservations,
+        ]
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+        for cause in &table.silence.causes {
+            assert!(
+                spellable.contains(cause.as_str()),
+                "silence cause {cause} is not a TransitionCause"
+            );
+        }
+    }
+
+    #[test]
+    fn the_inventory_is_sorted_and_unique() {
+        let mut sorted = OP_INVENTORY.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.as_slice(), OP_INVENTORY);
+    }
+
+    #[test]
+    fn the_op_inventory_covers_the_d5_ladder() {
+        // Each rung of the D5 ladder must actually exist in the table, so a
+        // future edit cannot quietly empty one — CRITICAL in particular.
+        use super::table::Risk;
+        let table = PolicyTable::load().unwrap();
+        for risk in [Risk::Low, Risk::Medium, Risk::High, Risk::Critical] {
+            assert!(
+                table.ops.values().any(|op| op.base_risk == risk),
+                "no op sits at {}",
+                risk.as_str()
+            );
+        }
+    }
+}

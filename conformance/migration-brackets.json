@@ -1,0 +1,154 @@
+{
+  "name": "migration-brackets",
+  "description": "Brackets pin the epoch identity: mid-epoch digest changes and disagreeing completions are refused; brackets have no version effect.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "7ae561cdd115f68d78a85bde80e9b199f41247dab2c4af6c6d2cb32a6c4dd57e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "migration.started",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:migrator"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "store_uuid": "feedfacefeedfacefeedfacefeedface",
+        "migration_schema": 1,
+        "source_digest": "6b17b8fcc411a533c822a5117e33cf73fa6766739d7d36ac86dc4bea883af4fe",
+        "planned_output_count": 2
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "7ae561cdd115f68d78a85bde80e9b199f41247dab2c4af6c6d2cb32a6c4dd57e",
+      "hash": "2409bd100b96941ae1bd1ea50c0449db50c4626e3b5d10805fb2d5450c2279f4",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "migration.started",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:migrator"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "store_uuid": "feedfacefeedfacefeedfacefeedface",
+        "migration_schema": 1,
+        "source_digest": "3e956d4f9444d637484ab4cccf21f708bfbedbb211cee7e868220640e9ea1861",
+        "planned_output_count": 2
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "2409bd100b96941ae1bd1ea50c0449db50c4626e3b5d10805fb2d5450c2279f4",
+      "hash": "4a2cb77a7d6580e4f5c94e7a4089b82cb0b77bab744ab3cd1d3d3ec56dc6e587",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "migration.completed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:migrator"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "store_uuid": "feedfacefeedfacefeedfacefeedface",
+        "migration_schema": 1,
+        "source_digest": "6b17b8fcc411a533c822a5117e33cf73fa6766739d7d36ac86dc4bea883af4fe",
+        "output_count": 3,
+        "output_keys_digest": "48a53f0774c8ceff574a1fdcb0d470dbd382b3db273cff4344b6d39d5379c923"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "4a2cb77a7d6580e4f5c94e7a4089b82cb0b77bab744ab3cd1d3d3ec56dc6e587",
+      "hash": "08e8c7331faea57cfec191d0f40708724dbd8c481b036da05d9de58d09b01a5a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "migration.completed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:migrator"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "store_uuid": "feedfacefeedfacefeedfacefeedface",
+        "migration_schema": 1,
+        "source_digest": "6b17b8fcc411a533c822a5117e33cf73fa6766739d7d36ac86dc4bea883af4fe",
+        "output_count": 2,
+        "output_keys_digest": "48a53f0774c8ceff574a1fdcb0d470dbd382b3db273cff4344b6d39d5379c923"
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {},
+    "aliases": {},
+    "observations": {},
+    "beliefs": {},
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {},
+    "batches": [],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "migration source digest changed mid-epoch — reconciliation, never a second epoch"
+    },
+    {
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "migration.completed output_count 3 disagrees with the started plan 2"
+    }
+  ]
+}

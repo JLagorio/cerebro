@@ -1,0 +1,28 @@
+{
+  "type": "assistant",
+  "message": {
+    "id": "msg_00000000000000000000000001",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-opus-5",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_00000000000000000000000001",
+        "name": "mcp__cerebro__search_notes",
+        "input": { "query": "risk register" }
+      }
+    ],
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 3,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 14678,
+      "output_tokens": 88,
+      "service_tier": "standard"
+    }
+  },
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "uuid": "00000000-0000-4000-8000-0000000000cc"
+}

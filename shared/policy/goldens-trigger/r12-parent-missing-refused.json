@@ -1,0 +1,37 @@
+{
+  "name": "r12-parent-missing-refused",
+  "description": "a tail without its fired parent is not evaluable",
+  "record": {
+    "variant": "discretionary",
+    "evaluation_id": "cd8d568aa1eefc935772723b6b305064b392fa4c0c887737e51f5413ec01aa01",
+    "gate_key": {
+      "registry_id": "R12",
+      "subcapability": "learned_aliases"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "parent_invalid"
+  }
+}

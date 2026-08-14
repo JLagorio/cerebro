@@ -254,18 +254,16 @@ interface UiState {
    */
   autoLearn: boolean;
   setAutoLearn(v: boolean): void;
-  /** Captures handed to the distiller when they were filed. Persisted. */
-  filedForLearning: string[];
-  fileForLearning(path: string): void;
-  /** Drop a filed path that can never produce a learn job — a capture that
-   * is (or became) a Skill/Agent record. Only a learn attempt consumes a
-   * filing, and these never get one, so without this the path reads as
-   * "filed" in the persisted ledger forever (PR #5 review). */
-  unfileForLearning(path: string): void;
   /**
-   * path → the note version last handed to the distiller. Persisted, and the
-   * only thing stopping a note nobody could learn anything from being read
-   * again on every tick — see engine/learn.ts.
+   * path → the version last handed to a background job. Persisted, and the
+   * only thing stopping a recheck that revised nothing from being run again
+   * on every tick — see engine/jobs.ts.
+   *
+   * M26.4j retired `filedForLearning` with the distillation lanes. Filing a
+   * capture is picked up because it WRITES the note, which the ingest pass
+   * sees as changed bytes; a renderer-side list of paths somebody organized
+   * was the mechanism that could only ever notice work the UI remembered to
+   * report.
    */
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
@@ -337,7 +335,6 @@ const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
 const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
-const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const STDIO_APPROVALS_KEY = 'cerebro.stdioApprovals';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 const SKILL_RUNS_KEY = 'cerebro.skillRuns';
@@ -806,32 +803,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AUTO_LEARN_KEY, String(v));
     set({ autoLearn: v });
   },
-  filedForLearning: loadStringList(FILED_LEARN_KEY),
-  fileForLearning: (path) =>
-    set((s) => {
-      if (s.filedForLearning.includes(path)) return s;
-      const next = [...s.filedForLearning, path];
-      storeString(FILED_LEARN_KEY, JSON.stringify(next));
-      return { filedForLearning: next };
-    }),
-  unfileForLearning: (path) =>
-    set((s) => {
-      if (!s.filedForLearning.includes(path)) return s;
-      const next = s.filedForLearning.filter((p) => p !== path);
-      storeString(FILED_LEARN_KEY, JSON.stringify(next));
-      return { filedForLearning: next };
-    }),
   learnAttempts: loadStringMap(LEARN_ATTEMPTS_KEY),
   recordLearnAttempt: (path, modifiedAt) =>
     set((s) => {
-      // Filing is consumed here rather than on completion: the attempt is
-      // what the record is for, and a run that dies mid-way must not leave the
-      // path queued to be tried again on the next tick.
-      const filed = s.filedForLearning.filter((p) => p !== path);
+      // Recorded on ATTEMPT rather than on completion: a run that dies
+      // mid-way must not leave the path queued to be tried again on the next
+      // tick.
       const next = { ...s.learnAttempts, [path]: modifiedAt };
       storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
-      storeString(FILED_LEARN_KEY, JSON.stringify(filed));
-      return { learnAttempts: next, filedForLearning: filed };
+      return { learnAttempts: next };
     }),
   triggerRuns: loadNestedStringMap(TRIGGER_RUNS_KEY),
   recordTriggerRun: (vault, agent, at) =>

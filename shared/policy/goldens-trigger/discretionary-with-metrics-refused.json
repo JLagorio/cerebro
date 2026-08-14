@@ -1,0 +1,45 @@
+{
+  "name": "discretionary-with-metrics-refused",
+  "description": "a discretionary record carries no metrics",
+  "record": {
+    "variant": "discretionary",
+    "evaluation_id": "0b41e912c926d7c1a63edc6bd120b8a06c0c947295d9503b1114013775e0ddfe",
+    "gate_key": {
+      "registry_id": "R8",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R8/2026-08-14-view.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "emitted_plans",
+          "series": "aggregate",
+          "value": 1
+        }
+      }
+    ],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R8/2026-08-14-view.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "variant_shape"
+  }
+}

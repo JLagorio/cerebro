@@ -201,6 +201,19 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
+  // M24.9 — what the base is holding until a person decides. A place you can
+  // navigate back to, because a queued card outlives the session that made it.
+  | { kind: 'review' }
+  // M25.7 — what the background pipeline ran, what it spent, and what it is
+  // waiting on. A place rather than a modal because a paused pipeline and a
+  // held pile outlive the session that made them.
+  | { kind: 'pipeline' }
+  // M27.8 — one coherent home for what the base knows about itself: what
+  // changed, what it cannot see, what it contradicts itself about, what has
+  // gone stale, what is waiting on a decision, and whether the background is
+  // running. A destination rather than banners, because six pieces of chrome
+  // competing for the top of the screen is how "nothing speaks first" dies.
+  | { kind: 'status' }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so

@@ -1,4 +1,4 @@
-import { conceptsAbout, isKnowledgePath, type Concept, type TrustTier } from '@/engine/okf';
+import { conceptsAbout, isKnowledgePath, type Concept, type ReviewState } from '@/engine/okf';
 import type { Entry, Schema, Selection } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 
@@ -84,9 +84,12 @@ export interface KnowledgeNote {
   /** The claim itself — a concept's description is the whole of its content
    * for this purpose; the body is elaboration. */
   claim: string;
-  /** unverified | machine-confirmed | human-reviewed. The agent must be able
-   * to weight a claim by whether a person has actually stood behind it. */
-  trust: TrustTier;
+  /** Whether a review covers what this says now, and who did it — two facts
+   * rather than one ladder (M27.5c). The agent must be able to weight a claim
+   * by whether a person has actually stood behind it, and "a nightly process
+   * confirmed it" is not that. */
+  review: ReviewState;
+  reviewedBy: 'human' | 'agent' | null;
   /** Which record in context this is knowledge OF. */
   about: string;
   /** Set when another concept contradicts this one — the single most useful
@@ -269,7 +272,8 @@ function knowledgeFor(
         path: concept.entry.path,
         title: concept.title,
         claim: concept.description ?? concept.entry.snippet,
-        trust: concept.trust,
+        review: concept.review,
+        reviewedBy: concept.reviewedBy,
         about: path,
         ...(contradicted.length > 0 ? { contradictedBy: contradicted } : {}),
         ...(concept.supersededBy === null ? {} : { supersededBy: concept.supersededBy }),
@@ -281,8 +285,10 @@ function knowledgeFor(
     if (n.supersededBy !== undefined) return 0;
     if (n.contradictedBy !== undefined) return 1;
     if (n.stale === true) return 2;
-    if (n.trust === 'unverified') return 3;
-    if (n.trust === 'machine-confirmed') return 4;
+    // Unreviewed and reviewed-but-predating rank together: in both cases
+    // nothing has been checked against what this now says.
+    if (n.review !== 'current') return 3;
+    if (n.reviewedBy !== 'human') return 4;
     return 5;
   };
   return notes.sort((a, b) => weight(a) - weight(b)).slice(0, MAX_CONCEPTS);

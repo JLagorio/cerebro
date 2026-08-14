@@ -1,0 +1,58 @@
+{
+  "name": "classify-conflict-is-not-available-yet",
+  "table": "v2",
+  "why": "The negative control for the capability gate, replayed against the FROZEN v2 table because M27.4 made every capability the shipped table declares available — and a refusal path with no shared fixture is exactly where two interpreters drift apart unwatched. Capability noise is OPERATIONAL: an agent asking for something a build cannot do is not epistemic history. Its positive twin is `classify-conflict-is-a-medium-verdict-on-the-ladder`.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dcaf000000000000000000000000001",
+    "run_id": "cdcaf000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "c04a5000000000000000000000000000",
+        "target_class": "comparison",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "classify_conflict",
+      "payload": {
+        "comparison_id": "c04a5000000000000000000000000000",
+        "outcome": "same_meaning",
+        "basis_refs": [
+          "0b5e4000000000000000000000000000"
+        ],
+        "model_id": "claude-opus-5",
+        "prompt_version": "classify-conflict-v1"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "capability_unavailable",
+    "destiny": "operational"
+  }
+}

@@ -30,6 +30,10 @@ vi.mock('@/lib/ipc', () => ({
   createFolder: vi.fn(),
   renameNote: vi.fn(),
   deleteNote: vi.fn(),
+  // The knowledge panel asks the ingest scheduler whether this note is queued
+  // (M26.4j). `null` is what the real backend returns when ambient ingest has
+  // never run, which is every vault by default.
+  ingestItemState: vi.fn().mockResolvedValue(null),
 }));
 
 afterEach(cleanup);

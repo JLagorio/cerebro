@@ -1,0 +1,49 @@
+{
+  "name": "component-unit-refused",
+  "description": "a projected component keeps M26's unit",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "fa2de1f8fa7c901c5b1062aa61482ecf150d4dd699cad54d07b16050a37a8d3c",
+    "gate_key": {
+      "registry_id": "R1",
+      "subcapability": "root"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "quantity": {
+          "name": {
+            "projected_component": {
+              "component": "output_tokens"
+            }
+          },
+          "value": 9000,
+          "unit": "calls",
+          "series": "aggregate"
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "metrics_invalid"
+  }
+}

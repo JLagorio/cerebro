@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "skeptic_model_id": "claude-haiku-4-5-20251001",
+  "components": [
+    { "component": "uncached_input_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "cache_read_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "cache_write_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "output_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "retrieval_calls", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "tool_calls", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "selected_context_bytes", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "selected_context_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "prompt_template_bytes", "multiplier_ppm": 1000000, "fixed_quantity": 0 },
+    { "component": "prompt_template_tokens", "multiplier_ppm": 1000000, "fixed_quantity": 0 }
+  ],
+  "pricing_snapshot": null
+}

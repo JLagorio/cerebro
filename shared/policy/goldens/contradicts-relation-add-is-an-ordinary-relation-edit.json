@@ -1,0 +1,60 @@
+{
+  "name": "contradicts-relation-add-is-an-ordinary-relation-edit",
+  "why": "The positive control for the conditional capability, and the mirror of `classify-conflict-is-not-available-yet`. `edit_relation` is gated on `declared_contradiction_authoring` ONLY when the payload says `add` + `contradicts`; M27.4 made that capability available, so the same clause that refused this proposal now lets it through to the ordinary MEDIUM ladder. What the capability buys is not the relation event — that always worked — but the registration, classification, and any open edge that now commit in the SAME batch as it, so a declaration is never durable while unclassified.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dcadcadd00000000000000000000000",
+    "run_id": "cdcadcadd00000000000000000000000",
+    "targets": [
+      {
+        "target_id": "4e1a7000000000000000000000000000",
+        "target_class": "relation",
+        "expected_version": null
+      },
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "5cce5000000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "edit_relation",
+      "payload": {
+        "relation_id": "4e1a7000000000000000000000000000",
+        "action": "add",
+        "from": "be11ef00000000000000000000000000",
+        "to": "5cce5000000000000000000000000000",
+        "relation": "contradicts"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": [],
+    "rejection": null,
+    "destiny": null
+  }
+}

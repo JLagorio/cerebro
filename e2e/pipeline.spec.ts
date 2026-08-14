@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { boot, readMockFile } from './boot';
 
 /**
  * The M8.2/M8.3 pipeline: ingest → distil → augment.
@@ -8,24 +9,6 @@ import { test, expect, type Page } from '@playwright/test';
  * distilled from both and anchored to the project, and a PRD in that project
  * that the concept should surface next to.
  */
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-}
 
 const TRANSCRIPT = 'inbox/phoenix-cutover-standup.md';
 const CONCEPT = 'knowledge/systems/pick-queue-drain.md';
@@ -218,9 +201,15 @@ test('augment: Home volunteers at most a few unconfirmed things, and forgets wha
 });
 
 test('grow: filing a capture hands it to the base without anyone asking', async ({ page }) => {
-  // The one spec that leaves the background distiller on. Everything it does
-  // is silent by design, so what is asserted is the absence of interruption
-  // as much as the presence of the work.
+  // Everything filing does is silent by design, so what is asserted is the
+  // absence of interruption as much as the presence of the work.
+  //
+  // M26.4j changed what "hands it over" MEANS. Filing used to push the path
+  // into a renderer-side list the distiller drained; it now simply writes the
+  // note, and changed bytes are what the Rust ingest tick watches. So the
+  // handover is the WRITE, and that is what this asserts — a queue chip
+  // backed by a durable scheduler cannot appear in a mock-backend browser
+  // test, and faking one would be asserting a second implementation.
   await page.addInitScript(() => {
     window.localStorage.setItem('cerebro.autoLearn', 'true');
     // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
@@ -249,14 +238,20 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   await page.getByRole('button', { name: /Mark organized/i }).click();
   await expect(page.getByTestId('ai-panel')).toHaveCount(0);
 
-  // The capture left the queue, so it is reached the way any filed note is.
+  // The capture left the queue, so it is reached the way any filed note is —
+  // and the write that organized it is on disk, which is the whole handover.
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('warehouse cutover');
   await page.getByTestId('quick-open-result').first().click();
   await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-knowledge').click();
-  await expect(page.getByTestId('doc-side-panel').getByTestId('learn-queued')).toContainText(
-    /Queued to be read|Reading this now/,
-  );
+  const panel = page.getByTestId('doc-side-panel').getByTestId('knowledge-commit');
+  await expect(panel).toBeVisible();
+  // Nothing has been distilled from it yet, and the panel says so plainly
+  // rather than implying work is under way that this backend cannot do.
+  await expect(panel).toHaveAttribute('data-state', 'uncommitted');
+  await expect(panel.getByRole('button', { name: 'Learn from this' })).toBeEnabled();
+  const organized = await readMockFile(page, 'inbox/warehouse-cutover-thought.md');
+  expect(organized).toContain('organized: true');
 });
 
 test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {

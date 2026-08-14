@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "freshness-v1",
+  "rules": [
+    {
+      "predicate_class": "charter_rationale",
+      "predicates": ["charter_rationale", "decision_rationale", "design_rationale"],
+      "time_basis": "belief_revision_time",
+      "staleness": { "kind": "durable" },
+      "attestation_may_anchor": true
+    },
+    {
+      "predicate_class": "ci_status",
+      "predicates": ["ci_status", "build_status", "test_status", "pipeline_status"],
+      "time_basis": "occurred_at",
+      "staleness": { "kind": "after", "seconds": 21600 },
+      "attestation_may_anchor": false
+    },
+    {
+      "predicate_class": "shipping_bom",
+      "predicates": ["bill_of_materials", "component_supplier", "component_part_number"],
+      "time_basis": "valid_from",
+      "staleness": { "kind": "after", "seconds": 604800 },
+      "attestation_may_anchor": false
+    }
+  ]
+}
