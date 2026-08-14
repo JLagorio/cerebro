@@ -565,6 +565,105 @@ fn trigger_run(app: tauri::AppHandle, vault: String) -> Result<trigger::runner::
     }
 }
 
+/// What recording one pack did, as the owner sees it.
+#[derive(serde::Serialize)]
+struct PackRecorded {
+    gate: String,
+    evaluation_id: String,
+    result: String,
+    replayed: bool,
+}
+
+/// Record an owner evidence pack (M28.2): the discretionary road, or R2's
+/// hybrid assembly — dispatched on the pack's own gate. `repo_root` is where
+/// `docs/superpowers/evidence/` lives; the packs govern this project's
+/// deferrals, so they live in the repository, not the vault.
+///
+/// A discretionary recording REQUIRES `result` ("fired" | "not_fired") —
+/// recording is the owner's explicit act. R2 refuses a supplied result: its
+/// result is measured from `budget_days`, never declared.
+#[tauri::command(async)]
+fn trigger_record_pack(
+    app: tauri::AppHandle,
+    vault: String,
+    repo_root: String,
+    pack_path: String,
+    result: Option<String>,
+) -> Result<PackRecorded, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = trigger_vault_scope(&vault)?;
+    let registry = trigger::registry::load()?;
+    let repo = Path::new(&repo_root);
+    let bytes = std::fs::read_to_string(repo.join(&pack_path))
+        .map_err(|e| format!("{pack_path:?} does not resolve from {repo_root:?}: {e}"))?;
+    let pack =
+        trigger::evidence::parse_pack(&bytes).map_err(|r| format!("{}: {}", r.code, r.detail))?;
+    let gate = pack
+        .frontmatter
+        .get("gate")
+        .cloned()
+        .ok_or("the pack declares no gate")?;
+    // A vault-scoped pack must be about THIS vault's store — recording
+    // governance rows for a store you are not looking at is how a fired
+    // gate ends up invisible.
+    if let Some(declared) = pack.frontmatter.get("scope") {
+        let own = format!("vault_store:{}:{}", scope.vault_id, scope.store_uuid);
+        if declared != "subscription_global" && declared != &own {
+            return Err(format!(
+                "the pack is scoped to {declared:?} and this vault is {own:?} — open the vault \
+                 the pack is about"
+            ));
+        }
+    }
+    let now = chrono::Utc::now();
+    if gate == "R2:root" {
+        if result.is_some() {
+            return Err(
+                "R2's result is measured from budget_days, never declared — omit \
+                        result for a hybrid pack"
+                    .to_string(),
+            );
+        }
+        let recorded = trigger::record::evaluate_r2(&conn, &registry, repo, &pack_path, now)?;
+        return Ok(PackRecorded {
+            gate,
+            evaluation_id: recorded.evaluation.evaluation_id,
+            result: recorded.evaluation.result.as_str().to_string(),
+            replayed: recorded.evaluation_put == runtime::triggers::Put::Replayed,
+        });
+    }
+    let result = match result.as_deref() {
+        Some("fired") => trigger::evaluation::TriggerResult::Fired,
+        Some("not_fired") => trigger::evaluation::TriggerResult::NotFired,
+        Some(other) => {
+            return Err(format!(
+                "result {other:?} is not one an owner may declare — fired or not_fired"
+            ))
+        }
+        None => {
+            return Err(
+                "a discretionary recording is the owner's explicit act — say fired or \
+                        not_fired"
+                    .to_string(),
+            )
+        }
+    };
+    let recorded = trigger::record::record_discretionary(
+        &conn,
+        &registry,
+        repo,
+        &pack_path,
+        result,
+        &now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    )?;
+    Ok(PackRecorded {
+        gate,
+        evaluation_id: recorded.evaluation.evaluation_id,
+        result: recorded.evaluation.result.as_str().to_string(),
+        replayed: recorded.evaluation_put == runtime::triggers::Put::Replayed,
+    })
+}
+
 /// Resolve the held pile. `baseline` accepts today's content as already
 /// accounted for; `process` queues it. Either decision is durable, and the
 /// question is asked once rather than on every launch.
@@ -965,6 +1064,7 @@ pub fn run() {
             trigger_run,
             trigger_declare_r7_scope,
             trigger_r7_scope,
+            trigger_record_pack,
             ambient_ingest_enabled,
             set_ambient_ingest,
             ingest_item_state,

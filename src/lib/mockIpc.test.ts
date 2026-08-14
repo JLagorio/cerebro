@@ -767,4 +767,12 @@ describe('the deferral gates (M28.1)', () => {
     expect(stored?.subjects).toEqual(['e0000000000000000000000000000001']);
     expect(stored?.stage).toBeNull();
   });
+
+  it('recording a pack refuses honestly in the browser', async () => {
+    // Governance rows land in the real runtime database off a real repo
+    // file; the mock has neither and invents nothing.
+    await expect(
+      mock.triggerRecordPack('/demo-vault', '/repo', 'docs/x.md', 'fired'),
+    ).rejects.toThrow(/browser mock/);
+  });
 });

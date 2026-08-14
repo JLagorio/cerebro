@@ -1523,3 +1523,24 @@ export async function triggerDeclareR7Scope(_vault: string, scopeJson: string): 
 export async function triggerR7Scope(_vault: string): Promise<VerificationScope | null> {
   return declaredR7Scope;
 }
+
+export interface PackRecorded {
+  gate: string;
+  evaluation_id: string;
+  result: string;
+  replayed: boolean;
+}
+
+export async function triggerRecordPack(
+  _vault: string,
+  _repoRoot: string,
+  _packPath: string,
+  _result: string | null,
+): Promise<PackRecorded> {
+  // Recording writes governance rows against the real runtime database and
+  // reads a pack off the real repository — the browser has neither, and a
+  // made-up evaluation id would be a governance record nobody can audit.
+  throw new Error(
+    'browser mock — recording an evidence pack needs the real runtime database and repository',
+  );
+}

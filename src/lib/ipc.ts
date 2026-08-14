@@ -559,3 +559,21 @@ export function triggerDeclareR7Scope(vault: string, scopeJson: string): Promise
 export function triggerR7Scope(vault: string): Promise<VerificationScope | null> {
   return inTauri() ? invokeTauri('trigger_r7_scope', { vault }) : mock.triggerR7Scope(vault);
 }
+
+import type { PackRecorded } from './mockIpc';
+export type { PackRecorded };
+
+/** Record an owner evidence pack (M28.2): the discretionary road, or R2's
+ * hybrid assembly, dispatched on the pack's own gate. `result` is required
+ * for discretionary packs ("fired" | "not_fired") and refused for R2, whose
+ * result is measured. */
+export function triggerRecordPack(
+  vault: string,
+  repoRoot: string,
+  packPath: string,
+  result: string | null,
+): Promise<PackRecorded> {
+  return inTauri()
+    ? invokeTauri('trigger_record_pack', { vault, repoRoot, packPath, result })
+    : mock.triggerRecordPack(vault, repoRoot, packPath, result);
+}
