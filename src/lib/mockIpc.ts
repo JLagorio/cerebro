@@ -933,7 +933,13 @@ export interface FacetChips {
   validity: Validity;
   freshness_basis: FreshnessBasis;
   review: ReviewStatus;
-  /** The three axes, already read aloud in axis order. */
+  /** Each axis, already read aloud. A chip renders one of these verbatim —
+   * mapping `(kind, summary)` to "coverage unassessed" on this side would be
+   * the fold rule spelled a second time in another language. */
+  support_text: string;
+  coverage_text: string;
+  validity_text: string;
+  /** The three above, joined in axis order. One wording, one place. */
   line: string;
 }
 

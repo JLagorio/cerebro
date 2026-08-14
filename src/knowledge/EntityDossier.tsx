@@ -5,7 +5,10 @@ import { buildDossier, isEmptyDossier, type Unsettled } from '@/engine/dossier';
 import { listConcepts, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
-import { TrustChip } from '@/knowledge/TrustChip';
+import { FacetLines } from '@/knowledge/FacetChips';
+import { ReviewChip } from '@/knowledge/ReviewChip';
+import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
+import type { BeliefChips } from '@/lib/ipc';
 import { distillPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
@@ -31,10 +34,13 @@ const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 function ConceptRow({
   concept,
+  chips = null,
   retired = false,
   onOpen,
 }: {
   concept: Concept;
+  /** The three axes for this concept's belief, when anybody derived them. */
+  chips?: BeliefChips | null;
   retired?: boolean;
   onOpen: (path: string) => void;
 }) {
@@ -58,8 +64,12 @@ function ConceptRow({
         {concept.description !== null && !retired && (
           <span className="block truncate text-xs text-n-500">{concept.description}</span>
         )}
+        {/* A retired row says one thing — that it is no longer believed. The
+            axes of something nobody believes are not what a reader is here
+            for, so they stay on the rows that are still standing. */}
+        {!retired && <FacetLines chips={chips} />}
       </span>
-      {!retired && <TrustChip tier={concept.trust} size="sm" />}
+      {!retired && <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />}
     </button>
   );
 }
@@ -122,9 +132,11 @@ export function EntityDossier({
   variant?: 'section' | 'panel';
 }) {
   const entries = useVaultStore((s) => s.entries);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
   const navigate = useNavStore((s) => s.navigate);
   const openPath = useOpenPath();
   const askAgent = useUiStore((s) => s.askAgent);
+  const chipIndex = useBeliefChips(vaultPath);
 
   const today = todayIso();
   const dossier = useMemo(
@@ -181,7 +193,11 @@ export function EntityDossier({
           <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
             {dossier.current.map((concept) => (
               <li key={concept.entry.path}>
-                <ConceptRow concept={concept} onOpen={openConcept} />
+                <ConceptRow
+                  concept={concept}
+                  chips={chipsFor(chipIndex, concept.entry.path)}
+                  onOpen={openConcept}
+                />
               </li>
             ))}
           </ul>

@@ -64,5 +64,8 @@ export async function readMockFile(page: Page, path: string): Promise<string> {
 declare global {
   interface Window {
     __cerebroMockFs: Map<string, string>;
+    /** The M27.5 chip seam. The browser has no ledger, so a spec that wants
+     * axes on screen stages the rows it wants to see. */
+    __cerebroSeedChips: (rows: unknown[]) => void;
   }
 }

@@ -83,6 +83,16 @@ pub struct FacetChips {
     pub freshness_basis: FreshnessBasis,
     /// D8 channel 1. Rendered separately, always.
     pub review: review::ReviewStatus,
+    /// Each axis, already read aloud. A chip renders one of these verbatim.
+    ///
+    /// Carried per-axis as well as joined because a surface draws three chips
+    /// and one sentence, and the alternative is a UI that maps
+    /// `(kind, summary)` to "coverage unassessed" on its own — the same fold
+    /// rule, spelled a second time in another language. [`Self::line`] is
+    /// exactly these three joined, so there is still ONE wording.
+    pub support_text: String,
+    pub coverage_text: String,
+    pub validity_text: String,
     /// The three axes, read aloud in axis order.
     pub line: String,
 }
@@ -113,12 +123,10 @@ pub fn chips_for_facet(
     let coverage = coverage::coverage_of(state, &tables.coverage, facet);
     let assessment = freshness::assess(state, &tables.freshness, facet, as_of);
     let validity = validity::validity_of(state, belief, assessment.freshness);
-    let line = format!(
-        "{}, {}, {}",
-        derived.support.describe(),
-        coverage.describe(),
-        validity.describe()
-    );
+    let support_text = derived.support.describe();
+    let coverage_text = coverage.describe().to_string();
+    let validity_text = validity.describe();
+    let line = format!("{support_text}, {coverage_text}, {validity_text}");
     FacetChips {
         key: facet.key.clone(),
         support: derived.support,
@@ -133,6 +141,9 @@ pub fn chips_for_facet(
             stale_after: assessment.effective_at.map(|at| at.to_rfc3339()),
         },
         review: review::status_for(belief, facet.key.belief_revision_event_id.as_str()),
+        support_text,
+        coverage_text,
+        validity_text,
         line,
     }
 }
@@ -392,6 +403,9 @@ mod tests {
                 "validity",
                 "freshness_basis",
                 "review",
+                "support_text",
+                "coverage_text",
+                "validity_text",
                 "line"
             ],
             "FacetChips changed shape — update the interface in src/lib/mockIpc.ts"

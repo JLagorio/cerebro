@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { listConcepts, relatedConcepts } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
-import { TrustChip } from '@/knowledge/TrustChip';
+import { ReviewChip } from '@/knowledge/ReviewChip';
 import { useNavStore } from '@/stores/navStore';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
@@ -109,7 +109,7 @@ export function RelatedKnowledge({
                     <span className="block truncate text-xs text-n-500">{concept.description}</span>
                   )}
                 </span>
-                <TrustChip tier={concept.trust} size="sm" />
+                <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
                 {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
               </button>
             </li>

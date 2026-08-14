@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { listConcepts, recentlyLearned } from '@/engine/okf';
-import { TrustChip } from '@/knowledge/TrustChip';
+import { ReviewChip } from '@/knowledge/ReviewChip';
 import { todayIso } from '@/lib/templates';
 import { SECTION_HEADING } from '@/pages/HomePage';
 import { useNavStore } from '@/stores/navStore';
@@ -70,7 +70,9 @@ export function LearnedCard() {
                   an "Unverified" chip on every row is three restatements of
                   the premise. Only the EXCEPTION — a machine-confirmed
                   concept, which the header does not describe — earns a chip. */}
-              {concept.trust !== 'unverified' && <TrustChip tier={concept.trust} size="sm" />}
+              {concept.review !== 'unreviewed' && (
+                <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+              )}
             </button>
             <IconButton
               icon="x"

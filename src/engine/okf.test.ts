@@ -27,7 +27,8 @@ import {
   reviewReasons,
   sectionOf,
   toConcept,
-  trustTier,
+  reviewStatus,
+  reviewedBy,
   verifyPatch,
 } from './okf';
 import { makeEntry } from './testHelpers';
@@ -74,14 +75,19 @@ describe('parseActor', () => {
   });
 });
 
-describe('trust tiers', () => {
-  it('reads absent verification as unverified', () => {
-    expect(trustTier(concept({}))).toBe('unverified');
+describe('review status and who did it', () => {
+  it('reads absent verification as unreviewed, with nobody named', () => {
+    expect(reviewStatus(concept({}))).toBe('unreviewed');
+    expect(reviewedBy(concept({}))).toBeNull();
   });
 
-  it('separates machine confirmation from human review', () => {
+  it('keeps the actor beside the status instead of ranking one above it', () => {
+    // The old three-rung tier said "machine-confirmed" and "human-reviewed"
+    // on one ladder. M27.5c splits them: BOTH are a current review, and who
+    // did it is a separate fact the queue reads for itself.
     const machine = concept({ verified: [{ by: 'process:nightly', at: '2026-07-01T00:00:00Z' }] });
-    expect(trustTier(machine)).toBe('machine-confirmed');
+    expect(reviewStatus(machine)).toBe('current');
+    expect(reviewedBy(machine)).toBe('agent');
 
     const human = concept({
       verified: [
@@ -89,14 +95,27 @@ describe('trust tiers', () => {
         { by: 'human:josef', at: '2026-07-20T00:00:00Z' },
       ],
     });
-    expect(trustTier(human)).toBe('human-reviewed');
+    expect(reviewStatus(human)).toBe('current');
+    expect(reviewedBy(human)).toBe('human');
+  });
+
+  it('says a review that predates the revision out loud (M23 r5)', () => {
+    // The projection rendered a notice instead of a stamp. "Somebody looked,
+    // at something else" is its own answer — collapsing it into `unreviewed`
+    // throws away the fact that a review happened at all.
+    const predating = concept({
+      verified: 'verified at r2; current is r3 — attestation predates revision',
+    });
+    expect(reviewStatus(predating)).toBe('predates_current');
+    expect(reviewedBy(predating)).toBeNull();
   });
 
   it('treats a bare verified mapping as a one-element list', () => {
     // §5.2 MUST — producers may omit the list dash for a single verifier.
     const bare = concept({ verified: { by: 'human:josef', at: '2026-07-20T00:00:00Z' } });
     expect(parseVerified(bare)).toHaveLength(1);
-    expect(trustTier(bare)).toBe('human-reviewed');
+    expect(reviewStatus(bare)).toBe('current');
+    expect(reviewedBy(bare)).toBe('human');
   });
 
   it('drops a stamp with no actor rather than showing an empty author', () => {
@@ -191,7 +210,8 @@ describe('toConcept', () => {
     expect(c.conceptType).toBe('Metric');
     expect(c.tags).toEqual(['finance', 'revenue']);
     expect(c.generated?.by.label).toBe('claude-code/2.0');
-    expect(c.trust).toBe('unverified');
+    expect(c.review).toBe('unreviewed');
+    expect(c.reviewedBy).toBeNull();
   });
 
   it('falls back to the entry title and a generic type', () => {
