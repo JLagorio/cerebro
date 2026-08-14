@@ -256,6 +256,129 @@ fn persist(
     })
 }
 
+/// A measurable evaluation being assembled: gate, scope, and window fixed
+/// up front; constants and window containment to hand while a protocol
+/// collects; persistence at the end. R1 and R7 build through this, so their
+/// modules cannot reach `persist` with a shape the window math never blessed.
+pub struct MeasurableOutcome<'a> {
+    registry: &'a Registry,
+    gate: String,
+    gate_key: GateKey,
+    scope: EvaluationScope,
+    stored_scope: StoredScope,
+    window: Window,
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+    evaluated_at: String,
+}
+
+impl<'a> MeasurableOutcome<'a> {
+    fn build(
+        registry: &'a Registry,
+        gate: &str,
+        scope: EvaluationScope,
+        stored_scope: StoredScope,
+        evaluated_at: chrono::DateTime<chrono::Utc>,
+        timezone: &str,
+    ) -> Result<Self, String> {
+        let tz = chrono_tz::Tz::from_str(timezone).map_err(|e| format!("{timezone:?}: {e}"))?;
+        let days = constant(registry, gate, "window_days")?;
+        let (window, start, end) = complete_window(tz, evaluated_at, days)?;
+        let (registry_id, subcapability) = gate
+            .split_once(':')
+            .ok_or_else(|| format!("{gate:?} is not a gate key"))?;
+        Ok(MeasurableOutcome {
+            registry,
+            gate: gate.to_string(),
+            gate_key: GateKey {
+                registry_id: registry_id.to_string(),
+                subcapability: subcapability.to_string(),
+            },
+            scope,
+            stored_scope,
+            window,
+            start,
+            end,
+            evaluated_at: evaluated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        })
+    }
+
+    /// R1/R2's shape: the whole subscription, no vault.
+    pub fn subscription(
+        registry: &'a Registry,
+        gate: &str,
+        evaluated_at: chrono::DateTime<chrono::Utc>,
+        timezone: &str,
+    ) -> Result<Self, String> {
+        Self::build(
+            registry,
+            gate,
+            EvaluationScope::SubscriptionGlobal,
+            StoredScope::SubscriptionGlobal,
+            evaluated_at,
+            timezone,
+        )
+    }
+
+    /// R3–R14's shape: one vault store.
+    pub fn vault(
+        registry: &'a Registry,
+        gate: &str,
+        scope: &VaultScope,
+        evaluated_at: chrono::DateTime<chrono::Utc>,
+        timezone: &str,
+    ) -> Result<Self, String> {
+        Self::build(
+            registry,
+            gate,
+            scope.evaluation_scope(),
+            scope.stored_scope(),
+            evaluated_at,
+            timezone,
+        )
+    }
+
+    /// One protocol constant, off the artifact.
+    pub fn constant(&self, name: &str) -> Result<u64, String> {
+        constant(self.registry, &self.gate, name)
+    }
+
+    /// Whether an RFC3339 stamp falls inside the window.
+    pub fn contains(&self, stamp: &str) -> Result<bool, String> {
+        let instant = parse_z(stamp)?;
+        Ok(instant >= self.start && instant < self.end)
+    }
+
+    /// The window's opening instant in the `…Z` spelling the runtime tables
+    /// store, for byte comparisons against their stamps.
+    pub fn window_start_utc(&self) -> String {
+        self.start
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    }
+
+    /// Record the outcome — see [`persist`].
+    pub fn persist(
+        self,
+        conn: &Connection,
+        payload: &serde_json::Value,
+        metrics: Vec<TriggerMetric>,
+        result: TriggerResult,
+    ) -> Result<Recorded, String> {
+        persist(
+            conn,
+            self.registry,
+            self.gate_key,
+            self.scope,
+            self.stored_scope,
+            self.window,
+            payload,
+            metrics,
+            result,
+            &self.evaluated_at,
+        )
+    }
+}
+
 fn aggregate_count(name: &str, value: u64) -> TriggerMetric {
     TriggerMetric::Count {
         name: name.to_string(),

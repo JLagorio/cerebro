@@ -17,6 +17,8 @@
 //! benefit of the doubt, because a gate that can be evaluated under the wrong
 //! rules is a gate somebody can satisfy by accident.
 
+pub mod cost;
 pub mod evaluate;
 pub mod evaluation;
 pub mod registry;
+pub mod sources;

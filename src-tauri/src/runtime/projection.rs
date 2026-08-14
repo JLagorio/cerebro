@@ -113,6 +113,13 @@ impl Contract {
     }
 }
 
+/// The committed digest of the shipped artifact — the "policy hash" an M28
+/// R1 evaluation persists beside its sample, so the projection it reports is
+/// pinned to the exact rules that computed it.
+pub fn shipped_digest() -> &'static str {
+    PROJECTION_DIGEST.trim()
+}
+
 /// Load the shipped contract, with the artifact's bytes checked against the
 /// committed digest.
 ///

@@ -1,0 +1,248 @@
+//! R7 — same-store cross-source qualification (M28.0e).
+//!
+//! Two distinct connector sources, continuously connected and healthy for a
+//! full 30-day window, each contributing at least a hundred distinct
+//! committed assertion-bearing Observations against ONE declared
+//! subject/predicate/scope digest. The registration, connection, and health
+//! halves come off the M25 portable cache and live-signal tables here; the
+//! OBSERVATION ids arrive injected.
+//!
+//! **The observation extractor is a named seam, deliberately.** Which
+//! Observations qualify — assertion-bearing, carrying the M22
+//! scope/relationship/basis metadata D11 needs, matching the declared scope
+//! digest, with a pinned `source_registration_event_id` that agrees with the
+//! joined cache row — is a walk over reducer state whose misclassification
+//! would silently miscount a GATE. That modelling deserves the M22 schema
+//! open and its own review, exactly as `recovery::receipts_in_ledger` was
+//! the M25.3 seam: the protocol arithmetic here is complete and tested
+//! against injected ids, and the extractor slots in without touching it.
+//! With no live connectors registered anywhere (R14's registered list is
+//! empty), no production population exists for it to miss.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use rusqlite::Connection;
+
+use crate::trigger::evaluate::{MeasurableOutcome, Recorded, VaultScope};
+use crate::trigger::evaluation::{MetricSeriesKey, TriggerMetric, TriggerResult};
+use crate::trigger::registry::Registry;
+
+/// One registered source, as the M25 cache and live signals describe it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct R7Source {
+    pub source_id: String,
+    pub kind: String,
+    pub registration_event_id: String,
+    pub connection_state: Option<String>,
+    pub connection_since: Option<String>,
+    pub health_state: Option<String>,
+    pub health_since: Option<String>,
+    /// Distinct qualifying Observation event ids, from the extractor seam.
+    pub observation_event_ids: BTreeSet<String>,
+}
+
+impl R7Source {
+    /// Continuously connected and healthy for the whole window: the current
+    /// state is right AND has held since before the window began. A
+    /// transition inside the window moved `since`, so it disqualifies.
+    fn steady(&self, window_start: &str) -> bool {
+        self.connection_state.as_deref() == Some("connected")
+            && self.health_state.as_deref() == Some("healthy")
+            && self
+                .connection_since
+                .as_deref()
+                .is_some_and(|since| since <= window_start)
+            && self
+                .health_since
+                .as_deref()
+                .is_some_and(|since| since <= window_start)
+    }
+}
+
+/// The pure core. `window_start_utc` is the window's opening instant as a
+/// `…Z` string — the same spelling the live-signal tables store, so the
+/// comparison is byte order over one calendar.
+pub fn r7_outcome(
+    sources: &[R7Source],
+    store_uuid: &str,
+    window_start_utc: &str,
+    required_sources: u64,
+    min_observations: u64,
+) -> (Vec<TriggerMetric>, TriggerResult) {
+    let connectors: Vec<&R7Source> = sources.iter().filter(|s| s.kind == "connector").collect();
+    let mut metrics = Vec::new();
+    let mut qualifying = 0u64;
+    for source in &connectors {
+        let observations = source.observation_event_ids.len() as u64;
+        metrics.push(TriggerMetric::Count {
+            name: "qualifying_observations".into(),
+            series: MetricSeriesKey::Source {
+                store_uuid: store_uuid.to_string(),
+                source_id: source.source_id.clone(),
+            },
+            value: observations,
+        });
+        if source.steady(window_start_utc) && observations >= min_observations {
+            qualifying += 1;
+        }
+    }
+    metrics.push(TriggerMetric::Count {
+        name: "qualifying_sources".into(),
+        series: MetricSeriesKey::Aggregate,
+        value: qualifying,
+    });
+    // Fewer than the required number of connector registrations is an absent
+    // population, not a quiet one: there is nothing the protocol could ever
+    // qualify, so the answer is "cannot be evaluated yet".
+    let result = if (connectors.len() as u64) < required_sources {
+        TriggerResult::NotReady
+    } else if qualifying >= required_sources {
+        TriggerResult::Fired
+    } else {
+        TriggerResult::NotFired
+    };
+    (metrics, result)
+}
+
+/// Evaluate R7 over one vault store.
+///
+/// `observations_by_source` is the extractor seam: distinct committed
+/// assertion-bearing Observation event ids per source id, already filtered
+/// to the declared `verification_scope_digest` per the module doc. The
+/// digest itself rides in the payload so the evaluation names what it was
+/// scoped to.
+pub fn evaluate_r7(
+    conn: &Connection,
+    registry: &Registry,
+    scope: &VaultScope,
+    evaluated_at: chrono::DateTime<chrono::Utc>,
+    timezone: &str,
+    verification_scope_digest: &str,
+    observations_by_source: &BTreeMap<String, BTreeSet<String>>,
+) -> Result<Recorded, String> {
+    let outcome = MeasurableOutcome::vault(registry, "R7:root", scope, evaluated_at, timezone)?;
+
+    let mut statement = conn
+        .prepare(
+            "SELECT r.source_id, r.kind, r.registration_event_id, \
+                    c.state, c.since, h.state, h.since \
+             FROM source_registration r \
+             LEFT JOIN source_connection c \
+               ON c.store_uuid = r.store_uuid AND c.source_id = r.source_id \
+             LEFT JOIN source_health h \
+               ON h.store_uuid = r.store_uuid AND h.source_id = r.source_id \
+             WHERE r.store_uuid = ?1 ORDER BY r.source_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let fetched = statement
+        .query_map(rusqlite::params![scope.store_uuid], |r| {
+            Ok(R7Source {
+                source_id: r.get(0)?,
+                kind: r.get(1)?,
+                registration_event_id: r.get(2)?,
+                connection_state: r.get(3)?,
+                connection_since: r.get(4)?,
+                health_state: r.get(5)?,
+                health_since: r.get(6)?,
+                observation_event_ids: BTreeSet::new(),
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut sources = Vec::new();
+    for source in fetched {
+        let mut source = source.map_err(|e| e.to_string())?;
+        if let Some(ids) = observations_by_source.get(&source.source_id) {
+            source.observation_event_ids = ids.clone();
+        }
+        sources.push(source);
+    }
+
+    let window_start_utc = outcome.window_start_utc();
+    let (metrics, result) = r7_outcome(
+        &sources,
+        &scope.store_uuid,
+        &window_start_utc,
+        outcome.constant("required_sources")?,
+        outcome.constant("min_observations_per_source")?,
+    );
+    outcome.persist(
+        conn,
+        &serde_json::json!({
+            "verification_scope_digest": verification_scope_digest,
+            "sources": sources,
+        }),
+        metrics,
+        result,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WINDOW_START: &str = "2026-07-15T00:00:00.000Z";
+
+    fn source(id: &str, kind: &str, since: &str, observations: usize) -> R7Source {
+        R7Source {
+            source_id: id.to_string(),
+            kind: kind.to_string(),
+            registration_event_id: "e".repeat(32),
+            connection_state: Some("connected".into()),
+            connection_since: Some(since.to_string()),
+            health_state: Some("healthy".into()),
+            health_since: Some(since.to_string()),
+            observation_event_ids: (0..observations).map(|n| format!("obs-{n:04}")).collect(),
+        }
+    }
+
+    #[test]
+    fn r7_fires_on_two_steady_connectors_with_a_hundred_each() {
+        let sources = vec![
+            source("s1", "connector", "2026-07-01T00:00:00.000Z", 100),
+            source("s2", "connector", "2026-06-01T00:00:00.000Z", 250),
+        ];
+        let (_, result) = r7_outcome(&sources, "store", WINDOW_START, 2, 100);
+        assert_eq!(result, TriggerResult::Fired);
+    }
+
+    #[test]
+    fn r7_each_disqualifier_closes_the_gate_on_its_own() {
+        let steady = source("s1", "connector", "2026-07-01T00:00:00.000Z", 100);
+        for spoiled in [
+            source("s2", "connector", "2026-07-01T00:00:00.000Z", 99),
+            // A connection transition INSIDE the window: `since` moved.
+            source("s2", "connector", "2026-07-20T00:00:00.000Z", 100),
+            {
+                let mut s = source("s2", "connector", "2026-07-01T00:00:00.000Z", 100);
+                s.health_state = Some("unhealthy".into());
+                s
+            },
+            {
+                let mut s = source("s2", "connector", "2026-07-01T00:00:00.000Z", 100);
+                s.connection_state = None;
+                s
+            },
+        ] {
+            let sources = vec![steady.clone(), spoiled];
+            let (_, result) = r7_outcome(&sources, "store", WINDOW_START, 2, 100);
+            assert_eq!(result, TriggerResult::NotFired);
+        }
+    }
+
+    #[test]
+    fn r7_non_connector_kinds_are_not_a_population() {
+        // The owner's own notes and the builtin knowledge bundle can never
+        // qualify, however steady: cross-source verification is about
+        // CONNECTORS, and today none are registered anywhere.
+        let sources = vec![
+            source("s1", "human_actor", "2026-07-01T00:00:00.000Z", 500),
+            source("s2", "builtin", "2026-07-01T00:00:00.000Z", 500),
+        ];
+        let (_, result) = r7_outcome(&sources, "store", WINDOW_START, 2, 100);
+        assert_eq!(
+            result,
+            TriggerResult::NotReady,
+            "no connector population exists"
+        );
+    }
+}
