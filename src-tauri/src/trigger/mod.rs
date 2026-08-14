@@ -20,5 +20,6 @@
 pub mod cost;
 pub mod evaluate;
 pub mod evaluation;
+pub mod evidence;
 pub mod registry;
 pub mod sources;
