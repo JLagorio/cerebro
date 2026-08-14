@@ -43,7 +43,7 @@ use super::manifest::{
 
 /// The prompt contract's version, so a stored transcript can be read against
 /// the rules that produced it.
-pub const PROMPT_VERSION: &str = "m26-assembly-v1";
+pub const PROMPT_VERSION: &str = "m31-assembly-v2";
 
 /// The tool an attended run answers through. Named here because the prompt
 /// tells the model to call it and `mcp.rs` serves it — one constant so the two
@@ -73,8 +73,8 @@ const RULES: &str = "\
 You are cerebro's synthesis pass. One run answers ONE question, from the
 evidence in this prompt and from nothing else.
 
-The evidence below is the whole of what the base could find. You have no tools
-for looking further; if something is missing, saying so IS the work.
+The evidence below is the whole of what the base could find.
+Your only tool is submit_answer; if something is missing, saying so IS the work.
 
 Rules that are not negotiable:
 
@@ -677,6 +677,15 @@ mod tests {
             refusal.contains("REPLACE") || refusal.contains("never held"),
             "{refusal}"
         );
+    }
+
+    #[test]
+    fn the_rules_do_not_claim_a_capability_the_spawn_site_contradicts() {
+        // M31.1a. RULES used to say "You have no tools", which was false:
+        // the spawn site left the full read surface attached. Now the spawn
+        // site narrows to SUBMIT_TOOL alone and the prompt says so.
+        assert!(RULES.contains("Your only tool is submit_answer"));
+        assert!(!RULES.contains("You have no tools"));
     }
 
     #[test]

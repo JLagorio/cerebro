@@ -731,8 +731,38 @@ pub const PROPOSAL_PREFIX: &str = "propose_";
 /// it closes the run's set.
 pub const COMMIT_TOOL: &str = "commit_proposals";
 
+/// Served by base_tools as a literal (the TS parity test scrapes those
+/// bytes — leave them); this const exists so SPAWN SITES never spell the
+/// name: a drifted spelling would be silently dropped by narrow().
+pub const REPORT_TOOL: &str = "report_window_outcome";
+
+/// Same contract. propose_organize is hand-written, not generated from the
+/// policy table (`proposal_op_of` says why), so proposal_tool_names() cannot
+/// yield it.
+pub const ORGANIZE_TOOL: &str = "propose_organize";
+
 pub fn proposal_tool_name(op: &str) -> String {
     format!("{PROPOSAL_PREFIX}{op}")
+}
+
+/// Every generated proposal tool plus the terminal commit — the surface an
+/// internal run needs to act on what it finds. Derived from the same table
+/// that serves them: a hand-copied list at a spawn site would be the twin
+/// inventory policy-is-data forbids. A table that fails to load yields only
+/// the terminal commit — the run is narrowed harder, never wider
+/// (fail-closed).
+pub fn proposal_tool_names() -> Vec<String> {
+    let mut names: Vec<String> = crate::policy::table::PolicyTable::load()
+        .map(|table| {
+            table
+                .agent_facing_ops()
+                .into_iter()
+                .map(proposal_tool_name)
+                .collect()
+        })
+        .unwrap_or_default();
+    names.push(COMMIT_TOOL.to_string());
+    names
 }
 
 /// The op a proposal tool name refers to, or `None` for anything else.
@@ -2831,6 +2861,23 @@ mod tests {
             served.contains(&crate::assembly::prompt::SUBMIT_TOOL),
             "the prompt names {} and the server serves {served:?}",
             crate::assembly::prompt::SUBMIT_TOOL
+        );
+    }
+
+    #[test]
+    fn the_hand_served_tool_consts_name_tools_the_catalog_serves() {
+        // M31.1a. `base_tools` spells these names literally so the TS parity
+        // test can scrape the bytes; the consts exist so SPAWN SITES never
+        // spell them. This ties the two ends together: a const that drifted
+        // from the served literal would be silently dropped by narrow().
+        let served: Vec<String> = tool_catalog(true)
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect();
+        assert!(served.iter().any(|name| name == REPORT_TOOL), "{served:?}");
+        assert!(
+            served.iter().any(|name| name == ORGANIZE_TOOL),
+            "{served:?}"
         );
     }
 

@@ -125,10 +125,24 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
-        // Not narrowed here. The tool policy already decides what an ambient
-        // actor may call, and a second list in this file would be a second
-        // place for that decision to drift from `policy::submit`'s.
-        allowed_tools: None,
+        // M31.1a — an ingest run observes, extracts, resolves, and PROPOSES;
+        // the proposal surface is derived from the policy table so this file
+        // never carries a second inventory of it. It does not read the vault
+        // (every byte it is entitled to is fenced into its prompt) and it
+        // does not write directly — write_concept and cache_source are
+        // deliberately absent: a direct writer here would bypass review, and
+        // a cached source authored by this run would re-enter the next
+        // window at owner authority.
+        allowed_tools: Some({
+            let mut tools = crate::mcp::proposal_tool_names();
+            tools.push(crate::mcp::REPORT_TOOL.into());
+            tools.push(crate::mcp::ORGANIZE_TOOL.into());
+            tools
+        }),
+        // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
+        // tools are withdrawn in build_args. Only the three internal spawn
+        // sites ever set this.
+        internal: true,
     }
 }
 
@@ -178,8 +192,48 @@ mod tests {
 
     #[test]
     fn the_tools_are_left_to_the_policy_rather_than_listed_twice() {
-        // A second list here would be a second place for the decision to
-        // drift from `policy::submit`'s served set.
-        assert_eq!(request(&session(), "u").allowed_tools, None);
+        // Inverted in M31.1a: the narrowing is now DECLARED, and it is derived
+        // from the policy table rather than listed — the original test's
+        // don't-drift concern, honored the other way around.
+        let declared = request(&session(), "u")
+            .allowed_tools
+            .expect("an internal run declares its tools");
+        assert!(
+            declared.iter().any(|t| t == crate::mcp::COMMIT_TOOL),
+            "the proposal surface is the point of the run"
+        );
+        assert!(
+            declared.iter().any(|t| t.starts_with("propose_")),
+            "at least one generated proposal op is granted"
+        );
+        assert!(
+            declared.iter().any(|t| t == crate::mcp::REPORT_TOOL),
+            "the ingest run reports its window outcome — the one name narrow() \
+             would silently drop if a literal drifted"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("get_note")),
+            "no internal run has a reason to read arbitrary notes"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("search_notes")),
+            "retrieval is the assembler's job, not the run's"
+        );
+        assert!(
+            !declared
+                .iter()
+                .any(|t| t == "write_concept" || t == "cache_source"),
+            "no direct writers on an unattended run — a cached source authored \
+             by this run would re-enter the next window at owner authority. \
+             Exact names: propose_cache_source is the REVIEWED channel and is \
+             a different tool (the propose_ prefix is injective by design)"
+        );
+    }
+
+    #[test]
+    fn an_ingest_run_is_marked_as_cerebros_own() {
+        // The marker build_args keys the CLI built-in withdrawal on. Only the
+        // three internal spawn sites ever set it.
+        assert!(request(&session(), "u").internal);
     }
 }

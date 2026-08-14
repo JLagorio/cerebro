@@ -131,6 +131,17 @@ pub struct AgentRequest {
     /// is a thing a read-only skill is allowed to ask for. The distinction is
     /// the whole reason this is an Option<Vec> rather than a Vec.
     pub allowed_tools: Option<Vec<String>>,
+    /// True only for cerebro's own three internal runs (ingest, maintain,
+    /// assembly synthesis), whose spawn sites construct this struct directly
+    /// in Rust — nothing else CAN set it: `skip_deserializing` makes the
+    /// field unreachable from the wire (it deserializes as
+    /// `bool::default()`, false), so "internal" is a structural fact, not a
+    /// documented convention. Keys the CLI built-in withdrawal in
+    /// build_args. Every TS caller (panel, scheduled jobs — including
+    /// declared-shell Agent records) is untouched and keeps the shipped
+    /// ceiling model.
+    #[serde(skip_deserializing)]
+    pub internal: bool,
 }
 
 /// Where the CLI keeps ITS OWN state for a vault (M17.14).
@@ -591,6 +602,27 @@ fn narrow(granted: Vec<String>, declared: Option<&Vec<String>>) -> Vec<String> {
         .collect()
 }
 
+/// Built-in CLI tools no cerebro-INTERNAL run may use. File tools because
+/// the cwd is the vault; web tools because an internal run has no business
+/// fetching; Task/Bash because no internal run was ever granted fan-out or
+/// shell. User-authored runs are exempt: shell on a schedule is a
+/// Settings-CEILINGED unattended capability of Agent records
+/// (useJobRunner.ts), not attended-only — this list must never apply to
+/// them.
+const INTERNAL_DISALLOWED: [&str; 11] = [
+    "Read",
+    "Glob",
+    "Grep",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+    "Bash",
+];
+
 pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Vec<String> {
     let tools = narrow(
         tool_policy(req.shell.unwrap_or(false)),
@@ -605,22 +637,37 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Ve
         "--include-partial-messages".into(),
         "--mcp-config".into(),
         mcp_config.to_string_lossy().to_string(),
+    ];
+    // M31.1a — an INTERNAL run executes vault-authored content on
+    // cerebro's own schedule. Its file access is its PROMPT: the CLI's own
+    // Read/Glob/Grep need no approval inside the cwd, and acceptEdits
+    // auto-approves built-in writes, so both are withdrawn. Keyed on
+    // internal identity: attendance is a METERING fact (the synthesis run
+    // is attended and still bounded), and user-authored runs — the panel
+    // and scheduled Agent records, including declared shell, a
+    // Settings-ceilinged unattended capability — keep their shipped argv.
+    if req.internal {
+        args.push("--permission-mode".into());
+        args.push("default".into());
+        args.push("--disallowedTools".into());
+        args.push(INTERNAL_DISALLOWED.join(","));
+    } else {
         // The CLI's own gate stays out of the way: cerebro's tools enforce
         // their boundaries themselves, and shell access is decided above.
-        "--permission-mode".into(),
-        "acceptEdits".into(),
-        "--allowedTools".into(),
-        tools.join(","),
-        // The vault is the child's cwd, and Claude Code walks up from cwd for
-        // `.claude/` and `CLAUDE.md`. Until M17.1 nothing said otherwise, so a
-        // vault could ship standing instructions into EVERY turn — verified
-        // against the real CLI: a vault CLAUDE.md reading "begin every reply
-        // with ZEBRAFISH-7731" did exactly that, and `--setting-sources user`
-        // stops it dead. `user` rather than none: this closes the door the
-        // VAULT opens, not the one the person opened on their own machine.
-        "--setting-sources".into(),
-        "user".into(),
-    ];
+        args.push("--permission-mode".into());
+        args.push("acceptEdits".into());
+    }
+    args.push("--allowedTools".into());
+    args.push(tools.join(","));
+    // The vault is the child's cwd, and Claude Code walks up from cwd for
+    // `.claude/` and `CLAUDE.md`. Until M17.1 nothing said otherwise, so a
+    // vault could ship standing instructions into EVERY turn — verified
+    // against the real CLI: a vault CLAUDE.md reading "begin every reply
+    // with ZEBRAFISH-7731" did exactly that, and `--setting-sources user`
+    // stops it dead. `user` rather than none: this closes the door the
+    // VAULT opens, not the one the person opened on their own machine.
+    args.push("--setting-sources".into());
+    args.push("user".into());
     // Strictness is decided by connectors::connector_context (M13.3): a vault
     // with an explicit connector list is pinned to it (strict, the enabled
     // servers merged into our config); a vault without one keeps the legacy
@@ -1049,6 +1096,7 @@ mod tests {
                 approved_stdio: None,
                 scope: None,
                 allowed_tools: None,
+                internal: false,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -1060,6 +1108,59 @@ mod tests {
             .position(|a| a == "--allowedTools")
             .map(|i| args[i + 1].clone())
             .expect("--allowedTools is always passed")
+    }
+
+    /// A request shaped like the panel's: every capability off, nothing
+    /// narrowed, and — the default the wire gives every TS caller — not
+    /// internal.
+    fn panel_style_request() -> AgentRequest {
+        AgentRequest {
+            message: "hi".into(),
+            system_prompt: None,
+            session_id: None,
+            model: None,
+            shell: None,
+            connectors: None,
+            connector_names: None,
+            attended: None,
+            mcp_url: None,
+            mcp_token: None,
+            actor: None,
+            approved_stdio: None,
+            scope: None,
+            allowed_tools: None,
+            internal: false,
+        }
+    }
+
+    #[test]
+    fn an_internal_run_loses_the_builtin_file_and_web_tools() {
+        let mut req = panel_style_request();
+        req.internal = true;
+        let args = build_args(&req, Path::new("/tmp/x.json"), true);
+        let joined = args.join(" ");
+        assert!(joined.contains("--disallowedTools"));
+        assert!(joined.contains("Read"), "the read built-ins are withdrawn");
+        assert!(
+            !joined.contains("acceptEdits"),
+            "no auto-approved edits on an internal run"
+        );
+    }
+
+    #[test]
+    fn a_user_authored_run_keeps_its_shipped_surface_even_unattended() {
+        // The declared-shell scheduled-agent path (useJobRunner.ts) must keep
+        // working: bounding internal runs may not withdraw a user grant. A
+        // blanket unattended denylist would break it silently, because a
+        // denylist overrides allow grants — which is why the bound is keyed
+        // on internal identity, never attendance.
+        let mut req = panel_style_request();
+        req.internal = false;
+        req.attended = Some(false);
+        let args = build_args(&req, Path::new("/tmp/x.json"), true);
+        let joined = args.join(" ");
+        assert!(!joined.contains("--disallowedTools"));
+        assert!(joined.contains("acceptEdits"));
     }
 
     #[test]
@@ -1220,6 +1321,7 @@ mod tests {
                 approved_stdio: None,
                 scope: None,
                 allowed_tools: None,
+                internal: false,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -1250,6 +1352,7 @@ mod tests {
                 scope: None,
                 allowed_tools: declared
                     .map(|d| d.into_iter().map(String::from).collect::<Vec<String>>()),
+                internal: false,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -1428,6 +1531,7 @@ mod tests {
                 approved_stdio: None,
                 scope: None,
                 allowed_tools: None,
+                internal: false,
             },
             Path::new("/tmp/mcp.json"),
             false,
@@ -1465,6 +1569,7 @@ mod tests {
                 approved_stdio: None,
                 scope: None,
                 allowed_tools: None,
+                internal: false,
             },
             Path::new("/tmp/mcp.json"),
             true,

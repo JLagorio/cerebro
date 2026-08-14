@@ -89,9 +89,18 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
-        // Left to `policy::submit`; a second list here would be a second place
-        // for that decision to drift.
-        allowed_tools: None,
+        // M31.1a — the maintenance pass proposes; its findings were computed
+        // deterministically before it spawned, so there is nothing to look
+        // up. Surface derived, not listed (policy-is-data).
+        allowed_tools: Some({
+            let mut tools = crate::mcp::proposal_tool_names();
+            tools.push(crate::mcp::ORGANIZE_TOOL.into());
+            tools
+        }),
+        // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
+        // tools are withdrawn in build_args. Only the three internal spawn
+        // sites ever set this.
+        internal: true,
     }
 }
 
@@ -117,6 +126,42 @@ mod tests {
 
     #[test]
     fn the_tools_are_left_to_the_policy_rather_than_listed_twice() {
-        assert_eq!(request("f", "t", "u").allowed_tools, None);
+        // Inverted in M31.1a: the narrowing is now DECLARED, and it is derived
+        // from the policy table rather than listed — the original test's
+        // don't-drift concern, honored the other way around.
+        let declared = request("f", "t", "u")
+            .allowed_tools
+            .expect("an internal run declares its tools");
+        assert!(
+            declared.iter().any(|t| t == crate::mcp::COMMIT_TOOL),
+            "the proposal surface is the point of the run"
+        );
+        assert!(
+            declared.iter().any(|t| t.starts_with("propose_")),
+            "at least one generated proposal op is granted"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("get_note")),
+            "no internal run has a reason to read arbitrary notes"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("search_notes")),
+            "retrieval is the assembler's job, not the run's"
+        );
+        assert!(
+            !declared
+                .iter()
+                .any(|t| t == "write_concept" || t == "cache_source"),
+            "no direct writers on an unattended run — exact names on purpose: \
+             propose_cache_source is the REVIEWED channel and is a different \
+             tool (the propose_ prefix is injective by design)"
+        );
+    }
+
+    #[test]
+    fn a_maintenance_run_is_marked_as_cerebros_own() {
+        // The marker build_args keys the CLI built-in withdrawal on. Only the
+        // three internal spawn sites ever set it.
+        assert!(request("f", "t", "u").internal);
     }
 }

@@ -109,10 +109,16 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run answers, and an answer is not a write.
         scope: Some(vec![]),
-        // Not narrowed here. `policy::submit` already decides what an actor
-        // may call, and a second list in this file would be a second place for
-        // that decision to drift.
-        allowed_tools: None,
+        // M31.1a — a synthesis run answers from the manifest and nothing
+        // else. That was always the design (prompt::RULES); until now it was
+        // a sentence. The constant, not a literal: SUBMIT_TOOL exists so the
+        // prompt and the served surface cannot disagree about the name, and
+        // a "submit_answer" string here would be a third spelling.
+        allowed_tools: Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]),
+        // Cerebro's own run: attended means a person awaits the ANSWER, not
+        // that anybody supervises the child, so the CLI built-ins are
+        // withdrawn here too. Only the three internal spawn sites set this.
+        internal: true,
     }
 }
 
@@ -145,6 +151,22 @@ mod tests {
 
     #[test]
     fn the_tools_are_left_to_the_policy_rather_than_listed_twice() {
-        assert_eq!(request("q", "t", "u").allowed_tools, None);
+        // Inverted in M31.1a: the narrowing is now DECLARED — one tool,
+        // spelled via the constant the prompt and the server already share.
+        // A synthesis run answers from the manifest and nothing else.
+        assert_eq!(
+            request("q", "t", "u").allowed_tools,
+            Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()])
+        );
+    }
+
+    #[test]
+    fn a_synthesis_run_is_marked_as_cerebros_own_though_a_person_waits() {
+        // Attended is a METERING fact — someone awaits the answer; nobody
+        // supervises the child. The internal marker, not attendance, is what
+        // keys the CLI built-in withdrawal in build_args.
+        let request = request("q", "t", "u");
+        assert!(request.internal);
+        assert_eq!(request.attended, Some(true));
     }
 }
