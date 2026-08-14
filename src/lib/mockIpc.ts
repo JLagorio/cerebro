@@ -969,6 +969,114 @@ export async function beliefChips(_vault: string): Promise<BeliefChips[]> {
   return chips;
 }
 
+// --- The Epistemic Status surface (M27.8b) ----------------------------------
+//
+// FIXED SHAPES, NO ENGINE — the same rule the control surface below states.
+// Every sentence on this wire is composed in `attention::status`, so a spec
+// seeds prose rather than facts and nothing here can disagree with the lane
+// rules it never loaded. Seeding a lane the artifact does not declare is a
+// spec bug the Rust wire-shape test is there to make loud.
+
+/** One thing in one lane, with the words already attached. */
+export interface LaneItem {
+  lane: 'contradiction' | 'blindness' | 'staleness' | 'epistemic_debt';
+  belief_id: string;
+  entity_id: string;
+  path: string | null;
+  predicate: string | null;
+  state_stage: string | null;
+  /** "ci_status at implemented", or null for the contradiction lane, whose
+   * subject is a belief PAIR and not a facet. */
+  scope_text: string | null;
+  reasons: string[];
+  /** Never empty. A lane item that could not say why would be a badge. */
+  reason_text: string;
+  reliance: string[];
+  reliance_text: string | null;
+  edge_id: string | null;
+  relation_id: string | null;
+}
+
+/** One lane. Present in the payload whether or not it holds anything — an
+ * absent lane and an empty one are the confusion this surface exists to end. */
+export interface LaneView {
+  id: string;
+  label: string;
+  blurb: string;
+  empty_text: string;
+  /** §33: no preference could have hidden this one. */
+  protected: boolean;
+  items: LaneItem[];
+  withheld: number;
+}
+
+export interface LanesView {
+  rule_version: string;
+  lanes: LaneView[];
+  /** What a preference held back, in total. Rendered, because a cap nobody
+   * can see reads as "there is nothing else". */
+  withheld: number;
+  /** What this answer could not see. Empty is the ordinary case. */
+  incomplete: string[];
+}
+
+/** One thing that moved (M26 convergence, read aloud by M27.8). */
+export interface ChangeLine {
+  text: string;
+  belief_id: string | null;
+  entity_id: string | null;
+}
+
+export interface ChangeSection {
+  id: string;
+  label: string;
+  empty_text: string;
+  lines: ChangeLine[];
+}
+
+export interface ChangesView {
+  schema_version: string;
+  window: { from_seq: number; to_seq: number };
+  /** M26's own answer to "did anything move", not a recount of the sections. */
+  quiet: boolean;
+  sections: ChangeSection[];
+}
+
+const NO_LANES: LanesView = { rule_version: 'lanes-v1', lanes: [], withheld: 0, incomplete: [] };
+
+let lanes: LanesView = NO_LANES;
+let changes: ChangesView | null = null;
+
+/** Test-only seam, mirroring `__cerebroSeedChips`. */
+export function __seedLanes(next: LanesView | null): void {
+  lanes = next ?? NO_LANES;
+}
+
+/** `null` restores the refusal — a vault with no ledger cannot answer this,
+ * and a spec needs to be able to render that case too. */
+export function __seedChanges(next: ChangesView | null): void {
+  changes = next;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedLanes: typeof __seedLanes }).__cerebroSeedLanes =
+    __seedLanes;
+  (window as unknown as { __cerebroSeedChanges: typeof __seedChanges }).__cerebroSeedChanges =
+    __seedChanges;
+}
+
+export async function attentionLanes(_vault: string): Promise<LanesView> {
+  return lanes;
+}
+
+export async function converge(_vault: string, _fromSeq?: number): Promise<ChangesView> {
+  // The real command REFUSES a vault with no ledger store rather than
+  // answering an empty window, because "nothing changed" and "there is
+  // nothing here to compare" are opposite sentences.
+  if (changes === null) throw new Error('this vault has no ledger store');
+  return changes;
+}
+
 // --- The control surface (M25.7) -------------------------------------------
 //
 // FIXED SHAPES, NO ENGINE. The mock serves whatever a spec seeds and computes

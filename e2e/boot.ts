@@ -67,5 +67,11 @@ declare global {
     /** The M27.5 chip seam. The browser has no ledger, so a spec that wants
      * axes on screen stages the rows it wants to see. */
     __cerebroSeedChips: (rows: unknown[]) => void;
+    /** The M27.8 lane seam. Same reason as the chips: every sentence in a
+     * lane is composed in Rust, so a spec stages prose and asserts placement. */
+    __cerebroSeedLanes: (view: unknown) => void;
+    /** The M27.8 convergence seam. `null` restores the refusal a vault with
+     * no ledger store gives, which a spec has to be able to render too. */
+    __cerebroSeedChanges: (view: unknown) => void;
   }
 }

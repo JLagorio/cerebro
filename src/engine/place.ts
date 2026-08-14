@@ -154,6 +154,8 @@ export function placeLabel(
       return 'Needs review';
     case 'pipeline':
       return 'Background';
+    case 'status':
+      return 'Epistemic status';
     case 'pulse':
       return 'Pulse';
     case 'library':

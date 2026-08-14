@@ -264,6 +264,10 @@ export function resolveSurface(
       // Runs and token counts are operational, not records — nothing in the
       // vault's filter vocabulary applies to them either.
       return { title: 'Background', entries: [], presentation: defaultPresentation() };
+    case 'status':
+      // Lanes and convergence lines are derived from the ledger and never
+      // from the scanned entries, so the same carve-out applies again.
+      return { title: 'Epistemic status', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     // Neither holds records. Listed rather than defaulted so that the next

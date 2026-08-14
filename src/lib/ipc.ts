@@ -304,17 +304,30 @@ export function ledgerStatus(vault: string): Promise<LedgerStatus> {
 // imports the mock, and a type import pointing back would close a cycle that
 // vitest's module ordering can trip over. Re-exported here because the app
 // imports its IPC types from the IPC module.
-import type { BeliefChips, CardTarget, ReviewCard, RevertableApplication } from './mockIpc';
+import type {
+  BeliefChips,
+  CardTarget,
+  ChangesView,
+  LanesView,
+  ReviewCard,
+  RevertableApplication,
+} from './mockIpc';
 
 export type { CardTarget, ReviewCard, RevertableApplication };
 export type {
   AuthorityScope,
   BeliefChips,
   BeliefFacetKey,
+  ChangeLine,
+  ChangeSection,
+  ChangesView,
   Coverage,
   FacetChips,
   FacetPredicate,
   FreshnessBasis,
+  LaneItem,
+  LanesView,
+  LaneView,
   ReviewStatus,
   Support,
   SupportFamily,
@@ -336,6 +349,25 @@ export function reviewQueue(vault: string): Promise<ReviewCard[]> {
  * caller decides which one to show. */
 export function beliefChips(vault: string): Promise<BeliefChips[]> {
   return inTauri() ? invokeTauri('belief_chips', { vault }) : mock.beliefChips(vault);
+}
+
+/** The four attention lanes, after §33's firewall (M27.8b).
+ *
+ * Every lane the artifact declares comes back whether or not it holds
+ * anything, and every sentence in it was composed beside the rule that
+ * produced it. A vault with no ledger REFUSES — the caller renders that
+ * differently from four empty lanes, because it is a different fact. */
+export function attentionLanes(vault: string): Promise<LanesView> {
+  return inTauri() ? invokeTauri('attention_lanes', { vault }) : mock.attentionLanes(vault);
+}
+
+/** What changed since the last time anybody looked (M26.8, read aloud in
+ * M27.8b). `fromSeq` omitted means "since the last stored run", which is the
+ * question a person actually asks. */
+export function converge(vault: string, fromSeq?: number): Promise<ChangesView> {
+  return inTauri()
+    ? invokeTauri('converge', { vault, fromSeq: fromSeq ?? null })
+    : mock.converge(vault, fromSeq);
 }
 
 export function revertableApplications(vault: string): Promise<RevertableApplication[]> {
