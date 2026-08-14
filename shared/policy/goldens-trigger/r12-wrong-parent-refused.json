@@ -1,0 +1,67 @@
+{
+  "name": "r12-wrong-parent-refused",
+  "description": "learned_aliases waits on R6, and a fired R8 is somebody else's parent",
+  "record": {
+    "variant": "discretionary",
+    "evaluation_id": "cd8d568aa1eefc935772723b6b305064b392fa4c0c887737e51f5413ec01aa01",
+    "gate_key": {
+      "registry_id": "R12",
+      "subcapability": "learned_aliases"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R12/2026-08-14-learned-aliases.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": "0b41e912c926d7c1a63edc6bd120b8a06c0c947295d9503b1114013775e0ddfe"
+  },
+  "expected": {
+    "refused": "parent_invalid"
+  },
+  "parent": {
+    "variant": "discretionary",
+    "evaluation_id": "0b41e912c926d7c1a63edc6bd120b8a06c0c947295d9503b1114013775e0ddfe",
+    "gate_key": {
+      "registry_id": "R8",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R8/2026-08-01-view.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R8/2026-08-01-view.md",
+    "result": "fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": null
+  }
+}

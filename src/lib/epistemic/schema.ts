@@ -625,7 +625,7 @@ const RFC3339 =
  * `chrono::DateTime::parse_from_rfc3339`: seconds run to 60 (a leap
  * second), offsets to ±23:59.
  */
-function isRfc3339(v: Json): boolean {
+export function isRfc3339(v: Json): boolean {
   if (typeof v !== 'string') return false;
   const m = v.match(RFC3339);
   if (m === null) return false;

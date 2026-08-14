@@ -1,0 +1,63 @@
+{
+  "name": "rule-version-refused",
+  "description": "an evaluation under different rules is a different evaluation",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "c99d73db85dd61222ff8779204bc8717f80f9e25a6b6232a2cb3f681311f2150",
+    "gate_key": {
+      "registry_id": "R13",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "emitted_plans",
+          "series": "aggregate",
+          "value": 21
+        }
+      },
+      {
+        "count": {
+          "name": "pending_plans",
+          "series": "aggregate",
+          "value": 13
+        }
+      },
+      {
+        "count": {
+          "name": "pending_high_stakes_plans",
+          "series": "aggregate",
+          "value": 5
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v0",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "rule_version_mismatch"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "r1-issue-refused",
+  "description": "R1 has no per-object keys",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "bbc16e40c090030958557328ae2dd65b7556158c090b1890ad720cf1c554fdc8",
+    "gate_key": {
+      "registry_id": "R1",
+      "subcapability": "issue"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "emitted_plans",
+          "series": "aggregate",
+          "value": 21
+        }
+      },
+      {
+        "count": {
+          "name": "pending_plans",
+          "series": "aggregate",
+          "value": 13
+        }
+      },
+      {
+        "count": {
+          "name": "pending_high_stakes_plans",
+          "series": "aggregate",
+          "value": 5
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "gate_unknown"
+  }
+}

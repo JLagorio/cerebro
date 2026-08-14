@@ -1,0 +1,37 @@
+{
+  "name": "r14-unregistered-connector-refused",
+  "description": "no connector is registered, so every connector key refuses",
+  "record": {
+    "variant": "discretionary",
+    "evaluation_id": "b7e992eab66a11ded87eb5bb205f603adc3198a8bb9e8f2072ca6036f75923a6",
+    "gate_key": {
+      "registry_id": "R14",
+      "subcapability": "connector:github"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": null,
+    "input_snapshot_refs": [
+      {
+        "evidence": {
+          "path": "docs/superpowers/evidence/triggers/R14/2026-08-14-github.md"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [],
+    "evidence_pack_path": "docs/superpowers/evidence/triggers/R14/2026-08-14-github.md",
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": "josef",
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "gate_unknown"
+  }
+}

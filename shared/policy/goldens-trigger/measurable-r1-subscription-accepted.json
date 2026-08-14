@@ -1,0 +1,90 @@
+{
+  "name": "measurable-r1-subscription-accepted",
+  "description": "R1 aggregates the whole subscription and carries the projection metrics",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "fa2de1f8fa7c901c5b1062aa61482ecf150d4dd699cad54d07b16050a37a8d3c",
+    "gate_key": {
+      "registry_id": "R1",
+      "subcapability": "root"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "sample_runs",
+          "series": "aggregate",
+          "value": 34
+        }
+      },
+      {
+        "count": {
+          "name": "high_stakes_runs",
+          "series": "aggregate",
+          "value": 12
+        }
+      },
+      {
+        "ratio_ppm": {
+          "name": "component_completeness",
+          "numerator": 33,
+          "denominator": 34,
+          "value_ppm": 970588,
+          "series": "aggregate"
+        }
+      },
+      {
+        "quantity": {
+          "name": "projected_input",
+          "value": 41000,
+          "unit": "tokens",
+          "series": {
+            "statistic": {
+              "quantile": "p50"
+            }
+          }
+        }
+      },
+      {
+        "quantity": {
+          "name": {
+            "projected_component": {
+              "component": "output_tokens"
+            }
+          },
+          "value": 9000,
+          "unit": "tokens",
+          "series": "aggregate"
+        }
+      },
+      {
+        "quantity": {
+          "name": "projected_cost",
+          "value": 125000,
+          "unit": "micros",
+          "series": "high_stakes_daily_load"
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": "accepted"
+}

@@ -1,0 +1,44 @@
+{
+  "name": "r2-as-measurable-refused",
+  "description": "R2 is hybrid; a measurable record understates it",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "6312eaaae46a3f35ff714853b2f792590dcaecf25c3747808c1346bd15f2f19d",
+    "gate_key": {
+      "registry_id": "R2",
+      "subcapability": "root"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "headroom_days",
+          "series": "aggregate",
+          "value": 23
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "variant_mismatch"
+  }
+}

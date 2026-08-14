@@ -1,0 +1,58 @@
+{
+  "name": "r13-subscription-scope-refused",
+  "description": "R3-R14 require one vault store",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "f801150642cd1ecc6651c7c618c5adf7910edbf6ad5a18ed91d9431567c11ba3",
+    "gate_key": {
+      "registry_id": "R13",
+      "subcapability": "root"
+    },
+    "scope": "subscription_global",
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "count": {
+          "name": "emitted_plans",
+          "series": "aggregate",
+          "value": 21
+        }
+      },
+      {
+        "count": {
+          "name": "pending_plans",
+          "series": "aggregate",
+          "value": 13
+        }
+      },
+      {
+        "count": {
+          "name": "pending_high_stakes_plans",
+          "series": "aggregate",
+          "value": 5
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "scope_mismatch"
+  }
+}

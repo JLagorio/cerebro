@@ -1,0 +1,51 @@
+{
+  "name": "ratio-recompute-refused",
+  "description": "value_ppm is floor(n*1e6/d), recomputed not trusted",
+  "record": {
+    "variant": "measurable",
+    "evaluation_id": "e00ed079bc1f9a28876f6eed6629c90f82875fc2d58afd505ebd00c7b48dda66",
+    "gate_key": {
+      "registry_id": "R6",
+      "subcapability": "root"
+    },
+    "scope": {
+      "vault_store": {
+        "vault_id": "0123456789abcdef0123456789abcdef",
+        "store_uuid": "feedfacefeedfacefeedfacefeedface"
+      }
+    },
+    "evaluated_at": "2026-08-14T09:00:00Z",
+    "window": {
+      "start": "2026-07-17T00:00:00+02:00",
+      "end": "2026-08-14T00:00:00+02:00",
+      "timezone": "Europe/Berlin"
+    },
+    "input_snapshot_refs": [
+      {
+        "runtime": {
+          "snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    ],
+    "input_snapshot_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "metrics": [
+      {
+        "ratio_ppm": {
+          "name": "unresolved_rate",
+          "numerator": 1,
+          "denominator": 3,
+          "value_ppm": 333334,
+          "series": "aggregate"
+        }
+      }
+    ],
+    "evidence_pack_path": null,
+    "result": "not_fired",
+    "rule_version": "trigger-registry-v1",
+    "approving_owner": null,
+    "parent_evaluation_id": null
+  },
+  "expected": {
+    "refused": "metrics_invalid"
+  }
+}
