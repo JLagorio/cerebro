@@ -206,6 +206,7 @@ mod tests {
                 from_seq: 0,
                 to_seq,
             },
+            &crate::policy::authority::resolvable().expect("the shipped artifacts"),
         )
     }
 

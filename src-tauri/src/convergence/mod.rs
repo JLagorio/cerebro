@@ -21,7 +21,8 @@ pub fn over(
     window: diff::Window,
 ) -> Result<diff::Output, String> {
     let (then, now) = diff::states(frames, store_uuid, window)?;
-    Ok(diff::compute(&then, &now, window))
+    let routes = crate::policy::authority::resolvable()?;
+    Ok(diff::compute(&then, &now, window, &routes))
 }
 
 /// The window a scheduled run should cover: from wherever the last stored run
