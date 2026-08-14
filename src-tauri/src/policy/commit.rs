@@ -1114,7 +1114,23 @@ fn apply_with_decisions(
             // one_click — which is what the UI keys its Revert action off, never
             // the op name.
             let revert_plan = if rule.revert == Revert::OneClick {
-                let digest = operation_digest(&expansion.members).map_err(internal)?;
+                // The digest NAMES the forward operation, so it is taken over
+                // the SYMBOLIC plan in both passes — the same bytes the
+                // writer's own idempotency digest describes. The physical
+                // pass's members carry values derived from ids this attempt
+                // happened to draw, and a digest over those describes a plan
+                // that exists nowhere: not the symbolic plan, and not the
+                // substituted bytes on disk.
+                let symbolic_members = if ctx.member_ids.is_some() {
+                    let mut symbolic_ctx = ctx.clone();
+                    symbolic_ctx.member_ids = None;
+                    expand(&proposal.op, &symbolic_ctx)
+                        .map_err(|e| expand_error(table, e))?
+                        .members
+                } else {
+                    expansion.members.clone()
+                };
+                let digest = operation_digest(&symbolic_members).map_err(internal)?;
                 Some(RevertPlan {
                     source_operation_digest: digest,
                     expected_post_versions: expansion
@@ -1123,7 +1139,18 @@ fn apply_with_decisions(
                         .map(|(class, id)| schema::PostVersion {
                             target_class: *class,
                             target_id: id.clone(),
-                            version: state.version(class.as_str(), id).unwrap_or(0) + 1,
+                            // COUNTED, not assumed 1 — the same rule
+                            // `post_versions` applies below: an op whose
+                            // members advance one target twice really does
+                            // leave it two ahead, and a `contradicts` add
+                            // advances its comparison through registration,
+                            // classification, and the same-batch open.
+                            version: state.version(class.as_str(), id).unwrap_or(0)
+                                + expansion
+                                    .advances
+                                    .iter()
+                                    .filter(|(c, i)| c == class && i == id)
+                                    .count() as u64,
                         })
                         .collect(),
                     steps: expansion.revert_steps.clone(),
@@ -2269,6 +2296,64 @@ mod tests {
                 schema::KIND_CONTRADICTION_OPENED,
                 schema::KIND_PROPOSAL_APPLIED,
             ]
+        );
+
+        // The stored inverse (M27.11a/b). Its post-versions must be the
+        // versions the batch ACTUALLY left — the comparison is advanced three
+        // times (registered, classified, opened), and the flat +1 this plan
+        // used to store was the un-fixed sibling of the M27.4d advances fix.
+        let applied_frame = frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_PROPOSAL_APPLIED)
+            .expect("the application committed");
+        let applied: schema::ProposalApplied =
+            serde_json::from_value(applied_frame.body.clone()).unwrap();
+        let plan = applied.revert_plan.expect("edit_relation is one_click");
+        assert!(!plan.expected_post_versions.is_empty());
+        for post in &plan.expected_post_versions {
+            assert_eq!(
+                Some(post.version),
+                state.version(post.target_class.as_str(), &post.target_id),
+                "{:?}/{} — the stored plan disagrees with the world the batch left",
+                post.target_class,
+                post.target_id
+            );
+        }
+        assert!(
+            plan.expected_post_versions
+                .iter()
+                .any(|p| p.target_id == body.comparison_id && p.version == 3),
+            "the comparison row carries the counted version, not +1: {:?}",
+            plan.expected_post_versions
+        );
+
+        // And its digest is over the SYMBOLIC plan — the same bytes the
+        // writer's idempotency digest describes. A digest over the physical
+        // pass's members would hash the relation event id this attempt drew,
+        // and describe a plan that exists nowhere.
+        let pre_frames: Vec<crate::ledger::frame::Frame> = frames
+            .iter()
+            .filter(|f| f.body.get("batch_id") != Some(&serde_json::json!(outcome.batch_id)))
+            .cloned()
+            .collect();
+        let pre_state = reduce(&pre_frames, writer.store_id());
+        let symbolic_ctx = ExpansionContext {
+            actor: actor(),
+            state: &pre_state,
+            base_ordinal: 0,
+            decision_event_id: None,
+            proposal_id: P1.to_string(),
+            staged_beliefs: Default::default(),
+            staged_entities: Default::default(),
+            addressed_contradictions: p.basis.addressed_contradictions.clone(),
+            member_ids: None,
+            submitted_at: pre_state.proposals.get(P1).unwrap().submitted_at.clone(),
+        };
+        let symbolic = expand(&p.op, &symbolic_ctx).expect("the symbolic expansion");
+        assert_eq!(
+            plan.source_operation_digest,
+            operation_digest(&symbolic.members).unwrap(),
+            "the stored digest names the symbolic operation"
         );
         let _ = std::fs::remove_dir_all(&vault);
     }

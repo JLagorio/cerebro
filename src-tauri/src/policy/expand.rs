@@ -63,6 +63,7 @@ pub struct Expansion {
 }
 
 /// What the server knows that the payload does not.
+#[derive(Clone)]
 pub struct ExpansionContext<'a> {
     /// The run's actor. Every generated body commits under it; nothing an
     /// agent separately claims.
@@ -618,9 +619,13 @@ impl<'a> Plan<'a> {
         self.members.extend(planned.members);
         // Server-derived, so the target-binding predicate skips it: the caller
         // could not have named an id that follows from an event this batch is
-        // about to mint. It is still a target this plan advances — the
-        // registration CREATES the comparison at v1, then the classification
-        // advances it, and an open edge advances it again.
+        // about to mint. It is still a target this plan advances, and the
+        // arithmetic counts EVERY version effect the reducer applies — the
+        // registration CREATES the comparison at v1, the classification
+        // advances it, and an open edge advances it again. One touch per
+        // event, or the stored post-version disagrees with the world the
+        // batch verifiably leaves (M27.11a).
+        self.touches(TargetClass::Comparison, &planned.comparison_id);
         self.touches(TargetClass::Comparison, &planned.comparison_id);
         if opens_an_edge {
             self.touches(TargetClass::Comparison, &planned.comparison_id);
