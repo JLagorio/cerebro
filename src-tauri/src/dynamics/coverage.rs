@@ -336,7 +336,28 @@ pub fn fold_states(fold: &Fold, states: &[DimensionState]) -> DimensionState {
 /// covers a source in general, and §90's whole point is that general coverage
 /// is not coverage OF this subject), it is not superseded, and its source is
 /// one the facet's own supporting assertions came from.
-fn assessments_for<'a>(state: &'a EpistemicState, facet: &Facet) -> Vec<&'a CoverageAssessment> {
+/// Does this assessment speak about the facet's predicate class?
+///
+/// `None` on the assessment means source-wide: everything that source says
+/// about this subject. `Some(c)` means it speaks only for class `c`, and a
+/// facet in another class must not read it (M27.10).
+///
+/// A facet whose class cannot be resolved — no freshness rule names its
+/// predicate — is only covered by source-wide assessments. That direction is
+/// deliberate: counting a class-scoped assessment for an unknown class would
+/// let one source's answer about something else read as "we looked".
+fn speaks_for(assessment: &CoverageAssessment, class: Option<&str>) -> bool {
+    match assessment.predicate_class.as_deref() {
+        None => true,
+        Some(scoped) => Some(scoped) == class,
+    }
+}
+
+fn assessments_for<'a>(
+    state: &'a EpistemicState,
+    facet: &Facet,
+    class: Option<&str>,
+) -> Vec<&'a CoverageAssessment> {
     let mut subject: Option<&str> = None;
     let mut sources: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     for event_id in &facet.supports {
@@ -351,18 +372,33 @@ fn assessments_for<'a>(state: &'a EpistemicState, facet: &Facet) -> Vec<&'a Cove
         return Vec::new();
     };
 
-    // One per source: `coverage_current` is the reducer's own selection by
-    // fold sequence, and re-deriving "latest" here from an agent-supplied
-    // `as_of` would let a source with a fast clock speak last.
-    let mut best: BTreeMap<&str, &CoverageAssessment> = BTreeMap::new();
+    // One per (source, class): `coverage_current` is the reducer's own
+    // selection by fold sequence, and re-deriving "latest" here from an
+    // agent-supplied `as_of` would let a source with a fast clock speak last.
+    //
+    // KEYED BY CLASS TOO, and it has to be (M27.10). The reducer keys
+    // `coverage_current` by `(source, subject, predicate_class)`; this keyed
+    // `best` by source alone, so one source's assessments about two classes
+    // overwrote each other and whichever class sorted last decided the
+    // facet's Coverage. An assessment about a different predicate class could
+    // therefore report a facet `observed` — the base saying it had looked
+    // when it had looked at something else.
+    let mut best: BTreeMap<(&str, Option<&str>), &CoverageAssessment> = BTreeMap::new();
+    let key = |assessment: &'a CoverageAssessment| {
+        (
+            assessment.source_id.as_str(),
+            assessment.predicate_class.as_deref(),
+        )
+    };
     for assessment in state.coverage_assessments.values() {
         if assessment.superseded
             || assessment.subject_id.as_deref() != Some(subject)
             || !sources.contains(assessment.source_id.as_str())
+            || !speaks_for(assessment, class)
         {
             continue;
         }
-        best.insert(assessment.source_id.as_str(), assessment);
+        best.insert(key(assessment), assessment);
     }
     // The reducer's current pointer wins where it has one.
     for ((source_id, subject_key, _), assessment_id) in &state.coverage_current {
@@ -370,8 +406,8 @@ fn assessments_for<'a>(state: &'a EpistemicState, facet: &Facet) -> Vec<&'a Cove
             continue;
         }
         if let Some(current) = state.coverage_assessments.get(assessment_id) {
-            if !current.superseded {
-                best.insert(current.source_id.as_str(), current);
+            if !current.superseded && speaks_for(current, class) {
+                best.insert(key(current), current);
             }
         }
     }
@@ -379,8 +415,17 @@ fn assessments_for<'a>(state: &'a EpistemicState, facet: &Facet) -> Vec<&'a Cove
 }
 
 /// Derive one facet's Coverage.
-pub fn coverage_of(state: &EpistemicState, fold: &Fold, facet: &Facet) -> Coverage {
-    let assessments = assessments_for(state, facet);
+/// `class` is the facet's predicate class, resolved by the CALLER from the
+/// freshness artifact it already loaded. Passed in rather than looked up here
+/// so this module never learns about freshness rules: it needs the name of
+/// the class, not the clock attached to it.
+pub fn coverage_of(
+    state: &EpistemicState,
+    fold: &Fold,
+    facet: &Facet,
+    class: Option<&str>,
+) -> Coverage {
+    let assessments = assessments_for(state, facet, class);
     let mut assessment_ids: Vec<String> = assessments
         .iter()
         .map(|a| a.assessment_id.clone())
@@ -535,7 +580,7 @@ mod tests {
         // not render alike, which is why this is a separate variant rather
         // than an `assessed` one with an empty map.
         let state = facet_base();
-        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state));
+        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         assert_eq!(coverage.summary(), Summary::Blind);
         assert!(matches!(coverage, Coverage::NoAssessments { .. }));
         assert_eq!(coverage.describe(), "coverage unassessed");
@@ -546,7 +591,7 @@ mod tests {
         let mut state = facet_base();
         assessed(&mut state, "a1", SOURCE_A, all(DimensionState::Yes));
         assessed(&mut state, "a2", SOURCE_B, all(DimensionState::Yes));
-        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state));
+        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         assert_eq!(coverage.summary(), Summary::Observed);
         assert_eq!(coverage.assessment_ids(), ["a1", "a2"]);
     }
@@ -560,7 +605,7 @@ mod tests {
         let mut broken = all(DimensionState::Yes);
         broken.scope_accessible = dimension(DimensionState::No, "2026-08-02T00:00:00Z");
         assessed(&mut state, "a2", SOURCE_B, broken);
-        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state));
+        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         assert_eq!(coverage.summary(), Summary::Blind);
         assert_eq!(coverage.describe(), "blind coverage");
     }
@@ -580,7 +625,7 @@ mod tests {
         assessed(&mut state, "a1", SOURCE_A, soft);
         assessed(&mut state, "a2", SOURCE_B, all(DimensionState::Yes));
         assert_eq!(
-            coverage_of(&state, &fold, &only_facet(&state)).summary(),
+            coverage_of(&state, &fold, &only_facet(&state), None).summary(),
             Summary::Partial
         );
     }
@@ -593,7 +638,7 @@ mod tests {
         assessed(&mut state, "a1", SOURCE_A, vague);
         assessed(&mut state, "a2", SOURCE_B, all(DimensionState::Yes));
         assert_eq!(
-            coverage_of(&state, &load().unwrap(), &only_facet(&state)).summary(),
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None).summary(),
             Summary::Partial
         );
     }
@@ -635,7 +680,7 @@ mod tests {
             all(DimensionState::NotApplicable),
         );
         assert_eq!(
-            coverage_of(&state, &load().unwrap(), &only_facet(&state)).summary(),
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None).summary(),
             Summary::Observed
         );
     }
@@ -735,7 +780,7 @@ mod tests {
         late.source_healthy = dimension(DimensionState::Yes, "2026-08-09T00:00:00Z");
         assessed(&mut state, "a2", SOURCE_B, late);
 
-        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state));
+        let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         let Coverage::Assessed { dimensions, .. } = &coverage else {
             panic!("assessed");
         };
@@ -756,9 +801,85 @@ mod tests {
         assessed(&mut state, "a1", SOURCE_A, all(DimensionState::Yes));
         state.coverage_assessments.get_mut("a1").unwrap().subject_id = Some("d".repeat(32));
         assert!(matches!(
-            coverage_of(&state, &load().unwrap(), &only_facet(&state)),
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None),
             Coverage::NoAssessments { .. }
         ));
+    }
+
+    /// THE defect this argument exists to close (M27.10).
+    ///
+    /// `best` was keyed by `source_id` alone while the reducer keys
+    /// `coverage_current` by `(source, subject, predicate_class)`. One source
+    /// assessing two classes about one subject therefore overwrote itself,
+    /// and whichever class sorted last decided the facet's Coverage — so a
+    /// facet about `ci_status` could read `observed` on the strength of
+    /// somebody having looked at a shipping BOM. Saying "we looked" when the
+    /// looking was at something else is the worst direction to be wrong in.
+    #[test]
+    fn an_assessment_scoped_to_another_predicate_class_covers_nothing_here() {
+        let mut state = facet_base();
+        // Blind about this facet's class, observed about another. One source,
+        // one subject, two classes.
+        assessed(&mut state, "a1", SOURCE_A, all(DimensionState::No));
+        state
+            .coverage_assessments
+            .get_mut("a1")
+            .unwrap()
+            .predicate_class = Some("ci_status".into());
+        assessed(&mut state, "a2", SOURCE_A, all(DimensionState::Yes));
+        state
+            .coverage_assessments
+            .get_mut("a2")
+            .unwrap()
+            .predicate_class = Some("shipping_bom".into());
+        state.coverage_current.insert(
+            (
+                SOURCE_A.into(),
+                crate::assembly::fixture::FALCON.into(),
+                "ci_status".into(),
+            ),
+            "a1".into(),
+        );
+        state.coverage_current.insert(
+            (
+                SOURCE_A.into(),
+                crate::assembly::fixture::FALCON.into(),
+                "shipping_bom".into(),
+            ),
+            "a2".into(),
+        );
+
+        let coverage = coverage_of(
+            &state,
+            &load().unwrap(),
+            &only_facet(&state),
+            Some("ci_status"),
+        );
+        assert_eq!(coverage.summary(), Summary::Blind);
+        assert_eq!(
+            coverage.assessment_ids(),
+            ["a1"],
+            "the BOM assessment answered a question this facet did not ask"
+        );
+
+        // And a facet whose class cannot be resolved reads neither of them:
+        // a class-scoped answer is not a source-wide one.
+        assert!(matches!(
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None),
+            Coverage::NoAssessments { .. }
+        ));
+    }
+
+    /// A source-wide assessment still speaks for every class, which is what
+    /// keeps the fix above from turning well-assessed facets blind.
+    #[test]
+    fn an_assessment_with_no_class_speaks_for_whatever_the_facet_is_about() {
+        let mut state = facet_base();
+        assessed(&mut state, "a1", SOURCE_A, all(DimensionState::Yes));
+        for class in [None, Some("ci_status"), Some("anything_at_all")] {
+            let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), class);
+            assert_eq!(coverage.assessment_ids(), ["a1"], "class {class:?}");
+        }
     }
 
     #[test]
@@ -767,7 +888,7 @@ mod tests {
         assessed(&mut state, "a1", SOURCE_A, all(DimensionState::Yes));
         state.coverage_assessments.get_mut("a1").unwrap().superseded = true;
         assert!(matches!(
-            coverage_of(&state, &load().unwrap(), &only_facet(&state)),
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None),
             Coverage::NoAssessments { .. }
         ));
     }
@@ -782,7 +903,7 @@ mod tests {
             all(DimensionState::Yes),
         );
         assert!(matches!(
-            coverage_of(&state, &load().unwrap(), &only_facet(&state)),
+            coverage_of(&state, &load().unwrap(), &only_facet(&state), None),
             Coverage::NoAssessments { .. }
         ));
     }

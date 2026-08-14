@@ -120,7 +120,15 @@ pub fn chips_for_facet(
     as_of: chrono::DateTime<chrono::Utc>,
 ) -> FacetChips {
     let derived = support::support_of(state, &tables.authority, facet);
-    let coverage = coverage::coverage_of(state, &tables.coverage, facet);
+    // The facet's predicate class, resolved HERE because this is the one place
+    // holding both artifacts. Coverage needs the class name to tell a
+    // class-scoped assessment about this facet from one about something else
+    // (M27.10); it has no business knowing what a freshness rule is.
+    let class = tables
+        .freshness
+        .rule_for(facet.key.predicate.value())
+        .map(|rule| rule.predicate_class.as_str());
+    let coverage = coverage::coverage_of(state, &tables.coverage, facet, class);
     let assessment = freshness::assess(state, &tables.freshness, facet, as_of);
     let validity = validity::validity_of(state, belief, assessment.freshness);
     let support_text = derived.support.describe();
