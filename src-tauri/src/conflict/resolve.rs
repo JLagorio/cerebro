@@ -389,7 +389,7 @@ mod discipline {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::assembly::fixture::{
         belief, linked, observation, revision, OBS_AUTHORITY, OBS_PLANNED,
@@ -658,7 +658,7 @@ mod tests {
     /// The lead says Rev C is AMD; main has the AMD config committed; the
     /// manufacturing BOM says NVIDIA. Three live beliefs about one entity and
     /// one predicate, disagreeing on the face of it.
-    fn lead_main_bom() -> EpistemicState {
+    pub(crate) fn lead_main_bom() -> EpistemicState {
         let mut state = EpistemicState::default();
         for (belief_id, revision_event, content, observation_event) in [
             (
