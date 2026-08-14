@@ -72,12 +72,44 @@ impl VaultScope {
     }
 }
 
-fn constant(registry: &Registry, gate: &str, name: &str) -> Result<u64, String> {
+pub(crate) fn constant(registry: &Registry, gate: &str, name: &str) -> Result<u64, String> {
     registry
         .protocol(gate)
         .and_then(|p| p.get(name))
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| format!("protocol {gate} has no integer constant {name}"))
+}
+
+/// The one runtime snapshot-id rule: the id names the QUESTION — gate,
+/// scope, rule version, window — alongside the payload bytes (M28.1a).
+/// Shared by the measurable persist path and R2's hybrid assembly, so the
+/// rule cannot fork.
+pub(crate) fn derive_runtime_snapshot_id(
+    registry: &Registry,
+    gate_key: &GateKey,
+    stored_scope: &StoredScope,
+    window: &Window,
+    payload_json: &str,
+) -> String {
+    let scope_bytes = match stored_scope {
+        StoredScope::SubscriptionGlobal => "subscription_global".to_string(),
+        StoredScope::VaultStore {
+            vault_id,
+            store_uuid,
+        } => format!("vault_store\0{vault_id}\0{store_uuid}"),
+    };
+    sha256_hex(
+        format!(
+            "{}\0{}\0{scope_bytes}\0{}\0{}\0{}\0{}\0{payload_json}",
+            registry.snapshot_hash_domain,
+            gate_key.canonical(),
+            registry.rule_version,
+            window.start,
+            window.end,
+            window.timezone,
+        )
+        .as_bytes(),
+    )
 }
 
 /// The first instant of a local calendar day. A skipped midnight (spring
@@ -107,7 +139,7 @@ fn local_day_start(
 /// The preceding `days` COMPLETE local calendar days: ends at the most
 /// recent local midnight at or before `evaluated_at`, starts `days` local
 /// days earlier.
-fn complete_window(
+pub(crate) fn complete_window(
     tz: chrono_tz::Tz,
     evaluated_at: chrono::DateTime<chrono::Utc>,
     days: u64,
@@ -137,7 +169,7 @@ fn complete_window(
     ))
 }
 
-fn parse_z(stamp: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+pub(crate) fn parse_z(stamp: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
     chrono::DateTime::parse_from_rfc3339(stamp)
         .map(|t| t.with_timezone(&chrono::Utc))
         .map_err(|e| format!("{stamp:?} is not RFC3339: {e}"))
@@ -176,25 +208,8 @@ fn persist(
 ) -> Result<Recorded, String> {
     let payload_json =
         serde_json::to_string(payload).map_err(|e| format!("canonicalizing payload: {e}"))?;
-    let scope_bytes = match &stored_scope {
-        StoredScope::SubscriptionGlobal => "subscription_global".to_string(),
-        StoredScope::VaultStore {
-            vault_id,
-            store_uuid,
-        } => format!("vault_store\0{vault_id}\0{store_uuid}"),
-    };
-    let snapshot_id = sha256_hex(
-        format!(
-            "{}\0{}\0{scope_bytes}\0{}\0{}\0{}\0{}\0{payload_json}",
-            registry.snapshot_hash_domain,
-            gate_key.canonical(),
-            registry.rule_version,
-            window.start,
-            window.end,
-            window.timezone,
-        )
-        .as_bytes(),
-    );
+    let snapshot_id =
+        derive_runtime_snapshot_id(registry, &gate_key, &stored_scope, &window, &payload_json);
     let input_snapshot_hash = derive_input_snapshot_hash(
         &registry.snapshot_hash_domain,
         &[(

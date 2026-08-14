@@ -101,8 +101,8 @@ pub fn run_measurable(
     gates.push(GateRun {
         gate: "R2:root".to_string(),
         outcome: GateOutcome::NotEvaluated {
-            reason: "hybrid — the measurable headroom leg runs only against an owner \
-                     evidence pack, and none exists yet"
+            reason: "hybrid — assembled from an owner evidence pack through the recording \
+                     road, never by this pass"
                 .to_string(),
         },
     });
