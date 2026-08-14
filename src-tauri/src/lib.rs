@@ -923,8 +923,10 @@ fn run_agent(
     let mut request = request;
     // M17.13: the scope rides the same token. It is taken from the REQUEST,
     // which the app builds from the Agent record — the CLI never sees it and
-    // therefore cannot argue with it.
-    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone())?);
+    // therefore cannot argue with it. No tool narrowing (M31.1b): the
+    // panel's own turns are unrestricted, and a person is watching them.
+    request.mcp_token =
+        Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone(), None)?);
     let dir = config_dir(&app)?;
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.

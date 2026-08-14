@@ -82,6 +82,11 @@ pub struct RunGrant {
     /// A Collection is a folder, so "the Product collection" is expressible;
     /// its empty entry set (surface.ts) is not consulted and does not matter.
     pub scope: Option<Vec<String>>,
+    /// Tool names this token may dispatch. `None` is unrestricted — the
+    /// panel's own turns. Same upper-bound semantics as `scope`, and checked
+    /// in the same place, for the same reason: argv is advice, the grant is
+    /// the boundary.
+    pub tools: Option<Vec<String>>,
 }
 
 /// A run's durable id, derived from its bearer token.
@@ -99,6 +104,7 @@ impl RunGrant {
             actor: actor.to_string(),
             run_id: run_id_of(actor),
             scope: None,
+            tools: None,
         }
     }
 
@@ -309,6 +315,8 @@ pub(crate) fn test_submit_answer(
             actor: crate::assembly::ask::ACTOR.to_string(),
             run_id: run_id.to_string(),
             scope: Some(vec![]),
+            // The narrowing the real mint site grants a synthesis run.
+            tools: Some(crate::assembly::live::declared_tools()),
         },
     )
     .map(|_| ())
@@ -451,6 +459,7 @@ impl McpState {
         &self,
         actor: Option<&str>,
         scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
     ) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
@@ -469,6 +478,9 @@ impl McpState {
                 // declares `scope:` and lists nothing has scoped itself to
                 // nothing, and the only safe reading of that is no writes.
                 scope,
+                // Same reading (M31.1b): an empty tools list grants no
+                // dispatch, and only `None` — the panel — is unrestricted.
+                tools,
             },
         );
         Ok(token)
@@ -1054,6 +1066,40 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
     }
 }
 
+/// M31.1b — the refusal an un-granted tool name earns, or `None` if the
+/// grant permits dispatch.
+///
+/// A function beside the check that uses it, like `may_write`, so the tests
+/// can hold the refusal itself. BOTH sides are normalized to the short
+/// spelling: loopback names arrive short, but a caller presenting the full
+/// `mcp__cerebro__` form names the same tool, and a grant DECLARED in the
+/// full form must admit the short-spelled call the loopback actually
+/// receives — a one-sided strip would refuse it, fail-closed but a silent
+/// drift channel. `MCP_PREFIX` lives in `agent/mod.rs` so the two spellings
+/// cannot drift.
+fn ungranted_tool_refusal(grant: &RunGrant, name: &str) -> Option<String> {
+    let tools = grant.tools.as_ref()?;
+    let strip = |t: &str| -> String {
+        t.strip_prefix(crate::agent::MCP_PREFIX)
+            .unwrap_or(t)
+            .to_string()
+    };
+    let short = strip(name);
+    // Equal names strip to equal names, so this one comparison also covers
+    // the verbatim `t == name` case.
+    if tools.iter().any(|t| strip(t) == short) {
+        return None;
+    }
+    Some(format!(
+        "This run is granted {} and cannot call {name}.",
+        if tools.is_empty() {
+            "nothing".to_string()
+        } else {
+            tools.join(", ")
+        }
+    ))
+}
+
 const PREFERENCES_REFUSAL: &str =
     "`preferences` is the user's memory for this agent and cannot be written by a run. Put what \
 you learned in `recent`, or record it as a concept with write_concept.";
@@ -1109,6 +1155,16 @@ fn call_tool(
                     .unwrap_or_default()
             )));
         }
+    }
+
+    // M31.1b — reads were the one surface the grant did not bound. Checked
+    // exactly like scope: a name outside the grant is refused before any
+    // tool body runs. And exactly like scope's refusal above, this is a
+    // plain error_result the model can read — no OperationalRefusal, no
+    // operational_log row. Deliberate, and symmetric: if either refusal
+    // ever starts recording operationally, both change together.
+    if let Some(refusal) = ungranted_tool_refusal(grant, name) {
+        return Ok(error_result(refusal));
     }
 
     if writes_preferences(&grant.actor, name, args) {
@@ -2583,6 +2639,7 @@ mod tests {
             actor: "process:scout".into(),
             run_id: run_id_of("process:scout"),
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+            tools: None,
         }
     }
 
@@ -2740,6 +2797,92 @@ mod tests {
         }
     }
 
+    // --- The tools narrowing (M31.1b) ----------------------------------
+    //
+    // Same property as scope, one surface over: the point is not that a run
+    // is ASKED to stay inside its granted tools (that is argv, M31.1a); it
+    // is that dispatch refuses an un-granted name before any tool body runs.
+
+    #[test]
+    fn a_granted_narrowing_is_enforced_at_dispatch_not_just_argv() {
+        // M31.1b. A token minted with a tool narrowing refuses un-granted
+        // reads server-side — a compromised CLI that ignores its argv still
+        // cannot read the vault through the loopback. Minted through the REAL
+        // `run_token`, which needs state but no live socket.
+        let run_actors = Arc::new(Mutex::new(Vec::new()));
+        let state = McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                token: "base".into(),
+                vault: Arc::new(Mutex::new(PathBuf::new())),
+                run_actors: run_actors.clone(),
+            })),
+        };
+        let token = state
+            .run_token(
+                Some("agent:m26-ingest"),
+                Some(vec![]),
+                Some(vec![COMMIT_TOOL.into()]),
+            )
+            .expect("minting needs state, not a socket");
+        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+            .expect("a minted token resolves to its grant");
+
+        let refusal = ungranted_tool_refusal(&grant, "get_note")
+            .expect("an un-granted read is refused before any tool body runs");
+        assert!(refusal.contains("get_note"), "names the tool: {refusal}");
+        assert!(
+            refusal.contains(COMMIT_TOOL),
+            "names the narrowing: {refusal}"
+        );
+        // What the grant names still dispatches.
+        assert!(ungranted_tool_refusal(&grant, COMMIT_TOOL).is_none());
+    }
+
+    #[test]
+    fn the_full_mcp_spelling_cannot_slip_past_the_narrowing() {
+        // Loopback names arrive short, so the strip is defensive — but both
+        // spellings must name the SAME tool: a granted short name admits the
+        // full spelling, and an un-granted one refuses both.
+        let mut grant = RunGrant::unrestricted("agent:m26-synthesis");
+        grant.tools = Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]);
+        let full = format!(
+            "{}{}",
+            crate::agent::MCP_PREFIX,
+            crate::assembly::prompt::SUBMIT_TOOL
+        );
+        assert!(ungranted_tool_refusal(&grant, &full).is_none());
+        let refusal = format!("{}get_note", crate::agent::MCP_PREFIX);
+        assert!(ungranted_tool_refusal(&grant, &refusal).is_some());
+        // And the declared side normalizes too: a grant WRITTEN in the full
+        // spelling admits the short-spelled call the loopback actually
+        // receives — a one-sided strip would refuse it, fail-closed but a
+        // silent drift channel.
+        grant.tools = Some(vec![full]);
+        assert!(ungranted_tool_refusal(&grant, crate::assembly::prompt::SUBMIT_TOOL).is_none());
+    }
+
+    #[test]
+    fn a_narrowing_that_lists_nothing_grants_nothing() {
+        // The same reading scope settled on: a declaration that lists nothing
+        // has narrowed itself to nothing, and the only safe reading of that
+        // is no dispatch — never "everything".
+        let mut grant = RunGrant::unrestricted("agent:x");
+        grant.tools = Some(vec![]);
+        let refusal = ungranted_tool_refusal(&grant, "get_note").expect("nothing is granted");
+        assert!(refusal.contains("get_note"), "{refusal}");
+    }
+
+    #[test]
+    fn an_unrestricted_grant_dispatches_the_whole_catalog() {
+        // The panel's own turns: `None` is no narrowing, not an empty one.
+        let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().unwrap();
+            assert!(ungranted_tool_refusal(&grant, name).is_none(), "{name}");
+        }
+    }
+
     /// One assembled question, opened for a run the way the app opens it.
     fn open_a_question(run_id: &str) -> crate::assembly::manifest::WorkingMemoryManifest {
         use crate::assembly::fixture;
@@ -2753,6 +2896,7 @@ mod tests {
             actor: "agent:m26-synthesis".into(),
             run_id: run_id.to_string(),
             scope: None,
+            tools: None,
         }
     }
 

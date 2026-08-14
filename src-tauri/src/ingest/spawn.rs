@@ -71,7 +71,10 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
             // rather than starting one behind the user's back.
             live.mcp.ensure(live.app, live.vault)?;
             // Scoped to nothing. An ingest run proposes; it does not write.
-            live.mcp.run_token(Some(ACTOR), Some(vec![]))
+            // M31.1b: the grant carries the SAME narrowing the argv declares
+            // — one list, so the boundary and the advice cannot disagree.
+            live.mcp
+                .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))
         },
         spawn: move |session: &Session| {
             let url = live.mcp.ensure(live.app, live.vault)?.url;
@@ -107,6 +110,22 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
     }
 }
 
+/// The tools an ingest run holds — declared in the request's argv (M31.1a)
+/// AND granted to its token (M31.1b) from this single list, so the two can
+/// never disagree. An ingest run observes, extracts, resolves, and PROPOSES;
+/// the proposal surface is derived from the policy table so this file never
+/// carries a second inventory of it. It does not read the vault (every byte
+/// it is entitled to is fenced into its prompt) and it does not write
+/// directly — write_concept and cache_source are deliberately absent: a
+/// direct writer here would bypass review, and a cached source authored by
+/// this run would re-enter the next window at owner authority.
+fn declared_tools() -> Vec<String> {
+    let mut tools = crate::mcp::proposal_tool_names();
+    tools.push(crate::mcp::REPORT_TOOL.into());
+    tools.push(crate::mcp::ORGANIZE_TOOL.into());
+    tools
+}
+
 fn request(session: &Session, url: &str) -> AgentRequest {
     AgentRequest {
         message: session.prompt.clone(),
@@ -125,20 +144,9 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
-        // M31.1a — an ingest run observes, extracts, resolves, and PROPOSES;
-        // the proposal surface is derived from the policy table so this file
-        // never carries a second inventory of it. It does not read the vault
-        // (every byte it is entitled to is fenced into its prompt) and it
-        // does not write directly — write_concept and cache_source are
-        // deliberately absent: a direct writer here would bypass review, and
-        // a cached source authored by this run would re-enter the next
-        // window at owner authority.
-        allowed_tools: Some({
-            let mut tools = crate::mcp::proposal_tool_names();
-            tools.push(crate::mcp::REPORT_TOOL.into());
-            tools.push(crate::mcp::ORGANIZE_TOOL.into());
-            tools
-        }),
+        // M31.1a — see `declared_tools` for what is granted and why. The
+        // same list `mint_token` grants (M31.1b).
+        allowed_tools: Some(declared_tools()),
         // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
         // tools are withdrawn in build_args. Only the three internal spawn
         // sites ever set this.
@@ -227,6 +235,17 @@ mod tests {
              by this run would re-enter the next window at owner authority. \
              Exact names: propose_cache_source is the REVIEWED channel and is \
              a different tool (the propose_ prefix is injective by design)"
+        );
+    }
+
+    #[test]
+    fn the_argv_and_the_grant_are_one_list() {
+        // M31.1b. `request` declares `declared_tools()` and the mint closure
+        // grants `declared_tools()` — the invariant is that both draw from
+        // the ONE function, so a second hand-written list cannot drift.
+        assert_eq!(
+            request(&session(), "u").allowed_tools,
+            Some(declared_tools())
         );
     }
 

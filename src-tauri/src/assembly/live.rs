@@ -51,7 +51,10 @@ impl Spawn for Live<'_> {
         // one behind the user's back.
         self.mcp.ensure(self.app, self.vault)?;
         // Scoped to nothing. A synthesis run answers; it does not write.
-        self.mcp.run_token(Some(ACTOR), Some(vec![]))
+        // M31.1b: the grant carries the SAME narrowing the argv declares —
+        // one list, so the boundary and the advice cannot disagree.
+        self.mcp
+            .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))
     }
 
     fn run(&self, token: &str, prompt: &str) -> Result<(), String> {
@@ -89,6 +92,17 @@ impl Spawn for Live<'_> {
     }
 }
 
+/// The one tool a synthesis run holds — declared in the request's argv
+/// (M31.1a) AND granted to its token (M31.1b) from this single list, so the
+/// two can never disagree. The constant, not a literal: `SUBMIT_TOOL` exists
+/// so the prompt and the served surface cannot disagree about the name, and
+/// a "submit_answer" string here would be a third spelling. `pub(crate)` so
+/// mcp's `test_submit_answer` fixture models the REAL grant rather than
+/// hand-writing a copy of it.
+pub(crate) fn declared_tools() -> Vec<String> {
+    vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]
+}
+
 fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
     AgentRequest {
         message: prompt.to_string(),
@@ -111,10 +125,8 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         scope: Some(vec![]),
         // M31.1a — a synthesis run answers from the manifest and nothing
         // else. That was always the design (prompt::RULES); until now it was
-        // a sentence. The constant, not a literal: SUBMIT_TOOL exists so the
-        // prompt and the served surface cannot disagree about the name, and
-        // a "submit_answer" string here would be a third spelling.
-        allowed_tools: Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]),
+        // a sentence. The same list `mint_token` grants (M31.1b).
+        allowed_tools: Some(declared_tools()),
         // Cerebro's own run: attended means a person awaits the ANSWER, not
         // that anybody supervises the child, so the CLI built-ins are
         // withdrawn here too. Only the three internal spawn sites set this.
@@ -158,6 +170,14 @@ mod tests {
             request("q", "t", "u").allowed_tools,
             Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()])
         );
+    }
+
+    #[test]
+    fn the_argv_and_the_grant_are_one_list() {
+        // M31.1b. `request` declares `declared_tools()` and `mint_token`
+        // grants `declared_tools()` — the invariant is that both draw from
+        // the ONE function, so a second hand-written list cannot drift.
+        assert_eq!(request("q", "t", "u").allowed_tools, Some(declared_tools()));
     }
 
     #[test]

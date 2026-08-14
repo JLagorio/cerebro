@@ -44,7 +44,12 @@ impl Runner for Live<'_> {
         // and errors if none is running, rather than starting one behind the
         // user's back.
         let url = self.mcp.ensure(self.app, self.vault)?.url;
-        let token = self.mcp.run_token(Some(ACTOR), Some(vec![]))?;
+        // Scoped to nothing; granted the SAME tool narrowing the argv
+        // declares (M31.1b) — one list, so the boundary and the advice
+        // cannot disagree.
+        let token = self
+            .mcp
+            .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))?;
         let (tx, rx) = sync_channel::<RunEnd>(1);
         crate::agent::stream(
             self.app.clone(),
@@ -72,6 +77,17 @@ impl Runner for Live<'_> {
     }
 }
 
+/// The tools a maintenance run holds — declared in the request's argv
+/// (M31.1a) AND granted to its token (M31.1b) from this single list, so the
+/// two can never disagree. The pass proposes; its findings were computed
+/// deterministically before it spawned, so there is nothing to look up.
+/// Surface derived, not listed (policy-is-data).
+fn declared_tools() -> Vec<String> {
+    let mut tools = crate::mcp::proposal_tool_names();
+    tools.push(crate::mcp::ORGANIZE_TOOL.into());
+    tools
+}
+
 fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
     AgentRequest {
         message: prompt.to_string(),
@@ -89,14 +105,9 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
-        // M31.1a — the maintenance pass proposes; its findings were computed
-        // deterministically before it spawned, so there is nothing to look
-        // up. Surface derived, not listed (policy-is-data).
-        allowed_tools: Some({
-            let mut tools = crate::mcp::proposal_tool_names();
-            tools.push(crate::mcp::ORGANIZE_TOOL.into());
-            tools
-        }),
+        // M31.1a — see `declared_tools` for what is granted and why. The
+        // same list the mint grants (M31.1b).
+        allowed_tools: Some(declared_tools()),
         // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
         // tools are withdrawn in build_args. Only the three internal spawn
         // sites ever set this.
@@ -156,6 +167,14 @@ mod tests {
              propose_cache_source is the REVIEWED channel and is a different \
              tool (the propose_ prefix is injective by design)"
         );
+    }
+
+    #[test]
+    fn the_argv_and_the_grant_are_one_list() {
+        // M31.1b. `request` declares `declared_tools()` and the mint grants
+        // `declared_tools()` — the invariant is that both draw from the ONE
+        // function, so a second hand-written list cannot drift.
+        assert_eq!(request("f", "t", "u").allowed_tools, Some(declared_tools()));
     }
 
     #[test]
