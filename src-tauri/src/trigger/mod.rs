@@ -23,6 +23,7 @@ pub mod evaluation;
 pub mod evidence;
 pub mod observations;
 pub mod registry;
+pub mod runner;
 pub mod sources;
 
 #[cfg(test)]
@@ -35,7 +36,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     /// The whole trigger module, non-test halves, as bytes to scan.
-    const TRIGGER_SOURCES: [(&str, &str); 7] = [
+    const TRIGGER_SOURCES: [(&str, &str); 8] = [
         ("mod.rs", include_str!("mod.rs")),
         ("registry.rs", include_str!("registry.rs")),
         ("evaluation.rs", include_str!("evaluation.rs")),
@@ -43,6 +44,7 @@ mod tests {
         ("cost.rs", include_str!("cost.rs")),
         ("sources.rs", include_str!("sources.rs")),
         ("evidence.rs", include_str!("evidence.rs")),
+        ("runner.rs", include_str!("runner.rs")),
     ];
 
     #[test]

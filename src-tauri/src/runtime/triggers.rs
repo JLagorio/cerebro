@@ -7,9 +7,10 @@
 //! snapshot, read it back, record an evaluation, read it back.
 //!
 //! **Immutability is refusal, not absence of an UPDATE.** A snapshot id is
-//! the domain-separated hash of its canonical payload and an evaluation id is
-//! a function of gate, scope, rule version, and snapshot hash — so a rerun
-//! over the same inputs lands on the same id, and the writer answers
+//! the domain-separated hash of the question it snapshots — gate, scope,
+//! rule version, window — plus its canonical payload, and an evaluation id
+//! is a function of gate, scope, rule version, and snapshot hash — so a
+//! rerun over the same inputs lands on the same id, and the writer answers
 //! `Replayed` with the row unchanged. The same id arriving with DIFFERENT
 //! bytes is refused out loud: it means a hash rule moved without its version
 //! moving, and overwriting would make every derived evaluation
@@ -123,7 +124,7 @@ pub fn put_snapshot(conn: &Connection, row: &SnapshotRow) -> Result<Put, String>
         }
         return Err(format!(
             "snapshot {} already exists with different content — a snapshot id is a hash of its \
-             payload, so this means a hash rule moved without its version moving",
+             question and payload, so this means a hash rule moved without its version moving",
             row.snapshot_id
         ));
     }
@@ -315,6 +316,33 @@ pub fn evaluation(conn: &Connection, evaluation_id: &str) -> Result<Option<Evalu
         })
     })
     .transpose()
+}
+
+/// The most recent recorded evaluation of one gate under one scope, or None
+/// if the gate has never been evaluated there — which the caller must say
+/// out loud, not render as silence.
+pub fn latest_evaluation(
+    conn: &Connection,
+    registry_id: &str,
+    subkey: &str,
+    scope: &StoredScope,
+) -> Result<Option<EvaluationRow>, String> {
+    let (scope_kind, vault_id, store_uuid) = scope.columns();
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT evaluation_id FROM trigger_evaluations \
+             WHERE registry_id = ?1 AND subkey = ?2 AND scope_kind = ?3 \
+               AND vault_id IS ?4 AND store_uuid IS ?5 \
+             ORDER BY evaluated_at DESC, evaluation_id LIMIT 1",
+            params![registry_id, subkey, scope_kind, vault_id, store_uuid],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("finding the latest {registry_id}:{subkey} evaluation: {e}"))?;
+    match id {
+        Some(id) => evaluation(conn, &id),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]
@@ -544,6 +572,36 @@ mod tests {
         row.parent_evaluation_id = Some(HASH_A.to_string());
         let err = put_evaluation(&conn, &row).unwrap_err();
         assert!(err.contains("FOREIGN KEY constraint failed"), "{err}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_latest_evaluation_is_the_newest_stamp_under_the_exact_scope() {
+        let (dir, conn, vault) = fixture("triggers-latest");
+        let earlier = measurable_row(&vault);
+        put_evaluation(&conn, &earlier).unwrap();
+        let mut later = measurable_row(&vault);
+        later.evaluation_id = "c".repeat(64);
+        later.evaluated_at = "2026-08-15T09:00:00.000Z".to_string();
+        later.result = "fired".to_string();
+        put_evaluation(&conn, &later).unwrap();
+
+        let scope = earlier.scope.clone();
+        let found = latest_evaluation(&conn, "R13", "root", &scope)
+            .unwrap()
+            .expect("two rows exist");
+        assert_eq!(found, later);
+
+        // A different store is a different question — nothing there.
+        let elsewhere = StoredScope::VaultStore {
+            vault_id: vault,
+            store_uuid: "0123456789abcdef0123456789abcdef".to_string(),
+        };
+        assert_eq!(
+            latest_evaluation(&conn, "R13", "root", &elsewhere),
+            Ok(None)
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
