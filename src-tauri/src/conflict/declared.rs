@@ -229,9 +229,44 @@ fn verdict(
 /// The backfill's declaration is the whole batch and passes 0; an authored one
 /// rides behind its own relation event and passes the ordinal after it.
 ///
-/// `Ok(None)` means the declaration cannot be classified at all — a belief or
-/// the pinned revision is gone. It is neither planned nor counted, because a
-/// count that included it would claim coverage nobody has.
+/// [`Unplannable::Unclassifiable`] means the declaration can never be
+/// classified — a belief or the pinned revision is gone. It is neither planned
+/// nor counted, because a count that included it would claim coverage nobody
+/// has; but it IS reported, because the relation stays live and therefore
+/// stays a `legacy_unclassified` row in a protected lane forever, and a person
+/// looking at that row deserves to know it is not merely waiting its turn
+/// (M27.10).
+///
+/// [`Unplannable::Failed`] is an ordinary failure: something about this
+/// declaration could not be built, and a retry might do better.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unplannable {
+    Unclassifiable(String),
+    Failed(String),
+}
+
+impl Unplannable {
+    pub fn detail(&self) -> &str {
+        match self {
+            Unplannable::Unclassifiable(detail) | Unplannable::Failed(detail) => detail,
+        }
+    }
+}
+
+impl std::fmt::Display for Unplannable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.detail())
+    }
+}
+
+/// Everything a `?` inside [`plan`] raises is an ordinary failure. The
+/// unclassifiable case is constructed explicitly, once, where it is found.
+impl From<String> for Unplannable {
+    fn from(detail: String) -> Self {
+        Unplannable::Failed(detail)
+    }
+}
+
 pub fn plan(
     state: &EpistemicState,
     declaration: &Declaration,
@@ -239,19 +274,28 @@ pub fn plan(
     rule_version: &str,
     classified_at: &str,
     base_ordinal: usize,
-) -> Result<Option<Planned>, String> {
+) -> Result<Planned, Unplannable> {
     let mut endpoints = Vec::new();
     let mut missing = Vec::new();
+    // Why this declaration cannot be classified, when it cannot. Carried out
+    // rather than returned as a bare `None` (M27.10): the caller records it,
+    // because a declaration that will NEVER be classifiable is a permanent
+    // `legacy_unclassified` row in a protected lane and nothing said why.
+    let mut missing_ref: Option<String> = None;
     for (belief_id, revision_event) in [&declaration.from, &declaration.to] {
         let Some(belief) = state.beliefs.get(belief_id) else {
-            return Ok(None);
+            missing_ref = Some(format!("belief {belief_id} is not in the base"));
+            break;
         };
         let Some(revision) = belief
             .revisions
             .iter()
             .find(|r| &r.event_id == revision_event)
         else {
-            return Ok(None);
+            missing_ref = Some(format!(
+                "belief {belief_id} has no revision {revision_event}"
+            ));
+            break;
         };
         let qualifiers = qualifiers_of(state, revision);
         missing.extend(qualifiers.missing.iter().copied());
@@ -262,6 +306,9 @@ pub fn plan(
             declaration.origin,
             &qualifiers,
         ));
+    }
+    if let Some(detail) = missing_ref {
+        return Err(Unplannable::Unclassifiable(detail));
     }
     missing.sort_unstable();
     missing.dedup();
@@ -278,11 +325,11 @@ pub fn plan(
 
     // Already settled: reported from what the store decided, never re-decided.
     if let Some(existing) = state.conflict_classifications.get(&comparison_id) {
-        return Ok(Some(Planned {
+        return Ok(Planned {
             comparison_id,
             outcome: existing.outcome,
             members: Vec::new(),
-        }));
+        });
     }
 
     let (outcome, reason_codes) = verdict(&left, &right, missing);
@@ -379,9 +426,9 @@ pub fn plan(
         ));
     }
 
-    Ok(Some(Planned {
+    Ok(Planned {
         comparison_id,
         outcome,
         members,
-    }))
+    })
 }

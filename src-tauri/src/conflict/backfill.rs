@@ -151,6 +151,11 @@ pub struct Sweep {
     pub resolved_count: u64,
     pub opened_count: u64,
     pub failed: Vec<(String, String)>,
+    /// Declarations that can NEVER be classified — a belief or the pinned
+    /// revision is gone. Not counted and not retried, and not silent either:
+    /// each one is a permanent contradiction-lane row, and a person reading
+    /// that row should be able to learn it is not merely waiting its turn.
+    pub unclassifiable: Vec<(String, String)>,
 }
 
 /// Plan the whole prefix. Relations already classified are skipped and still
@@ -164,7 +169,7 @@ pub fn sweep(
     let mut out = Sweep::default();
     for declaration in declarations(frames, state) {
         match plan_one(state, &declaration, store_uuid, classified_at) {
-            Ok(Some((plan, outcome))) => {
+            Ok((plan, outcome)) => {
                 out.source_relation_count += 1;
                 if outcome.is_unresolved() {
                     out.opened_count += 1;
@@ -175,8 +180,16 @@ pub fn sweep(
                     out.plans.push(plan);
                 }
             }
-            Ok(None) => {}
-            Err(detail) => out
+            // Neither planned nor counted — the marker's arithmetic claims
+            // coverage of what it could classify — but SAID, because the
+            // relation stays live and therefore stays a `legacy_unclassified`
+            // row in a protected lane forever (M27.10). It does not go in
+            // `failed`: a permanent condition there would wedge the
+            // checkpoint on something no retry can fix.
+            Err(declared::Unplannable::Unclassifiable(detail)) => out
+                .unclassifiable
+                .push((declaration.relation_event_id.clone(), detail)),
+            Err(declared::Unplannable::Failed(detail)) => out
                 .failed
                 .push((declaration.relation_event_id.clone(), detail)),
         }
@@ -194,27 +207,24 @@ fn plan_one(
     declaration: &Declaration,
     store_uuid: &str,
     classified_at: &str,
-) -> Result<Option<(Option<Plan>, ConflictOutcome)>, String> {
+) -> Result<(Option<Plan>, ConflictOutcome), declared::Unplannable> {
     let actor = Actor {
         id: ACTOR.to_string(),
     };
     // Ordinal 0: a backfill declaration's plan IS its whole batch. The
     // relation event it classifies committed long ago.
-    let Some(planned) = declared::plan(
+    let planned = declared::plan(
         state,
         declaration,
         &actor,
         BACKFILL_VERSION,
         classified_at,
         0,
-    )?
-    else {
-        return Ok(None);
-    };
+    )?;
     if planned.members.is_empty() {
-        return Ok(Some((None, planned.outcome)));
+        return Ok((None, planned.outcome));
     }
-    Ok(Some((
+    Ok((
         Some(Plan {
             operation_key: format!(
                 "contradiction-backfill:{store_uuid}:{}",
@@ -225,7 +235,7 @@ fn plan_one(
             members: planned.members,
         }),
         planned.outcome,
-    )))
+    ))
 }
 
 /// What one backfill pass did.
@@ -235,6 +245,8 @@ pub struct Ran {
     pub already_done: usize,
     pub marker: Option<String>,
     pub failed: Vec<(String, String)>,
+    /// Carried through from the sweep. See [`Sweep::unclassifiable`].
+    pub unclassifiable: Vec<(String, String)>,
 }
 
 /// Run the sweep and, when the whole prefix is accounted for, checkpoint it.
@@ -258,6 +270,10 @@ where
     let mut out = Ran {
         already_done: sweep.source_relation_count as usize - sweep.plans.len(),
         failed: sweep.failed,
+        // Carried, NOT folded into `failed`: these do not block the
+        // checkpoint (no retry can fix a belief that is gone) and they are
+        // not nothing either (M27.10).
+        unclassifiable: sweep.unclassifiable,
         ..Ran::default()
     };
     // A declaration that could not even be PLANNED is unclassified, and a
@@ -698,6 +714,64 @@ mod tests {
         assert!(sweep.plans.is_empty());
     }
 
+    /// A declaration nothing can ever classify is SAID, and does not wedge
+    /// the checkpoint (M27.10).
+    ///
+    /// It used to be dropped on the floor — neither planned, nor counted, nor
+    /// failed. The relation stays live, so it stays a `legacy_unclassified`
+    /// row in the contradiction lane forever and keeps refusing merges over
+    /// its beliefs, which is the safe direction. What was missing is any way
+    /// to learn that it is not merely waiting its turn in a backfill that has
+    /// not reached it yet.
+    ///
+    /// It must NOT go in `failed`, and that is the other half: `failed` holds
+    /// the checkpoint open for a retry, and no retry can bring back a belief
+    /// that is gone. One permanent entry there would stop every future
+    /// backfill from ever marking a prefix.
+    #[test]
+    fn a_declaration_nothing_can_classify_is_reported_and_does_not_wedge_the_marker() {
+        let mut rig = Rig::new("m27-backfill-unclassifiable");
+        belief(&mut rig, BELIEF, unsupported());
+        belief(&mut rig, BELIEF_B, unsupported());
+        contradicts(&mut rig, "human:josef");
+
+        // The relation is live and its endpoints are committed, but the
+        // revision it pins is not one the belief holds — the shape a migrated
+        // or partially-recovered base arrives in.
+        let mut state = rig.state();
+        state
+            .beliefs
+            .get_mut(BELIEF)
+            .unwrap()
+            .revisions
+            .iter_mut()
+            .for_each(|revision| revision.event_id = "f".repeat(32));
+
+        let sweep = sweep(&rig.frames(), &state, &rig.store_id, AS_OF);
+        assert_eq!(sweep.unclassifiable.len(), 1, "{sweep:?}");
+        assert!(
+            sweep.unclassifiable[0].1.contains("revision"),
+            "the report names what is missing: {}",
+            sweep.unclassifiable[0].1
+        );
+        assert!(sweep.failed.is_empty(), "a permanent state is not a retry");
+        assert_eq!(
+            sweep.source_relation_count, 0,
+            "the marker must not claim coverage of something nobody classified"
+        );
+
+        // And the run still checkpoints: an unclassifiable declaration is a
+        // fact about the base, not an unfinished piece of this run's work.
+        let spy = Spy::default();
+        let ran = run(&rig.frames(), &state, &rig.store_id, AS_OF, &spy, &spy);
+        assert_eq!(ran.unclassifiable.len(), 1);
+        assert!(ran.failed.is_empty());
+        assert!(
+            ran.marker.is_some(),
+            "a permanent condition wedged the checkpoint"
+        );
+    }
+
     #[test]
     fn the_run_writes_every_batch_and_then_one_marker() {
         let mut rig = Rig::new("m27-backfill-run");
@@ -801,7 +875,6 @@ mod tests {
             AS_OF,
             0,
         )
-        .unwrap()
         .unwrap();
         rig.writer
             .append_batch(planned.members.clone(), Some("op:authored"))

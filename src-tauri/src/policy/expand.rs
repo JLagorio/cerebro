@@ -589,14 +589,16 @@ impl<'a> Plan<'a> {
             &self.ctx.submitted_at,
             self.ctx.base_ordinal + self.members.len(),
         )
-        .map_err(|detail| refuse("schema_invalid", detail))?
-        .ok_or_else(|| {
+        .map_err(|detail| match detail {
             // Unreachable behind `committed_belief` above, which already
-            // refuses a Belief that does not exist.
-            refuse(
-                "invalid_reference",
-                "a declaration between beliefs that exist could not be classified",
-            )
+            // refuses a Belief that does not exist — but named rather than
+            // collapsed, so if it ever happens the card says which.
+            crate::conflict::declared::Unplannable::Unclassifiable(detail) => {
+                refuse("invalid_reference", detail)
+            }
+            crate::conflict::declared::Unplannable::Failed(detail) => {
+                refuse("schema_invalid", detail)
+            }
         })?;
         if planned.members.is_empty() {
             // Only reachable if this exact comparison were already classified,
