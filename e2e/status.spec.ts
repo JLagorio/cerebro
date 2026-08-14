@@ -221,3 +221,52 @@ test('status: the review summary is a door and not a second copy of the cards', 
   await page.getByTestId('health-summary').click();
   await expect(page.getByTestId('pipeline-page')).toBeVisible();
 });
+
+test('status: the gate board is the shared artifact, and never-evaluated is said out loud', async ({
+  page,
+}) => {
+  await open(page);
+
+  // The mock derives the board from the SAME registry file the Rust runner
+  // reads — 14 entries, 34 declared gates. A count drift here means the
+  // surface and the artifact stopped agreeing.
+  await expect(page.getByTestId('gate-entry')).toHaveCount(14);
+  await expect(page.getByTestId('gate-row')).toHaveCount(34);
+  // Nothing has ever been evaluated, and each row says so.
+  await expect(page.locator('[data-gate="R13:root"]')).toContainText('Never evaluated here.');
+  // R14 declares no gates yet, and the entry says why instead of leaving a
+  // hole in the numbering.
+  await expect(page.locator('[data-entry="R14"]')).toContainText('no connector is registered');
+  // A discretionary gate names what it waits for.
+  await expect(page.locator('[data-gate="R8:root"]')).toContainText('owner evidence pack');
+});
+
+test('status: a fired gate is loud, and even then licenses only a dated plan', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    window.__cerebroSeedTriggerLatest('R13:root', {
+      evaluation_id: 'e'.repeat(64),
+      result: 'fired',
+      evaluated_at: '2026-08-14T09:00:00Z',
+      window_end: '2026-08-14T00:00:00+02:00',
+    });
+  });
+  await page.getByTestId('rail').getByRole('button', { name: 'Epistemic status' }).click();
+
+  const row = page.locator('[data-gate="R13:root"]');
+  await expect(row).toHaveAttribute('data-result', 'fired');
+  await expect(row).toContainText('A firing licenses a dated plan, never code.');
+  await expect(page.locator('[data-section="gates"]')).toContainText('R13:root has fired');
+});
+
+test('status: evaluate answers honestly in the browser, where no runtime database exists', async ({
+  page,
+}) => {
+  await open(page);
+
+  await page.getByTestId('gates-evaluate').click();
+  // The mock invents no results — every gate answers not-evaluated with the
+  // reason, and the surface renders each refusal as its own sentence.
+  await expect(page.getByTestId('gates-run-outcome')).toContainText('Evaluated 0 gates');
+  await expect(page.getByTestId('gates-run-skip').first()).toContainText('browser mock');
+});

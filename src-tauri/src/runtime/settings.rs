@@ -319,6 +319,13 @@ mod tests {
         let stored = r7_scope(&conn, &vault).unwrap().expect("declared");
         assert_eq!(stored.digest().unwrap(), digest);
         assert_eq!(stored.subjects, ["e0000000000000000000000000000001"]);
+        // Pinned vector, shared with the browser mock's parity test
+        // (mockIpc.test.ts) — the one digest rule, observed from both
+        // languages rather than mirrored in prose.
+        assert_eq!(
+            digest,
+            "093da74e0fbf1a510061af1bdfe0ff9626681f67e689d75b5cef47ecb06f2cb2"
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

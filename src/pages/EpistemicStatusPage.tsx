@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import * as ipc from '@/lib/ipc';
-import type { ChangesView, LanesView, LaneView, PipelineOverview, ReviewCard } from '@/lib/ipc';
+import type {
+  ChangesView,
+  LanesView,
+  LaneView,
+  PipelineOverview,
+  ReviewCard,
+  TriggerEntryStatus,
+  TriggerRunReport,
+} from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -36,7 +44,11 @@ import { useVaultStore } from '@/stores/vaultStore';
  * slow read never renders as a refusal. */
 type Feed<T> = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: T };
 
-function useFeed<T>(vaultPath: string | null, read: (vault: string) => Promise<T>): Feed<T> {
+function useFeed<T>(
+  vaultPath: string | null,
+  read: (vault: string) => Promise<T>,
+  version = 0,
+): Feed<T> {
   const [feed, setFeed] = useState<Feed<T>>({ kind: 'loading' });
   useEffect(() => {
     if (vaultPath === null) {
@@ -63,8 +75,9 @@ function useFeed<T>(vaultPath: string | null, read: (vault: string) => Promise<T
     // `read` is in the deps rather than suppressed. Every call site passes a
     // module-level IPC function, so it is stable; an inline lambda would
     // re-fetch on every render, which is a defect this dependency makes loud
-    // instead of hiding.
-  }, [vaultPath, read]);
+    // instead of hiding. `version` is the one deliberate re-read: an action
+    // that changed what the feed would say bumps it.
+  }, [vaultPath, read, version]);
   return feed;
 }
 
@@ -267,6 +280,130 @@ function SystemHealth({ feed }: { feed: Feed<PipelineOverview> }) {
   );
 }
 
+/** What one run pass did, said in one line — plus each gate that could not
+ * be evaluated or failed, because a silent skip and a recorded row are
+ * different claims and the difference is the point. */
+function skipText(outcome: ipc.TriggerGateOutcome): string | null {
+  if (outcome.kind === 'not_evaluated') return outcome.reason;
+  if (outcome.kind === 'error') return `failed — ${outcome.message}`;
+  return null;
+}
+
+function RunOutcome({ report }: { report: TriggerRunReport }) {
+  const recorded = report.gates.filter((g) => g.outcome.kind === 'recorded').length;
+  return (
+    <div data-testid="gates-run-outcome" className="flex flex-col gap-0.5">
+      <p className="text-2xs text-n-600">
+        Evaluated {recorded} gate{recorded === 1 ? '' : 's'}.
+      </p>
+      {report.gates
+        .map((g) => ({ gate: g.gate, text: skipText(g.outcome) }))
+        .filter((g): g is { gate: string; text: string } => g.text !== null)
+        .map((g) => (
+          <p key={g.gate} data-testid="gates-run-skip" className="text-2xs text-n-500">
+            {g.gate}: {g.text}
+          </p>
+        ))}
+    </div>
+  );
+}
+
+/** One gate's row: key, variant, newest result or an explicit
+ * never-evaluated, and the note saying what it waits for. A fired gate is
+ * the loud case — and even then the sentence says what firing licenses. */
+function GateRow({ gate }: { gate: ipc.TriggerGateStatus }) {
+  const fired = gate.latest?.result === 'fired';
+  return (
+    <div
+      data-testid="gate-row"
+      data-gate={gate.gate}
+      data-result={gate.latest?.result ?? 'never'}
+      className={`flex flex-col gap-0.5 rounded border px-2.5 py-1.5 ${
+        fired ? 'border-warn-700' : 'border-n-200'
+      }`}
+    >
+      <span className="flex items-baseline gap-2">
+        <span className="text-xs font-medium text-n-800">{gate.gate}</span>
+        <span className="text-2xs uppercase tracking-[0.06em] text-n-500">{gate.variant}</span>
+      </span>
+      <span className="text-2xs text-n-600">
+        {gate.latest === null
+          ? 'Never evaluated here.'
+          : `${gate.latest.result.replaceAll('_', ' ')} — evaluated ${gate.latest.evaluated_at.slice(0, 10)}.`}
+        {fired && ' A firing licenses a dated plan, never code.'}
+      </span>
+      {gate.note !== null && <span className="text-2xs text-n-500">{gate.note}</span>}
+    </div>
+  );
+}
+
+function Gates({
+  feed,
+  onEvaluate,
+  running,
+  report,
+  error,
+}: {
+  feed: Feed<TriggerEntryStatus[]>;
+  onEvaluate: () => void;
+  running: boolean;
+  report: TriggerRunReport | null;
+  error: string | null;
+}) {
+  if (feed.kind === 'loading') return <Loading />;
+  if (feed.kind === 'unavailable') return <Unavailable what="The trigger registry" />;
+  const board = feed.data;
+  const firedGates = board.flatMap((entry) =>
+    entry.gates.filter((gate) => gate.latest?.result === 'fired'),
+  );
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="gates-evaluate"
+          onClick={onEvaluate}
+          disabled={running}
+          className="rounded border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
+        >
+          {running ? 'Evaluating…' : 'Evaluate now'}
+        </button>
+        <span className="text-2xs text-n-500">
+          {firedGates.length === 0
+            ? 'Nothing has fired.'
+            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired.`}
+        </span>
+      </div>
+      {error !== null && (
+        <p data-testid="gates-run-error" className="text-2xs text-warn-700">
+          {error}
+        </p>
+      )}
+      {report !== null && <RunOutcome report={report} />}
+      {board.map((entry) => (
+        <div
+          key={entry.registry_id}
+          data-testid="gate-entry"
+          data-entry={entry.registry_id}
+          className="flex flex-col gap-1"
+        >
+          <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
+            {entry.registry_id} — {entry.capability}
+          </span>
+          {entry.gates.map((gate) => (
+            <GateRow key={gate.gate} gate={gate} />
+          ))}
+          {entry.note !== null && (
+            <p data-testid="gate-entry-note" className="text-2xs text-n-500">
+              {entry.note}
+            </p>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function Lanes({ feed }: { feed: Feed<LanesView> }) {
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') {
@@ -297,6 +434,31 @@ export function EpistemicStatusPage() {
   const lanes = useFeed(vaultPath, ipc.attentionLanes);
   const review = useFeed(vaultPath, ipc.reviewQueue);
   const health = useFeed(vaultPath, ipc.pipelineOverview);
+  const [gatesVersion, setGatesVersion] = useState(0);
+  const gates = useFeed(vaultPath, ipc.triggerStatus, gatesVersion);
+  const [running, setRunning] = useState(false);
+  const [runReport, setRunReport] = useState<TriggerRunReport | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  // The one action on this page. It never throws (the store-layer rule):
+  // failure becomes a sentence beside the button, and success re-reads the
+  // board so the newest rows are the ones on screen.
+  const evaluateNow = () => {
+    if (vaultPath === null || running) return;
+    setRunning(true);
+    setRunError(null);
+    void (async () => {
+      try {
+        setRunReport(await ipc.triggerRun(vaultPath));
+        setGatesVersion((version) => version + 1);
+      } catch (error) {
+        setRunReport(null);
+        setRunError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setRunning(false);
+      }
+    })();
+  };
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto" data-testid="status-page">
@@ -330,6 +492,20 @@ export function EpistemicStatusPage() {
           blurb="Whether anything is running, and what it has left to spend."
         >
           <SystemHealth feed={health} />
+        </Section>
+
+        <Section
+          id="gates"
+          title="Deferral gates"
+          blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
+        >
+          <Gates
+            feed={gates}
+            onEvaluate={evaluateNow}
+            running={running}
+            report={runReport}
+            error={runError}
+          />
         </Section>
       </div>
     </div>

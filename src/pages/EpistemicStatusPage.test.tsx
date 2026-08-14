@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChangesView, LanesView, PipelineOverview, ReviewCard } from '@/lib/ipc';
+import type {
+  ChangesView,
+  LanesView,
+  PipelineOverview,
+  ReviewCard,
+  TriggerEntryStatus,
+  TriggerRunReport,
+} from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { EpistemicStatusPage } from './EpistemicStatusPage';
 
@@ -18,6 +25,8 @@ const converge = vi.fn<(vault: string) => Promise<ChangesView>>();
 const attentionLanes = vi.fn<(vault: string) => Promise<LanesView>>();
 const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
 const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
+const triggerStatus = vi.fn<(vault: string) => Promise<TriggerEntryStatus[]>>();
+const triggerRun = vi.fn<(vault: string) => Promise<TriggerRunReport>>();
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -27,6 +36,8 @@ vi.mock('@/lib/ipc', async () => {
     attentionLanes: (vault: string) => attentionLanes(vault),
     reviewQueue: (vault: string) => reviewQueue(vault),
     pipelineOverview: (vault: string) => pipelineOverview(vault),
+    triggerStatus: (vault: string) => triggerStatus(vault),
+    triggerRun: (vault: string) => triggerRun(vault),
   };
 });
 
@@ -83,6 +94,64 @@ const HEALTH: PipelineOverview = {
   held: { baseline_held: 0, recovery_held: 0, pending_review: 0, pending: 0 },
 };
 
+const BOARD: TriggerEntryStatus[] = [
+  {
+    registry_id: 'R8',
+    capability: 'Curiosity as a construct',
+    scope: 'vault_store',
+    note: null,
+    gates: [
+      {
+        gate: 'R8:root',
+        variant: 'discretionary',
+        note: 'awaiting a dated owner evidence pack',
+        latest: null,
+      },
+    ],
+  },
+  {
+    registry_id: 'R13',
+    capability: 'Discovery execution',
+    scope: 'vault_store',
+    note: null,
+    gates: [{ gate: 'R13:root', variant: 'measurable', note: null, latest: null }],
+  },
+  {
+    registry_id: 'R14',
+    capability: 'Live connectors',
+    scope: 'vault_store',
+    note: 'no connector is registered yet — connector:<id> gates appear as connectors register',
+    gates: [],
+  },
+];
+
+const RUN_REPORT: TriggerRunReport = {
+  evaluated_at: '2026-08-14T09:00:00Z',
+  timezone: 'UTC',
+  gates: [
+    {
+      gate: 'R13:root',
+      outcome: {
+        kind: 'recorded',
+        result: 'not_ready',
+        evaluation_id: 'e'.repeat(64),
+        replayed: false,
+      },
+    },
+    {
+      gate: 'R7:root',
+      outcome: {
+        kind: 'not_evaluated',
+        reason: 'no verification scope is declared for this vault',
+      },
+    },
+    {
+      gate: 'R1:root',
+      outcome: { kind: 'error', message: 'the projection artifact is unreadable' },
+    },
+  ],
+};
+
 describe('EpistemicStatusPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -91,6 +160,8 @@ describe('EpistemicStatusPage', () => {
     attentionLanes.mockResolvedValue(EMPTY_LANES);
     reviewQueue.mockResolvedValue([]);
     pipelineOverview.mockResolvedValue(HEALTH);
+    triggerStatus.mockResolvedValue(BOARD);
+    triggerRun.mockResolvedValue(RUN_REPORT);
   });
 
   it('renders every lane the feed declares, including the ones holding nothing', async () => {
@@ -208,7 +279,78 @@ describe('EpistemicStatusPage', () => {
     useVaultStore.setState({ vaultPath: null });
     render(<EpistemicStatusPage />);
 
-    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(4));
+    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(5));
     expect(converge).not.toHaveBeenCalled();
+  });
+
+  it('renders every gate the board declares, and never-evaluated is said, not omitted', async () => {
+    render(<EpistemicStatusPage />);
+
+    const rows = await screen.findAllByTestId('gate-row');
+    expect(rows.map((row) => row.getAttribute('data-gate'))).toEqual(['R8:root', 'R13:root']);
+    expect(rows[0].textContent).toContain('Never evaluated here.');
+    expect(rows[0].textContent).toContain('awaiting a dated owner evidence pack');
+    // R14 holds no gates and the entry says why instead of leaving a hole.
+    expect((await screen.findByTestId('gate-entry-note')).textContent).toContain(
+      'no connector is registered',
+    );
+  });
+
+  it('a fired gate is loud and names the one thing firing licenses', async () => {
+    triggerStatus.mockResolvedValue([
+      {
+        ...BOARD[1],
+        gates: [
+          {
+            gate: 'R13:root',
+            variant: 'measurable',
+            note: null,
+            latest: {
+              evaluation_id: 'e'.repeat(64),
+              result: 'fired',
+              evaluated_at: '2026-08-14T09:00:00Z',
+              window_end: '2026-08-14T00:00:00+02:00',
+            },
+          },
+        ],
+      },
+    ]);
+    render(<EpistemicStatusPage />);
+
+    const row = await screen.findByTestId('gate-row');
+    expect(row.getAttribute('data-result')).toBe('fired');
+    expect(row.textContent).toContain('A firing licenses a dated plan, never code.');
+    expect(screen.getByText(/R13:root has fired/)).toBeTruthy();
+  });
+
+  it('evaluate runs once, says what each gate did, and re-reads the board', async () => {
+    render(<EpistemicStatusPage />);
+    await screen.findAllByTestId('gate-row');
+    expect(triggerStatus).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('gates-evaluate'));
+
+    const outcome = await screen.findByTestId('gates-run-outcome');
+    expect(outcome.textContent).toContain('Evaluated 1 gate');
+    const skips = screen.getAllByTestId('gates-run-skip');
+    expect(skips.map((skip) => skip.textContent)).toEqual([
+      'R7:root: no verification scope is declared for this vault',
+      'R1:root: failed — the projection artifact is unreadable',
+    ]);
+    // The board was re-read so the newest rows are the ones on screen.
+    await waitFor(() => expect(triggerStatus).toHaveBeenCalledTimes(2));
+  });
+
+  it('a run that refuses becomes a sentence, never a throw', async () => {
+    triggerRun.mockRejectedValue(
+      new Error('an R7 verification scope is declared, but this vault has no active ledger writer'),
+    );
+    render(<EpistemicStatusPage />);
+    await screen.findAllByTestId('gate-row');
+
+    fireEvent.click(screen.getByTestId('gates-evaluate'));
+
+    const error = await screen.findByTestId('gates-run-error');
+    expect(error.textContent).toContain('no active ledger writer');
   });
 });

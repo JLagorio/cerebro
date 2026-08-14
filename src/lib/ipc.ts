@@ -511,3 +511,51 @@ export function resolveHeldItems(
     ? invokeTauri('resolve_held_items', { vault, which, choice })
     : mock.resolveHeldItems(vault, which, choice);
 }
+
+// --- The deferral gates (M28.1) ---------------------------------------------
+
+import type {
+  TriggerEntryStatus,
+  TriggerGateOutcome,
+  TriggerGateRun,
+  TriggerGateStatus,
+  TriggerLatest,
+  TriggerRunReport,
+  VerificationScope,
+} from './mockIpc';
+
+export type {
+  TriggerEntryStatus,
+  TriggerGateOutcome,
+  TriggerGateRun,
+  TriggerGateStatus,
+  TriggerLatest,
+  TriggerRunReport,
+  VerificationScope,
+};
+
+/** The board: every gate the shared artifact declares, with its newest
+ * recorded evaluation or an explicit never-evaluated. */
+export function triggerStatus(vault: string): Promise<TriggerEntryStatus[]> {
+  return inTauri() ? invokeTauri('trigger_status', { vault }) : mock.triggerStatus(vault);
+}
+
+/** One pass over every gate with a measurable leg. Safe whenever the surface
+ * opens — a same-day rerun replays byte-identically. */
+export function triggerRun(vault: string): Promise<TriggerRunReport> {
+  return inTauri() ? invokeTauri('trigger_run', { vault }) : mock.triggerRun(vault);
+}
+
+/** Declare what R7 should count for this vault; returns the canonical digest
+ * recorded evaluations will carry. */
+export function triggerDeclareR7Scope(vault: string, scopeJson: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('trigger_declare_r7_scope', { vault, scopeJson })
+    : mock.triggerDeclareR7Scope(vault, scopeJson);
+}
+
+/** The declared R7 scope, if any. `null` is "nothing declared"; a rejection
+ * is "cannot tell" — the two are never conflated. */
+export function triggerR7Scope(vault: string): Promise<VerificationScope | null> {
+  return inTauri() ? invokeTauri('trigger_r7_scope', { vault }) : mock.triggerR7Scope(vault);
+}

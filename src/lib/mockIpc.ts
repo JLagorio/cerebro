@@ -9,6 +9,9 @@ import { isKnowledgePath } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
+import { sha256Hex } from './sha256';
+import { loadRegistry } from './trigger/registry';
+import type { ParentRule, Variant as TriggerVariant } from './trigger/registry';
 
 const SEED_TIME = '2026-07-24T00:00:00.000Z';
 
@@ -1308,4 +1311,215 @@ export async function resolveHeldItems(
   if (choice === 'process') held.pending += moved;
   pipeline = { ...pipeline, held };
   return moved;
+}
+
+// --- The deferral gates (M28.1) ---------------------------------------------
+//
+// The board derives from the SAME shared artifact the Rust runner reads —
+// parity by shared data, not twin code. Evaluations themselves are Rust
+// functions over a real runtime database, so this mock never invents a
+// result: a fresh board shows every gate never-evaluated, triggerRun answers
+// not-evaluated with the reason, and `__seedTriggerLatest` lets a test paint
+// a recorded state the way `__seedPipeline` paints the pipeline.
+
+export interface TriggerLatest {
+  evaluation_id: string;
+  result: string;
+  evaluated_at: string;
+  window_end: string | null;
+}
+
+export interface TriggerGateStatus {
+  gate: string;
+  variant: TriggerVariant;
+  note: string | null;
+  latest: TriggerLatest | null;
+}
+
+export interface TriggerEntryStatus {
+  registry_id: string;
+  capability: string;
+  scope: string;
+  note: string | null;
+  gates: TriggerGateStatus[];
+}
+
+export type TriggerGateOutcome =
+  | { kind: 'recorded'; result: string; evaluation_id: string; replayed: boolean }
+  | { kind: 'not_evaluated'; reason: string }
+  | { kind: 'error'; message: string };
+
+export interface TriggerGateRun {
+  gate: string;
+  outcome: TriggerGateOutcome;
+}
+
+export interface TriggerRunReport {
+  evaluated_at: string;
+  timezone: string;
+  gates: TriggerGateRun[];
+}
+
+export interface VerificationScope {
+  subjects: string[];
+  predicate_classes: string[];
+  stage: string | null;
+  environment: string | null;
+  geography: string | null;
+}
+
+/** The Rust runner's note rules, over the same artifact data. Prose drift
+ * here is cosmetic; the CLOSED enumeration cannot drift because both sides
+ * read one file. */
+function triggerGateNote(variant: TriggerVariant, parent: ParentRule | null): string | null {
+  if (variant === 'measurable') {
+    return parent !== null && parent.kind === 'measurable_alias'
+      ? `fires only as a byte-equal alias of a fired ${parent.allowed.join(' or ')}`
+      : null;
+  }
+  if (variant === 'hybrid') return 'hybrid — a measurable leg plus a dated owner evidence pack';
+  return parent !== null && parent.kind === 'fired_parent'
+    ? `awaiting a dated owner evidence pack, and its parent ${parent.allowed.join(' or ')} must have fired`
+    : 'awaiting a dated owner evidence pack';
+}
+
+/** Seeded recorded states, keyed by gate ("R13:root"). */
+const seededTriggerLatest = new Map<string, TriggerLatest>();
+
+/** Test-only seam. Paint one gate's newest recorded evaluation. */
+export function __seedTriggerLatest(gate: string, latest: TriggerLatest): void {
+  seededTriggerLatest.set(gate, latest);
+}
+(
+  window as unknown as { __cerebroSeedTriggerLatest: typeof __seedTriggerLatest }
+).__cerebroSeedTriggerLatest = __seedTriggerLatest;
+
+export async function triggerStatus(_vault: string): Promise<TriggerEntryStatus[]> {
+  const registry = loadRegistry();
+  return registry.entries.map((entry) => ({
+    registry_id: entry.id,
+    capability: entry.capability,
+    scope: entry.scope,
+    note:
+      entry.subcapability_pattern !== undefined &&
+      entry.subcapability_pattern.registered_connectors.length === 0
+        ? `no connector is registered yet — ${entry.subcapability_pattern.prefix}<id> gates appear as connectors register`
+        : null,
+    gates: [
+      ...entry.subcapabilities.map((sub) => ({
+        gate: `${entry.id}:${sub.key}`,
+        variant: sub.variant,
+        note: triggerGateNote(sub.variant, sub.parent),
+        latest: seededTriggerLatest.get(`${entry.id}:${sub.key}`) ?? null,
+      })),
+      ...(entry.subcapability_pattern?.registered_connectors ?? []).map((connector) => {
+        const pattern = entry.subcapability_pattern;
+        if (pattern === undefined) throw new Error('unreachable: pattern vanished mid-map');
+        const gate = `${entry.id}:${pattern.prefix}${connector}`;
+        return {
+          gate,
+          variant: pattern.variant,
+          note: triggerGateNote(pattern.variant, pattern.parent),
+          latest: seededTriggerLatest.get(gate) ?? null,
+        };
+      }),
+    ],
+  }));
+}
+
+export async function triggerRun(_vault: string): Promise<TriggerRunReport> {
+  // The evaluators are Rust functions over a real runtime database, and a
+  // made-up result would claim a state no database ever held — the
+  // ingestItemState rule. Every gate answers not-evaluated, with the reason.
+  const reason = 'browser mock — evaluations need the real runtime database';
+  return {
+    evaluated_at: SEED_TIME,
+    timezone: 'UTC',
+    gates: ['R1:root', 'R2:root', 'R3:root', 'R6:root', 'R7:root', 'R10:root', 'R13:root'].map(
+      (gate) => ({ gate, outcome: { kind: 'not_evaluated', reason } }),
+    ),
+  };
+}
+
+/** The one digest rule, mirrored byte-for-byte and pinned against a
+ * Rust-generated vector in mockIpc.test.ts (see settings.rs's twin pin). */
+export function verificationScopeDigest(scope: VerificationScope): string {
+  const canonical = JSON.stringify({
+    subjects: scope.subjects,
+    predicate_classes: scope.predicate_classes,
+    stage: scope.stage,
+    environment: scope.environment,
+    geography: scope.geography,
+  });
+  return sha256Hex(`cerebro-verification-scope-v1\0${canonical}`);
+}
+
+/** The Rust-side guards, mirrored: shape, sortedness, and non-emptiness are
+ * refused with the same key phrases the desktop build uses. */
+function parseVerificationScope(scopeJson: string): VerificationScope {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(scopeJson);
+  } catch (e) {
+    throw new Error(`the scope does not parse: ${String(e)}`, { cause: e });
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('the scope does not parse: not an object');
+  }
+  const known = ['subjects', 'predicate_classes', 'stage', 'environment', 'geography'];
+  for (const key of Object.keys(raw)) {
+    if (!known.includes(key)) throw new Error(`the scope does not parse: unknown field ${key}`);
+  }
+  const value = raw as Record<string, unknown>;
+  const lists: [string, unknown][] = [
+    ['subjects', value.subjects],
+    ['predicate_classes', value.predicate_classes],
+  ];
+  for (const [name, list] of lists) {
+    if (!Array.isArray(list) || !list.every((s) => typeof s === 'string')) {
+      throw new Error(`the scope does not parse: ${name} must be a list of strings`);
+    }
+    if (list.length === 0) {
+      throw new Error(
+        `a verification scope with no ${name} verifies nothing — refusing beats counting everything`,
+      );
+    }
+    for (let i = 1; i < list.length; i += 1) {
+      if ((list[i - 1] as string) >= (list[i] as string)) {
+        throw new Error(`${name} must be sorted and duplicate-free`);
+      }
+    }
+  }
+  const constraints: [string, unknown][] = [
+    ['stage', value.stage],
+    ['environment', value.environment],
+    ['geography', value.geography],
+  ];
+  for (const [name, constraint] of constraints) {
+    if (constraint !== null && typeof constraint !== 'string' && constraint !== undefined) {
+      throw new Error(`the scope does not parse: ${name} must be a string or null`);
+    }
+    if (constraint === '') {
+      throw new Error(`an empty ${name} constraint is a constraint on nothing`);
+    }
+  }
+  return {
+    subjects: value.subjects as string[],
+    predicate_classes: value.predicate_classes as string[],
+    stage: (value.stage as string | undefined) ?? null,
+    environment: (value.environment as string | undefined) ?? null,
+    geography: (value.geography as string | undefined) ?? null,
+  };
+}
+
+let declaredR7Scope: VerificationScope | null = null;
+
+export async function triggerDeclareR7Scope(_vault: string, scopeJson: string): Promise<string> {
+  const scope = parseVerificationScope(scopeJson);
+  declaredR7Scope = scope;
+  return verificationScopeDigest(scope);
+}
+
+export async function triggerR7Scope(_vault: string): Promise<VerificationScope | null> {
+  return declaredR7Scope;
 }

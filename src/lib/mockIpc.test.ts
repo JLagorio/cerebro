@@ -662,3 +662,109 @@ describe('mockIpc', () => {
     expect([...dirs].sort()).toEqual(dirs);
   });
 });
+
+describe('the deferral gates (M28.1)', () => {
+  it('the board is the shared artifact: 14 entries, 34 gates, R14 honestly empty', async () => {
+    const board = await mock.triggerStatus('/demo-vault');
+    expect(board).toHaveLength(14);
+    expect(board.flatMap((entry) => entry.gates)).toHaveLength(34);
+    const r14 = board.find((entry) => entry.registry_id === 'R14');
+    expect(r14?.gates).toEqual([]);
+    expect(r14?.note).toContain('no connector is registered');
+    // Fresh board: nothing has ever been evaluated, and every row says so
+    // rather than omitting the column.
+    expect(board.every((entry) => entry.gates.every((gate) => gate.latest === null))).toBe(true);
+    // The dispositions ride the rows: a tail names its parent, the alias
+    // names whose firing it borrows.
+    const discovery = board
+      .find((entry) => entry.registry_id === 'R5')
+      ?.gates.find((gate) => gate.gate === 'R5:discovery');
+    expect(discovery?.note).toContain('R13:root');
+  });
+
+  it('a seeded latest paints exactly one gate', async () => {
+    mock.__seedTriggerLatest('R13:root', {
+      evaluation_id: 'e'.repeat(64),
+      result: 'fired',
+      evaluated_at: '2026-08-14T09:00:00Z',
+      window_end: '2026-08-14T00:00:00+02:00',
+    });
+    const board = await mock.triggerStatus('/demo-vault');
+    const r13 = board.find((entry) => entry.registry_id === 'R13');
+    expect(r13?.gates[0]?.latest?.result).toBe('fired');
+    const others = board.filter((entry) => entry.registry_id !== 'R13');
+    expect(others.every((entry) => entry.gates.every((gate) => gate.latest === null))).toBe(true);
+  });
+
+  it('triggerRun invents nothing: every gate answers not-evaluated with the reason', async () => {
+    const report = await mock.triggerRun('/demo-vault');
+    expect(report.gates.map((gate) => gate.gate)).toEqual([
+      'R1:root',
+      'R2:root',
+      'R3:root',
+      'R6:root',
+      'R7:root',
+      'R10:root',
+      'R13:root',
+    ]);
+    expect(
+      report.gates.every(
+        (gate) =>
+          gate.outcome.kind === 'not_evaluated' && gate.outcome.reason.includes('browser mock'),
+      ),
+    ).toBe(true);
+  });
+
+  it('the scope digest matches the Rust-generated vector byte for byte', () => {
+    // The twin pin lives in settings.rs. One digest rule, two languages,
+    // one constant — drift on either side fails a build.
+    expect(
+      mock.verificationScopeDigest({
+        subjects: ['e0000000000000000000000000000001'],
+        predicate_classes: ['operational_status'],
+        stage: null,
+        environment: null,
+        geography: null,
+      }),
+    ).toBe('093da74e0fbf1a510061af1bdfe0ff9626681f67e689d75b5cef47ecb06f2cb2');
+  });
+
+  it('declaring a scope mirrors the Rust guards and round-trips', async () => {
+    await expect(
+      mock.triggerDeclareR7Scope(
+        '/demo-vault',
+        JSON.stringify({
+          subjects: [],
+          predicate_classes: ['operational_status'],
+          stage: null,
+          environment: null,
+          geography: null,
+        }),
+      ),
+    ).rejects.toThrow(/verifies nothing/);
+    await expect(
+      mock.triggerDeclareR7Scope('/demo-vault', '{"subjects": ["a"], "stagee": "x"}'),
+    ).rejects.toThrow(/does not parse/);
+    await expect(
+      mock.triggerDeclareR7Scope(
+        '/demo-vault',
+        JSON.stringify({
+          subjects: ['b', 'a'],
+          predicate_classes: ['operational_status'],
+        }),
+      ),
+    ).rejects.toThrow(/sorted and duplicate-free/);
+
+    const digest = await mock.triggerDeclareR7Scope(
+      '/demo-vault',
+      JSON.stringify({
+        subjects: ['e0000000000000000000000000000001'],
+        predicate_classes: ['operational_status'],
+      }),
+    );
+    expect(digest).toBe('093da74e0fbf1a510061af1bdfe0ff9626681f67e689d75b5cef47ecb06f2cb2');
+    const stored = await mock.triggerR7Scope('/demo-vault');
+    expect(stored?.subjects).toEqual(['e0000000000000000000000000000001']);
+    expect(stored?.stage).toBeNull();
+  });
+});

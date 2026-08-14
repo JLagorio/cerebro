@@ -73,5 +73,8 @@ declare global {
     /** The M27.8 convergence seam. `null` restores the refusal a vault with
      * no ledger store gives, which a spec has to be able to render too. */
     __cerebroSeedChanges: (view: unknown) => void;
+    /** The M28.1 gate seam. Evaluations are Rust over a real runtime DB, so
+     * a spec that wants a recorded result on the board paints it. */
+    __cerebroSeedTriggerLatest: (gate: string, latest: unknown) => void;
   }
 }
