@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "artifact_version": 2,
+  "artifact_version": 3,
   "rule_version": "lanes-v1",
   "lanes": [
     {
@@ -33,10 +33,13 @@
       "protected": false,
       "reasons": [
         "unresolved_contradiction",
+        "descendant_only_reinforcement",
+        "circular_support",
         "unsupported_inference",
         "authority_route_unmatched",
         "no_authority_route_declared",
         "promotion_blocked",
+        "duplicated_lineage_family",
         "stale_evidence",
         "coverage_not_observed"
       ]

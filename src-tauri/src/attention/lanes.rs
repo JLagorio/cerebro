@@ -173,14 +173,9 @@ pub fn load() -> Result<Definitions, String> {
     // The reasons this build can emit, against the reasons the artifact
     // declares. Both directions: an undeclared reason would sort nowhere, and
     // a declared-but-unreachable one is a promise the code does not keep.
-    for (lane, emitted) in [
-        (Lane::Contradiction, &Reason::CONTRADICTION[..]),
-        (Lane::Blindness, &Reason::BLINDNESS[..]),
-        (Lane::Staleness, &Reason::STALENESS[..]),
-        (Lane::EpistemicDebt, &Reason::DEBT[..]),
-    ] {
+    for lane in Lane::ALL {
         let declared = reasons.get(lane.as_str()).expect("checked above");
-        let emitted: BTreeSet<&str> = emitted.iter().map(|r| r.as_str()).collect();
+        let emitted: BTreeSet<&str> = Reason::of(lane).iter().map(|r| r.as_str()).collect();
         let declared_set: BTreeSet<&str> = declared.iter().map(String::as_str).collect();
         if emitted != declared_set {
             return Err(format!(
@@ -267,6 +262,11 @@ pub enum Reason {
     PromotionBlocked,
     StaleEvidence,
     CoverageNotObserved,
+    // §78/§80, retrospective. `dynamics::hygiene` computes these over
+    // committed state; this is where they reach a person.
+    CircularSupport,
+    DuplicatedLineageFamily,
+    DescendantOnlyReinforcement,
 }
 
 impl Reason {
@@ -278,7 +278,7 @@ impl Reason {
     ];
     pub const BLINDNESS: [Reason; 2] = [Reason::CoverageBlindAssessed, Reason::CoverageUnassessed];
     pub const STALENESS: [Reason; 1] = [Reason::FreshnessStale];
-    pub const DEBT: [Reason; 7] = [
+    pub const DEBT: [Reason; 10] = [
         Reason::UnresolvedContradiction,
         Reason::UnsupportedInference,
         Reason::AuthorityRouteUnmatched,
@@ -286,7 +286,22 @@ impl Reason {
         Reason::PromotionBlocked,
         Reason::StaleEvidence,
         Reason::CoverageNotObserved,
+        Reason::CircularSupport,
+        Reason::DuplicatedLineageFamily,
+        Reason::DescendantOnlyReinforcement,
     ];
+
+    /// Every reason one lane can emit. The loader checks the artifact against
+    /// this in both directions, so a new variant with no home here fails the
+    /// build rather than sorting nowhere at runtime.
+    pub fn of(lane: Lane) -> &'static [Reason] {
+        match lane {
+            Lane::Contradiction => &Reason::CONTRADICTION[..],
+            Lane::Blindness => &Reason::BLINDNESS[..],
+            Lane::Staleness => &Reason::STALENESS[..],
+            Lane::EpistemicDebt => &Reason::DEBT[..],
+        }
+    }
 
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -304,6 +319,9 @@ impl Reason {
             Reason::PromotionBlocked => "promotion_blocked",
             Reason::StaleEvidence => "stale_evidence",
             Reason::CoverageNotObserved => "coverage_not_observed",
+            Reason::CircularSupport => "circular_support",
+            Reason::DuplicatedLineageFamily => "duplicated_lineage_family",
+            Reason::DescendantOnlyReinforcement => "descendant_only_reinforcement",
         }
     }
 }
@@ -395,6 +413,11 @@ pub fn lanes(
 ) -> Lanes {
     let chips = bundle::all_chips(state, tables, as_of);
     let reliance = reliance_index(state, parked);
+    // §78/§80 are computed once over the whole base rather than per facet:
+    // the walk is a reachability query and running it inside the loop would
+    // re-derive the same graph for every row.
+    let findings = crate::dynamics::hygiene::scan(state);
+    let hygiene = crate::dynamics::hygiene::by_belief(&findings);
     let mut items = Vec::new();
 
     items.extend(contradiction(state));
@@ -420,6 +443,10 @@ pub fn lanes(
                 facet,
                 &relied,
                 parked,
+                hygiene
+                    .get(belief.belief_id.as_str())
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
                 &entity_id,
             ));
         }
@@ -645,6 +672,7 @@ fn debt(
     facet: &FacetChips,
     relied: &[Reliance],
     parked: &[ParkedPromotion],
+    hygiene: &[&crate::dynamics::hygiene::Finding],
     entity_id: &str,
 ) -> Vec<Item> {
     use crate::dynamics::coverage::Summary;
@@ -654,6 +682,7 @@ fn debt(
         return Vec::new();
     }
     let mut reasons = Vec::new();
+    reasons.extend(hygiene_reasons(hygiene, facet));
     if facet.validity.conflict == crate::dynamics::validity::Conflict::Contested {
         reasons.push(Reason::UnresolvedContradiction);
     }
@@ -700,6 +729,46 @@ fn debt(
         relied,
         entity_id,
     )]
+}
+
+/// §78/§80's findings, matched to the facet whose OWN supports they name.
+///
+/// A finding carries the implicated assertions but not a facet key, and a
+/// belief can hold two facets resting on different evidence. Attaching by
+/// belief would put "supported through a cycle" on a facet whose supports do
+/// not loop — a false row in the one lane a person is meant to work through.
+/// The join is exact because a finding's assertions are drawn from the very
+/// facet that produced it.
+fn hygiene_reasons(
+    findings: &[&crate::dynamics::hygiene::Finding],
+    facet: &FacetChips,
+) -> Vec<Reason> {
+    use crate::dynamics::hygiene::FindingKind;
+
+    let mine: BTreeSet<&str> = facet
+        .families
+        .iter()
+        .flat_map(|family| family.members.iter())
+        .map(String::as_str)
+        .collect();
+    let mut reasons: Vec<Reason> = findings
+        .iter()
+        .filter(|finding| {
+            finding.belief_revision_event_id == facet.key.belief_revision_event_id
+                && finding
+                    .assertion_event_ids
+                    .iter()
+                    .any(|id| mine.contains(id.as_str()))
+        })
+        .map(|finding| match finding.kind {
+            FindingKind::CircularSupport => Reason::CircularSupport,
+            FindingKind::DuplicatedLineageFamily => Reason::DuplicatedLineageFamily,
+            FindingKind::DescendantOnlyReinforcement => Reason::DescendantOnlyReinforcement,
+        })
+        .collect();
+    reasons.sort();
+    reasons.dedup();
+    reasons
 }
 
 /// Which beliefs the base is relying on, and why.
@@ -931,6 +1000,12 @@ pub(crate) mod tests {
             debt[0].reasons,
             vec![
                 Reason::NoAuthorityRouteDeclared,
+                // §78's second half, and the fixture really does have it:
+                // `standing()` indexes both of B_ONE's supports and both come
+                // from SOURCE_A, so they collapse into ONE family with two
+                // members. A reader told "two supports" should be able to see
+                // that they were the same message twice (M27.9).
+                Reason::DuplicatedLineageFamily,
                 Reason::StaleEvidence,
                 Reason::CoverageNotObserved
             ],

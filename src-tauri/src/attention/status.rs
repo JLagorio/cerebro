@@ -146,6 +146,12 @@ fn reason_words(reason: Reason) -> &'static str {
         Reason::PromotionBlocked => "promotion parked, waiting on missing fields",
         Reason::StaleEvidence => "its evidence is stale",
         Reason::CoverageNotObserved => "coverage is not observed",
+        // §78/§80. Never "reasoning in circles" — the finding is a graph fact
+        // about which evidence traces back to this belief's own output, and
+        // it says which walk it took rather than what it thinks of it.
+        Reason::CircularSupport => "some of its support traces back to itself",
+        Reason::DuplicatedLineageFamily => "two of its supports are the same message twice",
+        Reason::DescendantOnlyReinforcement => "all of its support traces back to itself",
     }
 }
 
@@ -603,6 +609,32 @@ mod tests {
                 "lane {} has no words for holding nothing",
                 lane.id
             );
+        }
+    }
+
+    /// The `match` guarantees a word exists; it does not guarantee the word
+    /// is any good. An empty string renders as a blank row and a duplicate
+    /// makes two different findings read as one — both are the exact failure
+    /// composing here was supposed to prevent.
+    #[test]
+    fn every_reason_and_lane_has_its_own_non_empty_words() {
+        let mut seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        for lane in Lane::ALL {
+            let words = lane_words(lane);
+            for text in [words.label, words.blurb, words.empty] {
+                assert!(!text.is_empty(), "{lane:?} has an empty string in it");
+            }
+            for reason in lanes::Reason::of(lane) {
+                let text = reason_words(*reason);
+                assert!(!text.is_empty(), "{reason:?} has no words");
+                assert!(
+                    seen.insert(text),
+                    "{reason:?} reads exactly like another reason: {text:?}"
+                );
+            }
+        }
+        for reliance in Reliance::ALL {
+            assert!(!reliance_words(reliance).is_empty());
         }
     }
 
