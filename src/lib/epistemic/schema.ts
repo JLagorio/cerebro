@@ -614,7 +614,35 @@ function canonCommon(obj: JsonObject): JsonObject {
   };
 }
 
-const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+const RFC3339 =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The shape gate AND the calendar gate (M27.11b). Rust validates every stamp
+ * with chrono, which refuses impossible values — a February 30th, a 25th
+ * hour, a `+99:00` offset. The regex alone accepted all of those, so the
+ * mock could apply history the real reducer refuses. Ranges are matched to
+ * `chrono::DateTime::parse_from_rfc3339`: seconds run to 60 (a leap
+ * second), offsets to ±23:59.
+ */
+function isRfc3339(v: Json): boolean {
+  if (typeof v !== 'string') return false;
+  const m = v.match(RFC3339);
+  if (m === null) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const last = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  if (day < 1 || day > last) return false;
+  if (Number(m[4]) > 23 || Number(m[5]) > 59 || Number(m[6]) > 60) return false;
+  const offset = m[8];
+  if (offset !== 'Z' && offset !== 'z') {
+    if (Number(offset.slice(1, 3)) > 23 || Number(offset.slice(4, 6)) > 59) return false;
+  }
+  return true;
+}
 
 export function validateCommon(body: JsonObject): void {
   if (body.schema !== 1) throw new RefusedError(`unsupported body schema ${body.schema}`);
@@ -629,7 +657,7 @@ export function validateCommon(body: JsonObject): void {
   }
   for (const key of ['occurred_at', 'valid_from', 'valid_to']) {
     const stamp = body[key];
-    if (stamp !== null && !RFC3339.test(stamp as string)) {
+    if (stamp !== null && !isRfc3339(stamp as string)) {
       throw new RefusedError(`${key} is not RFC3339`);
     }
   }
@@ -3351,8 +3379,6 @@ function sortedUniqueDimensions(dimensions: string[], what: string): void {
     }
   }
 }
-
-const isRfc3339 = (v: Json): boolean => typeof v === 'string' && RFC3339.test(v);
 
 function validateRetrievalReceipt(receipt: JsonObject): void {
   for (const name of [

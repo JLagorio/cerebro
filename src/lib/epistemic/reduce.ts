@@ -1444,10 +1444,10 @@ function applyContradictionClosed(
 
 /**
  * `contradiction.backfill_completed` (M27.3) — the checkpoint activation is
- * gated on. Neither check is about ordering: `through_event_id` is an event
+ * gated on. The check is not about ordering: `through_event_id` is an event
  * id and this reducer holds no id→position index. What it can prove is that
- * the same coverage is not claimed twice, and that a later checkpoint never
- * claims to have seen FEWER relations than an earlier one.
+ * the same coverage is not claimed twice. A LOWER count than an earlier
+ * checkpoint is legal since M27.5a — the vector asserts that success.
  */
 function applyBackfillCompleted(
   state: EpistemicState,

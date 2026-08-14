@@ -2514,13 +2514,13 @@ fn distinct_endpoints<'a>(left: &'a str, right: &'a str) -> Vec<&'a str> {
 /// `contradiction.backfill_completed` (M27.3) — the checkpoint activation is
 /// gated on.
 ///
-/// Two checks, and neither is about ordering, because there is nothing here
-/// to order BY: `through_event_id` is an event id, and the reducer holds no
+/// The check is not about ordering, because there is nothing here to order
+/// BY: `through_event_id` is an event id, and the reducer holds no
 /// id→position index it could use to prove one checkpoint is later than
-/// another. What it can prove is that the same coverage is not claimed twice,
-/// and that a later checkpoint never claims to have seen FEWER relations than
-/// an earlier one — the backfill reads a growing prefix of the ledger, so a
-/// shrinking count is a backfill that lost its place.
+/// another. What it can prove is that the same coverage is not claimed
+/// twice. A LOWER count than an earlier checkpoint is legal since M27.5a:
+/// claim-based sweeps re-walk what the reduced state lacks, and a re-walk
+/// over a ledger whose relations were since withdrawn honestly sees fewer.
 fn apply_backfill_completed(
     state: &mut EpistemicState,
     frame: &Frame,
