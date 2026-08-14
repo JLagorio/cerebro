@@ -515,6 +515,44 @@ pub fn support_of(state: &EpistemicState, routes: &[AuthorityRoutesV1], facet: &
     }
 }
 
+/// Whether one route's declared predicate classes and stages cover a facet's.
+///
+/// The ONE place that decides it. `authority_scope` asks to pick a route to
+/// evaluate; M27.6's debt lane asks whether any route exists at all. Two
+/// copies of "predicate AND stage, never universally" is two chances to
+/// disagree about what a route is for.
+pub fn route_covers(route: &authority::AuthorityRoute, predicate: &str, stage: StateStage) -> bool {
+    route.predicate_classes.iter().any(|c| c == predicate)
+        && route.state_stages.contains(&route_stage(stage))
+}
+
+/// Does anything in the artifact set declare a route for this predicate at
+/// this stage? Says nothing about whether the evidence satisfies one —
+/// "nobody has said how this could be authoritative" and "nothing has met the
+/// bar" are different sentences, and the lane renders them differently.
+pub fn route_declared(
+    routes: &[AuthorityRoutesV1],
+    predicate: Option<&str>,
+    stage: StateStage,
+) -> bool {
+    let Some(predicate) = predicate else {
+        return false;
+    };
+    routes
+        .iter()
+        .any(|artifact| route_covers_any(&artifact.routes, predicate, stage))
+}
+
+fn route_covers_any(
+    routes: &[authority::AuthorityRoute],
+    predicate: &str,
+    stage: StateStage,
+) -> bool {
+    routes
+        .iter()
+        .any(|route| route_covers(route, predicate, stage))
+}
+
 fn route_stage(stage: StateStage) -> RouteStage {
     match stage {
         StateStage::Planned => RouteStage::Planned,
@@ -539,16 +577,13 @@ fn authority_scope(
     facet: &Facet,
 ) -> Option<AuthorityScope> {
     let predicate = facet.key.predicate.value()?;
-    let stage = route_stage(facet.key.state_stage);
     for artifact in routes {
         let artifact_hash = artifact.artifact_hash();
         for route in &artifact.routes {
             // Predicate AND stage, never universally. A responsible owner
             // authoritative for intent at `planned` is not authoritative for
             // what shipped.
-            if !route.predicate_classes.iter().any(|c| c == predicate)
-                || !route.state_stages.contains(&stage)
-            {
+            if !route_covers(route, predicate, facet.key.state_stage) {
                 continue;
             }
             for criterion in &route.criteria {

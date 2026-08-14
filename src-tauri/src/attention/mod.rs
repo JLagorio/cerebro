@@ -8,5 +8,6 @@
 //! shipping them together would mean the ranking was decided by whoever wrote
 //! the query first.
 
+pub mod lanes;
 pub mod signals;
 pub mod store;

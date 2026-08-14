@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "lanes-v1",
+  "lanes": [
+    {
+      "id": "contradiction",
+      "reasons": [
+        "open_edge_genuine_direct",
+        "open_edge_partial",
+        "open_edge_conditional",
+        "legacy_unclassified"
+      ]
+    },
+    {
+      "id": "blindness",
+      "reasons": ["coverage_blind_assessed", "coverage_unassessed"]
+    },
+    {
+      "id": "staleness",
+      "reasons": ["freshness_stale"]
+    },
+    {
+      "id": "epistemic_debt",
+      "reasons": [
+        "unresolved_contradiction",
+        "unsupported_inference",
+        "authority_route_unmatched",
+        "no_authority_route_declared",
+        "promotion_blocked",
+        "stale_evidence",
+        "coverage_not_observed"
+      ]
+    }
+  ],
+  "reliance": ["qualified", "promotion_attempted", "refined_by"],
+  "debt_requires_reliance": true
+}

@@ -23,6 +23,15 @@ preemptively.)
 | `authority-routes.v1.json` | The current predicate- and stage-specific authority routes (D11). |
 | `authority-routes/<hash>.json` | Immutable content-addressed snapshots. A queued proposal pins `(route_id, rule_version, artifact_hash)`, so an approval tomorrow is evaluated against the rule the agent was actually shown. |
 | `independence-rules.v1.json` + `.sha256` | The two deterministic positive-independence predicates (M25.5), loaded by `src-tauri/src/ingest/independence.rs`. `rule_version` is bumped by ANY predicate change and pinned into every event the producer emits. |
+| `freshness.v1.json` + `.sha256` | When a claim goes stale, by predicate class (M27.1) — `time_basis`, `staleness`, and whether an attestation may anchor. Loaded by `src-tauri/src/dynamics/freshness.rs`. `rule_version` is stamped into every `freshness.transitioned` event. |
+| `coverage-fold.v1.json` + `.sha256` | The Coverage dimension precedence and summary fold (M27.2). Loaded by `src-tauri/src/dynamics/coverage.rs`; `fold_rule_version` is carried on every folded answer. |
+| `lanes.v1.json` + `.sha256` | The four attention lanes (M27.6): lane order, the reason codes each lane may emit and their within-lane order, the reliance vocabulary, and whether the debt lane requires reliance. Loaded by `src-tauri/src/attention/lanes.rs`, which refuses to start if the artifact and the code disagree about EITHER set — a lane or reason declared with no code behind it renders as permanently empty, which reads as "nothing here". |
+
+**Three of these are Rust-only, and that is not an exemption from the house
+rule.** `freshness`, `coverage-fold` and `lanes` are read by no TypeScript
+because the browser holds no ledger to evaluate them against — so there is no
+twin to disagree with. If a surface ever needs one of these rules on the TS
+side, it loads the same file; it does not reimplement the rule.
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 
 The whole directory is `.prettierignore`d: the bytes are hashed, and a
@@ -40,6 +49,10 @@ cargo test --lib policy::table::tests::write_policy_digest -- --ignored
 # after an edit to authority-routes.v1.json (bump artifact_version and every
 # changed route's authority_rule_version first; the prior snapshot stays)
 cargo test --lib policy::authority::tests::write_authority_snapshot -- --ignored
+# after an edit to freshness.v1.json / coverage-fold.v1.json / lanes.v1.json
+cargo test --lib dynamics::freshness::tests::write_freshness_digest -- --ignored
+cargo test --lib dynamics::coverage::tests::write_coverage_fold_digest -- --ignored
+cargo test --lib attention::lanes::tests::write_lanes_digest -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in
