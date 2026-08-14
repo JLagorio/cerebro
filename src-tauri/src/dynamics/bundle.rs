@@ -179,6 +179,30 @@ pub fn all_chips(
         .collect()
 }
 
+/// Read one vault's chips through the active writer (M27.5b).
+///
+/// Rebuilt from the ledger on every call, like the review surface: the axes
+/// are a fold of what is on disk, and a cache of them is a second answer that
+/// can be wrong while the first one is right.
+///
+/// A vault with no writer is an ERROR rather than an empty list. "This vault
+/// has no ledger" and "this vault's beliefs rest on nothing" are opposite
+/// sentences, and a caller that got `[]` for the first would render the
+/// second.
+pub fn for_vault(
+    vault: &std::path::Path,
+    as_of: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<BeliefChips>, String> {
+    let tables = Tables::load()?;
+    crate::ledger::shadow::with_writer(vault, |writer| {
+        let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
+            .map_err(|e| e.to_string())?;
+        let state = crate::ledger::reduce::reduce(&read.frames, writer.store_id());
+        Ok(all_chips(&state, &tables, as_of))
+    })
+    .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,6 +354,56 @@ mod tests {
             0,
             "an attestation is not a family"
         );
+    }
+
+    #[test]
+    fn the_wire_shape_is_pinned_because_typescript_declares_it_a_second_time() {
+        // `src/lib/mockIpc.ts` re-declares these shapes as interfaces, and a
+        // field added here that nobody adds there is invisible until a
+        // surface silently renders `undefined`. That exact class of drift got
+        // through once already in M27.3b.
+        //
+        // This pins the KEYS only. It cannot prove the TypeScript is right —
+        // nothing in this suite reads that file — so it fails loudly enough
+        // to send whoever changed the struct to the other declaration.
+        let chips = one(&base(), B_TWO);
+        let json = serde_json::to_value(&chips).unwrap();
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            value
+                .as_object()
+                .expect("an object")
+                .keys()
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            keys(&json),
+            ["belief_id", "path", "belief_revision_event_id", "facets"],
+            "BeliefChips changed shape — update the interface in src/lib/mockIpc.ts"
+        );
+        assert_eq!(
+            keys(&json["facets"][0]),
+            [
+                "key",
+                "support",
+                "families",
+                "independence_edges",
+                "coverage",
+                "validity",
+                "freshness_basis",
+                "review",
+                "line"
+            ],
+            "FacetChips changed shape — update the interface in src/lib/mockIpc.ts"
+        );
+        assert_eq!(
+            json["support"]["level"],
+            serde_json::Value::Null,
+            "Support is tagged INSIDE its own object, not flattened onto the facet"
+        );
+        assert_eq!(json["facets"][0]["support"]["level"], "unsupported");
+        assert_eq!(json["facets"][0]["coverage"]["kind"], "no_assessments");
+        assert_eq!(json["facets"][0]["review"]["status"], "unreviewed");
     }
 
     #[test]

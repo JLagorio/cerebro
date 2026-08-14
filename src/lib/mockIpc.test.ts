@@ -596,6 +596,59 @@ describe('mockIpc', () => {
     });
   });
 
+  it('beliefChips serves what a spec seeds and derives nothing', async () => {
+    // The browser has no ledger, so it has no axes. Empty until seeded is the
+    // honest starting point — and the seam exists so a spec can stage the
+    // rows it wants without a second derivation living here.
+    expect(await mock.beliefChips('/demo-vault')).toEqual([]);
+    mock.__seedChips([
+      {
+        belief_id: 'b1',
+        path: 'concepts/sync-error-rate.md',
+        belief_revision_event_id: 'r1',
+        facets: [
+          {
+            key: {
+              belief_id: 'b1',
+              belief_revision_event_id: 'r1',
+              predicate: { kind: 'known', value: 'ci_status' },
+              state_stage: 'implemented',
+            },
+            support: {
+              level: 'single_source',
+              ancestral_family_count: 1,
+              independent_family_count: 1,
+              independence_unknown_count: 1,
+            },
+            families: [],
+            independence_edges: [],
+            coverage: {
+              kind: 'no_assessments',
+              summary: 'blind',
+              assessment_ids: [],
+              fold_rule_version: 'coverage-fold-v1',
+            },
+            validity: { freshness: 'stale', conflict: 'contested', lifecycle: 'active' },
+            freshness_basis: {
+              predicate_class: 'ci_status',
+              anchor_event_id: 'o1',
+              anchor_at: '2026-08-01T00:00:00Z',
+              stale_after: '2026-08-01T06:00:00Z',
+            },
+            review: { status: 'unreviewed' },
+            line: 'single-source, coverage unassessed, stale and contested',
+          },
+        ],
+      },
+    ]);
+    const rows = await mock.beliefChips('/demo-vault');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.facets[0]?.line).toBe(
+      'single-source, coverage unassessed, stale and contested',
+    );
+    mock.__seedChips([]);
+  });
+
   it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
     await mock.createFolder('/demo-vault', 'projects/empty-folder');
     await mock.saveView('/demo-vault', 'v', 'name: V\n');

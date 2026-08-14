@@ -366,6 +366,16 @@ fn converge(
     convergence::over(&read.frames, &store_uuid, window)
 }
 
+/// The three axes, per belief facet (M27.5b).
+///
+/// The clock is read HERE and passed down, because the derivation must not
+/// read one: freshness is a function of `as_of`, and a module that fetched
+/// its own would answer differently about a ledger that had not moved.
+#[tauri::command(async)]
+fn belief_chips(vault: String) -> Result<Vec<dynamics::bundle::BeliefChips>, String> {
+    dynamics::bundle::for_vault(Path::new(&vault), chrono::Utc::now())
+}
+
 /// The ambient ingest switch, per vault (M26.4i). Defaults OFF.
 ///
 /// The supervisor thread starts with the vault and reads this every tick, so
@@ -801,6 +811,7 @@ pub fn run() {
             ingest_item_state,
             ask_question,
             converge,
+            belief_chips,
             resolve_held_items,
             create_note,
             set_note_title,

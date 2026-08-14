@@ -304,14 +304,38 @@ export function ledgerStatus(vault: string): Promise<LedgerStatus> {
 // imports the mock, and a type import pointing back would close a cycle that
 // vitest's module ordering can trip over. Re-exported here because the app
 // imports its IPC types from the IPC module.
-import type { CardTarget, ReviewCard, RevertableApplication } from './mockIpc';
+import type { BeliefChips, CardTarget, ReviewCard, RevertableApplication } from './mockIpc';
 
 export type { CardTarget, ReviewCard, RevertableApplication };
+export type {
+  AuthorityScope,
+  BeliefChips,
+  BeliefFacetKey,
+  Coverage,
+  FacetChips,
+  FacetPredicate,
+  FreshnessBasis,
+  ReviewStatus,
+  Support,
+  SupportFamily,
+  Validity,
+} from './mockIpc';
 
 /** Cards awaiting a human. Rebuilt from the ledger on every call — nothing
  * is cached, so a wiped app-data directory cannot lose one. */
 export function reviewQueue(vault: string): Promise<ReviewCard[]> {
   return inTauri() ? invokeTauri('review_queue', { vault }) : mock.reviewQueue(vault);
+}
+
+/** Support/Coverage/Validity per belief facet (M27.5b).
+ *
+ * Rebuilt from the ledger on every call, and derived nowhere else: the `line`
+ * each row carries is composed in Rust so the sentence exists once. A vault
+ * with no ledger REFUSES rather than answering `[]` — "there is no ledger
+ * here" and "nothing rests under anything" are opposite sentences, and the
+ * caller decides which one to show. */
+export function beliefChips(vault: string): Promise<BeliefChips[]> {
+  return inTauri() ? invokeTauri('belief_chips', { vault }) : mock.beliefChips(vault);
 }
 
 export function revertableApplications(vault: string): Promise<RevertableApplication[]> {

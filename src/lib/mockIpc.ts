@@ -817,6 +817,152 @@ export async function revertApplication(
   return 'apply';
 }
 
+// --- Belief chips (M27.5b) -------------------------------------------------
+//
+// The wire shapes of `dynamics::bundle`, and NOTHING ELSE. No axis is derived
+// here and no sentence is composed here: `line` arrives already read aloud,
+// because a line assembled on this side from three serialized values would be
+// a second implementation of it. Same reason the review surface holds cards
+// rather than a policy engine.
+//
+// The browser has no ledger, so it has no beliefs and no axes. A spec seeds
+// the rows it wants to see.
+
+/** The predicate half of a facet key. `unknown` is a member, not a null —
+ * "no predicate was recorded" and "the predicate is ci_status" are different
+ * keys. */
+export type FacetPredicate = { kind: 'known'; value: string } | { kind: 'unknown' };
+
+export interface BeliefFacetKey {
+  belief_id: string;
+  belief_revision_event_id: string;
+  predicate: FacetPredicate;
+  state_stage: string;
+}
+
+/** Where authority came from, scoped to one predicate at one stage. */
+export interface AuthorityScope {
+  predicate: string;
+  state_stage: string;
+  authority_class: string;
+  authority_route_id: string;
+  authority_rule_version: number;
+  authority_artifact_hash: string;
+  assertion_event_id: string;
+  source_registration_event_id: string;
+  authority_provenance: string;
+}
+
+/** One collapsed evidence family. */
+export interface SupportFamily {
+  family_id: string;
+  members: string[];
+  source_ids: string[];
+  independence: 'known_independent' | 'independence_unknown';
+}
+
+export interface IndependenceEdge {
+  left_family_id: string;
+  right_family_id: string;
+  proof_kind: string;
+  rule_version: string | null;
+  proposal_id: string | null;
+  decision_event_id: string | null;
+  recorded_by_event_id: string;
+}
+
+/** What rests underneath — never lifted by a review. */
+export interface Support {
+  level: 'unsupported' | 'single_source' | 'corroborated' | 'authoritative_for_predicate_stage';
+  ancestral_family_count: number;
+  independent_family_count: number;
+  independence_unknown_count: number;
+  authority_scope?: AuthorityScope;
+}
+
+export interface CoverageDimensionInput {
+  assessment_id: string;
+  source_id: string;
+  state: string;
+  basis_event_ids: string[];
+  as_of: string;
+}
+
+export interface FoldedDimension {
+  state: string;
+  inputs: CoverageDimensionInput[];
+}
+
+/** How much anybody has looked. `no_assessments` and a folded `blind` are
+ * different answers, which is why the tag survives the wire. */
+export interface Coverage {
+  kind: 'no_assessments' | 'assessed';
+  summary: 'observed' | 'partial' | 'blind';
+  assessment_ids: string[];
+  fold_rule_version: string;
+  dimensions?: Record<string, FoldedDimension>;
+}
+
+/** Whether it still holds. Three subfields, deliberately not one enum. */
+export interface Validity {
+  freshness: 'fresh' | 'stale' | 'unknown';
+  conflict: 'clear' | 'contested';
+  lifecycle: 'active' | 'superseded' | 'archived' | 'tombstoned';
+}
+
+export interface FreshnessBasis {
+  predicate_class: string | null;
+  anchor_event_id: string | null;
+  anchor_at: string | null;
+  stale_after: string | null;
+}
+
+/** D8 channel 1 — beside the axes, never inside Support. */
+export interface ReviewStatus {
+  status: 'unreviewed' | 'current' | 'predates_current';
+  attestation_event_id?: string;
+  attested_belief_revision_event_id?: string;
+}
+
+export interface FacetChips {
+  key: BeliefFacetKey;
+  support: Support;
+  families: SupportFamily[];
+  independence_edges: IndependenceEdge[];
+  coverage: Coverage;
+  validity: Validity;
+  freshness_basis: FreshnessBasis;
+  review: ReviewStatus;
+  /** The three axes, already read aloud in axis order. */
+  line: string;
+}
+
+export interface BeliefChips {
+  belief_id: string;
+  /** The knowledge-relative projection path — how a file on screen finds the
+   * belief these axes are about. Null for a belief no file projects. */
+  path: string | null;
+  belief_revision_event_id: string;
+  /** One row per facet. A multi-facet belief renders separate scoped rows. */
+  facets: FacetChips[];
+}
+
+let chips: BeliefChips[] = [];
+
+/** Test-only seam, mirroring `__cerebroSeedReview`. */
+export function __seedChips(rows: BeliefChips[]): void {
+  chips = rows;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedChips: (r: BeliefChips[]) => void }).__cerebroSeedChips =
+    __seedChips;
+}
+
+export async function beliefChips(_vault: string): Promise<BeliefChips[]> {
+  return chips;
+}
+
 // --- The control surface (M25.7) -------------------------------------------
 //
 // FIXED SHAPES, NO ENGINE. The mock serves whatever a spec seeds and computes
