@@ -8,6 +8,7 @@ import type {
   ReviewCard,
   TriggerEntryStatus,
   TriggerRunReport,
+  VerificationScope,
 } from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { EpistemicStatusPage } from './EpistemicStatusPage';
@@ -27,6 +28,8 @@ const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
 const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
 const triggerStatus = vi.fn<(vault: string) => Promise<TriggerEntryStatus[]>>();
 const triggerRun = vi.fn<(vault: string) => Promise<TriggerRunReport>>();
+const triggerR7Scope = vi.fn<(vault: string) => Promise<VerificationScope | null>>();
+const triggerDeclareR7Scope = vi.fn<(vault: string, scopeJson: string) => Promise<string>>();
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -38,6 +41,9 @@ vi.mock('@/lib/ipc', async () => {
     pipelineOverview: (vault: string) => pipelineOverview(vault),
     triggerStatus: (vault: string) => triggerStatus(vault),
     triggerRun: (vault: string) => triggerRun(vault),
+    triggerR7Scope: (vault: string) => triggerR7Scope(vault),
+    triggerDeclareR7Scope: (vault: string, scopeJson: string) =>
+      triggerDeclareR7Scope(vault, scopeJson),
   };
 });
 
@@ -162,6 +168,8 @@ describe('EpistemicStatusPage', () => {
     pipelineOverview.mockResolvedValue(HEALTH);
     triggerStatus.mockResolvedValue(BOARD);
     triggerRun.mockResolvedValue(RUN_REPORT);
+    triggerR7Scope.mockResolvedValue(null);
+    triggerDeclareR7Scope.mockResolvedValue('a'.repeat(64));
   });
 
   it('renders every lane the feed declares, including the ones holding nothing', async () => {
@@ -279,7 +287,7 @@ describe('EpistemicStatusPage', () => {
     useVaultStore.setState({ vaultPath: null });
     render(<EpistemicStatusPage />);
 
-    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(5));
+    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(6));
     expect(converge).not.toHaveBeenCalled();
   });
 
@@ -352,5 +360,68 @@ describe('EpistemicStatusPage', () => {
 
     const error = await screen.findByTestId('gates-run-error');
     expect(error.textContent).toContain('no active ledger writer');
+  });
+
+  it('declaring an R7 scope canonicalizes the lists before anything is sent', async () => {
+    render(<EpistemicStatusPage />);
+    expect((await screen.findByTestId('r7-scope-none')).textContent).toContain(
+      'No scope is declared',
+    );
+
+    fireEvent.click(screen.getByTestId('r7-scope-open'));
+    // Unsorted, duplicated, and padded with blank lines — the form's job is
+    // to canonicalize, not to make a human hand-sort entity ids.
+    fireEvent.change(screen.getByTestId('r7-scope-subjects'), {
+      target: { value: '\nbbb\naaa\n\nbbb\n' },
+    });
+    fireEvent.change(screen.getByTestId('r7-scope-classes'), {
+      target: { value: 'operational_status' },
+    });
+    fireEvent.change(screen.getByTestId('r7-scope-stage'), { target: { value: '  ' } });
+    fireEvent.click(screen.getByTestId('r7-scope-save'));
+
+    await screen.findByTestId('r7-scope-digest');
+    expect(triggerDeclareR7Scope).toHaveBeenCalledWith(
+      '/demo-vault',
+      JSON.stringify({
+        subjects: ['aaa', 'bbb'],
+        predicate_classes: ['operational_status'],
+        stage: null,
+        environment: null,
+        geography: null,
+      }),
+    );
+    // The declared feed is re-read so the block shows what is now stored.
+    await waitFor(() => expect(triggerR7Scope).toHaveBeenCalledTimes(2));
+  });
+
+  it('a refused declaration is a sentence beside the form, which stays open', async () => {
+    triggerDeclareR7Scope.mockRejectedValue(
+      new Error('a verification scope with no subjects verifies nothing'),
+    );
+    render(<EpistemicStatusPage />);
+    await screen.findByTestId('r7-scope-none');
+
+    fireEvent.click(screen.getByTestId('r7-scope-open'));
+    fireEvent.click(screen.getByTestId('r7-scope-save'));
+
+    expect((await screen.findByTestId('r7-scope-error')).textContent).toContain('verifies nothing');
+    expect(screen.getByTestId('r7-scope-save')).toBeTruthy();
+  });
+
+  it('a declared scope renders as the question R7 is counting', async () => {
+    triggerR7Scope.mockResolvedValue({
+      subjects: ['e0000000000000000000000000000001'],
+      predicate_classes: ['operational_status'],
+      stage: 'implemented',
+      environment: null,
+      geography: null,
+    });
+    render(<EpistemicStatusPage />);
+
+    const declared = await screen.findByTestId('r7-scope-declared');
+    expect(declared.textContent).toContain('e0000000000000000000000000000001');
+    expect(declared.textContent).toContain('operational_status');
+    expect(declared.textContent).toContain('stage implemented');
   });
 });

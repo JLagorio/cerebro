@@ -337,6 +337,203 @@ function GateRow({ gate }: { gate: ipc.TriggerGateStatus }) {
   );
 }
 
+/** R7 is the one gate whose question is DECLARED: which subjects, which
+ * predicate classes, under which constraints. The runner never invents a
+ * scope, so until one is declared here R7 reports not-evaluated. The lists
+ * are canonicalized (trimmed, deduplicated, byte-sorted) before they are
+ * sent — the validator refuses unsorted input, and making a human hand-sort
+ * entity ids would be refusing them for the wrong reason. */
+function R7Scope({ vaultPath }: { vaultPath: string | null }) {
+  const [version, setVersion] = useState(0);
+  const declared = useFeed(vaultPath, ipc.triggerR7Scope, version);
+  const [editing, setEditing] = useState(false);
+  const [subjects, setSubjects] = useState('');
+  const [classes, setClasses] = useState('');
+  const [stage, setStage] = useState('');
+  const [environment, setEnvironment] = useState('');
+  const [geography, setGeography] = useState('');
+  const [digest, setDigest] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const openForm = () => {
+    if (declared.kind === 'ready' && declared.data !== null) {
+      setSubjects(declared.data.subjects.join('\n'));
+      setClasses(declared.data.predicate_classes.join('\n'));
+      setStage(declared.data.stage ?? '');
+      setEnvironment(declared.data.environment ?? '');
+      setGeography(declared.data.geography ?? '');
+    }
+    setDigest(null);
+    setEditing(true);
+  };
+
+  const save = () => {
+    if (vaultPath === null || saving) return;
+    const list = (text: string) =>
+      [
+        ...new Set(
+          text
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line !== ''),
+        ),
+        // Default sort: UTF-16 code-unit order, which is byte order for the
+        // ASCII ids these lists hold — the same order the Rust validator
+        // checks. localeCompare would be the wrong collation here.
+      ].sort();
+    const constraint = (value: string) => (value.trim() === '' ? null : value.trim());
+    const scope = {
+      subjects: list(subjects),
+      predicate_classes: list(classes),
+      stage: constraint(stage),
+      environment: constraint(environment),
+      geography: constraint(geography),
+    };
+    setSaving(true);
+    setError(null);
+    void (async () => {
+      try {
+        setDigest(await ipc.triggerDeclareR7Scope(vaultPath, JSON.stringify(scope)));
+        setEditing(false);
+        setVersion((v) => v + 1);
+      } catch (e) {
+        // Never a throw: the validator's refusal is a sentence the person
+        // fixes, not an error the page fell over on.
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSaving(false);
+      }
+    })();
+  };
+
+  const field =
+    'rounded border border-n-200 bg-transparent px-2 py-1 text-xs text-n-800 placeholder:text-n-400';
+
+  return (
+    <div data-testid="r7-scope" className="flex flex-col gap-1.5 rounded border border-n-200 p-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-n-800">R7 verification scope</span>
+        {!editing && (
+          <button
+            type="button"
+            data-testid="r7-scope-open"
+            onClick={openForm}
+            className="rounded border border-n-200 px-2 py-0.5 text-2xs text-n-800 hover:bg-n-50"
+          >
+            {declared.kind === 'ready' && declared.data !== null ? 'Edit' : 'Declare'}
+          </button>
+        )}
+      </div>
+      {declared.kind === 'loading' && <Loading />}
+      {declared.kind === 'unavailable' && <Unavailable what="The R7 verification scope" />}
+      {declared.kind === 'ready' && !editing && declared.data === null && (
+        <p data-testid="r7-scope-none" className="text-2xs text-n-500">
+          No scope is declared, so R7 has no question to count. Declare which subjects and predicate
+          classes it should verify.
+        </p>
+      )}
+      {declared.kind === 'ready' && !editing && declared.data !== null && (
+        <div data-testid="r7-scope-declared" className="flex flex-col gap-0.5 text-2xs text-n-600">
+          <span>Subjects: {declared.data.subjects.join(', ')}</span>
+          <span>Predicate classes: {declared.data.predicate_classes.join(', ')}</span>
+          {(declared.data.stage !== null ||
+            declared.data.environment !== null ||
+            declared.data.geography !== null) && (
+            <span>
+              Constraints:{' '}
+              {[
+                declared.data.stage !== null ? `stage ${declared.data.stage}` : null,
+                declared.data.environment !== null
+                  ? `environment ${declared.data.environment}`
+                  : null,
+                declared.data.geography !== null ? `geography ${declared.data.geography}` : null,
+              ]
+                .filter((part) => part !== null)
+                .join(', ')}
+            </span>
+          )}
+        </div>
+      )}
+      {editing && (
+        <div className="flex flex-col gap-1.5">
+          <label className="flex flex-col gap-0.5 text-2xs text-n-600">
+            Subjects, one entity id per line
+            <textarea
+              data-testid="r7-scope-subjects"
+              value={subjects}
+              onChange={(event) => setSubjects(event.target.value)}
+              rows={3}
+              className={field}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5 text-2xs text-n-600">
+            Predicate classes, one per line
+            <textarea
+              data-testid="r7-scope-classes"
+              value={classes}
+              onChange={(event) => setClasses(event.target.value)}
+              rows={2}
+              className={field}
+            />
+          </label>
+          <div className="flex gap-1.5">
+            {(
+              [
+                ['stage', stage, setStage],
+                ['environment', environment, setEnvironment],
+                ['geography', geography, setGeography],
+              ] as const
+            ).map(([name, value, set]) => (
+              <label key={name} className="flex flex-1 flex-col gap-0.5 text-2xs text-n-600">
+                {name} (optional)
+                <input
+                  data-testid={`r7-scope-${name}`}
+                  value={value}
+                  onChange={(event) => set(event.target.value)}
+                  className={field}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="r7-scope-save"
+              onClick={save}
+              disabled={saving}
+              className="rounded border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
+            >
+              {saving ? 'Declaring…' : 'Declare scope'}
+            </button>
+            <button
+              type="button"
+              data-testid="r7-scope-cancel"
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+              }}
+              className="text-2xs text-n-500 hover:text-n-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error !== null && (
+        <p data-testid="r7-scope-error" className="text-2xs text-warn-700">
+          {error}
+        </p>
+      )}
+      {digest !== null && (
+        <p data-testid="r7-scope-digest" className="text-2xs text-n-500">
+          Declared. Evaluations under this scope will carry digest {digest.slice(0, 12)}….
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Gates({
   feed,
   onEvaluate,
@@ -506,6 +703,7 @@ export function EpistemicStatusPage() {
             report={runReport}
             error={runError}
           />
+          <R7Scope vaultPath={vaultPath} />
         </Section>
       </div>
     </div>

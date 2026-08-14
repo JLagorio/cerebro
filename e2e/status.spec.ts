@@ -270,3 +270,23 @@ test('status: evaluate answers honestly in the browser, where no runtime databas
   await expect(page.getByTestId('gates-run-outcome')).toContainText('Evaluated 0 gates');
   await expect(page.getByTestId('gates-run-skip').first()).toContainText('browser mock');
 });
+
+test('status: declaring an R7 scope walks the real guards and round-trips', async ({ page }) => {
+  await open(page);
+  await expect(page.getByTestId('r7-scope-none')).toContainText('No scope is declared');
+
+  // An empty declaration meets the validator, and the refusal is a sentence
+  // beside the form — the same words the desktop build refuses with.
+  await page.getByTestId('r7-scope-open').click();
+  await page.getByTestId('r7-scope-save').click();
+  await expect(page.getByTestId('r7-scope-error')).toContainText('verifies nothing');
+
+  await page.getByTestId('r7-scope-subjects').fill('e0000000000000000000000000000001');
+  await page.getByTestId('r7-scope-classes').fill('operational_status');
+  await page.getByTestId('r7-scope-save').click();
+
+  // The digest on screen is the digest the pinned cross-language vector
+  // proves both engines derive.
+  await expect(page.getByTestId('r7-scope-digest')).toContainText('093da74e0fbf');
+  await expect(page.getByTestId('r7-scope-declared')).toContainText('operational_status');
+});
