@@ -28,6 +28,7 @@ preemptively.)
 | `lanes.v1.json` + `.sha256` | The four attention lanes (M27.6): lane order, the reason codes each lane may emit and their within-lane order, the reliance vocabulary, whether the debt lane requires reliance, and (M27.7) which lanes are PROTECTED under §33. Loaded by `src-tauri/src/attention/lanes.rs`, which refuses to start if the artifact and the code disagree about EITHER set — a lane or reason declared with no code behind it renders as permanently empty, which reads as "nothing here" — and refuses an artifact that protects nothing, because a firewall with no protected class is a comment. M27.9 added the three §78/§80 hygiene reasons to the debt lane — `dynamics::hygiene` had computed them since M27.2 with no caller, which is the same as not computing them. |
 | `critical-attention.v1.json` + `.sha256` | §8's bypass (M27.7): the deliberately small, complete inventory of deterministic signals that must not wait in a lane. Each trigger declares its required typed fields, the comparison operators and durations, and the copy key; the artifact declares the replacement relation and its DIRECTION. Interpreted by `src-tauri/src/attention/critical.rs` and `src/lib/attention/critical.ts` — two interpreters, one artifact, and no rule written in either language. **Adding a trigger is an artifact change plus a vector change, never hidden code.** |
 | `goldens-critical/*.json` | The bypass's parity mechanism, replayed by `cargo test` and `pnpm test:run` from the same bytes. Every shipped trigger has five: positive, boundary, replaced, wrong-environment, malformed — and BOTH suites assert that all five exist for every trigger, so a new trigger without vectors fails the build rather than shipping unchecked. |
+| `trigger-registry.v1.json` + `.sha256` | The M28 deferral registry: fourteen closed entries, each gate key's required evaluation variant, scope, and parent rule, the metric name/unit tables, and the measurable protocols' floors. Interpreted by `src-tauri/src/trigger/registry.rs` and `src/lib/trigger/registry.ts` — two interpreters, one artifact. A combination the artifact does not name resolves to nothing, which IS the refusal. R14's `registered_connectors` is the one deliberately empty list: no connector qualifies yet, and a fake registration to satisfy a validator would be worse. |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
 
 **Three of these are Rust-only, and that is not an exemption from the house
@@ -57,6 +58,8 @@ cargo test --lib dynamics::coverage::tests::write_coverage_fold_digest -- --igno
 cargo test --lib attention::lanes::tests::write_lanes_digest -- --ignored
 # after an edit to critical-attention.v1.json
 cargo test --lib attention::critical::tests::write_critical_digest -- --ignored
+# after an edit to trigger-registry.v1.json
+cargo test --lib trigger::registry::tests::write_trigger_registry_digest -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in
@@ -331,3 +334,29 @@ gate above landed first ON PURPOSE: a predicate the table requires and nothing
 evaluates is a rule that looks like protection, so the walk (M26.3a) shipped
 with nothing depending on it, the binding (M26.3b) second, and registration —
 which must also carry M26.2's semantic-receipt-v2 validator — last.
+
+## The trigger registry (M28.0)
+
+- **The protocols' floors are data, not code.** The design fixes each
+  measurable protocol's mechanism in prose; the numbers (window lengths,
+  sample floors, ppm thresholds) live in the artifact so retuning one is a
+  reviewed artifact edit with a digest regeneration, never a quiet constant
+  change in an evaluator. `rule_version` is baked into every evaluation id,
+  so an evaluation run under different rules is a different evaluation.
+- **`snapshot_hash_domain` is `cerebro-trigger-snapshot-v1`.** The design
+  fixes the evaluation-id domain (`cerebro-trigger-evaluation-v1`) and says
+  the input-snapshot hash is domain-separated without naming the tag; this is
+  the name, chosen in the artifact rather than in either interpreter.
+- **`metrics.component_units` restates `runtime::governance::Component`,**
+  and the Rust loader REFUSES an artifact that disagrees with the enum — the
+  `attention::lanes` posture. The restatement exists so TypeScript can
+  validate a projected-component metric without reimplementing M26; it is
+  tolerable exactly as long as the refusal holds.
+- **Protocol coverage is two-sided.** Every unaliased measurable/hybrid gate
+  must have a protocol entry and nothing else may: a protocol for a
+  discretionary gate would read as a measurement nobody performs, and R5's
+  Discovery alias deliberately owns none — its entire content is
+  byte-equality with a fired R13 parent.
+- **`R14:connector:*` is the one wildcard parent**, and with zero registered
+  connectors it is a parent nothing can satisfy — the fail-closed reading the
+  `per_connector_scope_model` tail wants.

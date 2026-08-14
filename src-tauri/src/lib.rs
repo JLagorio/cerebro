@@ -24,6 +24,7 @@ pub mod roots;
 pub mod roots_commands;
 pub mod runtime;
 pub mod search;
+pub mod trigger;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
