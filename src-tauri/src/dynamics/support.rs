@@ -410,16 +410,32 @@ pub fn support_of(state: &EpistemicState, routes: &[AuthorityRoutesV1], facet: &
         // The registration refs still byte-match what the Observations pin.
         // The reducer checked this when the event folded; a later correction
         // could move an Observation's registration underneath it.
+        //
+        // COMPARED AS AN UNORDERED PAIR, and it has to be (M27.10). Three
+        // orderings are in play and they do not agree: `proof_for`
+        // canonicalizes a proof's refs by REGISTRATION id, the reducer
+        // validates them against the BODY's observation order, and this map's
+        // key is sorted by OBSERVATION id. Comparing position by position
+        // silently dropped a valid committed proof whenever the last two
+        // disagreed — about half of all pairs — and the belief read
+        // `single_source` with nothing anywhere saying why.
+        //
+        // This is still the "has anything moved underneath it" check it was:
+        // both refs must name a registration one of these two endpoints
+        // actually pins, and the reducer already fixed which is which.
         let (proof_left, proof_right) = row.proof.registration_refs();
-        let matches = state
-            .observations
-            .get(left)
-            .is_some_and(|o| o.source_registration_event_id == proof_left)
-            && state
-                .observations
-                .get(right)
-                .is_some_and(|o| o.source_registration_event_id == proof_right);
-        if !matches {
+        let mut claimed = [proof_left, proof_right];
+        claimed.sort_unstable();
+        let pinned = (state.observations.get(left), state.observations.get(right));
+        let (Some(left_row), Some(right_row)) = pinned else {
+            continue;
+        };
+        let mut actual = [
+            left_row.source_registration_event_id.as_str(),
+            right_row.source_registration_event_id.as_str(),
+        ];
+        actual.sort_unstable();
+        if claimed != actual {
             continue;
         }
         let (rule_version, proposal_id, decision_event_id) = match &row.proof {
@@ -892,6 +908,90 @@ mod tests {
         let derived = support_of(&state, &routes(), &facet(&state, B_ONE));
         assert!(derived.independence_edges.is_empty());
         assert_eq!(derived.support.level(), "single_source");
+    }
+
+    /// THREE orderings were in play and only two of them agreed (M27.10).
+    ///
+    /// `ingest::independence::proof_for` canonicalizes a proof's refs by
+    /// REGISTRATION id. The reducer validates them against the BODY's
+    /// observation order. This module read them against the map key, which is
+    /// sorted by OBSERVATION id. When those two orders disagree — about half
+    /// of all pairs — a valid, committed corroboration proof was silently
+    /// skipped and the belief read `single_source`.
+    ///
+    /// The existing fixture could not catch it: `prove` used one registration
+    /// on both sides, so the comparison was symmetric by accident.
+    #[test]
+    fn a_proof_recorded_in_the_other_order_is_the_same_proof() {
+        let registrations = |state: &mut EpistemicState, left: &str, right: &str| {
+            state
+                .observations
+                .get_mut(OBS_AUTHORITY)
+                .unwrap()
+                .source_registration_event_id = left.into();
+            state
+                .observations
+                .get_mut(OBS_INFERRED)
+                .unwrap()
+                .source_registration_event_id = right.into();
+        };
+        let low = "10000000000000000000000000000001";
+        let high = "99999999999999999999999999999999";
+
+        // Two registrations, and the proof refs written in each order. Both
+        // are proofs about the same pair, and the honest answer is the same.
+        for (a, b) in [(low, high), (high, low)] {
+            let mut state = base();
+            registrations(&mut state, a, b);
+            let (left, right) = if OBS_AUTHORITY <= OBS_INFERRED {
+                (OBS_AUTHORITY, OBS_INFERRED)
+            } else {
+                (OBS_INFERRED, OBS_AUTHORITY)
+            };
+            // The refs in the emitter's canonical order: smaller registration
+            // first, whatever the observation ids do.
+            let (proof_left, proof_right) = if a <= b { (a, b) } else { (b, a) };
+            state.independence.insert(
+                (left.into(), right.into()),
+                IndependenceRow {
+                    event_id: "90000000000000000000000000000001".into(),
+                    proof_kind: "independent_system_artifact".into(),
+                    proof: IndependenceProof::IndependentSystemArtifact {
+                        left_source_registration_event_id: proof_left.into(),
+                        right_source_registration_event_id: proof_right.into(),
+                        rule_version: "independence-rules-v1".into(),
+                    },
+                },
+            );
+            let derived = support_of(&state, &routes(), &facet(&state, B_ONE));
+            assert_eq!(
+                derived.independence_edges.len(),
+                1,
+                "the proof was dropped with registrations ({a}, {b})"
+            );
+            assert_eq!(derived.support.level(), "corroborated");
+        }
+    }
+
+    #[test]
+    fn a_proof_whose_refs_name_a_registration_neither_endpoint_pins_still_stops_counting() {
+        // The order fix must not turn the moved-underneath check into a
+        // formality: one ref that matches nothing is still a proof about a
+        // world that has changed.
+        let mut state = base();
+        prove(
+            &mut state,
+            OBS_AUTHORITY,
+            OBS_INFERRED,
+            "independent_system_artifact",
+        );
+        state
+            .observations
+            .get_mut(OBS_INFERRED)
+            .unwrap()
+            .source_registration_event_id = "7".repeat(32);
+        let derived = support_of(&state, &routes(), &facet(&state, B_ONE));
+        assert!(derived.independence_edges.is_empty());
     }
 
     #[test]
