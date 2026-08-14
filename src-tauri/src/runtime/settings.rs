@@ -31,6 +31,50 @@ pub fn lane_key(lane: &str) -> String {
 /// M25 here" and "the operational history was deleted".
 pub const IMPORT_COMPLETE: &str = "upgrade.legacy_import_complete";
 
+/// The vault-scoped R7 verification scope (M28.1) — the declared question
+/// the R7 gate counts observations against, stored as the canonical JSON of
+/// a validated `VerificationScope`. Operational configuration by the
+/// two-records rule: mutable, undated, and safe to be so, because every
+/// recorded evaluation carries the digest of the scope it actually ran
+/// under.
+pub const R7_VERIFICATION_SCOPE: &str = "trigger.r7_verification_scope";
+
+/// Declare the R7 scope for one vault. Validated before a byte is stored;
+/// returns the canonical digest recorded evaluations will carry.
+pub fn declare_r7_scope(
+    conn: &Connection,
+    vault_id: &str,
+    scope_json: &str,
+) -> Result<String, String> {
+    let scope: crate::trigger::observations::VerificationScope =
+        serde_json::from_str(scope_json).map_err(|e| format!("the scope does not parse: {e}"))?;
+    scope.validate()?;
+    let digest = scope.digest()?;
+    let canonical =
+        serde_json::to_string(&scope).map_err(|e| format!("canonicalizing the scope: {e}"))?;
+    set(conn, R7_VERIFICATION_SCOPE, Some(vault_id), &canonical)?;
+    Ok(digest)
+}
+
+/// The declared R7 scope for one vault, if any. A stored scope that no
+/// longer parses or validates is an ERROR, never a `None` — "we cannot tell
+/// you" and "nothing is declared" are different answers.
+pub fn r7_scope(
+    conn: &Connection,
+    vault_id: &str,
+) -> Result<Option<crate::trigger::observations::VerificationScope>, String> {
+    match get(conn, R7_VERIFICATION_SCOPE, Some(vault_id))? {
+        None => Ok(None),
+        Some(json) => {
+            let scope: crate::trigger::observations::VerificationScope =
+                serde_json::from_str(&json)
+                    .map_err(|e| format!("the stored R7 scope no longer parses: {e}"))?;
+            scope.validate()?;
+            Ok(Some(scope))
+        }
+    }
+}
+
 pub fn get(conn: &Connection, key: &str, vault_id: Option<&str>) -> Result<Option<String>, String> {
     let result = match vault_id {
         Some(vault) => conn.query_row(
@@ -256,6 +300,55 @@ mod tests {
                 "schema"
             ]
         );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_declared_r7_scope_round_trips_and_its_digest_is_the_scopes_own() {
+        let (dir, conn) = db("settings-r7-scope");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        assert_eq!(r7_scope(&conn, &vault), Ok(None));
+
+        let json = r#"{
+            "subjects": ["e0000000000000000000000000000001"],
+            "predicate_classes": ["operational_status"],
+            "stage": null, "environment": null, "geography": null
+        }"#;
+        let digest = declare_r7_scope(&conn, &vault, json).unwrap();
+        let stored = r7_scope(&conn, &vault).unwrap().expect("declared");
+        assert_eq!(stored.digest().unwrap(), digest);
+        assert_eq!(stored.subjects, ["e0000000000000000000000000000001"]);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_invalid_scope_is_refused_before_a_byte_is_stored() {
+        let (dir, conn) = db("settings-r7-invalid");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        // Empty subjects: the validator's own refusal, verbatim.
+        let err = declare_r7_scope(
+            &conn,
+            &vault,
+            r#"{"subjects": [], "predicate_classes": ["operational_status"],
+                "stage": null, "environment": null, "geography": null}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("verifies nothing"), "{err}");
+        // A field the shape does not know is a typo'd constraint, refused.
+        let err = declare_r7_scope(
+            &conn,
+            &vault,
+            r#"{"subjects": ["e0000000000000000000000000000001"],
+                "predicate_classes": ["operational_status"],
+                "stage": null, "environment": null, "geography": null,
+                "stagee": "prod"}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("does not parse"), "{err}");
+        // Nothing landed.
+        assert_eq!(r7_scope(&conn, &vault), Ok(None));
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

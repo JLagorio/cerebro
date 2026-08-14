@@ -459,6 +459,112 @@ fn set_lane_enabled(
     runtime::settings::set_lane_enabled(&conn, &scope.vault_id, &lane, enabled)
 }
 
+// --- The deferral gates (M28.1) ---------------------------------------------
+//
+// The trigger registry's caller surface: a status board, a run-on-demand,
+// and the R7 scope declaration. No daemon — every measurable gate is a pure
+// function of persisted history, so it is evaluated when somebody looks.
+// The wall clock is read HERE, at the shell, and handed down: the trigger
+// module's own source scans forbid it a clock of its own.
+
+/// The vault-store scope the R3–R14 gates evaluate under.
+fn trigger_vault_scope(vault: &str) -> Result<trigger::evaluate::VaultScope, String> {
+    let scope = runtime::open_vault(Path::new(vault))
+        .ok_or("this vault is not registered with the runtime database")?;
+    let store_uuid = scope.store_uuid.ok_or(
+        "this vault has no ledger store yet — the vault-scoped gates have nothing to measure",
+    )?;
+    Ok(trigger::evaluate::VaultScope {
+        vault_id: scope.vault_id,
+        store_uuid,
+    })
+}
+
+/// The board: every gate the artifact declares, with its newest recorded
+/// evaluation or an explicit never-evaluated.
+#[tauri::command(async)]
+fn trigger_status(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<trigger::runner::EntryStatus>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = trigger_vault_scope(&vault)?;
+    let registry = trigger::registry::load()?;
+    trigger::runner::status(&conn, &registry, &scope)
+}
+
+/// Declare what R7 should count for this vault. Returns the canonical
+/// digest recorded evaluations will carry.
+#[tauri::command(async)]
+fn trigger_declare_r7_scope(
+    app: tauri::AppHandle,
+    vault: String,
+    scope_json: String,
+) -> Result<String, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = trigger_vault_scope(&vault)?;
+    runtime::settings::declare_r7_scope(&conn, &scope.vault_id, &scope_json)
+}
+
+/// The declared R7 scope, if any — None is "nothing declared", an error is
+/// "cannot tell", and the two are never conflated.
+#[tauri::command(async)]
+fn trigger_r7_scope(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Option<trigger::observations::VerificationScope>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = trigger_vault_scope(&vault)?;
+    runtime::settings::r7_scope(&conn, &scope.vault_id)
+}
+
+/// One pass over every gate with a measurable leg. Rerunning inside one
+/// local day replays byte-identically, so this is safe to call whenever the
+/// surface opens.
+#[tauri::command(async)]
+fn trigger_run(app: tauri::AppHandle, vault: String) -> Result<trigger::runner::RunReport, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = trigger_vault_scope(&vault)?;
+    let registry = trigger::registry::load()?;
+    let now = chrono::Utc::now();
+    let timezone = runtime::budget::system_timezone();
+    match runtime::settings::r7_scope(&conn, &scope.vault_id)? {
+        None => Ok(trigger::runner::run_measurable(
+            &conn, &registry, &scope, None, now, &timezone,
+        )),
+        Some(verification) => {
+            // A declared scope makes R7 a real question, and a real question
+            // needs the reduced ledger. No active writer is a whole-run
+            // error, not a silent skip — the runner's not-evaluated wording
+            // ("no scope declared") would be false here.
+            let path = Path::new(&vault);
+            ledger::shadow::with_writer(path, |writer| {
+                let read =
+                    ledger::read_ledger(&ledger::ledger_dir(path)).map_err(|e| e.to_string())?;
+                let state = ledger::reduce::reduce(&read.frames, writer.store_id());
+                Ok(trigger::runner::run_measurable(
+                    &conn,
+                    &registry,
+                    &scope,
+                    Some(trigger::runner::R7Input {
+                        state: &state,
+                        verification: &verification,
+                    }),
+                    now,
+                    &timezone,
+                ))
+            })
+            .unwrap_or_else(|| {
+                Err(
+                    "an R7 verification scope is declared, but this vault has no active ledger \
+                     writer to reduce — reopen the vault and ask again"
+                        .to_string(),
+                )
+            })
+        }
+    }
+}
+
 /// Resolve the held pile. `baseline` accepts today's content as already
 /// accounted for; `process` queues it. Either decision is durable, and the
 /// question is asked once rather than on every launch.
@@ -855,6 +961,10 @@ pub fn run() {
             pipeline_overview,
             set_global_pause,
             set_lane_enabled,
+            trigger_status,
+            trigger_run,
+            trigger_declare_r7_scope,
+            trigger_r7_scope,
             ambient_ingest_enabled,
             set_ambient_ingest,
             ingest_item_state,
