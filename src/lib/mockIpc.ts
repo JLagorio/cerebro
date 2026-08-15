@@ -1270,6 +1270,167 @@ export async function pipelineOverview(_vault: string): Promise<PipelineOverview
 }
 
 /**
+ * One run as the fleet shows it (M33.2). The Rust shape verbatim.
+ *
+ * `actor` is null for a run written before M33.1 and for bare attended chat.
+ * That is a real category — "unattributed" — and nothing backfills it.
+ */
+export interface FleetRun {
+  run_id: string;
+  actor: string | null;
+  vault_id: string | null;
+  mode: string;
+  lane: string;
+  started_at: string;
+  ended_at: string | null;
+  outcome: string;
+  /** `pending` | `exact` | `unknown`. Read this BEFORE the token counts. */
+  usage_state: string;
+  input_tokens: number;
+  output_tokens: number;
+  proposals_submitted: number;
+  applied: number;
+  rejected: number;
+}
+
+/** One `run_cost_components` row (M31.6). */
+export interface FleetCostComponent {
+  component: string;
+  unit: string;
+  model_id: string | null;
+  quantity: number;
+  observed_cost_micros: number | null;
+  /** Derived rather than measured. Showing an estimate as a measurement is
+   * worse than showing nothing. */
+  estimated: boolean;
+  pricing_snapshot_id: string | null;
+  recorded_at: string;
+}
+
+/** One `assembly_metrics` row (M31.6). */
+export interface FleetAssemblyMetrics {
+  manifest_id: string;
+  intended_stakes: string;
+  source_count: number;
+  evidence_item_count: number;
+  context_bytes: number;
+  retrieval_query_count: number;
+  blocked_intent_count: number;
+  answer_latency_micros: number | null;
+  recorded_at: string;
+}
+
+/**
+ * One run and its governance joins.
+ *
+ * `cost_components: null` means NOT RECORDED — pre-M31.6, or a path M31.6
+ * does not cover. An empty array would mean "measured, and it cost nothing",
+ * which is a different fact; the UI must not render either as $0.
+ */
+export interface FleetRunDetail {
+  run: FleetRun;
+  cost_components: FleetCostComponent[] | null;
+  assembly: FleetAssemblyMetrics | null;
+}
+
+/** What one actor's rows add up to (M33.2). */
+export interface FleetActorSummary {
+  actor: string;
+  run_count: number;
+  /** Summed across `usage_state === 'exact'` runs ONLY. */
+  input_tokens: number;
+  output_tokens: number;
+  /** Runs that happened but never said what they spent. Counted rather than
+   * added as zero, so a lifetime total reads as visibly partial. */
+  unknown_runs: number;
+  last_outcome: string | null;
+  last_started_at: string | null;
+}
+
+/** Which runs to return. Absent field means "any". */
+export interface FleetFilter {
+  vault_id?: string | null;
+  lane?: string | null;
+  mode?: string | null;
+  actor?: string | null;
+  limit?: number | null;
+}
+
+/** Mirrors `fleet.rs`'s two constants. */
+const FLEET_MAX_LIMIT = 200;
+const FLEET_DEFAULT_LIMIT = 50;
+
+let fleetRuns: FleetRun[] = [];
+let fleetDetails: Record<string, FleetRunDetail> = {};
+/** Null models a missing runtime DB: every fleet command refuses, which is
+ * how the section reaches `unavailable` rather than `empty`. */
+let fleetAvailable = true;
+
+/** Test-only seam, mirroring `__cerebroSeedPipeline`. */
+export function __seedFleet(
+  runs: FleetRun[] | null,
+  details: Record<string, FleetRunDetail> = {},
+): void {
+  fleetAvailable = runs !== null;
+  fleetRuns = runs ?? [];
+  fleetDetails = details;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedFleet: typeof __seedFleet }).__cerebroSeedFleet =
+    __seedFleet;
+}
+
+function fleetUnavailable(): Error {
+  return new Error('no runtime database for this workspace');
+}
+
+export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[]> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const matches = fleetRuns.filter(
+    (run) =>
+      (filter.vault_id == null || run.vault_id === filter.vault_id) &&
+      (filter.lane == null || run.lane === filter.lane) &&
+      (filter.mode == null || run.mode === filter.mode) &&
+      (filter.actor == null || run.actor === filter.actor),
+  );
+  // Same ordering and the same server-side clamp as `fleet.rs`: a mock that
+  // trusted the caller's limit would let a test pass against a page the real
+  // backend would have truncated.
+  const ordered = [...matches].sort(
+    (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
+  );
+  return ordered.slice(0, Math.min(filter.limit ?? FLEET_DEFAULT_LIMIT, FLEET_MAX_LIMIT));
+}
+
+export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const detail = fleetDetails[runId];
+  // Refused, not null — the same way Rust refuses. A typo and a run that
+  // recorded nothing must not look the same.
+  if (detail === undefined) throw new Error(`no run with id ${runId}`);
+  return detail;
+}
+
+export async function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const mine = fleetRuns.filter((run) => run.actor === actor);
+  const metered = mine.filter((run) => run.usage_state === 'exact');
+  const latest = [...mine].sort(
+    (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
+  )[0];
+  return {
+    actor,
+    run_count: mine.length,
+    input_tokens: metered.reduce((sum, run) => sum + run.input_tokens, 0),
+    output_tokens: metered.reduce((sum, run) => sum + run.output_tokens, 0),
+    unknown_runs: mine.length - metered.length,
+    last_outcome: latest?.outcome ?? null,
+    last_started_at: latest?.started_at ?? null,
+  };
+}
+
+/**
  * Where the scheduler holds one item (M26.4j).
  *
  * `null` for everything, and that is the honest mock rather than a gap. The

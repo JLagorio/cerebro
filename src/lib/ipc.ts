@@ -455,6 +455,43 @@ export function pipelineOverview(vault: string): Promise<PipelineOverview> {
   return inTauri() ? invokeTauri('pipeline_overview', { vault }) : mock.pipelineOverview(vault);
 }
 
+// --- The fleet read surface (M33.2) ----------------------------------------
+
+import type {
+  FleetRun,
+  FleetCostComponent,
+  FleetAssemblyMetrics,
+  FleetRunDetail,
+  FleetActorSummary,
+  FleetFilter,
+} from './mockIpc';
+
+export type {
+  FleetRun,
+  FleetCostComponent,
+  FleetAssemblyMetrics,
+  FleetRunDetail,
+  FleetActorSummary,
+  FleetFilter,
+};
+
+/**
+ * One page of run history, newest first (M33.2).
+ *
+ * Takes no vault: the fleet spans them, and a caller that wants one vault's
+ * runs says so in the filter. REFUSES when there is no runtime database —
+ * the section renders "unavailable", which is not "no runs".
+ */
+export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
+  return inTauri() ? invokeTauri('fleet_runs', { filter }) : mock.fleetRunsPage(filter);
+}
+
+/** One run and whatever the governance tables recorded about it. An unknown
+ * id is refused, so a typo and an unmetered run never look the same. */
+export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
+  return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
+}
+
 /**
  * Where the ingest scheduler holds one item (M26.4j).
  *

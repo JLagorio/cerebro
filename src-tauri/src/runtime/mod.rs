@@ -38,6 +38,7 @@
 pub mod budget;
 pub mod catchup;
 pub mod dispatch;
+pub mod fleet;
 pub mod governance;
 pub mod health;
 pub mod import;

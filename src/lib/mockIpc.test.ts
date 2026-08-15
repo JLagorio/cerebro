@@ -775,4 +775,94 @@ describe('the deferral gates (M28.1)', () => {
       mock.triggerRecordPack('/demo-vault', '/repo', 'docs/x.md', 'fired'),
     ).rejects.toThrow(/browser mock/);
   });
+
+  // --- Fleet parity (M33.2) ------------------------------------------------
+  //
+  // Every guard `fleet.rs` enforces has to hold here too, or a component test
+  // passes against a backend that would have refused it.
+
+  const fleetRun = (over: Partial<mock.FleetRun> = {}): mock.FleetRun => ({
+    run_id: 'r1',
+    actor: null,
+    vault_id: 'v1',
+    mode: 'ambient',
+    lane: 'filed',
+    started_at: '2026-07-28T10:00:00Z',
+    ended_at: '2026-07-28T10:01:00Z',
+    outcome: 'succeeded',
+    usage_state: 'exact',
+    input_tokens: 100,
+    output_tokens: 10,
+    proposals_submitted: 0,
+    applied: 0,
+    rejected: 0,
+    ...over,
+  });
+
+  it('fleet runs filter by actor and come back newest first', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:digest', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({ run_id: 'r2', actor: null, started_at: '2026-07-28T11:00:00Z' }),
+      fleetRun({ run_id: 'r3', actor: 'process:digest', started_at: '2026-07-28T12:00:00Z' }),
+    ]);
+    const page = await mock.fleetRunsPage({ actor: 'process:digest' });
+    expect(page.map((r) => r.run_id)).toEqual(['r3', 'r1']);
+    const all = await mock.fleetRunsPage();
+    expect(all).toHaveLength(3);
+    expect(all[1].actor).toBeNull();
+  });
+
+  it('fleet clamps an absurd limit rather than trusting it', async () => {
+    // The same clamp `fleet.rs` applies server-side. A mock that obeyed the
+    // caller would let a test pass against a page the backend truncates.
+    mock.__seedFleet(
+      ['a', 'b', 'c'].map((id) => fleetRun({ run_id: id, started_at: `2026-07-28T1${id}:00:00Z` })),
+    );
+    expect(await mock.fleetRunsPage({ limit: 2 })).toHaveLength(2);
+    expect(await mock.fleetRunsPage({ limit: 10_000_000 })).toHaveLength(3);
+  });
+
+  it('an unknown run id is REFUSED, exactly as Rust refuses it', async () => {
+    // Not null. A typo and a run that recorded nothing must not look the same.
+    mock.__seedFleet([fleetRun()], {
+      r1: { run: fleetRun(), cost_components: null, assembly: null },
+    });
+    await expect(mock.fleetRunDetail('nope')).rejects.toThrow(/no run with id/);
+    const detail = await mock.fleetRunDetail('r1');
+    expect(detail.cost_components).toBeNull();
+    expect(detail.assembly).toBeNull();
+  });
+
+  it('a missing runtime database refuses every fleet command', async () => {
+    // This is how the hub section reaches `unavailable` instead of `empty`.
+    mock.__seedFleet(null);
+    await expect(mock.fleetRunsPage()).rejects.toThrow(/runtime database/);
+    await expect(mock.fleetRunDetail('r1')).rejects.toThrow(/runtime database/);
+    await expect(mock.fleetActorSummary('process:digest')).rejects.toThrow(/runtime database/);
+    mock.__seedFleet([]);
+  });
+
+  it('a lifetime summary counts unmetered runs instead of adding zero', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:digest', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({
+        run_id: 'r2',
+        actor: 'process:digest',
+        started_at: '2026-07-28T11:00:00Z',
+        usage_state: 'unknown',
+        input_tokens: 0,
+        output_tokens: 0,
+      }),
+      fleetRun({ run_id: 'r3', actor: 'other', started_at: '2026-07-28T12:00:00Z' }),
+    ]);
+    const summary = await mock.fleetActorSummary('process:digest');
+    expect(summary.run_count).toBe(2);
+    expect(summary.input_tokens).toBe(100);
+    expect(summary.unknown_runs).toBe(1);
+    expect(summary.last_started_at).toBe('2026-07-28T11:00:00Z');
+
+    const fresh = await mock.fleetActorSummary('process:brand-new');
+    expect(fresh.run_count).toBe(0);
+    expect(fresh.last_outcome).toBeNull();
+  });
 });

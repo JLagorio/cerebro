@@ -209,6 +209,34 @@ fn pipeline_overview(
     )
 }
 
+/// One page of the fleet's run history (M33.2).
+///
+/// Unlike `pipeline_overview`, this takes no vault: the fleet spans them, and
+/// a caller that wants one vault's runs says so in the filter. A missing
+/// runtime DB is an error for the same reason it is there — the section
+/// renders "unavailable", which is not the same as "no runs".
+#[tauri::command(async)]
+fn fleet_runs(
+    app: tauri::AppHandle,
+    filter: runtime::fleet::Filter,
+) -> Result<Vec<runtime::fleet::FleetRun>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::runs(&conn, &filter)
+}
+
+/// One run, with whatever the governance tables recorded about it (M33.2).
+///
+/// An id nothing knows is an error rather than an empty detail: a typo and a
+/// run that recorded nothing must not look the same.
+#[tauri::command(async)]
+fn fleet_run_detail(
+    app: tauri::AppHandle,
+    run_id: String,
+) -> Result<runtime::fleet::RunDetail, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::run_detail(&conn, &run_id)
+}
+
 /// The subscription-wide pause. Persisted, so it survives a restart — a
 /// pause that forgot itself overnight would be the least trustworthy control
 /// in the app.
@@ -1074,6 +1102,8 @@ pub fn run() {
             decide_proposal,
             revert_application,
             pipeline_overview,
+            fleet_runs,
+            fleet_run_detail,
             set_global_pause,
             set_lane_enabled,
             trigger_status,
