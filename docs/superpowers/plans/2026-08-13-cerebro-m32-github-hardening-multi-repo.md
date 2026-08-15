@@ -749,7 +749,7 @@ audits (unpinned-uses, ref-confusion, artipacked, cache-poisoning).
 **Files**
 - Create: `.github/workflows/scanners.yml`
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 ```yaml
 name: Workflow scanners
@@ -805,7 +805,7 @@ README at that SHA), pass the path positionally or via the documented input —
 the requirement that survives is: **zizmor sees `.github/workflows/` and
 nothing else.**
 
-- [ ] **Step 2: Enable CodeQL default setup, advisory**
+- [x] **Step 2: Enable CodeQL default setup, advisory**
 
 ```sh
 gh api -X PATCH repos/JLagorio/cerebro/code-scanning/default-setup \
@@ -819,7 +819,7 @@ exactly Cerebro's attack surface shape (`mcp.rs` loopback server, `agent.rs`
 subprocess spawn, `connectors.rs`). Advisory for the first month: findings
 are read, not required checks. Tick the SETUP.md line.
 
-- [ ] **Step 3: Commit and watch both scanners run**
+- [x] **Step 3: Commit and watch both scanners run**
 
 ```sh
 git add .github/workflows/scanners.yml .github/SETUP.md
@@ -830,6 +830,45 @@ git push && gh pr checks --watch
 Expected: both scanner jobs green against the already-hardened mac-app.yml.
 If zizmor flags something M32.1/M32.2 missed, fix it in this commit — that
 is the lane doing its job on day one.
+
+> **Executed 2026-08-15. The lane did its job on day one, as hoped — and
+> found two things this plan got wrong.**
+>
+> zizmor was run locally (`uvx zizmor@1.29.0`, no Docker needed) before
+> pushing: **26 findings, 15 high.** Resolved as follows.
+>
+> 1. **`unpinned-uses` (10 high) contradicts M32.2's design.** zizmor's
+>    blanket policy requires hash pins for `actions/*` too, which M32.2
+>    deliberately exempted. Resolved zizmor's way — ALL actions are now
+>    commit-pinned. M32.2's acceptance line ("only `actions/*` remain")
+>    is superseded: `grep '@v[0-9]' .github/workflows/*.yml` is now empty.
+>    Pinned to the **v4 line** (`checkout` v4.4.0, `setup-node` v4.4.0,
+>    `upload-artifact` v4.6.2) — NOT to `latest`, which is now v7 for all
+>    three. A triple major bump is a reviewable Dependabot PR, not
+>    something a hardening commit smuggles in.
+> 2. **`cache-poisoning` (5 high)** — suppressed inline with cause per
+>    AGENTS.md ("suppressions carry reasons, in place"): quality/e2e ship
+>    no bytes; the build job's two are the mitigation itself (no
+>    `cache: pnpm`, rust-cache skipped on tags).
+> 3. **`superfluous-actions` (1 info)** — suppressed with cause; a
+>    `gh release` script step is not obviously safer than a pinned action.
+>
+> Post-fix: **"No findings to report (6 ignored, 10 suppressed)"**, and
+> actionlint v1.7.12 exits 0 locally.
+>
+> **actionlint bumped 1.7.10 → 1.7.12** (1.7.10 is two releases stale).
+> Both checksums were verified against rhysd's published
+> `checksums.txt`; the plan's 1.7.10 hash was correct, and the shipped
+> 1.7.12 hash is `8aca8db9…a3d8`.
+>
+> **CodeQL does NOT cover Rust.** The plan asserts Rust is GA in default
+> setup; the API rejects it — allowed values are `actions, c-cpp, csharp,
+> go, java-kotlin, javascript-typescript, python, ruby, swift` (422 on
+> `rust`). Default setup is therefore `javascript-typescript` + `actions`
+> only, and **the Rust attack surface named in this phase's rationale
+> (`mcp.rs`, `agent.rs`, `connectors.rs`) gets no taint tracking from
+> CodeQL.** Clippy still does no taint analysis either. Registered as a
+> deferral in M32.12 rather than quietly dropped.
 
 **Acceptance:** scanners run on `.github/**` changes only; zizmor is scoped
 away from vendored trees; actionlint is checksum-pinned; CodeQL default

@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -51,7 +51,12 @@ jobs:
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored here with cause: this job ships no bytes to
+      # anyone. The audit fires because the WORKFLOW can publish a release on
+      # a tag, but that is the `build` job, which restores nothing on tag refs
+      # (see its rust-cache guard). A poisoned store here reaches lint and
+      # tests only, and a compromised gate is caught by the gate itself.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
           cache: pnpm
@@ -86,8 +91,9 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      # This job publishes nothing, so it keeps its cache.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # This job publishes nothing, so it keeps its cache — same cause as the
+      # setup-node ignore above.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 # zizmor: ignore[cache-poisoning]
         with:
           workspaces: src-tauri -> target
 
@@ -104,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -112,7 +118,12 @@ jobs:
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored here with cause: this job ships no bytes to
+      # anyone. The audit fires because the WORKFLOW can publish a release on
+      # a tag, but that is the `build` job, which restores nothing on tag refs
+      # (see its rust-cache guard). A poisoned store here reaches lint and
+      # tests only, and a compromised gate is caught by the gate itself.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
           cache: pnpm
@@ -127,7 +138,7 @@ jobs:
       - name: Playwright e2e
         run: pnpm e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-failures
@@ -146,7 +157,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -154,7 +165,10 @@ jobs:
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored with cause: the mitigation IS this step —
+      # `cache: pnpm` is deliberately absent, so setup-node restores nothing.
+      # The audit flags the action's default behaviour, not our configuration.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
           # No pnpm store cache in this job — same reasoning as rust-cache
@@ -167,7 +181,9 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # cache-poisoning ignored with cause: the `if:` below IS the mitigation
+      # the audit asks for — the release lane never restores this cache.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 # zizmor: ignore[cache-poisoning]
         # A release must never link objects it didn't compile: an attacker
         # with one-time execution in any main-branch run can poison a shared
         # cache, and the next tag build would link it into the DMG. Tag
@@ -189,7 +205,7 @@ jobs:
 
       # Both the DMG and the zip when the DMG was produced, the zip alone when
       # hdiutil had to be abandoned — either one installs the same app.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Cerebro-macOS
           path: dist-mac/*
@@ -197,7 +213,12 @@ jobs:
 
       - name: Publish a release for a tag
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        # superfluous-actions ignored with cause: `gh release create` in a
+        # script step would hand this job a token in an environment where a
+        # shell typo publishes something. The action takes the file glob and
+        # the body declaratively, which is the safer shape here, and it is
+        # commit-pinned above. Revisit if the release step grows logic.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2 # zizmor: ignore[superfluous-actions]
         with:
           files: dist-mac/*
           body: |
