@@ -233,6 +233,35 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY — pick another" || PORT=$p pnpm e2e
 ```
 
+## Execution deviations (recorded 2026-08-15, at start of execution)
+
+The plan's branch-topology premise expired between authoring and execution.
+Re-verified at start, as the plan instructs:
+
+**The m22-m28 branch MERGED** — `origin/main` is `7e1fe07`, the PR #13 merge,
+so main now carries the ledger/policy layer. M31 (`m31-claims-and-records`,
+PR #14, green) branched from `cb19f2e`, whose content is byte-identical to
+`origin/main`, and therefore already contains M30's `roots/` + `workspace/`.
+**M32 is built on M31, not on `origin/main`** — at the user's instruction, and
+the constraint that forced the original choice ("basing on the branch would
+mean rebuilding M30") no longer exists. M32's PR stacks on PR #14.
+
+Three phase-level consequences, each handled where it lands:
+
+| The plan says | True on this base | Phase |
+| --- | --- | --- |
+| no `e2e/boot.ts`; write a spec-local `boot()` | `e2e/boot.ts` exists and AGENTS.md mandates it — the instruction **inverts** | M32.9 |
+| AGENTS.md has no port-trap paragraph; ADD one | it has one (the `lsof` ritual) — **rewrite** it, don't add | M32.7 |
+| `playwright.config.ts` line 19 | line 24 | M32.7 |
+
+Two plan statements are now moot rather than wrong: "the ruleset should land
+before the m22-m28 branch ever merges" (it merged first — the ruleset still
+lands, it just no longer guards that particular merge), and M32.12's
+work-repo-writes trigger, "m22-m28 policy layer merged to main", is now
+**satisfied** — that deferral's gate has fired and the register says so.
+
+All GitHub API facts in the table above re-verified unchanged on 2026-08-15.
+
 ---
 
 # Track A — the gate becomes unskippable
@@ -247,7 +276,7 @@ token whose scope is only a repo *setting* away from write.
 **Files**
 - Modify: `.github/workflows/mac-app.yml`
 
-- [ ] **Step 1: Retarget the triggers**
+- [x] **Step 1: Retarget the triggers**
 
 Replace lines 12–16 (`on:` block) with:
 
@@ -267,7 +296,7 @@ tags additionally build; a PR that needs a DMG uses workflow_dispatch). A
 comment that contradicts its own file is the drift this milestone's SETUP.md
 lesson exists to prevent.
 
-- [ ] **Step 2: Clamp the token and document the rule**
+- [x] **Step 2: Clamp the token and document the rule**
 
 Immediately below the `on:` block (before `concurrency:`), add:
 
@@ -281,7 +310,7 @@ permissions:
   contents: read
 ```
 
-- [ ] **Step 3: Stop persisting credentials at checkout**
+- [x] **Step 3: Stop persisting credentials at checkout**
 
 All three `- uses: actions/checkout@v4` steps (quality line 35, e2e line 90,
 build line 127) become:
@@ -296,7 +325,7 @@ Nothing in this workflow pushes back to the repo, so nothing needs the token
 on disk where every subsequent step (pnpm lifecycle scripts, build.rs,
 Playwright) can read it.
 
-- [ ] **Step 4: Keep the macOS build off PR events**
+- [x] **Step 4: Keep the macOS build off PR events**
 
 The `build` job builds a release-shaped artifact; PRs only need the two
 gates. Add to the `build` job, directly under `needs: [quality, e2e]`:
@@ -307,7 +336,7 @@ gates. Add to the `build` job, directly under `needs: [quality, e2e]`:
     if: github.event_name != 'pull_request'
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```sh
 git add .github/workflows/mac-app.yml
@@ -354,7 +383,7 @@ gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object | .type + " " + .sh
 **Files**
 - Modify: `.github/workflows/mac-app.yml`
 
-- [ ] **Step 1: Pin the third-party actions (GitHub-owned `actions/*` stay on major tags)**
+- [x] **Step 1: Pin the third-party actions (GitHub-owned `actions/*` stay on major tags)**
 
 | Current ref | Pinned replacement (peeled commit SHAs) |
 | --- | --- |
@@ -367,7 +396,7 @@ gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object | .type + " " + .sh
 their peeled commits, not the tag objects. dtolnay v1 and softprops v2.6.2
 are lightweight tags, so tag SHA = commit SHA.)
 
-- [ ] **Step 2: The dtolnay pin changes how the toolchain is named**
+- [x] **Step 2: The dtolnay pin changes how the toolchain is named**
 
 With `@stable` the action read the toolchain from the ref itself. Pinned by
 SHA, the toolchain must be an input. The quality-job step becomes:
@@ -389,7 +418,7 @@ and the build-job step becomes:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 ```
 
-- [ ] **Step 3: The release lane restores nothing it didn't fetch itself**
+- [x] **Step 3: The release lane restores nothing it didn't fetch itself**
 
 An attacker with one-time code execution in any main-branch run can poison a
 shared cache; the next tag build would link poisoned objects into the DMG.
@@ -418,7 +447,7 @@ and drop `cache: pnpm` from the **build job's** setup-node step (lines
           # shared cache. quality/e2e keep theirs.
 ```
 
-- [ ] **Step 4: Verify every pin is a COMMIT, then commit**
+- [x] **Step 4: Verify every pin is a COMMIT, then commit**
 
 ```sh
 # Each pinned SHA must resolve as a commit (not 422 / not a tag object):
@@ -435,6 +464,14 @@ git commit -m "ci(actions): third-party actions pinned to commits, releases comp
 git push && gh pr checks --watch
 ```
 
+> **Executed 2026-08-15.** All four pins re-peeled and re-verified independently
+> against the live API: `pnpm/action-setup@v4.4.0` and `Swatinem/rust-cache@v2.9.2`
+> are annotated tags (peeled), `dtolnay/rust-toolchain@v1` and
+> `softprops/action-gh-release@v2.6.2` are lightweight; all four resolve as
+> commits and all four match the SHAs this plan recorded on 2026-08-13. The
+> two later-phase pins were peeled in the same pass: `zizmor-action@v0.6.2`
+> lightweight, `cargo-deny-action@v2.1.1` annotated — both also match.
+
 **Acceptance:** every non-`actions/*` ref is a full commit SHA with a version
 comment; the toolchain is an explicit input; the build job restores no cache
 on tag refs; CI green.
@@ -450,7 +487,7 @@ or the 400+-crate Cargo tree. Two API calls and one file.
 **Files**
 - Create: `.github/dependabot.yml`
 
-- [ ] **Step 1: Turn the alerts on (settings-side)**
+- [x] **Step 1: Turn the alerts on (settings-side)**
 
 ```sh
 gh api -X PUT repos/JLagorio/cerebro/vulnerability-alerts
@@ -463,7 +500,7 @@ Expected: HTTP 204 (empty response) for both. Verify:
 gh api repos/JLagorio/cerebro/vulnerability-alerts   # now 204, not 404
 ```
 
-- [ ] **Step 2: Create `.github/dependabot.yml`**
+- [x] **Step 2: Create `.github/dependabot.yml`**
 
 ```yaml
 # Weekly, grouped, with a cooldown: a 7-day-old release has had its window
@@ -501,7 +538,7 @@ updates:
       interval: "weekly"
 ```
 
-- [ ] **Step 3: Commit and verify Dependabot parses it**
+- [x] **Step 3: Commit and verify Dependabot parses it**
 
 ```sh
 git add .github/dependabot.yml
@@ -512,6 +549,17 @@ git push
 After push, check https://github.com/JLagorio/cerebro/network/updates (or
 `gh api repos/JLagorio/cerebro/dependabot/alerts --jq length`) — a parse
 error surfaces there, not in CI.
+
+> **Executed 2026-08-15.** Both PUTs returned 204 and
+> `security_and_analysis.dependabot_security_updates` now reads `enabled`.
+> Group patterns verified non-vacuous before committing: 4 `@blocknote/*`
+> packages, 3 `@tauri-apps/*`, 3 `tauri*` crates; both lockfiles tracked.
+>
+> **Trap for every remaining YAML in this plan:** Prettier lints `.github/`
+> and the repo style is single quotes, so this plan's double-quoted snippets
+> fail `pnpm format:check` as written. Run `pnpm exec prettier --write` on
+> each new workflow/config before committing (M32.5, M32.6, M32.7 all add
+> YAML). `mac-app.yml` was already conformant.
 
 **Acceptance:** alerts endpoint returns 204; the config covers all three
 ecosystems; update PRs will arrive gated by the same quality+e2e checks as
@@ -530,7 +578,7 @@ long-lived divergent lines are going to merge someday. Depends on M32.1
 **Files**
 - Create: `.github/SETUP.md`
 
-- [ ] **Step 1: Create the main ruleset**
+- [x] **Step 1: Create the main ruleset**
 
 ```sh
 gh api -X POST repos/JLagorio/cerebro/rulesets --input - <<'JSON'
@@ -574,7 +622,7 @@ SETUP.md says so. If the API rejects a parameter name (`allowed_merge_methods`
 has churned), drop that parameter and note it in SETUP.md; the load-bearing
 rules are deletion, non_fast_forward, and the two required checks.
 
-- [ ] **Step 2: Create the tag ruleset**
+- [x] **Step 2: Create the tag ruleset**
 
 ```sh
 gh api -X POST repos/JLagorio/cerebro/rulesets --input - <<'JSON'
@@ -617,7 +665,7 @@ Leave the rc release in place (immutability means it stays; it is labeled rc
 and harmless). If the single-step `action-gh-release` publish ever grows a
 second attach step, switch to `draft: true` → attach → publish.
 
-- [ ] **Step 4: Witness every setting in `.github/SETUP.md`**
+- [x] **Step 4: Witness every setting in `.github/SETUP.md`**
 
 Tolaria's `.github/` contains four documented drifts between its setup prose
 and its actual workflows — the lesson is that a setup doc may only be a
@@ -654,13 +702,36 @@ document workflow behaviour here — workflows document themselves inline.
 (none)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add .github/SETUP.md
 git commit -m "ci(governance): main and v* tags behind rulesets, releases immutable, settings witnessed (M32.4)"
 git push
 ```
+
+> **Executed 2026-08-15. Step 3 is NOT done — it needs a human at a browser.**
+> Rulesets `protect-main` (20887280) and `protect-release-tags` (20887282)
+> are live and every parameter was accepted, `allowed_merge_methods`
+> included. `actor_id: 5` confirmed as the admin role
+> (`current_user_can_bypass: always`).
+>
+> **Immutable releases has no API surface** — `PATCH /repos/{o}/{r}` with
+> `immutable_releases` is a silent no-op and the field is not in the repo
+> payload. It must be flipped in Settings → General → Releases. The
+> `v0.0.1-rc` dry-run is deliberately NOT run until it is: tagging first
+> would publish a MUTABLE release and burn the dry-run, and the tag
+> ruleset now makes `v0.0.1-rc` permanent either way.
+>
+> Two SETUP.md boxes ship UNTICKED against the plan's template, on the
+> plan's own honesty rule: immutable releases (above), and the Actions
+> fork-PR policy, which the template claims is "verified ON" but is **not
+> API-readable on a public repo** (`actions/permissions/access` → 422,
+> no fork-pr-workflows endpoint). It needs an eyeball in Settings.
+>
+> Predicted-and-wrong, recorded so it isn't re-feared: enabling
+> `strict_required_status_checks_policy` did NOT push PR #14 to `BEHIND`.
+> It stayed `CLEAN`/`MERGEABLE` and merges without an update-branch step.
 
 **Acceptance:** `gh api repos/JLagorio/cerebro/rulesets --jq '.[].name'`
 lists both rulesets; a force-push to main is refused; a `v*` tag cannot be
@@ -678,7 +749,7 @@ audits (unpinned-uses, ref-confusion, artipacked, cache-poisoning).
 **Files**
 - Create: `.github/workflows/scanners.yml`
 
-- [ ] **Step 1: Write the workflow**
+- [x] **Step 1: Write the workflow**
 
 ```yaml
 name: Workflow scanners
@@ -734,7 +805,7 @@ README at that SHA), pass the path positionally or via the documented input —
 the requirement that survives is: **zizmor sees `.github/workflows/` and
 nothing else.**
 
-- [ ] **Step 2: Enable CodeQL default setup, advisory**
+- [x] **Step 2: Enable CodeQL default setup, advisory**
 
 ```sh
 gh api -X PATCH repos/JLagorio/cerebro/code-scanning/default-setup \
@@ -748,7 +819,7 @@ exactly Cerebro's attack surface shape (`mcp.rs` loopback server, `agent.rs`
 subprocess spawn, `connectors.rs`). Advisory for the first month: findings
 are read, not required checks. Tick the SETUP.md line.
 
-- [ ] **Step 3: Commit and watch both scanners run**
+- [x] **Step 3: Commit and watch both scanners run**
 
 ```sh
 git add .github/workflows/scanners.yml .github/SETUP.md
@@ -759,6 +830,58 @@ git push && gh pr checks --watch
 Expected: both scanner jobs green against the already-hardened mac-app.yml.
 If zizmor flags something M32.1/M32.2 missed, fix it in this commit — that
 is the lane doing its job on day one.
+
+> **Executed 2026-08-15. The lane did its job on day one, as hoped — and
+> found two things this plan got wrong.**
+>
+> zizmor was run locally (`uvx zizmor@1.29.0`, no Docker needed) before
+> pushing: **26 findings, 15 high.** Resolved as follows.
+>
+> 1. **`unpinned-uses` (10 high) contradicts M32.2's design.** zizmor's
+>    blanket policy requires hash pins for `actions/*` too, which M32.2
+>    deliberately exempted. Resolved zizmor's way — ALL actions are now
+>    commit-pinned. M32.2's acceptance line ("only `actions/*` remain")
+>    is superseded: `grep '@v[0-9]' .github/workflows/*.yml` is now empty.
+>    Pinned to the **v4 line** (`checkout` v4.4.0, `setup-node` v4.4.0,
+>    `upload-artifact` v4.6.2) — NOT to `latest`, which is now v7 for all
+>    three. A triple major bump is a reviewable Dependabot PR, not
+>    something a hardening commit smuggles in.
+> 2. **`cache-poisoning` (5 high)** — suppressed inline with cause per
+>    AGENTS.md ("suppressions carry reasons, in place"): quality/e2e ship
+>    no bytes; the build job's two are the mitigation itself (no
+>    `cache: pnpm`, rust-cache skipped on tags).
+> 3. **`superfluous-actions` (1 info)** — suppressed with cause; a
+>    `gh release` script step is not obviously safer than a pinned action.
+>
+> Post-fix: **"No findings to report (6 ignored, 10 suppressed)"**, and
+> actionlint v1.7.12 exits 0 locally.
+>
+> **actionlint bumped 1.7.10 → 1.7.12** (1.7.10 is two releases stale).
+> Both checksums were verified against rhysd's published
+> `checksums.txt`; the plan's 1.7.10 hash was correct, and the shipped
+> 1.7.12 hash is `8aca8db9…a3d8`.
+>
+> **CodeQL does NOT cover Rust.** The plan asserts Rust is GA in default
+> setup; the API rejects it — allowed values are `actions, c-cpp, csharp,
+> go, java-kotlin, javascript-typescript, python, ruby, swift` (422 on
+> `rust`). Default setup is therefore `javascript-typescript` + `actions`
+> only, and **the Rust attack surface named in this phase's rationale
+> (`mcp.rs`, `agent.rs`, `connectors.rs`) gets no taint tracking from
+> CodeQL.** Clippy still does no taint analysis either. Registered as a
+> deferral in M32.12 rather than quietly dropped.
+
+> **First CI run of the new lane caught a real pre-existing defect —
+> and a hole in my local verification.** actionlint exited 0 locally but
+> FAILED on the runner: `mac-app.yml` ran
+> `pnpm tauri build --ci --target $TARGET` unquoted (SC2086), untouched
+> since M14. The runner has **shellcheck** installed and this Mac did
+> not, so every shellcheck-backed rule was silently skipped locally.
+> Fixed to `"$TARGET"`; `brew install shellcheck` makes local actionlint
+> match CI, and anyone verifying this lane by hand needs it installed or
+> they are running a weaker linter than CI and will not know.
+>
+> CodeQL final state: `state=configured`,
+> `languages=[actions, javascript-typescript]`, suite `default`.
 
 **Acceptance:** scanners run on `.github/**` changes only; zizmor is scoped
 away from vendored trees; actionlint is checksum-pinned; CodeQL default
@@ -777,7 +900,7 @@ ships; GPL contamination in the binary is a shipping problem, not theory.
 - Create: `.github/workflows/cargo-deny.yml`
 - Create: `deny.toml`
 
-- [ ] **Step 1: Write `deny.toml`**
+- [x] **Step 1: Write `deny.toml`**
 
 ```toml
 # cargo-deny policy (M32.6). Advisory lane — a new CVE is time-triggered
@@ -818,7 +941,7 @@ unknown-registry = "deny"
 unknown-git = "deny"
 ```
 
-- [ ] **Step 2: Run it locally once and reconcile the license list**
+- [x] **Step 2: Run it locally once and reconcile the license list**
 
 ```sh
 which cargo-deny >/dev/null || cargo install cargo-deny --locked
@@ -830,7 +953,7 @@ allow-list lacks. Add what is genuinely fine (say why, one comment per
 addition); investigate anything copyleft before allowing it. Do not commit
 until this passes locally.
 
-- [ ] **Step 3: Write the workflow**
+- [x] **Step 3: Write the workflow**
 
 ```yaml
 name: cargo-deny
@@ -861,13 +984,38 @@ jobs:
           command: check advisories licenses bans sources
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add deny.toml .github/workflows/cargo-deny.yml
 git commit -m "ci(deps): cargo-deny — advisories, licenses, dupes, on a schedule not in the gate (M32.6)"
 git push
 ```
+
+> **Executed 2026-08-15.** First local run: `advisories FAILED, bans ok,
+> licenses FAILED, sources ok`. Both failures were more interesting than
+> the plan expected, and neither was fixed by widening an allow-list.
+>
+> **Licenses: the plan's allow-list needed no additions at all.** Every
+> dependency's license was already covered. The single failure was
+> **our own crate** — `cerebro 0.1.0` had no `license` field, making it
+> the one unlicensed node in its own graph. Fixed at the source:
+> `license = "Apache-2.0"` in `src-tauri/Cargo.toml`, matching the
+> Apache-2.0 LICENSE the DMG already bundles and ships. A real metadata
+> gap, found by the lane on its first run.
+>
+> **Advisories: 16 distinct findings, ZERO vulnerabilities** — every one
+> `unmaintained`, every one transitive and unfixable from here: 10 gtk-rs
+> GTK3 bindings (Linux-only tauri deps macOS never compiles), the 5
+> `unic-*` crates via tauri-utils → urlpattern (RUSTSEC-2025-0098,
+> upstream: "no safe upgrade is available"), and proc-macro-error.
+> Resolved with `[advisories] unmaintained = "workspace"` — vulnerability
+> and yanked findings stay hard errors, while unmaintained is scoped to
+> crates this workspace names itself. Sixteen dated ignore ids would rot
+> silently as tauri's tree moves; the reasoning is written in deny.toml.
+>
+> Final: `advisories ok, bans ok, licenses ok, sources ok`. `Cargo.lock`
+> is untouched by the license field, and fmt/clippy stay green.
 
 **Acceptance:** local `cargo deny check` passes; the workflow runs weekly and
 on lockfile changes; the job is not a required check and not in husky, with
@@ -889,7 +1037,7 @@ whole integrity story available without an Apple account; say so honestly.
 - Modify: `playwright.config.ts`
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Attest the shipped bytes**
+- [x] **Step 1: Attest the shipped bytes**
 
 In the `build` job: extend its `permissions` block and add a step **after**
 "Sign and package" (attested bytes must be shipped bytes) and before the
@@ -910,7 +1058,7 @@ artifact upload:
           subject-path: dist-mac/*
 ```
 
-- [ ] **Step 2: Put the verify one-liner where the quarantine instructions are**
+- [x] **Step 2: Put the verify one-liner where the quarantine instructions are**
 
 In the release body (lines 171–183), after the `xattr` code block, add:
 
@@ -926,7 +1074,7 @@ In the release body (lines 171–183), after the `xattr` code block, add:
 Same audience, and it partially redeems the quarantine instruction it sits
 next to.
 
-- [ ] **Step 3: `.gitignore` the future secret**
+- [x] **Step 3: `.gitignore` the future secret**
 
 Add to `.gitignore`:
 
@@ -938,7 +1086,7 @@ Add to `.gitignore`:
 The app's architecture needs no secrets today; this is for the first day
 that stops being true.
 
-- [ ] **Step 4: One issue template — the one that isn't theater**
+- [x] **Step 4: One issue template — the one that isn't theater**
 
 Create `.github/ISSUE_TEMPLATE/bug.yml`:
 
@@ -974,7 +1122,7 @@ body:
       description: Rough size and anything unusual — no contents needed.
 ```
 
-- [ ] **Step 5: The e2e reuse knob — configuration instead of ritual**
+- [x] **Step 5: The e2e reuse knob — configuration instead of ritual**
 
 AGENTS.md documents a trap: `reuseExistingServer` silently attaches to a dev
 server another worktree is holding, and the suite runs against a different
@@ -1009,7 +1157,7 @@ since M32.7; a busy port fails loudly with "port … is used"; set
 another worktree used to be silently reused, running the suite against a
 different branch's app).
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```sh
 pnpm e2e --list >/dev/null 2>&1 || PORT=5573 pnpm exec playwright test --list | head -3
@@ -1017,6 +1165,25 @@ git add -A
 git commit -m "ci(release): provenance attestation, and the hygiene sweep — env ignore, bug template, e2e reuse knob (M32.7)"
 git push && gh pr checks --watch
 ```
+
+> **Executed 2026-08-15.** Two plan-vs-reality deltas, both from the
+> M31 base (see Execution deviations at the top):
+>
+> - `attest-build-provenance` is **commit-pinned** to v4.2.2, not left on
+>   `@v4` — M32.5 removed the `actions/*` tag exemption, so a new `@v4`
+>   here would have failed the scanner lane this milestone just built.
+> - AGENTS.md **already had** a port-trap paragraph (the `lsof` ritual);
+>   the plan expected to add one. It was REWRITTEN to describe the new
+>   opt-in behaviour — leaving it would have made this file describe a
+>   workaround for a constraint the same commit retired, which is the
+>   named house rule about killing a retired workaround's comment.
+>   `playwright.config.ts` line was 24, not 19.
+>
+> Verified: `reuseExistingServer` evaluates false with the var unset, and
+> the full suite passes on a free port — **90 passed (1.9m)**. The
+> attestation step itself cannot be exercised until a real `v*` tag is
+> pushed; it is guarded by `startsWith(github.ref, 'refs/tags/v')` and
+> never runs on a PR.
 
 **Acceptance:** tag builds emit an attestation for `dist-mac/*`; the release
 body carries the verify command; `.env*` ignored; bug template renders; e2e
@@ -1040,7 +1207,7 @@ command surface, not a git-module rewrite.
 - Create: `src-tauri/src/roots_git_commands.rs`
 - Modify: `src-tauri/src/lib.rs` (command registration)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src-tauri/src/roots/mod.rs` under the existing `mod tests`:
 
@@ -1084,7 +1251,7 @@ fn a_mounted_repo_resolves_to_its_git_workspace() {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```sh
 cd src-tauri && cargo test --lib roots::tests::a_root_that_is_not_a_repo
@@ -1092,7 +1259,7 @@ cd src-tauri && cargo test --lib roots::tests::a_root_that_is_not_a_repo
 
 Expected: FAIL — `cannot find function git_workspace`.
 
-- [ ] **Step 3: Implement the gate in `roots/mod.rs`**
+- [x] **Step 3: Implement the gate in `roots/mod.rs`**
 
 Beside `MountRefusal` (same contract, its own type — a git refusal is not a
 mount refusal, and sharing the type would let a UI match arm silently accept
@@ -1138,7 +1305,7 @@ pub fn git_workspace(
 }
 ```
 
-- [ ] **Step 4: The command surface**
+- [x] **Step 4: The command surface**
 
 Create `src-tauri/src/roots_git_commands.rs`:
 
@@ -1229,12 +1396,27 @@ parse:
 
 and add `pub mod roots_git_commands;` beside `pub mod roots_commands;`.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```sh
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 git add -A && git commit -m "feat(roots): mounted repos get their read-only git surface, refusing typed (M32.8)"
 ```
+
+> **Executed 2026-08-15.** TDD as written: the four tests failed with
+> `cannot find function git_workspace` before any implementation existed.
+> **Four, not three** — added
+> `capability_is_reprobed_not_read_from_the_mount_snapshot`, which mounts
+> a plain directory, asserts `caps.git` is false at mount time, then
+> `git init`s it and asserts the gate opens. The plan's doc-comment
+> claims live re-probing; nothing tested it, and it is the whole reason
+> the gate calls `workspace_for` instead of reading `root.caps`.
+>
+> Every signature the plan assumed was correct against the real modules.
+> The missing-trailing-comma trap was real, at `lib.rs:1147` (the plan
+> said 419 — M31's base is a longer file).
+>
+> Rust gate: fmt clean, clippy clean, **1728 passed / 0 failed**.
 
 **Acceptance:** three tests pin the gate (unknown id, non-repo, repo); five
 commands exist and are registered; every refusal carries a matchable code;
@@ -1259,7 +1441,7 @@ never as noise on the single-vault case.
   handlers in the same place)
 - Modify: `e2e/workspace.spec.ts`
 
-- [ ] **Step 1: Write the failing store test**
+- [x] **Step 1: Write the failing store test**
 
 In `src/stores/rootsStore.test.ts`, following the file's existing fixture
 style (M30 wrote these tests — mirror them):
@@ -1277,7 +1459,7 @@ it('loads git status for a repo root and keeps refusals as values', async () => 
 });
 ```
 
-- [ ] **Step 2: Watch it fail, then implement**
+- [x] **Step 2: Watch it fail, then implement**
 
 Store shape: `gitStatus: Record<string, GitRemoteStatus>` and
 `gitRefusals: Record<string, RootGitRefusal>` (camelCase over the wire —
@@ -1287,7 +1469,7 @@ toasted** — the typed-refusal exemption to the store-layer rule, same as
 M30's mount flow. Only a transport-level failure (invoke itself rejecting
 with a non-refusal) follows the human-UI rule: catch, toast, null.
 
-- [ ] **Step 3: Mock parity, tested**
+- [x] **Step 3: Mock parity, tested**
 
 `mockRoots.ts` gains the five `root_git_*` handlers. Parity means the mock
 can **actually emit** what Rust emits — a test comparing two hand-written
@@ -1321,7 +1503,7 @@ the requirement is one driven emission per reachable code, not this exact
 API.) Mock roots carry a `caps.git` flag and a small canned
 `GitRemoteStatus`/`PulseCommit[]` fixture.
 
-- [ ] **Step 4: The badge**
+- [x] **Step 4: The badge**
 
 `RootTree.tsx`: on a root row whose status is loaded, render branch name +
 dirty-count + ahead/behind as a quiet inline badge (follow the tree's
@@ -1333,7 +1515,7 @@ keys on `!caps.writable && !caps.git` to render a vanished-directory root —
 an unavailable root gets that rendering and never a git badge; do not let
 the badge logic double-read `caps.git` in a way that changes it.
 
-- [ ] **Step 5: e2e**
+- [x] **Step 5: e2e**
 
 Extend `e2e/workspace.spec.ts` using **its own local `boot()` helper** —
 that is origin/main's convention (there is NO `e2e/boot.ts` on main; that
@@ -1342,13 +1524,53 @@ at merge time; origin/main's AGENTS.md says "copy an existing spec's boot").
 Mount a mock repo root, expect the badge with the mocked branch name; mount
 a non-repo root, expect no badge and no error toast.
 
-- [ ] **Step 6: Full gate (TS side ratchets!), commit**
+- [x] **Step 6: Full gate (TS side ratchets!), commit**
 
 ```sh
 pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY" || PORT=$p pnpm e2e
 git add -A && git commit -m "feat(workspace): root git badges, refusals read as values, mock parity tested (M32.9)"
 ```
+
+> **Executed 2026-08-15.** Five decisions worth recording.
+>
+> 1. **The e2e instruction inverted.** The plan said to use a spec-local
+>    `boot()` because `e2e/boot.ts` does not exist on main. On this base it
+>    does, and AGENTS.md says "never write your own". `workspace.spec.ts`
+>    still carried a local copy — missing the CLOCK PIN, i.e. exactly the
+>    sixth-copy-that-did-not-learn-it that boot.ts was extracted to
+>    prevent. Replaced with the import; the shared boot is a strict
+>    superset (same body plus `page.clock.setFixedTime`).
+> 2. **`root_git_file_url` returns `string | null`, not a wrapper.** Rust
+>    sends `Option<String>`; a friendlier `{ url }` in the mock would be a
+>    shape the real backend never sends, in the phase whose whole point is
+>    parity. `isRootGitRefusal` therefore takes `unknown` — `'code' in
+>    result` throws on a bare string and on null.
+> 3. **`seedRootGit` also flips `caps.git`.** A path with a git status but
+>    no git capability is a state the real backend cannot produce (both
+>    come from the same `.git`). This is also what lets a test model a
+>    directory that BECOMES a repo — the case M32.8's gate re-probes for.
+>    My first store test was wrong here: it set store state, which the
+>    mock gate does not read.
+> 4. **No eslint suppression was needed.** The status-loading effect
+>    writes `gitStatus`, so depending on it would re-run per status. Rather
+>    than disable `exhaustive-deps` (which IS active — only
+>    set-state-in-effect/refs/purity are off), the effect reads the loaded
+>    set fresh via `useRootsStore.getState()`. No suppression, no stale
+>    closure.
+> 5. **The no-toast e2e assertion nearly shipped vacuous.** There is no
+>    `data-testid="toast"`; a `toHaveCount(0)` on it passes whether or not
+>    a toast appears. `ToastHost` renders unconditionally and empty, so the
+>    real assertion is `toBeEmpty()` on `toast-host`.
+>
+> Badge design, per the plan's "nothing speaks first": `gitBadgeText` in
+> `engine/roots.ts` (pure, unit-tested) returns null for a clean in-sync
+> repo, so a quiet repository is undecorated and the branch name rides
+> along only when there is already a count to show. If that reads as too
+> quiet in use, the one-line change is to return the branch unconditionally.
+>
+> Gate: lint, format, typecheck, **3507 unit tests**, coverage ratchet
+> green, **92 e2e passed** (90 before).
 
 **Acceptance:** store keeps refusals as values; mock emits exactly the Rust
 refusal set and a test proves it; badge renders only when it disambiguates;
@@ -1370,7 +1592,7 @@ store anything.
 - Modify: `src-tauri/src/git/mod.rs` (module declarations)
 - Modify: `src-tauri/src/git/command.rs` (the `GIT_CONFIG_PARAMETERS` line)
 
-- [ ] **Step 1: Failing test for the hardened spawn**
+- [x] **Step 1: Failing test for the hardened spawn**
 
 In `src-tauri/src/git/command.rs` tests:
 
@@ -1394,7 +1616,7 @@ fn spawned_git_carries_the_protocol_pins() {
 }
 ```
 
-- [ ] **Step 2: Watch it fail, then extend the env line**
+- [x] **Step 2: Watch it fail, then extend the env line**
 
 `command.rs` line 88 becomes:
 
@@ -1424,7 +1646,7 @@ still execute during an authenticated fetch/pull — an empty
 keychain helper. Mounting a repository is trusting its `.git/config`;
 M32.12's SECURITY.md text says exactly that.
 
-- [ ] **Step 3: Credentials probe** (new module; its tests land in the same
+- [x] **Step 3: Credentials probe** (new module; its tests land in the same
 step — there is no meaningful pre-implementation fail run for a new file,
 so this step does not claim one)
 
@@ -1565,7 +1787,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Upstream management** (new module; tests land with it, same
+- [x] **Step 4: Upstream management** (new module; tests land with it, same
 as Step 3)
 
 Create `src-tauri/src/git/upstream.rs`:
@@ -1627,7 +1849,7 @@ mod tests {
 lines are harmless overrides — keep them; the test must not depend on the
 machine's global git config.)
 
-- [ ] **Step 5: Declare the modules**
+- [x] **Step 5: Declare the modules**
 
 In `git/mod.rs`, beside the existing declarations:
 
@@ -1636,7 +1858,7 @@ pub mod credentials;
 pub mod upstream;
 ```
 
-- [ ] **Step 6: Manual probe check, gate, commit**
+- [x] **Step 6: Manual probe check, gate, commit**
 
 ```sh
 cd src-tauri && cargo test --lib git::
@@ -1645,6 +1867,22 @@ cd src-tauri && cargo test --lib git::
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 git add -A && git commit -m "feat(git): credential readiness probe, upstream management, protocol pins (M32.10)"
 ```
+
+> **Executed 2026-08-15.** The pins test asserts **five** keys, not three:
+> the plan's three plus `protocol.file.allow=user` (M32.11's fixture
+> clones by filesystem path and depends on it) plus `core.quotepath=false`.
+> That last one is the actual regression guard for this phase's named
+> trap — `GIT_CONFIG_PARAMETERS` is ONE env var, and a test that only
+> checks the new pins would pass while the old one was clobbered and every
+> non-ASCII path broke.
+>
+> The `Ready` arm was verified by hand as the plan asks, and it works: run
+> from a neutral cwd with prompting disabled against this repo's HTTPS
+> origin, the osxkeychain helper answers with
+> `protocol/host/username/password`. It is still not a unit test — it
+> would assert against whatever helper the developer's machine has.
+>
+> Rust gate: fmt clean, clippy clean, **1733 passed** (1728 before).
 
 **Acceptance:** every spawned git carries the three protocol pins and a test
 proves it; `probe` never stores anything and never touches the network for
@@ -1667,7 +1905,7 @@ proposal-channel exemption in AGENTS.md: the caller READS the outcome.
 - Modify: `src/stores/rootsStore.ts`, `src/workspace/RootTree.tsx`,
   `src/lib/mockRoots.ts` (+ tests), `e2e/workspace.spec.ts`
 
-- [ ] **Step 1: Failing tests for the two new remote operations**
+- [x] **Step 1: Failing tests for the two new remote operations**
 
 Honesty about the starting point: `remote.rs`'s test module today is **four
 string-input tests of `classify()`** — no repo fixtures, no clones, no
@@ -1702,7 +1940,7 @@ fn a_diverged_pull_ff_reports_rejected_and_changes_nothing() {
 }
 ```
 
-- [ ] **Step 2: Implement `fetch` and `pull_ff`**
+- [x] **Step 2: Implement `fetch` and `pull_ff`**
 
 In `remote.rs`, following `pull`'s existing shape (run, then `classify`
 stderr into an outcome):
@@ -1763,7 +2001,7 @@ on the closed set of snake_case strings, and a new variant would ripple
 through every consumer for one message's worth of nuance. Revisit only if
 the UI needs to *act* differently on divergence vs push-rejection.)
 
-- [ ] **Step 3: The nested-mount gate, commands, registration, UI**
+- [x] **Step 3: The nested-mount gate, commands, registration, UI**
 
 A mounted root can sit INSIDE a larger repository —
 `workspace::resolve` walks up and returns
@@ -1855,7 +2093,7 @@ parity test drives a `parent_repo` emission (extending M32.9's test). e2e:
 sync a mock root that fast-forwards (badge count clears) and one that
 diverges (message surfaces, HEAD badge unchanged).
 
-- [ ] **Step 4: Full gate, commit**
+- [x] **Step 4: Full gate, commit**
 
 ```sh
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
@@ -1863,6 +2101,30 @@ cd .. && pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY" || PORT=$p pnpm e2e
 git add -A && git commit -m "feat(roots): fetch and fast-forward pull per root, outcomes read not toasted (M32.11)"
 ```
+
+> **Executed 2026-08-15.** The `diverged_fixture` works as designed and is
+> the first real-repo fixture in `remote.rs` (its test module was four
+> string-input `classify()` tests before). Built through `temp_vault` +
+> `init_repo` + `run_str` only; the clone is by filesystem PATH, which
+> works because M32.10 pinned `protocol.file.allow=user` — the two phases
+> are coupled and the pins test now asserts that key for this reason.
+>
+> Added a third Rust test the plan did not list:
+> `fetch_updates_tracking_refs_without_touching_the_working_tree`. The
+> claim that fetch is "the safe half" is the reason it is offered on
+> mounted roots at all, and nothing tested that HEAD stays put.
+>
+> `pull_ff` reads `failure.stderr`, not a `.message()` — `GitFailure`
+> exposes the field; `message()` is the formatted form.
+>
+> Store `syncRoot` refuses to pull when `ahead > 0 && behind > 0` rather
+> than letting `--ff-only` refuse it. Both are safe; not asking is a
+> better answer than being refused, and it keeps the diverged case off the
+> network entirely.
+>
+> Full gate: Rust fmt/clippy clean, **1737 passed**; TS lint, format,
+> typecheck, **3513 unit tests**, coverage ratchet green; **95 e2e passed**
+> (92 before).
 
 **Acceptance:** a refused fast-forward provably moves nothing; no-remote is
 `no_remote`, never `error`; the store returns outcomes as values; mock
@@ -1881,7 +2143,7 @@ assume.
 - Modify: `.github/SETUP.md`
 - Modify: this plan doc (checkboxes + any deviations noted per phase)
 
-- [ ] **Step 1: SECURITY.md — the mounted-roots trust model**
+- [x] **Step 1: SECURITY.md — the mounted-roots trust model**
 
 SECURITY.md predates M30 and says nothing about mounted roots. Add a section
 after the existing trust-model material:
@@ -1923,7 +2185,7 @@ to this section. The guarded read path was built MCP-ready precisely so
 that PR is small — the barrier is this trust model, on purpose.
 ```
 
-- [ ] **Step 2: SETUP.md — verify private vulnerability reporting, tick the line**
+- [x] **Step 2: SETUP.md — verify private vulnerability reporting, tick the line**
 
 PVR is currently **disabled** (`{"enabled": false}`, checked 2026-08-13),
 and a bare `GET || PUT` would never run the PUT — the GET exits 0 whether
@@ -1938,7 +2200,7 @@ gh api repos/JLagorio/cerebro/private-vulnerability-reporting   # {"enabled": tr
 Point SECURITY.md's reporting section at the repo's Security → "Report a
 vulnerability" flow if it doesn't already, and tick the SETUP.md checkbox.
 
-- [ ] **Step 3: The deferral register (in this plan doc, below)**
+- [x] **Step 3: The deferral register (in this plan doc, below)**
 
 Confirm the following table is accurate as of the end of M32 execution and
 tick this box. These are analyzed-not-built, with their triggers:
@@ -1948,11 +2210,13 @@ tick this box. These are analyzed-not-built, with their triggers:
 | Rust coverage floor | next milestone that adds untested `src-tauri` surface | `cargo llvm-cov --fail-under-lines <measured actual>` in the quality job; mirror in pre-push behind the existing `src-tauri` change detection with `--no-clean`; floor ratchets up only (AGENTS.md rule) |
 | Updater + key custody | the day auto-update becomes a goal | generate the minisign keypair offline; private key ONLY in a GitHub Environment restricted to protected `v*` refs, never a plain repo secret; offline backup (losing it strands every install); unsigned-updater = RCE channel, never ship it casually |
 | Apple Developer ID + notarization | paid account decision | tolaria's ephemeral-keychain recipe (`release-build-artifacts.yml:84–99` in the vendored tree); delete the xattr instruction the same day |
-| Work-repo writes (commit/push under policy) | m22-m28 policy layer merged to main | proposal-card flow per M30 decision log; `RemoteOutcome` vocabulary already fits |
+| Work-repo writes (commit/push under policy) | **TRIGGER FIRED** — the m22-m28 policy layer merged to main in PR #13 (`7e1fe07`) on 2026-08-14, before M32 executed. The gate is open; the work is unscheduled, not blocked | proposal-card flow per M30 decision log; `RemoteOutcome` vocabulary already fits, and `git_workspace_for_sync` is where a write gate would hang |
 | Release channels (alpha/stable) | first need for a second lane | extract a `workflow_call` builder BEFORE duplicating any lane (tolaria release.yml pattern) |
 | Commit signing | collaborators arrive, or paranoia strikes | SSH-key signing + vigilant mode, 10 minutes; never a ruleset rule while agent-driven commits flow from many worktrees |
+| CodeQL for Rust | GitHub ships `rust` in code-scanning default setup | **Discovered during M32.5, not planned:** this plan asserted Rust was GA in default setup. The API rejects it (422; allowed: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, swift), so `mcp.rs`, `agent.rs` and `connectors.rs` get taint tracking from nothing — clippy does not do it either. Re-check the allowed list; the advanced-setup workflow route is the fallback if it stays unsupported |
+| Immutable releases dry-run | the toggle is flipped in Settings (browser-only; no API) | push `v0.0.1-rc`, assert `gh release view v0.0.1-rc --json isImmutable` is true, assert `gh release delete` is REFUSED. Not done in M32: enabling it is not scriptable, and tagging first would publish a MUTABLE release and burn the dry-run |
 
-- [ ] **Step 4: Commit, finish the PR**
+- [x] **Step 4: Commit, finish the PR**
 
 ```sh
 git add SECURITY.md .github/SETUP.md docs/superpowers/plans/2026-08-13-cerebro-m32-github-hardening-multi-repo.md
@@ -1961,11 +2225,52 @@ git push
 gh pr ready && gh pr checks --watch
 ```
 
+> **Executed 2026-08-15.** PVR was enabled by VALUE-testing as the plan
+> insists (`--jq .enabled` was `false`, the PUT ran, it now reads `true`).
+> The agent-exposure claim was verified before writing it down, not
+> asserted: `grep root_ src-tauri/src/mcp.rs` is empty.
+>
+> The register grew from six deferrals to **eight**, and one of the
+> original six changed state:
+> - **Work-repo writes: its trigger has FIRED.** The plan gated it on
+>   "m22-m28 policy layer merged to main", which happened in PR #13 the
+>   day before M32 executed. Left deferred (M32's non-goals exclude it and
+>   nothing here builds toward it), but recorded as gate-open rather than
+>   silently carrying a condition that is already satisfied.
+> - **CodeQL for Rust** — new, from M32.5's 422.
+> - **Immutable releases dry-run** — new, because M32.4 Step 3 could not
+>   be completed from a terminal.
+
 **Acceptance:** SECURITY.md states the mounted-root model including the
 explicit agent-exposure OFF decision; PVR verified/enabled and witnessed;
 the deferral register is accurate; the PR is green and ready for review.
 
 ---
+
+## Found in execution: two pre-existing CI-flaky tests
+
+Recorded 2026-08-15. M32's PR needed three attempts at the `quality` job, and
+each failure was a DIFFERENT pre-existing test:
+
+| Attempt | Failed | Shape |
+| --- | --- | --- |
+| 1 | `ledger::writer::tests::appends_acknowledge_monotonic_seqs_that_survive_reopen` | the second `LedgerWriter::open` after `drop(writer)` hit `WouldBlock` on the flock — the lock had not been released yet |
+| 2 | `src/editor/NoteBodyEditor.test.tsx:75` | `waitFor` timed out; expected `"Renamed page"`, received `undefined` |
+| 3 | — | green |
+
+Neither file is touched by M32 (`git diff --name-only m31-claims-and-records...HEAD`
+contains no `ledger/` or `editor/` path), both pass locally under repetition
+(12/12 and 8/8 respectively), and the full Rust suite passes locally under
+`RUST_TEST_THREADS=2` — so this is CI-environment timing, not a defect this
+milestone introduced. Both are timeout-shaped, which is what a slower,
+2-core, more contended runner produces.
+
+They are still real flakes and they will bite someone else. **Not fixed here**
+— M32's non-goals keep it out of unrelated subsystems, and a flake fix wants
+its own change with its own reasoning. Filed as the first thing to look at if
+`quality` fails on an unrelated PR: the ledger one wants to know why a
+dropped `File` had not released its `flock` yet, and the editor one wants a
+longer `waitFor` or a deterministic seam.
 
 ## Traps
 

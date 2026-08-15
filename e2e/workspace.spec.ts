@@ -1,31 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
+import { boot } from './boot';
 
 /** What the mock roots backend exposes for seeding (see src/lib/mockRoots.ts). */
 interface MockRootsWindow {
   __cerebroMockRoots: {
     resetMockRoots(): void;
-    seedRoot(s: { path: string; label: string; knowledge?: boolean }): { id: string };
+    seedRoot(s: { path: string; label: string; knowledge?: boolean; git?: boolean }): {
+      id: string;
+    };
     seedFile(rootPath: string, rel: string, content: string): void;
     seedKnowledgeDir(path: string): void;
+    seedRootGit(
+      rootPath: string,
+      status: { branch?: string; ahead?: number; behind?: number },
+    ): void;
+    seedRootGitFailure(rootId: string): void;
+    seedRootNested(rootPath: string): void;
   };
-}
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 }
 
 /** Seed two mounted repositories with a small documentation tree. */
@@ -244,5 +235,105 @@ test.describe('workspace', () => {
 
     await expect(page.getByTestId('workspace-empty')).toBeVisible();
     await expect(page.getByTestId('root-tree')).toBeHidden();
+  });
+});
+
+test.describe('workspace git', () => {
+  test('a repo root badges its branch and counts, a plain folder stays silent', async ({
+    page,
+  }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+      w.__cerebroMockRoots.seedRoot({ path: '/notes', label: 'notes', git: false });
+      w.__cerebroMockRoots.seedRootGit('/repos/alpha', { branch: 'main', ahead: 2, behind: 1 });
+      w.__cerebroMockRoots.seedFile('/repos/alpha', 'README.md', '# Alpha');
+      w.__cerebroMockRoots.seedFile('/notes', 'note.md', '# Note');
+    });
+    await openWorkspace(page);
+
+    const badges = page.getByTestId('root-git-badge');
+    await expect(badges).toHaveCount(1);
+    await expect(badges.first()).toHaveText('main ↑2 ↓1');
+  });
+
+  test('a non-repo root refuses without a toast, and the tree stays usable', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/notes', label: 'notes', git: false });
+      w.__cerebroMockRoots.seedFile('/notes', 'note.md', '# Note');
+    });
+    await openWorkspace(page);
+
+    await expect(page.getByTestId('root-tree')).toBeVisible();
+    await expect(page.getByTestId('root-git-badge')).toHaveCount(0);
+    // A refusal is READ, not toasted — a mounted folder that is not a repo is
+    // an ordinary state, and an error popup on every one of them would be
+    // noise. The live region renders unconditionally and EMPTY (see
+    // ToastHost), so emptiness is the assertion that can actually fail; a
+    // `getByTestId('toast')` count would pass whether or not one appeared.
+    await expect(page.getByTestId('toast-host')).toBeEmpty();
+    await expect(page.getByTestId('tree-row').first()).toBeVisible();
+  });
+});
+
+test.describe('workspace git sync', () => {
+  test('a root that is only behind fast-forwards and the badge clears', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/repos/behind', label: 'behind', git: true });
+      w.__cerebroMockRoots.seedRootGit('/repos/behind', { branch: 'main', ahead: 0, behind: 2 });
+      w.__cerebroMockRoots.seedFile('/repos/behind', 'README.md', '# Behind');
+    });
+    await openWorkspace(page);
+
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↓2');
+    await page.getByTestId('root-git-sync').click();
+
+    // Fast-forwarded: nothing left to say, so the badge goes quiet entirely.
+    await expect(page.getByTestId('root-git-badge')).toHaveCount(0);
+  });
+
+  test('a diverged root is not pulled and its counts stand', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/repos/div', label: 'div', git: true });
+      w.__cerebroMockRoots.seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+      w.__cerebroMockRoots.seedFile('/repos/div', 'README.md', '# Div');
+    });
+    await openWorkspace(page);
+
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↑1 ↓1');
+    await page.getByTestId('root-git-sync').click();
+
+    // Diverged: Cerebro does not try to reconcile a repo it does not own.
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↑1 ↓1');
+    await expect(page.getByTestId('toast-host')).toBeEmpty();
+  });
+
+  test('a root nested in a larger repository shows a quiet nested state', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+      w.__cerebroMockRoots.seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+      w.__cerebroMockRoots.seedRootNested('/work/mono/sub');
+      w.__cerebroMockRoots.seedFile('/work/mono/sub', 'README.md', '# Sub');
+    });
+    await openWorkspace(page);
+
+    await page.getByTestId('root-git-sync').click();
+
+    await expect(page.getByTestId('root-git-sync')).toHaveText('nested');
+    await expect(page.getByTestId('toast-host')).toBeEmpty();
   });
 });

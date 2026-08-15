@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetMockRoots, seedFile, seedKnowledgeDir, seedRoot } from '@/lib/mockRoots';
+import {
+  resetMockRoots,
+  seedFile,
+  seedKnowledgeDir,
+  seedRoot,
+  seedRootGit,
+  seedRootNested,
+} from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from './rootsStore';
 
 beforeEach(() => {
@@ -96,5 +103,77 @@ describe('unmount', () => {
       rootId: alpha.id,
       path: 'README.md',
     });
+  });
+});
+
+describe('loadGitStatus', () => {
+  it('loads git status for a repo root and keeps refusals as values', async () => {
+    const repo = seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    const plain = seedRoot({ path: '/notes', label: 'notes', git: false });
+    seedRootGit('/repos/alpha', { branch: 'main', ahead: 0, behind: 2 });
+    await useRootsStore.getState().loadRoots();
+
+    await useRootsStore.getState().loadGitStatus(repo.id);
+    expect(useRootsStore.getState().gitStatus[repo.id]?.branch).toBe('main');
+    expect(useRootsStore.getState().gitRefusals[repo.id]).toBeUndefined();
+
+    await useRootsStore.getState().loadGitStatus(plain.id);
+    // READ, not toasted away — the typed-refusal exemption to the store rule.
+    expect(useRootsStore.getState().gitRefusals[plain.id]?.code).toBe('no_git_capability');
+    expect(useRootsStore.getState().gitStatus[plain.id]).toBeUndefined();
+  });
+
+  it('clears a stale refusal once the root resolves', async () => {
+    const root = seedRoot({ path: '/repos/late', label: 'late', git: false });
+    await useRootsStore.getState().loadRoots();
+    await useRootsStore.getState().loadGitStatus(root.id);
+    expect(useRootsStore.getState().gitRefusals[root.id]?.code).toBe('no_git_capability');
+
+    // The directory became a repo; the gate re-probes and the badge must not
+    // keep rendering yesterday's refusal.
+    seedRootGit('/repos/late', { branch: 'trunk' });
+    await useRootsStore.getState().loadRoots();
+    await useRootsStore.getState().loadGitStatus(root.id);
+
+    expect(useRootsStore.getState().gitRefusals[root.id]).toBeUndefined();
+    expect(useRootsStore.getState().gitStatus[root.id]?.branch).toBe('trunk');
+  });
+});
+
+describe('syncRoot', () => {
+  it('fast-forwards a root that is only behind, and refreshes the badge', async () => {
+    const root = seedRoot({ path: '/repos/behind', label: 'behind', git: true });
+    seedRootGit('/repos/behind', { branch: 'main', ahead: 0, behind: 2 });
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(result && 'status' in result && result.status).toBe('updated');
+    expect(useRootsStore.getState().gitStatus[root.id]?.behind).toBe(0);
+  });
+
+  it('never attempts a pull on a diverged root', async () => {
+    const root = seedRoot({ path: '/repos/div', label: 'div', git: true });
+    seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    // Fetch succeeded; the pull was not even asked for, so the counts stand.
+    expect(result && 'status' in result && result.status).toBe('updated');
+    expect(useRootsStore.getState().gitStatus[root.id]?.behind).toBe(1);
+    expect(useRootsStore.getState().gitStatus[root.id]?.ahead).toBe(1);
+  });
+
+  it('returns parent_repo as a value the caller renders, and does not toast', async () => {
+    const root = seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+    seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+    seedRootNested('/work/mono/sub');
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(result && 'code' in result && result.code).toBe('parent_repo');
+    expect(useRootsStore.getState().gitRefusals[root.id]?.code).toBe('parent_repo');
   });
 });

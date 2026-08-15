@@ -198,6 +198,75 @@ pub fn find(config_dir: &Path, id: &str) -> Option<Root> {
     store::load(config_dir).into_iter().find(|r| r.id == id)
 }
 
+/// A git-surface refusal the UI is expected to READ and act on — the same
+/// contract as `MountRefusal`, deliberately its own type. Sharing one would
+/// let a UI match arm silently accept codes it never handles.
+///
+/// Codes: `no_such_root`, `no_git_capability`, `config_unavailable`,
+/// `git_error`, and (from M32.11's mutation gate) `parent_repo`. The mock's
+/// parity test drives every browser-reachable one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootGitRefusal {
+    pub code: String,
+    pub message: String,
+}
+
+impl RootGitRefusal {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Resolve a mounted root to its git workspace — the capability gate every
+/// root-scoped git command goes through.
+///
+/// Capability is re-probed live rather than read from `root.caps`: the stored
+/// snapshot is a mount-time cache, and a directory `git init`ed after mount is
+/// a repository now.
+pub fn git_workspace(
+    config_dir: &Path,
+    root_id: &str,
+) -> Result<crate::git::workspace::GitWorkspaceInfo, RootGitRefusal> {
+    let root = find(config_dir, root_id).ok_or_else(|| {
+        RootGitRefusal::new("no_such_root", format!("no mounted root with id {root_id}"))
+    })?;
+    let ws = crate::git::workspace_for(&root.path);
+    if !ws.is_repo() {
+        return Err(RootGitRefusal::new(
+            "no_git_capability",
+            format!("{} is not a git repository", root.label),
+        ));
+    }
+    Ok(ws)
+}
+
+/// The MUTATION gate: like `git_workspace`, but additionally refuses roots
+/// mounted INSIDE a larger repository.
+///
+/// `workspace::resolve` walks up, so a root nested in a repo resolves to the
+/// enclosing one and `dir()` is that repo. Reads are fine there — status is
+/// pathspec-scoped and branch info is honest display — but a fetch or pull
+/// would act on the whole parent repository, i.e. on everything outside the
+/// scope the user actually mounted. New code: `parent_repo`.
+pub fn git_workspace_for_sync(
+    config_dir: &Path,
+    root_id: &str,
+) -> Result<crate::git::workspace::GitWorkspaceInfo, RootGitRefusal> {
+    let ws = git_workspace(config_dir, root_id)?;
+    if ws.git_root_relation != crate::git::workspace::GitRootRelation::Vault {
+        return Err(RootGitRefusal::new(
+            "parent_repo",
+            "this root sits inside a larger repository; syncing would act on \
+             the whole repo — run git there yourself",
+        ));
+    }
+    Ok(ws)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +419,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cfg);
         let _ = std::fs::remove_dir_all(a.parent().unwrap());
         let _ = std::fs::remove_dir_all(b.parent().unwrap());
+    }
+
+    // The M32.8 capability gate. `caps.git` was probed by M30 and consumed by
+    // no git surface; these pin the three answers the gate can give.
+
+    #[test]
+    fn a_root_that_is_not_a_repo_refuses_git_typed() {
+        let config = testutil::temp_vault("m32-gate-config");
+        let plain = testutil::temp_vault("m32-gate-plain");
+        let root = mount(&config, plain.to_str().unwrap()).unwrap();
+        let err = git_workspace(&config, &root.id).unwrap_err();
+        assert_eq!(err.code, "no_git_capability");
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn an_unknown_root_id_refuses_typed_not_stringly() {
+        let config = testutil::temp_vault("m32-gate-unknown");
+        let err = git_workspace(&config, "no-such-id").unwrap_err();
+        assert_eq!(err.code, "no_such_root");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn a_mounted_repo_resolves_to_its_git_workspace() {
+        let config = testutil::temp_vault("m32-gate-repo-config");
+        let repo = testutil::temp_vault("m32-gate-repo");
+        crate::git::commit::init_repo(&repo).unwrap();
+        let root = mount(&config, repo.to_str().unwrap()).unwrap();
+        let ws = git_workspace(&config, &root.id).unwrap();
+        assert!(ws.is_repo());
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// A root mounted inside a larger repository can be READ (status is
+    /// pathspec-scoped) but never SYNCED — fetch/pull would act on the whole
+    /// enclosing repo, which the user never mounted.
+    #[test]
+    fn sync_on_a_subfolder_mount_refuses_parent_repo() {
+        let config = testutil::temp_vault("m32-sync-config");
+        let repo = testutil::temp_vault("m32-sync-parent");
+        crate::git::commit::init_repo(&repo).unwrap();
+        let sub = repo.join("nested");
+        std::fs::create_dir(&sub).unwrap();
+
+        let root = mount(&config, sub.to_str().unwrap()).unwrap();
+
+        assert_eq!(
+            git_workspace_for_sync(&config, &root.id).unwrap_err().code,
+            "parent_repo"
+        );
+        // The READ gate still resolves it — reads are pathspec-scoped.
+        assert!(git_workspace(&config, &root.id).is_ok());
+
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// The capability is re-probed live, so a directory that becomes a repo
+    /// after mount is a repo NOW — the stored `caps` snapshot is a cache, not
+    /// the truth. Mount first, `git init` second, and the gate must still open.
+    #[test]
+    fn capability_is_reprobed_not_read_from_the_mount_snapshot() {
+        let config = testutil::temp_vault("m32-gate-reprobe-config");
+        let dir = testutil::temp_vault("m32-gate-reprobe");
+        let root = mount(&config, dir.to_str().unwrap()).unwrap();
+        assert!(!root.caps.git, "not a repo at mount time");
+        crate::git::commit::init_repo(&dir).unwrap();
+        assert!(
+            git_workspace(&config, &root.id).is_ok(),
+            "a repo created after mount is still a repo"
+        );
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

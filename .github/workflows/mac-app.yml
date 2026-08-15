@@ -1,19 +1,30 @@
 name: CI & Mac app
 
-# Two gates and a build (M14.4). `quality` and `e2e` run on Linux on every
-# push; the macOS build only starts once both pass, so a broken lint,
-# typecheck, test, or Playwright flow can no longer ship a DMG — which it
-# could until M14 (CI ran vitest + cargo test and nothing else; tsc breakage
-# reached main in 80ca071).
+# Two gates and a build (M14.4; triggers retargeted M32.1). `quality` and
+# `e2e` run on Linux for every pull request and every push to main; the macOS
+# build only starts once both pass, so a broken lint, typecheck, test, or
+# Playwright flow can no longer ship a DMG — which it could until M14 (CI ran
+# vitest + cargo test and nothing else; tsc breakage reached main in 80ca071).
 #
-# Every push produces a downloadable artifact (Actions → this run → Artifacts).
-# Pushing a `v*` tag additionally publishes a release.
+# A pull request runs the two gates and stops there — WIP pushes no longer
+# burn a macOS runner. Pushes to main and `v*` tags additionally produce a
+# downloadable artifact (Actions → this run → Artifacts), and a `v*` tag
+# publishes a release. A PR that genuinely needs a DMG dispatches one by hand.
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
+
+# Least privilege: the ambient token is read-only for every job; `build`
+# alone elevates to contents:write for tag releases. The repo setting says
+# read-only too, but a setting is not reviewable — this line is.
+# House rule: no workflow in this repo may ever use pull_request_target.
+# It hands the base repo's secrets to fork code; nothing we do needs it.
+permissions:
+  contents: read
 
 # Pushing again supersedes the previous build for the same ref rather than
 # leaving it to finish a build nobody is waiting for any more.
@@ -32,13 +43,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored here with cause: this job ships no bytes to
+      # anyone. The audit fires because the WORKFLOW can publish a release on
+      # a tag, but that is the `build` job, which restores nothing on tag refs
+      # (see its rust-cache guard). A poisoned store here reaches lint and
+      # tests only, and a compromised gate is caught by the gate itself.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
           cache: pnpm
@@ -66,11 +84,16 @@ jobs:
             wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned by commit, so the toolchain can no longer be read from the ref
+      # (`@stable` was a moving BRANCH) — it is an explicit input now.
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      # This job publishes nothing, so it keeps its cache — same cause as the
+      # setup-node ignore above.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 # zizmor: ignore[cache-poisoning]
         with:
           workspaces: src-tauri -> target
 
@@ -87,13 +110,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored here with cause: this job ships no bytes to
+      # anyone. The audit fires because the WORKFLOW can publish a release on
+      # a tag, but that is the `build` job, which restores nothing on tag refs
+      # (see its rust-cache guard). A poisoned store here reaches lint and
+      # tests only, and a compromised gate is caught by the gate itself.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
           cache: pnpm
@@ -108,7 +138,7 @@ jobs:
       - name: Playwright e2e
         run: pnpm e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-failures
@@ -118,29 +148,49 @@ jobs:
   build:
     runs-on: macos-14
     needs: [quality, e2e]
+    # PRs are gated by quality+e2e alone; the artifact build runs on main,
+    # tags, and manual dispatch. A PR that needs a DMG can dispatch one.
+    if: github.event_name != 'pull_request'
     # The whole job is minutes. Past this something is wedged, and failing says
     # so instead of holding a runner for hours.
     timeout-minutes: 45
     permissions:
       contents: write
+      id-token: write # provenance attestation (M32.7)
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      # cache-poisoning ignored with cause: the mitigation IS this step —
+      # `cache: pnpm` is deliberately absent, so setup-node restores nothing.
+      # The audit flags the action's default behaviour, not our configuration.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0 # zizmor: ignore[cache-poisoning]
         with:
           node-version: 22
-          cache: pnpm
+          # No pnpm store cache in this job — same reasoning as rust-cache
+          # below: the lane that ships bytes restores nothing from a writable
+          # shared cache. quality/e2e keep theirs.
 
       - name: Install Rust with both Mac targets
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@v2
+      # cache-poisoning ignored with cause: the `if:` below IS the mitigation
+      # the audit asks for — the release lane never restores this cache.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 # zizmor: ignore[cache-poisoning]
+        # A release must never link objects it didn't compile: an attacker
+        # with one-time execution in any main-branch run can poison a shared
+        # cache, and the next tag build would link it into the DMG. Tag
+        # builds start cold. Costs minutes, on the one lane where it matters.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           workspaces: src-tauri -> target
 
@@ -150,14 +200,24 @@ jobs:
       # after the bundle is signed, so what ships inside it is the signed copy.
       # `--ci` so a prompt can never hold a runner open.
       - name: Build the app
-        run: pnpm tauri build --ci --target $TARGET --bundles app
+        run: pnpm tauri build --ci --target "$TARGET" --bundles app
 
       - name: Sign and package
         run: ./scripts/mac-package.sh "src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
 
+      # Attested bytes must BE the shipped bytes, so this runs after signing
+      # and packaging and before the upload. Without an Apple Developer ID
+      # this is the whole integrity story: it proves the DMG came out of this
+      # repo's CI at a given commit. It does not make macOS trust the app.
+      - name: Attest build provenance (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist-mac/*
+
       # Both the DMG and the zip when the DMG was produced, the zip alone when
       # hdiutil had to be abandoned — either one installs the same app.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Cerebro-macOS
           path: dist-mac/*
@@ -165,7 +225,12 @@ jobs:
 
       - name: Publish a release for a tag
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        # superfluous-actions ignored with cause: `gh release create` in a
+        # script step would hand this job a token in an environment where a
+        # shell typo publishes something. The action takes the file glob and
+        # the body declaratively, which is the safer shape here, and it is
+        # commit-pinned above. Revisit if the release step grows logic.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2 # zizmor: ignore[superfluous-actions]
         with:
           files: dist-mac/*
           body: |
@@ -177,6 +242,13 @@ jobs:
 
             ```
             xattr -dr com.apple.quarantine /Applications/Cerebro.app
+            ```
+
+            You can verify this DMG was built by this repository's CI from the
+            tagged commit (requires the GitHub CLI):
+
+            ```
+            gh attestation verify Cerebro.dmg -R JLagorio/cerebro
             ```
 
             The assistant uses the Claude Code CLI already installed on your

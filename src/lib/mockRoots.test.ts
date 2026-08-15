@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { isRootGitRefusal } from '@/engine/roots';
 import * as mock from './mockRoots';
 
 /** A NUL written as an escape — never a raw byte in a source file. */
@@ -95,5 +96,92 @@ describe('listDir', () => {
     mock.seedFile('/repos/beta', 'b.md', '# B');
 
     expect((await mock.listDir(alpha.id, '')).map((e) => e.name)).toEqual(['a.md']);
+  });
+});
+
+describe('root git parity', () => {
+  it('the mock emits every refusal the Rust surface can emit', async () => {
+    const repo = mock.seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    const plain = mock.seedRoot({ path: '/notes', label: 'notes', git: false });
+    mock.seedRootGit('/repos/alpha', { branch: 'main' });
+
+    // no_such_root
+    const unknown = await mock.rootGitRemoteStatus('nope');
+    expect('code' in unknown && unknown.code).toBe('no_such_root');
+
+    // no_git_capability — a mounted root with no git capability
+    const notRepo = await mock.rootGitRemoteStatus(plain.id);
+    expect('code' in notRepo && notRepo.code).toBe('no_git_capability');
+
+    // git_error — seeded, because a mock that cannot FAIL cannot prove parity
+    mock.seedRootGitFailure(repo.id);
+    const failed = await mock.rootGitRemoteStatus(repo.id);
+    expect('code' in failed && failed.code).toBe('git_error');
+
+    // config_unavailable is Rust-transport-only (there is no app config dir in
+    // a browser); every other code in roots/mod.rs's RootGitRefusal doc list is
+    // emitted above. Keep this comment next to that list when either moves.
+  });
+
+  it('the gate applies to every root git command, not just status', async () => {
+    const plain = mock.seedRoot({ path: '/notes', label: 'notes', git: false });
+    for (const call of [
+      mock.rootGitRemoteStatus(plain.id),
+      mock.rootGitModifiedFiles(plain.id),
+      mock.rootGitPulse(plain.id),
+      mock.rootGitFileUrl(plain.id, 'README.md'),
+      mock.rootGitWorkspaceInfo(plain.id),
+    ]) {
+      const result = await call;
+      expect(isRootGitRefusal(result) && result.code).toBe('no_git_capability');
+    }
+  });
+
+  it('a repo root answers status, pulse and file url', async () => {
+    const repo = mock.seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    mock.seedRootGit('/repos/alpha', { branch: 'main', ahead: 1, behind: 3 });
+
+    const status = await mock.rootGitRemoteStatus(repo.id);
+    expect('branch' in status && status.branch).toBe('main');
+    expect('ahead' in status && status.ahead).toBe(1);
+    expect(Array.isArray(await mock.rootGitPulse(repo.id))).toBe(true);
+  });
+});
+
+describe('root git sync', () => {
+  it('refuses parent_repo for a root nested in a larger repository', async () => {
+    const nested = mock.seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+    mock.seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+    mock.seedRootNested('/work/mono/sub');
+
+    for (const call of [mock.rootGitFetch(nested.id), mock.rootGitPullFf(nested.id)]) {
+      const result = await call;
+      expect(isRootGitRefusal(result) && result.code).toBe('parent_repo');
+    }
+    // The READ surface still answers — status is pathspec-scoped.
+    const status = await mock.rootGitRemoteStatus(nested.id);
+    expect(isRootGitRefusal(status)).toBe(false);
+  });
+
+  it('refuses a diverged fast-forward and leaves the counts alone', async () => {
+    const repo = mock.seedRoot({ path: '/repos/div', label: 'div', git: true });
+    mock.seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+
+    const pulled = await mock.rootGitPullFf(repo.id);
+
+    expect(!isRootGitRefusal(pulled) && pulled.status).toBe('rejected');
+    const after = await mock.rootGitRemoteStatus(repo.id);
+    expect(!isRootGitRefusal(after) && after.behind).toBe(1);
+  });
+
+  it('fast-forwards a root that is only behind', async () => {
+    const repo = mock.seedRoot({ path: '/repos/ff', label: 'ff', git: true });
+    mock.seedRootGit('/repos/ff', { branch: 'main', ahead: 0, behind: 3 });
+
+    const pulled = await mock.rootGitPullFf(repo.id);
+
+    expect(!isRootGitRefusal(pulled) && pulled.status).toBe('updated');
+    const after = await mock.rootGitRemoteStatus(repo.id);
+    expect(!isRootGitRefusal(after) && after.behind).toBe(0);
   });
 });

@@ -84,8 +84,34 @@ pub fn git_command() -> Command {
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_ASKPASS", "");
     cmd.env("SSH_ASKPASS", "");
-    // Stable, parseable output regardless of the user's config.
-    cmd.env("GIT_CONFIG_PARAMETERS", "'core.quotepath=false'");
+    // Stable, parseable output regardless of the user's config, plus the
+    // M32.10 protocol pins — one env var, so this list is EXTENDED and never
+    // clobbered (dropping `core.quotepath=false` would break every path with
+    // a non-ASCII character in it).
+    //
+    // `ext::` transports are arbitrary command execution and are never
+    // legitimate here; `file://` stays user-initiated only; fsmonitor daemons
+    // have no business being started by an app that spawns git on a timer; and
+    // a repository's own hooks NEVER run under Cerebro-spawned git — fetch
+    // fires reference-transaction hooks and pull fires post-merge, which in a
+    // mounted repo means running that repo's code. /var/empty exists and holds
+    // nothing on macOS; command-scope config outranks repo-local.
+    //
+    // The hooks pin applies to VAULT git flows too, deliberately: an app
+    // auto-committing on a timer must never hang on, or execute, a repo's
+    // hook. A user who wants their vault's hooks runs git themselves.
+    //
+    // Residual vectors that CANNOT be pinned off without breaking legitimate
+    // auth, written down so nobody thinks they were missed: `credential.helper`
+    // and `core.sshCommand` in a mounted repo's `.git/config` still execute
+    // during an authenticated fetch/pull — an empty `credential.helper` pin
+    // would reset the helper LIST and kill the user's keychain helper.
+    // Mounting a repository is trusting its `.git/config`; SECURITY.md says so.
+    cmd.env(
+        "GIT_CONFIG_PARAMETERS",
+        "'core.quotepath=false' 'protocol.ext.allow=never' 'protocol.file.allow=user' \
+         'core.fsmonitor=false' 'core.hooksPath=/var/empty'",
+    );
     cmd.env("LC_ALL", "C");
     cmd.stdin(Stdio::null());
     cmd
@@ -196,5 +222,30 @@ mod env_tests {
              repository would operate on another"
         );
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    /// Every Cerebro-spawned git carries the M32.10 protocol pins.
+    ///
+    /// `GIT_CONFIG_PARAMETERS` entries are visible to `git config` inside the
+    /// spawned process — that is the property this relies on. It also proves
+    /// the pins were APPENDED: `core.quotepath` still has to be there, and
+    /// clobbering that env var would break every non-ASCII path.
+    #[test]
+    fn spawned_git_carries_the_protocol_pins() {
+        let dir = crate::vault::testutil::temp_vault("m32-pins");
+        crate::git::commit::init_repo(&dir).unwrap();
+
+        for (key, expected) in [
+            ("protocol.ext.allow", "never"),
+            ("core.fsmonitor", "false"),
+            ("core.hooksPath", "/var/empty"),
+            ("protocol.file.allow", "user"),
+            // The pre-existing pin must survive being extended (M32.10 trap).
+            ("core.quotepath", "false"),
+        ] {
+            let value = run_str(&dir, &["config", key]).unwrap();
+            assert_eq!(value.trim(), expected, "{key} is not pinned");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

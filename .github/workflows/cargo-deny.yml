@@ -1,0 +1,29 @@
+name: cargo-deny
+
+# Weekly because advisories are time-triggered; on lockfile/policy change
+# because those are the two commits that can introduce a violation.
+# Deliberately NOT a required check and NOT in the husky gate: a CVE
+# published on a Tuesday is not a defect in Monday's commit, and a lane that
+# can fail without anyone changing anything must never block a push.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  pull_request:
+    paths: ['src-tauri/Cargo.lock', 'deny.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories licenses bans sources
