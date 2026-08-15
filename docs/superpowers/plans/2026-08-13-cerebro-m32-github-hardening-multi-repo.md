@@ -900,7 +900,7 @@ ships; GPL contamination in the binary is a shipping problem, not theory.
 - Create: `.github/workflows/cargo-deny.yml`
 - Create: `deny.toml`
 
-- [ ] **Step 1: Write `deny.toml`**
+- [x] **Step 1: Write `deny.toml`**
 
 ```toml
 # cargo-deny policy (M32.6). Advisory lane — a new CVE is time-triggered
@@ -941,7 +941,7 @@ unknown-registry = "deny"
 unknown-git = "deny"
 ```
 
-- [ ] **Step 2: Run it locally once and reconcile the license list**
+- [x] **Step 2: Run it locally once and reconcile the license list**
 
 ```sh
 which cargo-deny >/dev/null || cargo install cargo-deny --locked
@@ -953,7 +953,7 @@ allow-list lacks. Add what is genuinely fine (say why, one comment per
 addition); investigate anything copyleft before allowing it. Do not commit
 until this passes locally.
 
-- [ ] **Step 3: Write the workflow**
+- [x] **Step 3: Write the workflow**
 
 ```yaml
 name: cargo-deny
@@ -984,13 +984,38 @@ jobs:
           command: check advisories licenses bans sources
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add deny.toml .github/workflows/cargo-deny.yml
 git commit -m "ci(deps): cargo-deny — advisories, licenses, dupes, on a schedule not in the gate (M32.6)"
 git push
 ```
+
+> **Executed 2026-08-15.** First local run: `advisories FAILED, bans ok,
+> licenses FAILED, sources ok`. Both failures were more interesting than
+> the plan expected, and neither was fixed by widening an allow-list.
+>
+> **Licenses: the plan's allow-list needed no additions at all.** Every
+> dependency's license was already covered. The single failure was
+> **our own crate** — `cerebro 0.1.0` had no `license` field, making it
+> the one unlicensed node in its own graph. Fixed at the source:
+> `license = "Apache-2.0"` in `src-tauri/Cargo.toml`, matching the
+> Apache-2.0 LICENSE the DMG already bundles and ships. A real metadata
+> gap, found by the lane on its first run.
+>
+> **Advisories: 16 distinct findings, ZERO vulnerabilities** — every one
+> `unmaintained`, every one transitive and unfixable from here: 10 gtk-rs
+> GTK3 bindings (Linux-only tauri deps macOS never compiles), the 5
+> `unic-*` crates via tauri-utils → urlpattern (RUSTSEC-2025-0098,
+> upstream: "no safe upgrade is available"), and proc-macro-error.
+> Resolved with `[advisories] unmaintained = "workspace"` — vulnerability
+> and yanked findings stay hard errors, while unmaintained is scoped to
+> crates this workspace names itself. Sixteen dated ignore ids would rot
+> silently as tauri's tree moves; the reasoning is written in deny.toml.
+>
+> Final: `advisories ok, bans ok, licenses ok, sources ok`. `Cargo.lock`
+> is untouched by the license field, and fmt/clippy stay green.
 
 **Acceptance:** local `cargo deny check` passes; the workflow runs weekly and
 on lockfile changes; the job is not a required check and not in husky, with

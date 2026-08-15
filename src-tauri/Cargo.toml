@@ -3,6 +3,9 @@ name = "cerebro"
 version = "0.1.0"
 description = "Cerebro — files-first work management"
 edition = "2021"
+# Declared so the crate is not the one unlicensed node in its own dependency
+# graph (M32.6). Matches the Apache-2.0 LICENSE the DMG bundles and ships.
+license = "Apache-2.0"
 
 [lib]
 name = "cerebro_lib"
