@@ -237,7 +237,14 @@ evaluation record's IANA timezone after M26 default-on. Require ≥30 successful
 including ≥10 HIGH/CRITICAL intended uses, and non-null component quantities
 for ≥95% of the sample. A run is component-complete only when all ten M26
 components occur exactly once, quantities are non-negative integers, and each
-unit matches M26's fixed table; zero counts, absence does not. Apply
+unit matches M26's fixed table; zero counts, absence does not. Rows carrying
+`estimated = 1` (M31.6: `selected_context_tokens` and
+`prompt_template_tokens`, derived at four bytes per token) COUNT toward
+component completeness — the run measured them, honestly labeled — and are
+EXCLUDED from the cost projection: apply the projection only to
+`estimated = 0` rows, and persist the estimated components separately in the
+evaluation record as `estimated_components`, never mixed into the projected
+totals. Apply
 `shared/policy/cost-projection.v1.json` component-by-component using exactly
 `ceil(q * multiplier_ppm / 1_000_000) + fixed_quantity`. Persist policy hash,
 every projected component, versioned p50/p90 input/output tokens and calls,

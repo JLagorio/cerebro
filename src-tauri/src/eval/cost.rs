@@ -64,7 +64,7 @@ fn a_run_that_measured_only_what_it_used_is_refused() {
     .into_iter()
     .map(Measured::zero)
     .collect();
-    let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &partial, now())
+    let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &partial, &[], now())
         .expect_err("a partial set has to be refused, not stored");
     for missing in ["cache_read_tokens", "cache_write_tokens", "retrieval_calls"] {
         assert!(detail.contains(missing), "{detail}");
@@ -79,7 +79,7 @@ fn a_run_that_measured_only_what_it_used_is_refused() {
 fn zero_is_written_and_a_window_can_tell_it_from_nothing() {
     let conn = conn();
     let all: Vec<Measured> = Component::ALL.into_iter().map(Measured::zero).collect();
-    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, now()).unwrap();
+    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, &[], now()).unwrap();
     let rows = costs(&conn, VAULT, STORE, RUN).unwrap();
     assert_eq!(rows.len(), 10);
     assert!(rows.iter().all(|(_, quantity)| *quantity == 0));
@@ -98,7 +98,7 @@ fn the_unit_is_the_components_and_the_table_says_so_too() {
     // where they drifted could make any run look cheap.
     let conn = conn();
     let all: Vec<Measured> = Component::ALL.into_iter().map(Measured::zero).collect();
-    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, now()).unwrap();
+    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, &[], now()).unwrap();
     let mut stmt = conn
         .prepare("SELECT component, unit FROM run_cost_components")
         .unwrap();

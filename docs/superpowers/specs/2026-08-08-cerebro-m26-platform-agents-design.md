@@ -691,6 +691,14 @@ zero is a valid quantity, absence is not. Quantities are non-negative integers.
 for calls/context/template rows. This required-row matrix is the definition of
 M28 R1 component completeness.
 
+Two of the ten are derived estimates rather than wire-exact counts (M31.6):
+`selected_context_tokens` and `prompt_template_tokens` are computed from
+their byte counterparts at four bytes per token, and their rows carry
+`estimated = 1`; the other eight are exact and carry `estimated = 0`. The
+flag is provenance, not a unit override — an estimated row still counts
+toward component completeness, and the R1 protocol (M28 spec) states how
+estimated rows are treated in the projection.
+
 M26 ships `shared/policy/cost-projection.v1.json`, a data-only projection
 contract, not a Skeptic implementation. It names the closed component set,
 `skeptic_model_id`, and for each component integer `multiplier_ppm` and

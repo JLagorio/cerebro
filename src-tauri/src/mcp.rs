@@ -262,9 +262,6 @@ pub(crate) fn note_tool_call(run_id: &str, tool: &str) {
 /// said about what the run dispatched. `Some(empty)` is a MEASURED zero: a
 /// run with no entry made no loopback calls, and a retried finalize of an
 /// already-drained run reads the same honest empty, never a repeat.
-// TODO(M31.6): remove this allow when the attended assembly path drains the
-// counter in production; until then only tests call it.
-#[allow(dead_code)]
 pub(crate) fn take_tool_calls(run_id: &str) -> Option<BTreeMap<String, u64>> {
     tool_calls()
         .lock()
