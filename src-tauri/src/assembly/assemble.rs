@@ -142,10 +142,12 @@ impl std::fmt::Display for Refusal {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assembly {
     pub manifest: WorkingMemoryManifest,
-    /// `item_id` → the exact bytes counted and hashed. M26.5e's prompt prints
-    /// these verbatim; the manifest's `byte_count` and `content_hash` are
-    /// computed from the same strings, which is the only way
-    /// `max_context_bytes` can mean anything.
+    /// `item_id` → the exact bytes counted and hashed. The manifest's
+    /// `byte_count` and `content_hash` are computed from these strings, and
+    /// M26.5e's prompt prints their fence-safe image (normalized and capped,
+    /// M31.3b), which exceeds these bytes only by the truncation mark, and
+    /// only when the cap fires — so `max_context_bytes` stays an honest
+    /// measure of what a run is shown.
     pub rendered: BTreeMap<String, String>,
 }
 
