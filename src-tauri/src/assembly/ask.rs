@@ -25,7 +25,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::agent::usage::Usage;
-use crate::ledger::reduce::{reduce, EpistemicState};
+use crate::ledger::reduce::EpistemicState;
 use crate::runtime::governance::{self, AssemblyObservation, CostError};
 
 use super::answer::SynthesisAnswer;
@@ -85,21 +85,26 @@ pub struct Context<'a> {
 ///
 /// One read, so the three cannot describe different moments. An assembly built
 /// from a projection at one head and a corpus at another would be a receipt
-/// for a base that never existed.
+/// for a base that never existed. Since M31.7 the read is served through
+/// [`crate::ledger::shadow::state_of`], which caches that whole triple from
+/// ONE pass and validates the cached head against the live writer head before
+/// serving (D4) — a hit re-folds nothing; a miss, or a vault with no active
+/// writer, is the same pure-disk read as before, uncached.
+///
+/// The store-uuid parameter is kept for the callers but no longer consumed:
+/// the fold names the ledger's OWN store id for both the reduction and the
+/// genesis fallback — the identity the runtime's `store_uuid` was registered
+/// from — because a shared cache cannot be keyed by a caller-supplied id.
 pub fn read(
     vault: &std::path::Path,
-    store_uuid: &str,
+    _store_uuid: &str,
 ) -> Result<(EpistemicState, Corpus, String), String> {
-    let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
-        .map_err(|e| format!("ledger: {e}"))?;
-    let head = read
-        .frames
-        .last()
-        .map(|frame| frame.event_id.clone())
-        .unwrap_or_else(|| format!("genesis:{store_uuid}"));
-    let state = reduce(&read.frames, store_uuid);
-    let corpus = Corpus::from_frames(&read.frames);
-    Ok((state, corpus, head))
+    let folded = crate::ledger::shadow::state_of(vault)?;
+    Ok((
+        folded.state.clone(),
+        folded.corpus.clone(),
+        folded.ask_head.clone(),
+    ))
 }
 
 /// Ask one question.

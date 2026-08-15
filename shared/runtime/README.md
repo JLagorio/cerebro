@@ -82,3 +82,23 @@ so the steady state is ~288 rows/day per affected vault until M26.9
 flips the switch or the findings resolve another way. If that proves
 noisy, the named follow-up is transition-dedup: record only on state
 change, or once per supervisor session.
+
+## ledger/index.rs's epistemic tables have no production reader (M31.7, 2026-08-14)
+
+The index materializes epistemic state into app-data SQLite on activation.
+Zero production readers — the only SELECT over the epistemic tables is the
+index's own rebuild-agreement dump helper (`dump_epistemic`), which tests
+use to prove replay and rebuild-from-zero agree. (The `events` and `meta`
+tables are different and stay: the replay cursor and the remembered head
+that anchors divergence classification are real production reads.) M31.7
+cached the in-memory fold instead, which is what the read paths actually
+needed. The epistemic materialization is retained because a query surface
+at a size the fold cannot hold is a real future need. It is a snapshot as
+of last activation and MUST NOT be treated as current: appends update the
+index's meta head only on the vault-file shadow path (`shadow::record`);
+ledger-first appends through `with_writer` leave the whole index untouched
+until the next such write or the next activation, and the epistemic tables
+themselves refresh only at activation.
+
+If M32 has not given the epistemic tables a reader, delete the
+materialization (not the meta anchor).
