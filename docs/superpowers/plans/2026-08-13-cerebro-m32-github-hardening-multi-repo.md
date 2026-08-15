@@ -383,7 +383,7 @@ gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object | .type + " " + .sh
 **Files**
 - Modify: `.github/workflows/mac-app.yml`
 
-- [ ] **Step 1: Pin the third-party actions (GitHub-owned `actions/*` stay on major tags)**
+- [x] **Step 1: Pin the third-party actions (GitHub-owned `actions/*` stay on major tags)**
 
 | Current ref | Pinned replacement (peeled commit SHAs) |
 | --- | --- |
@@ -396,7 +396,7 @@ gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object | .type + " " + .sh
 their peeled commits, not the tag objects. dtolnay v1 and softprops v2.6.2
 are lightweight tags, so tag SHA = commit SHA.)
 
-- [ ] **Step 2: The dtolnay pin changes how the toolchain is named**
+- [x] **Step 2: The dtolnay pin changes how the toolchain is named**
 
 With `@stable` the action read the toolchain from the ref itself. Pinned by
 SHA, the toolchain must be an input. The quality-job step becomes:
@@ -418,7 +418,7 @@ and the build-job step becomes:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 ```
 
-- [ ] **Step 3: The release lane restores nothing it didn't fetch itself**
+- [x] **Step 3: The release lane restores nothing it didn't fetch itself**
 
 An attacker with one-time code execution in any main-branch run can poison a
 shared cache; the next tag build would link poisoned objects into the DMG.
@@ -447,7 +447,7 @@ and drop `cache: pnpm` from the **build job's** setup-node step (lines
           # shared cache. quality/e2e keep theirs.
 ```
 
-- [ ] **Step 4: Verify every pin is a COMMIT, then commit**
+- [x] **Step 4: Verify every pin is a COMMIT, then commit**
 
 ```sh
 # Each pinned SHA must resolve as a commit (not 422 / not a tag object):
@@ -463,6 +463,14 @@ git add .github/workflows/mac-app.yml
 git commit -m "ci(actions): third-party actions pinned to commits, releases compile cold (M32.2)"
 git push && gh pr checks --watch
 ```
+
+> **Executed 2026-08-15.** All four pins re-peeled and re-verified independently
+> against the live API: `pnpm/action-setup@v4.4.0` and `Swatinem/rust-cache@v2.9.2`
+> are annotated tags (peeled), `dtolnay/rust-toolchain@v1` and
+> `softprops/action-gh-release@v2.6.2` are lightweight; all four resolve as
+> commits and all four match the SHAs this plan recorded on 2026-08-13. The
+> two later-phase pins were peeled in the same pass: `zizmor-action@v0.6.2`
+> lightweight, `cargo-deny-action@v2.1.1` annotated — both also match.
 
 **Acceptance:** every non-`actions/*` ref is a full commit SHA with a version
 comment; the toolchain is an explicit input; the build job restores no cache

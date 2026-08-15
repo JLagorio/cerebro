@@ -47,7 +47,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
@@ -79,11 +79,15 @@ jobs:
             wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned by commit, so the toolchain can no longer be read from the ref
+      # (`@stable` was a moving BRANCH) — it is an explicit input now.
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      # This job publishes nothing, so it keeps its cache.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
 
@@ -104,7 +108,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
@@ -146,21 +150,29 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           version: 10
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+          # No pnpm store cache in this job — same reasoning as rust-cache
+          # below: the lane that ships bytes restores nothing from a writable
+          # shared cache. quality/e2e keep theirs.
 
       - name: Install Rust with both Mac targets
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        # A release must never link objects it didn't compile: an attacker
+        # with one-time execution in any main-branch run can poison a shared
+        # cache, and the next tag build would link it into the DMG. Tag
+        # builds start cold. Costs minutes, on the one lane where it matters.
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           workspaces: src-tauri -> target
 
@@ -185,7 +197,7 @@ jobs:
 
       - name: Publish a release for a tag
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist-mac/*
           body: |
