@@ -578,7 +578,7 @@ long-lived divergent lines are going to merge someday. Depends on M32.1
 **Files**
 - Create: `.github/SETUP.md`
 
-- [ ] **Step 1: Create the main ruleset**
+- [x] **Step 1: Create the main ruleset**
 
 ```sh
 gh api -X POST repos/JLagorio/cerebro/rulesets --input - <<'JSON'
@@ -622,7 +622,7 @@ SETUP.md says so. If the API rejects a parameter name (`allowed_merge_methods`
 has churned), drop that parameter and note it in SETUP.md; the load-bearing
 rules are deletion, non_fast_forward, and the two required checks.
 
-- [ ] **Step 2: Create the tag ruleset**
+- [x] **Step 2: Create the tag ruleset**
 
 ```sh
 gh api -X POST repos/JLagorio/cerebro/rulesets --input - <<'JSON'
@@ -665,7 +665,7 @@ Leave the rc release in place (immutability means it stays; it is labeled rc
 and harmless). If the single-step `action-gh-release` publish ever grows a
 second attach step, switch to `draft: true` → attach → publish.
 
-- [ ] **Step 4: Witness every setting in `.github/SETUP.md`**
+- [x] **Step 4: Witness every setting in `.github/SETUP.md`**
 
 Tolaria's `.github/` contains four documented drifts between its setup prose
 and its actual workflows — the lesson is that a setup doc may only be a
@@ -702,13 +702,36 @@ document workflow behaviour here — workflows document themselves inline.
 (none)
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add .github/SETUP.md
 git commit -m "ci(governance): main and v* tags behind rulesets, releases immutable, settings witnessed (M32.4)"
 git push
 ```
+
+> **Executed 2026-08-15. Step 3 is NOT done — it needs a human at a browser.**
+> Rulesets `protect-main` (20887280) and `protect-release-tags` (20887282)
+> are live and every parameter was accepted, `allowed_merge_methods`
+> included. `actor_id: 5` confirmed as the admin role
+> (`current_user_can_bypass: always`).
+>
+> **Immutable releases has no API surface** — `PATCH /repos/{o}/{r}` with
+> `immutable_releases` is a silent no-op and the field is not in the repo
+> payload. It must be flipped in Settings → General → Releases. The
+> `v0.0.1-rc` dry-run is deliberately NOT run until it is: tagging first
+> would publish a MUTABLE release and burn the dry-run, and the tag
+> ruleset now makes `v0.0.1-rc` permanent either way.
+>
+> Two SETUP.md boxes ship UNTICKED against the plan's template, on the
+> plan's own honesty rule: immutable releases (above), and the Actions
+> fork-PR policy, which the template claims is "verified ON" but is **not
+> API-readable on a public repo** (`actions/permissions/access` → 422,
+> no fork-pr-workflows endpoint). It needs an eyeball in Settings.
+>
+> Predicted-and-wrong, recorded so it isn't re-feared: enabling
+> `strict_required_status_checks_policy` did NOT push PR #14 to `BEHIND`.
+> It stayed `CLEAN`/`MERGEABLE` and merges without an update-branch step.
 
 **Acceptance:** `gh api repos/JLagorio/cerebro/rulesets --jq '.[].name'`
 lists both rulesets; a force-push to main is refused; a `v*` tag cannot be
