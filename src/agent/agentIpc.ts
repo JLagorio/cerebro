@@ -100,9 +100,27 @@ export interface RunOptions {
 const mockRuns = new Map<number, MockRun>();
 let mockRunSeq = 0;
 
-/** Start a run. Resolves to the RUN ID whose tag every event of this run
- * carries — the same id stopAgent reports back when the run is killed. */
-export async function runAgent(vault: string, options: RunOptions): Promise<number> {
+/**
+ * What starting a run hands back (M33.7).
+ *
+ * `run` is the process-local tag every event of this run carries and the id
+ * `stopAgent` takes — unchanged. `durableId` is the id the `runs` row is
+ * keyed by, so a finished run in the status bar can open its own fleet
+ * detail.
+ *
+ * `durableId` is NULL in the browser, and that is the honest answer rather
+ * than a placeholder: there is no runtime database there, so no row exists to
+ * point at. It is the same "this device only" state a log entry written
+ * before M33.7 is in.
+ */
+export interface RunHandle {
+  run: number;
+  durableId: string | null;
+}
+
+/** Start a run. Resolves to the process tag and, where one exists, the
+ * durable id of the row this run will be recorded in. */
+export async function runAgent(vault: string, options: RunOptions): Promise<RunHandle> {
   if (!inTauri()) {
     const run = ++mockRunSeq;
     // The mock drives the UI-action channel through the same fan-out the
@@ -119,9 +137,11 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       { onUiAction: emitUiAction },
     );
     mockRuns.set(run, mock);
-    return run;
+    // No runtime database in the browser, so no durable row and no id to
+    // invent for it.
+    return { run, durableId: null };
   }
-  return invokeTauri<number>('run_agent', {
+  return invokeTauri<{ run: number; run_id: string }>('run_agent', {
     vault,
     request: {
       message: options.message,
@@ -139,7 +159,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
-  });
+  }).then(({ run, run_id }) => ({ run, durableId: run_id }));
 }
 
 /**

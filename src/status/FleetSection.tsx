@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ipc from '@/lib/ipc';
 import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { RunDetailPanel } from './RunDetailPanel';
 
 /**
@@ -72,6 +73,9 @@ function Chip({
 }
 
 export function FleetSection() {
+  const selection = useNavStore((s) => s.selection);
+  // The run a link asked for, if any (M33.7).
+  const requested = selection.kind === 'status' ? selection.run : undefined;
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [mode, setMode] = useState('');
   const [lane, setLane] = useState('');
@@ -119,15 +123,22 @@ export function FleetSection() {
     return [...seen].sort();
   }, [state]);
 
-  const openRun = async (runId: string) => {
+  const openRun = useCallback(async (runId: string) => {
     try {
       setOpen(await ipc.fleetRunDetail(runId));
     } catch {
       // A detail that will not open is not worth a toast behind a surface
       // (the store-layer rule); the row stays closed and the list stands.
+      // This is also the honest landing for a device-local log entry naming
+      // a run THIS database never had — nothing opens, nothing lies.
       setOpen(null);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (requested === undefined) return;
+    void openRun(requested);
+  }, [requested, openRun]);
 
   return (
     <div className="flex flex-col gap-2" data-testid="fleet-section">

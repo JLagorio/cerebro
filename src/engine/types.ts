@@ -222,7 +222,11 @@ export type Selection =
   // returns to, addressed as `{kind:'status', section:'needs-review'}`. The
   // values are the `data-section` attributes the sections already render —
   // one vocabulary, not a lookup table between two.
-  | { kind: 'status'; section?: StatusSection }
+  // `run` deep-links one run's detail inside the fleet section (M33.7), so a
+  // finished run in the status bar has somewhere to land. Ignored unless the
+  // section is `fleet`, and a run the page cannot find simply does not open —
+  // a device-local log entry may name a run this database never had.
+  | { kind: 'status'; section?: StatusSection; run?: string }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so

@@ -547,7 +547,7 @@ export function MarkdownEditor({
         try {
           const document = await blocksToMarkdown(editor);
           const mcp = await startMcp(vaultPath);
-          const runId = await runAgent(vaultPath, {
+          const { run: runId } = await runAgent(vaultPath, {
             message: [
               `Answer this about the document below: ${prompt.trim()}`,
               '',

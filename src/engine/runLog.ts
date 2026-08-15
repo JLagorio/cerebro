@@ -45,6 +45,19 @@ export interface RunLogEntry {
   status: 'ok' | 'failed' | 'stopped';
   /** Present when status is 'failed'. One line, never a stack. */
   error?: string;
+  /**
+   * The durable run id (M33.7) — the key of this run's row in `runs`.
+   *
+   * OPTIONAL, and old entries parse unchanged: this log has always been keyed
+   * by the process-local tag, which restarts at zero every launch and so
+   * cannot address a database row. Entries written before this, and entries
+   * written where no runtime database exists, have none — they are the run
+   * log's honest "this device only" state, and nothing backfills them.
+   *
+   * This log stays what its header says it is: a disposable, device-local
+   * record. M33 LINKS it to the durable one; it does not migrate it.
+   */
+  durableId?: string;
 }
 
 const KEY = 'cerebro.runLog';

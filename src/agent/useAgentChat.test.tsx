@@ -3,7 +3,8 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 
 const handlers: Array<(event: unknown) => void> = [];
 vi.mock('./agentIpc', () => ({
-  runAgent: vi.fn(async () => 8),
+  // M33.7: the pair, not the bare tag. The chat path uses only `run`.
+  runAgent: vi.fn(async () => ({ run: 8, durableId: 'durable-chat-8' })),
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
   stopAgent: vi.fn(async () => true),
   // Mirrors the real fan-out (M17.3): a subscriber that names a run sees only

@@ -29,6 +29,7 @@ pub mod vault;
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -207,6 +208,23 @@ fn pipeline_overview(
         scope.store_uuid.as_deref().unwrap_or_default(),
         chrono::Utc::now(),
     )
+}
+
+/// What starting a run hands back (M33.7).
+///
+/// EXTENDED, not replaced: `run` is the process-local tag every event of this
+/// run carries and the id `stop_agent` takes, exactly as before. `run_id` is
+/// the DURABLE id M31.2a mints before the token — the one the `runs` row, the
+/// grant, the proposals and the cost components all join on.
+///
+/// The renderer needed both. Its localStorage log has always been keyed by
+/// the process tag, which restarts at zero every launch and therefore cannot
+/// address a row in a database; carrying the durable id beside it is what
+/// lets a finished run in the status bar open its own fleet detail.
+#[derive(Debug, Serialize)]
+pub struct RunHandle {
+    pub run: u64,
+    pub run_id: String,
 }
 
 /// One page of the fleet's run history (M33.2).
@@ -955,7 +973,7 @@ fn run_agent(
     mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
-) -> Result<u64, String> {
+) -> Result<RunHandle, String> {
     // Attribution rides the run's own bearer token (M13.4): the MCP server
     // stamps `generated.by` from the token each request presents, so a
     // child killed while a write is in flight still stamps as itself.
@@ -968,6 +986,10 @@ fn run_agent(
     // here, a token-derived hash in the grant), and everything that joins runs
     // to proposals, answers, or costs needs them to be one.
     let run_id = ledger::new_run_id();
+    // M33.7: the renderer gets this id back, so its device-local run log and
+    // the durable `runs` row can finally name the same run. Cloned rather
+    // than moved because the meter takes ownership below.
+    let durable = run_id.clone();
     // M17.13: the scope rides the same token. It is taken from the REQUEST,
     // which the app builds from the Agent record — the CLI never sees it and
     // therefore cannot argue with it. No tool narrowing (M31.1b): the
@@ -1007,6 +1029,10 @@ fn run_agent(
         // event stream, and the person is watching it.
         None,
     )
+    .map(|run| RunHandle {
+        run,
+        run_id: durable,
+    })
 }
 
 /// Empty string = the vault has no connectors.json (a real state Settings

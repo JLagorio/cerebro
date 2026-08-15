@@ -138,6 +138,55 @@ describe('the run log (M17.15)', () => {
     expect(row.textContent).toContain('Wrote records/risks/a.md');
   });
 
+  it('an entry that knows its durable id opens that run in the fleet', () => {
+    // M33.7 — the two run logs finally name the same run. Before this the
+    // device-local log was keyed by a process tag that restarts at zero every
+    // launch, so it could not address a database row at all.
+    appendRunLog({
+      id: 'r-2',
+      at: '2026-08-03T10:00:00Z',
+      owner: 'job',
+      label: 'Release scout',
+      source: 'records/agents/scout.md',
+      trigger: 'schedule',
+      scope: null,
+      files: [],
+      status: 'ok',
+      durableId: 'durable-abc',
+    });
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+
+    fireEvent.click(screen.getByTestId('run-log-link'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'status',
+      section: 'fleet',
+      run: 'durable-abc',
+    });
+  });
+
+  it('an entry from before the ids met is labelled device-only, and is not a link', () => {
+    // Not broken — a run from before M33.7, or one that happened where no
+    // runtime database exists. A link here would land nowhere.
+    appendRunLog({
+      id: 'r-3',
+      at: '2026-08-03T10:00:00Z',
+      owner: 'job',
+      label: 'Old scout',
+      source: null,
+      trigger: 'schedule',
+      scope: null,
+      files: [],
+      status: 'ok',
+    });
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+
+    const row = screen.getByTestId('run-log-row');
+    expect(row.textContent).toContain('this device only');
+    expect(screen.queryByTestId('run-log-link')).toBeNull();
+  });
+
   it('says "wrote nothing" rather than leaving a blank', () => {
     // An agent that correctly decides to do nothing has run successfully, and
     // that is the outcome the ask: gate is designed to produce most of the time.

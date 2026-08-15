@@ -4,8 +4,11 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 const handlers: Array<(event: unknown) => void> = [];
 /** The run id the mocked runAgent hands back for every job. */
 const JOB_RUN = 8;
+/** M33.7: `runAgent` hands back BOTH ids — the process tag the stream is
+ * filtered by, and the durable id the run's database row is keyed under. */
+const JOB_DURABLE = 'durable-job-8';
 vi.mock('./agentIpc', () => ({
-  runAgent: vi.fn(async () => JOB_RUN),
+  runAgent: vi.fn(async () => ({ run: JOB_RUN, durableId: JOB_DURABLE })),
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
   stopAgent: vi.fn(async () => true),
   // Honours the run filter, like the real fan-out (M17.3): a job hears its

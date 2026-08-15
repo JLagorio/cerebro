@@ -332,7 +332,7 @@ export function useJobRunner(): void {
             }
             recorded = true;
           }
-          const runId = await runAgent(vaultPath, {
+          const { run: runId, durableId } = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
@@ -383,6 +383,8 @@ export function useJobRunner(): void {
                   : job.kind
                 : `event: ${woken.because}`,
             scope: agent?.scope ?? null,
+            // Absent in the browser, where there is no row to point at.
+            ...(durableId === null ? {} : { durableId }),
           };
           unsubscribe.current = onAgentEvent((event) => {
             if (event.kind === 'ToolStart') {

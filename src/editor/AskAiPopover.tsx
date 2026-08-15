@@ -87,7 +87,7 @@ export function AskAiPopover({
     void (async () => {
       try {
         const mcp = await startMcp(vaultPath);
-        const runId = await runAgent(vaultPath, {
+        const { run: runId } = await runAgent(vaultPath, {
           message,
           systemPrompt:
             "You rewrite a passage of the user's document and return ONLY the rewritten passage. " +

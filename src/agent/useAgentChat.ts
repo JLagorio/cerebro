@@ -319,7 +319,7 @@ export function useAgentChat(
           const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
           mcpRef.current ??= await startMcp(vaultPath);
           if (cancelled()) return;
-          const run = await runAgent(vaultPath, {
+          const { run } = await runAgent(vaultPath, {
             message: outgoing,
             systemPrompt: turn.systemPrompt,
             sessionId: sessionRef.current,
