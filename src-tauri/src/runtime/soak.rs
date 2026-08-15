@@ -128,6 +128,7 @@ mod tests {
                     &lease.run_id,
                     RunOutcome::Succeeded,
                     Some(usage),
+                    None,
                     ItemOutcome::Consume,
                     now + Duration::minutes(1),
                 )
@@ -231,6 +232,7 @@ mod tests {
                         &lease.run_id,
                         RunOutcome::Succeeded,
                         Some(usage),
+                        None,
                         ItemOutcome::Consume,
                         at("2026-08-09T18:01:00Z") + Duration::minutes(round as i64 * 5),
                     )
@@ -351,6 +353,7 @@ mod tests {
                 output_tokens: 120,
                 ..Usage::default()
             }),
+            None,
             ItemOutcome::Requeue,
             now + Duration::minutes(2),
         )

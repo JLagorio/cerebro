@@ -1,0 +1,25 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 9107,
+  "duration_api_ms": 8654,
+  "num_turns": 4,
+  "result": "Refreshed the dossier and filed two follow-ups.",
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "total_cost_usd": 0.0538,
+  "usage": {
+    "input_tokens": 6,
+    "cache_creation_input_tokens": 1205,
+    "cache_read_input_tokens": 14678,
+    "output_tokens": 344,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 1105,
+      "ephemeral_1h_input_tokens": 100
+    },
+    "server_tool_use": { "web_search_requests": 2 },
+    "service_tier": "standard"
+  },
+  "permission_denials": [],
+  "uuid": "00000000-0000-4000-8000-0000000000dd"
+}

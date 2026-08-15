@@ -27,7 +27,7 @@
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 
-use crate::agent::usage::Usage;
+use crate::agent::usage::{RunFacts, Usage};
 
 use super::budget::{self, Day, Decision, GateReason, Reservation};
 use super::scheduler::SchedulerState;
@@ -345,13 +345,14 @@ pub fn finalize(
     run_id: &str,
     outcome: RunOutcome,
     usage: Option<Usage>,
+    facts: Option<&RunFacts>,
     items: ItemOutcome,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("finalize: {e}"))?;
     crate::crash::crash_point("runtime-finalize-begun");
-    let result = finalize_inner(conn, run_id, outcome, usage, items, now);
+    let result = finalize_inner(conn, run_id, outcome, usage, facts, items, now);
     match result {
         Ok(pause) => {
             conn.execute_batch("COMMIT")
@@ -379,6 +380,7 @@ fn finalize_inner(
     run_id: &str,
     outcome: RunOutcome,
     usage: Option<Usage>,
+    facts: Option<&RunFacts>,
     items: ItemOutcome,
     now: DateTime<Utc>,
 ) -> Result<bool, String> {
@@ -433,6 +435,11 @@ fn finalize_inner(
         ],
     )
     .map_err(|e| format!("runs: {e}"))?;
+
+    if let Some(facts) = facts {
+        write_facts(conn, run_id, facts)?;
+        route_denials(conn, run_id, store_uuid.as_deref(), facts);
+    }
 
     if mode == "attended" {
         // Metered, never budgeted: an attended run debits no ceiling and
@@ -550,6 +557,8 @@ pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<u
             run_id,
             RunOutcome::AbandonedUsageUnknown,
             None,
+            // A recovered lease has no stream to read facts from.
+            None,
             ItemOutcome::Requeue,
             now,
         )?;
@@ -567,6 +576,7 @@ pub fn meter_attended(
     store_uuid: Option<&str>,
     outcome: RunOutcome,
     usage: Option<Usage>,
+    facts: Option<&RunFacts>,
     started_at: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -591,7 +601,81 @@ pub fn meter_attended(
         ],
     )
     .map_err(|e| format!("runs (attended): {e}"))?;
+    if let Some(facts) = facts {
+        write_facts(conn, run_id, facts)?;
+        route_denials(conn, run_id, store_uuid, facts);
+    }
     Ok(())
+}
+
+/// Write one run's best-effort facts (M31.5) onto its already-written row.
+///
+/// Absent facts never reach here — the caller skips the UPDATE entirely —
+/// and an absent FIELD writes NULL, which is the honest answer and never
+/// zero. A value too large for the column degrades to NULL the same way
+/// (`i64::try_from`, never `as`): a wrapped cast would go negative, trip the
+/// CHECK, and roll back the WHOLE finalize — measurement becoming a second
+/// way for the run to fail, over a number the wire got wrong. The fact
+/// columns say what the stream said; the count columns beside them keep
+/// saying what the budget counted.
+fn write_facts(conn: &Connection, run_id: &str, facts: &RunFacts) -> Result<(), String> {
+    let column = |value: Option<u64>| value.and_then(|v| i64::try_from(v).ok());
+    conn.execute(
+        "UPDATE runs SET model_id = ?2, stop_reason = ?3, service_tier = ?4, \
+         total_cost_micros = ?5, num_turns = ?6, duration_ms = ?7, duration_api_ms = ?8, \
+         cache_write_5m = ?9, cache_write_1h = ?10, server_tool_use = ?11 WHERE run_id = ?1",
+        rusqlite::params![
+            run_id,
+            facts.model_id,
+            facts.stop_reason,
+            facts.service_tier,
+            column(facts.total_cost_micros),
+            column(facts.num_turns),
+            column(facts.duration_ms),
+            column(facts.duration_api_ms),
+            column(facts.cache_write_5m),
+            column(facts.cache_write_1h),
+            column(facts.server_tool_use),
+        ],
+    )
+    .map_err(|e| format!("runs (facts): {e}"))?;
+    Ok(())
+}
+
+/// Route a run's permission denials to the operational log (M31.5).
+///
+/// One row per run with a NON-EMPTY denial array, reusing the registered
+/// `capability_unavailable` code — operational by the two-destinies rule: a
+/// denied tool call is a capability gap of this run, not epistemic history.
+/// An empty array records nothing; `Some(0)` lives in RunFacts, and a zero
+/// row per run would train everyone to stop reading the log. Best-effort by
+/// construction (`record_or_warn`): telemetry must never become a second way
+/// for the run to fail.
+fn route_denials(conn: &Connection, run_id: &str, store_uuid: Option<&str>, facts: &RunFacts) {
+    let Some(denied) = facts.permission_denials.filter(|count| *count > 0) else {
+        return;
+    };
+    let detail = format!("the CLI reported {denied} permission denial(s) during this run");
+    let refusal = crate::policy::table::PolicyTable::load()
+        .ok()
+        .and_then(|table| {
+            crate::policy::rejection::OperationalRefusal::new(
+                &table,
+                "capability_unavailable",
+                "agent.permission",
+                &detail,
+            )
+            .ok()
+        });
+    if let Some(refusal) = refusal {
+        let entry = super::operational::LogEntry {
+            store_uuid: store_uuid.map(str::to_string),
+            proposal_id: None,
+            run_id: Some(run_id.to_string()),
+            rule: None,
+        };
+        super::operational::record_or_warn(conn, &refusal, &entry);
+    }
 }
 
 /// Today's ambient spend across every vault — what the meter reads.
@@ -814,6 +898,7 @@ mod tests {
                 cache_read: 1_000,
                 cache_write: 100,
             }),
+            None,
             ItemOutcome::Consume,
             at("2026-08-09T10:05:00Z"),
         )
@@ -852,6 +937,153 @@ mod tests {
     }
 
     #[test]
+    fn the_facts_land_on_the_run_and_absent_facts_write_nothing() {
+        let (dir, conn, vault) = fixture("dispatch-facts");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("dispatch");
+        };
+        let facts = RunFacts {
+            model_id: Some("claude-opus-5".into()),
+            stop_reason: Some("end_turn".into()),
+            total_cost_micros: Some(41_200),
+            permission_denials: Some(2),
+            ..RunFacts::default()
+        };
+        finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::Succeeded,
+            Some(Usage::default()),
+            Some(&facts),
+            ItemOutcome::Consume,
+            at("2026-08-09T10:05:00Z"),
+        )
+        .unwrap();
+        let (model, cost, turns): (Option<String>, Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT model_id, total_cost_micros, num_turns FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(cost, Some(41_200));
+        assert_eq!(turns, None, "an absent field is NULL, never zero");
+        let routed: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operational_log \
+                 WHERE surface = 'agent.permission' AND run_id = ?1",
+                [&lease.run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(routed, 1, "a non-empty denial array is one operational row");
+
+        // No facts at all: every fact column stays NULL and nothing routes.
+        let Dispatched::Started(second) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["b.md".into()],
+            at("2026-08-09T11:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("second dispatch");
+        };
+        finalize(
+            &conn,
+            &second.run_id,
+            RunOutcome::Succeeded,
+            Some(Usage::default()),
+            None,
+            ItemOutcome::Consume,
+            at("2026-08-09T11:01:00Z"),
+        )
+        .unwrap();
+        let (model, routed): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT model_id, (SELECT count(*) FROM operational_log \
+                 WHERE surface = 'agent.permission' AND run_id = ?1) \
+                 FROM runs WHERE run_id = ?1",
+                [&second.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(model, None, "absent facts update nothing");
+        assert_eq!(routed, 0);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_absurd_cost_degrades_to_null_and_never_fails_the_finalize() {
+        // 1e300 USD is finite and non-negative, so it survives the parse
+        // filter as a saturated u64 — and a wrapped `as i64` cast would go
+        // negative, trip the CHECK, and roll back the WHOLE finalize, losing
+        // the run's real token counts over a number the wire got wrong.
+        let (dir, conn, vault) = fixture("dispatch-absurd-cost");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("dispatch");
+        };
+        let facts =
+            RunFacts::parse(&serde_json::json!({ "type": "result", "total_cost_usd": 1e300 }))
+                .unwrap();
+        assert!(facts.total_cost_micros.is_some(), "the filter passes it");
+        finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::Succeeded,
+            Some(Usage {
+                output_tokens: 271,
+                ..Usage::default()
+            }),
+            Some(&facts),
+            ItemOutcome::Consume,
+            at("2026-08-09T10:05:00Z"),
+        )
+        .expect("measurement must never fail the finalize");
+        let (outcome, cost, output): (String, Option<i64>, i64) = conn
+            .query_row(
+                "SELECT outcome, total_cost_micros, output_tokens FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "succeeded");
+        assert_eq!(cost, None, "the overflowing field degrades to NULL alone");
+        assert_eq!(output, 271, "and the real token counts are intact");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_failure_requeues_its_work_and_counts_against_the_lane() {
         let (dir, conn, vault) = fixture("dispatch-failure");
         let _lock = status::test_lock();
@@ -880,6 +1112,7 @@ mod tests {
                     output_tokens: 10,
                     ..Usage::default()
                 }),
+                None,
                 ItemOutcome::Requeue,
                 now,
             )
@@ -943,6 +1176,7 @@ mod tests {
             &conn,
             &lease.run_id,
             RunOutcome::AbandonedUsageUnknown,
+            None,
             None,
             ItemOutcome::Requeue,
             at("2026-08-09T10:30:00Z"),
@@ -1043,6 +1277,7 @@ mod tests {
             &lease.run_id,
             RunOutcome::Succeeded,
             usage,
+            None,
             ItemOutcome::Consume,
             now,
         )
@@ -1052,6 +1287,7 @@ mod tests {
             &lease.run_id,
             RunOutcome::Succeeded,
             usage,
+            None,
             ItemOutcome::Consume,
             now,
         )
@@ -1098,6 +1334,7 @@ mod tests {
                 output_tokens: 17,
                 ..Usage::default()
             }),
+            None,
             ItemOutcome::Requeue,
             at("2026-08-09T10:02:00Z"),
         )
@@ -1170,6 +1407,7 @@ mod tests {
             &lease.run_id,
             RunOutcome::Succeeded,
             Some(Usage::default()),
+            None,
             ItemOutcome::Consume,
             now,
         )
@@ -1211,6 +1449,7 @@ mod tests {
                 cache_read: 0,
                 cache_write: 0,
             }),
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -1353,6 +1592,7 @@ mod tests {
                 output_tokens: 500,
                 ..Usage::default()
             }),
+            None,
             ItemOutcome::Consume,
             at("2026-08-09T10:05:00Z"),
         );

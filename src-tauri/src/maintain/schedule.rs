@@ -135,6 +135,8 @@ pub fn attempt<R: Runner>(
         // The meter books real usage against this run id; there is nothing
         // honest to report from here.
         None,
+        // And the facts live with the meter's tally for the same reason.
+        None,
         // No items were claimed, so there are none to land. `Consume` is the
         // no-op over an empty claim.
         ItemOutcome::Consume,

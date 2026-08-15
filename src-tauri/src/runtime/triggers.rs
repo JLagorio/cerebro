@@ -405,12 +405,16 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_db_lands_at_version_eleven() {
+    fn the_runtime_db_lands_at_the_version_this_build_speaks() {
+        // Pinned 11 when M28.0 landed the trigger tables; M31.5 moved the
+        // current version to 12. The claim this test keeps is that the
+        // fixture's database is FULLY migrated — the trigger tables' own
+        // presence is proven by every other test in this module.
         let (dir, conn, _) = fixture("triggers-version");
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, crate::runtime::USER_VERSION);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -81,8 +81,9 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// The schema version this build speaks. M24 established 2 (`operational_log`
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
 /// meter, budget, coverage cache, and settings at 3. M28.0 adds the two
-/// trigger-governance tables at 11.
-pub const USER_VERSION: i64 = 11;
+/// trigger-governance tables at 11. M31.5 adds the run-fact columns — plus
+/// the two M31.6 will write, whole per D5 — at 12.
+pub const USER_VERSION: i64 = 12;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -225,7 +226,32 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V11,
         validate: validate_v11,
     },
+    Migration {
+        to: 12,
+        sql: schema::SCHEMA_V12,
+        validate: validate_v12,
+    },
 ];
+
+/// The columns `user_version = 12` promises (M31.5). ALTERs rather than
+/// tables, so the check names every column: a `SELECT` that prepares is a
+/// column the app can actually read, including the two M31.6 writes later
+/// (`estimated`, `answer_latency_micros`) — landed whole per D5.
+fn validate_v12(conn: &Connection) -> Result<(), String> {
+    for (table, columns) in [
+        (
+            "runs",
+            "model_id, stop_reason, service_tier, total_cost_micros, num_turns, \
+             duration_ms, duration_api_ms, cache_write_5m, cache_write_1h, server_tool_use",
+        ),
+        ("run_cost_components", "estimated"),
+        ("assembly_metrics", "answer_latency_micros"),
+    ] {
+        conn.prepare(&format!("SELECT {columns} FROM {table}"))
+            .map_err(|e| format!("validating {table}: {e}"))?;
+    }
+    Ok(())
+}
 
 /// The two governance tables `user_version = 11` promises (M28.0), checked
 /// the same way. Two, and exactly two: the trigger registry may write

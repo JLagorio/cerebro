@@ -373,11 +373,15 @@ mod tests {
 
     fn conn() -> Connection {
         let conn = Connection::open_in_memory().expect("memory db");
+        // The stub `runs` table exists so SCHEMA_V12 — which also ALTERs the
+        // real one — executes here unedited, exactly like the taint stub
+        // exists for SCHEMA_V9's rebuild.
         conn.execute_batch(
             "CREATE TABLE vault_registry (vault_id TEXT PRIMARY KEY, path TEXT NOT NULL);
              CREATE TABLE source_taint_assessments (
                  vault_id TEXT, store_uuid TEXT, observation_event_id TEXT,
-                 classifier_version TEXT, signals TEXT, assessed_at TEXT);",
+                 classifier_version TEXT, signals TEXT, assessed_at TEXT);
+             CREATE TABLE runs (run_id TEXT PRIMARY KEY);",
         )
         .expect("registry");
         conn.execute(
@@ -387,6 +391,11 @@ mod tests {
         .expect("register");
         conn.execute_batch(crate::runtime::schema::SCHEMA_V9)
             .expect("v9");
+        // V12 adds the columns M31.6 writes (`estimated`,
+        // `answer_latency_micros`) — applied here so this fixture holds the
+        // same tables the migrated file does.
+        conn.execute_batch(crate::runtime::schema::SCHEMA_V12)
+            .expect("v12");
         conn
     }
 
