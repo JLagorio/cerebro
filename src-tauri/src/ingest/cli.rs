@@ -117,7 +117,8 @@ mod tests {
             elapsed_limit_seconds: 600,
             batch_key: batch_key.into(),
             prompt: "the rendered window".into(),
-            prompt_version: "m26-ingest-v1",
+            // The real const, so this fixture can never go stale against it.
+            prompt_version: crate::ingest::prompt::PROMPT_VERSION,
         }
     }
 
