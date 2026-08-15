@@ -21,12 +21,14 @@ pub mod author;
 pub mod command;
 pub mod commit;
 pub mod conflict;
+pub mod credentials;
 pub mod dates;
 pub mod history;
 pub mod provider;
 pub mod pulse;
 pub mod remote;
 pub mod status;
+pub mod upstream;
 pub mod workspace;
 
 use std::path::Path;

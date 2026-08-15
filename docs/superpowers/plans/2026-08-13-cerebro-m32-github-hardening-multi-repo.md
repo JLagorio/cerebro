@@ -1592,7 +1592,7 @@ store anything.
 - Modify: `src-tauri/src/git/mod.rs` (module declarations)
 - Modify: `src-tauri/src/git/command.rs` (the `GIT_CONFIG_PARAMETERS` line)
 
-- [ ] **Step 1: Failing test for the hardened spawn**
+- [x] **Step 1: Failing test for the hardened spawn**
 
 In `src-tauri/src/git/command.rs` tests:
 
@@ -1616,7 +1616,7 @@ fn spawned_git_carries_the_protocol_pins() {
 }
 ```
 
-- [ ] **Step 2: Watch it fail, then extend the env line**
+- [x] **Step 2: Watch it fail, then extend the env line**
 
 `command.rs` line 88 becomes:
 
@@ -1646,7 +1646,7 @@ still execute during an authenticated fetch/pull — an empty
 keychain helper. Mounting a repository is trusting its `.git/config`;
 M32.12's SECURITY.md text says exactly that.
 
-- [ ] **Step 3: Credentials probe** (new module; its tests land in the same
+- [x] **Step 3: Credentials probe** (new module; its tests land in the same
 step — there is no meaningful pre-implementation fail run for a new file,
 so this step does not claim one)
 
@@ -1787,7 +1787,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 4: Upstream management** (new module; tests land with it, same
+- [x] **Step 4: Upstream management** (new module; tests land with it, same
 as Step 3)
 
 Create `src-tauri/src/git/upstream.rs`:
@@ -1849,7 +1849,7 @@ mod tests {
 lines are harmless overrides — keep them; the test must not depend on the
 machine's global git config.)
 
-- [ ] **Step 5: Declare the modules**
+- [x] **Step 5: Declare the modules**
 
 In `git/mod.rs`, beside the existing declarations:
 
@@ -1858,7 +1858,7 @@ pub mod credentials;
 pub mod upstream;
 ```
 
-- [ ] **Step 6: Manual probe check, gate, commit**
+- [x] **Step 6: Manual probe check, gate, commit**
 
 ```sh
 cd src-tauri && cargo test --lib git::
@@ -1867,6 +1867,22 @@ cd src-tauri && cargo test --lib git::
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 git add -A && git commit -m "feat(git): credential readiness probe, upstream management, protocol pins (M32.10)"
 ```
+
+> **Executed 2026-08-15.** The pins test asserts **five** keys, not three:
+> the plan's three plus `protocol.file.allow=user` (M32.11's fixture
+> clones by filesystem path and depends on it) plus `core.quotepath=false`.
+> That last one is the actual regression guard for this phase's named
+> trap — `GIT_CONFIG_PARAMETERS` is ONE env var, and a test that only
+> checks the new pins would pass while the old one was clobbered and every
+> non-ASCII path broke.
+>
+> The `Ready` arm was verified by hand as the plan asks, and it works: run
+> from a neutral cwd with prompting disabled against this repo's HTTPS
+> origin, the osxkeychain helper answers with
+> `protocol/host/username/password`. It is still not a unit test — it
+> would assert against whatever helper the developer's machine has.
+>
+> Rust gate: fmt clean, clippy clean, **1733 passed** (1728 before).
 
 **Acceptance:** every spawned git carries the three protocol pins and a test
 proves it; `probe` never stores anything and never touches the network for
