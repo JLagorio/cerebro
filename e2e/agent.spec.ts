@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot } from './boot';
+import { boot, seedBeforeBoot } from './boot';
 
 /**
  * The panel runs against the scripted mock in browser mode (see
@@ -315,6 +315,65 @@ test('library: an agent is built from pickers, not from remembered strings', asy
   );
   await after.toContain('at-risk');
   await after.toContain('Check the release date first.');
+});
+
+test('library: an agent record carries its own run history (M33.6)', async ({ page }) => {
+  // The dossier answers "what has this agent done, what did it cost, when
+  // does it run next" without leaving the editor — and nothing about the
+  // agent itself is stored outside the vault to do it.
+  await seedBeforeBoot(
+    page,
+    '__cerebroSeedFleet',
+    [
+      {
+        run_id: 'scout-1',
+        actor: 'process:release-scout',
+        vault_id: 'v1',
+        mode: 'attended',
+        lane: 'agent',
+        started_at: '2026-07-28T09:00:00Z',
+        ended_at: '2026-07-28T09:01:00Z',
+        outcome: 'succeeded',
+        usage_state: 'exact',
+        input_tokens: 900,
+        output_tokens: 100,
+        proposals_submitted: 0,
+        applied: 0,
+        rejected: 0,
+      },
+    ],
+    {},
+  );
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  const dossier = page.getByTestId('agent-dossier');
+  await expect(dossier).toBeVisible();
+  await expect(dossier).toHaveAttribute('data-actor', 'process:release-scout');
+  await expect(dossier.getByTestId('fleet-row')).toHaveCount(1);
+  await expect(dossier.getByTestId('dossier-runs')).toContainText('1');
+  await expect(dossier.getByTestId('dossier-last')).toContainText('succeeded');
+  // On duty is DERIVED. The demo scout has no schedule and no trigger, so
+  // nothing can fire it — and the strip says that rather than showing a
+  // stored flag.
+  await expect(dossier.getByTestId('dossier-duty')).toHaveAttribute('data-on-duty', 'false');
+});
+
+test('library: an agent with no runs says so, rather than showing a table of zeros', async ({
+  page,
+}) => {
+  await seedBeforeBoot(page, '__cerebroSeedFleet', [], {});
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  const dossier = page.getByTestId('agent-dossier');
+  await expect(dossier.getByTestId('section-empty')).toContainText('No runs yet');
+  await expect(dossier.getByTestId('fleet-row')).toHaveCount(0);
+  await expect(dossier.getByTestId('dossier-last')).toContainText('never run');
 });
 
 test('library: a schedule is built, never typed as a grammar', async ({ page }) => {

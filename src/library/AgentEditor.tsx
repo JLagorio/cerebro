@@ -4,6 +4,7 @@ import { Select } from '@/components/ui/Select';
 import type { AgentDraft } from '@/engine/libraryDraft';
 import { matchedToolset, TOOLSETS, writesAnything } from '@/engine/tools';
 import { describeTrigger, type Trigger } from '@/engine/triggers';
+import { AgentDossier } from './AgentDossier';
 import { slugify } from '@/lib/slug';
 import { BodyField, EditorSection, Field, GuardRow, TextField } from './chrome';
 import { Picker, type PickerOption } from './Picker';
@@ -101,8 +102,23 @@ export function AgentEditor({
       }),
     );
 
+  // The actor this record's runs are booked under — the same string the run's
+  // bearer token stamps (`engine/agents.ts:145`), derived here from the same
+  // two inputs rather than stored a second time.
+  const actor = `process:${draft.slug.trim() === '' ? derived : slugify(draft.slug)}`;
+
   return (
     <>
+      {/* M33.6 — capability-gated, not type-gated: the dossier renders for a
+          record that CAN be on duty, which is a question about what it does
+          and never about what it is called. A record with no identity to book
+          runs under has no history to show, so it gets no strip. */}
+      {actor !== 'process:' && (
+        <EditorSection title="What it has done">
+          <AgentDossier draft={draft} actor={actor} />
+        </EditorSection>
+      )}
+
       <EditorSection title="What it is">
         <Field
           label="Description"

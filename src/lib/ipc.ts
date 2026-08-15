@@ -492,6 +492,13 @@ export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
 }
 
+/** What one actor's runs add up to (M33.6). An actor with no runs answers
+ * with zeros and a null last outcome rather than refusing — "no runs yet" is
+ * what a freshly written Agent record's dossier has to be able to say. */
+export function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
+  return inTauri() ? invokeTauri('fleet_actor_summary', { actor }) : mock.fleetActorSummary(actor);
+}
+
 /**
  * Where the ingest scheduler holds one item (M26.4j).
  *

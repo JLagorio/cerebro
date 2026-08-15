@@ -237,6 +237,20 @@ fn fleet_run_detail(
     runtime::fleet::run_detail(&conn, &run_id)
 }
 
+/// What one actor's runs add up to (M33.6).
+///
+/// An actor with no runs is not an error — a freshly written Agent record has
+/// none — so this answers with a zeroed summary and an absent last outcome
+/// rather than refusing. "No runs yet" is a thing its dossier has to say.
+#[tauri::command(async)]
+fn fleet_actor_summary(
+    app: tauri::AppHandle,
+    actor: String,
+) -> Result<runtime::fleet::ActorSummary, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::actor_summary(&conn, &actor)
+}
+
 /// The subscription-wide pause. Persisted, so it survives a restart — a
 /// pause that forgot itself overnight would be the least trustworthy control
 /// in the app.
@@ -1104,6 +1118,7 @@ pub fn run() {
             pipeline_overview,
             fleet_runs,
             fleet_run_detail,
+            fleet_actor_summary,
             set_global_pause,
             set_lane_enabled,
             trigger_status,
