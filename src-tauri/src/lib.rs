@@ -22,6 +22,7 @@ pub mod policy;
 pub mod retrieval;
 pub mod roots;
 pub mod roots_commands;
+pub mod roots_git_commands;
 pub mod runtime;
 pub mod search;
 pub mod trigger;
@@ -1144,7 +1145,12 @@ pub fn run() {
             roots_commands::mount_root,
             roots_commands::unmount_root,
             roots_commands::list_dir,
-            roots_commands::read_file_text
+            roots_commands::read_file_text,
+            roots_git_commands::root_git_workspace_info,
+            roots_git_commands::root_git_remote_status,
+            roots_git_commands::root_git_modified_files,
+            roots_git_commands::root_git_pulse,
+            roots_git_commands::root_git_file_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

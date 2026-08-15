@@ -1207,7 +1207,7 @@ command surface, not a git-module rewrite.
 - Create: `src-tauri/src/roots_git_commands.rs`
 - Modify: `src-tauri/src/lib.rs` (command registration)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src-tauri/src/roots/mod.rs` under the existing `mod tests`:
 
@@ -1251,7 +1251,7 @@ fn a_mounted_repo_resolves_to_its_git_workspace() {
 }
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```sh
 cd src-tauri && cargo test --lib roots::tests::a_root_that_is_not_a_repo
@@ -1259,7 +1259,7 @@ cd src-tauri && cargo test --lib roots::tests::a_root_that_is_not_a_repo
 
 Expected: FAIL — `cannot find function git_workspace`.
 
-- [ ] **Step 3: Implement the gate in `roots/mod.rs`**
+- [x] **Step 3: Implement the gate in `roots/mod.rs`**
 
 Beside `MountRefusal` (same contract, its own type — a git refusal is not a
 mount refusal, and sharing the type would let a UI match arm silently accept
@@ -1305,7 +1305,7 @@ pub fn git_workspace(
 }
 ```
 
-- [ ] **Step 4: The command surface**
+- [x] **Step 4: The command surface**
 
 Create `src-tauri/src/roots_git_commands.rs`:
 
@@ -1396,12 +1396,27 @@ parse:
 
 and add `pub mod roots_git_commands;` beside `pub mod roots_commands;`.
 
-- [ ] **Step 5: Gate and commit**
+- [x] **Step 5: Gate and commit**
 
 ```sh
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 git add -A && git commit -m "feat(roots): mounted repos get their read-only git surface, refusing typed (M32.8)"
 ```
+
+> **Executed 2026-08-15.** TDD as written: the four tests failed with
+> `cannot find function git_workspace` before any implementation existed.
+> **Four, not three** — added
+> `capability_is_reprobed_not_read_from_the_mount_snapshot`, which mounts
+> a plain directory, asserts `caps.git` is false at mount time, then
+> `git init`s it and asserts the gate opens. The plan's doc-comment
+> claims live re-probing; nothing tested it, and it is the whole reason
+> the gate calls `workspace_for` instead of reading `root.caps`.
+>
+> Every signature the plan assumed was correct against the real modules.
+> The missing-trailing-comma trap was real, at `lib.rs:1147` (the plan
+> said 419 — M31's base is a longer file).
+>
+> Rust gate: fmt clean, clippy clean, **1728 passed / 0 failed**.
 
 **Acceptance:** three tests pin the gate (unknown id, non-repo, repo); five
 commands exist and are registered; every refusal carries a matchable code;
