@@ -160,9 +160,11 @@ test('status: a feed that refused says so, and does not borrow the empty state',
     'Nothing in contradiction.',
   );
   await expect(page.locator('[data-section="system"]').getByTestId('budget-meter')).toBeVisible();
-  await expect(page.locator('[data-section="needs-review"]')).toContainText(
-    'Nothing is waiting on a decision.',
-  );
+  // The needs section answered too — with the corpus's cards, since M33.10
+  // gave the operational surfaces a corpus of their own.
+  await expect(
+    page.locator('[data-section="needs-review"]').getByTestId('review-card'),
+  ).not.toHaveCount(0);
 });
 
 test('status: what the backend could not see is named, not dropped', async ({ page }) => {
@@ -223,8 +225,10 @@ test('status: needs-review holds the cards themselves, not a door to them', asyn
   // on their own tab. The tab is gone: the hub is where they live, so the
   // door is what must not exist now. The card behaviours themselves are
   // proved in `review.spec.ts`, against this same section.
-  // With nothing queued the honest answer is still the empty one.
-  await open(page);
+  // With nothing queued the honest answer is still the empty one. Asked for
+  // explicitly since M33.10: the demo corpus seeds a real queue, so "empty"
+  // is now a case a spec stages rather than one it inherits.
+  await open(page, { review: { cards: [], applications: [] } });
   const section = page.locator('[data-section="needs-review"]');
   await expect(section).toContainText('Nothing is waiting on a decision.');
 
@@ -264,6 +268,28 @@ test('status: needs-review holds the cards themselves, not a door to them', asyn
   // the hub now, so neither of the two doors this page used to hold exists.
   await expect(page.getByTestId('health-summary')).toHaveCount(0);
   await expect(page.locator('[data-section="system"]').getByTestId('lane-toggles')).toBeVisible();
+});
+
+test('status: the hub carries its own nav, not the record sidebar (M33.10)', async ({ page }) => {
+  await open(page);
+
+  // Home's sidebar lists types and views — a description of the RECORD
+  // corpus, which has nothing to say about runs, budgets or queued
+  // proposals. The hub answers its own question and navigates itself.
+  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  const nav = page.getByTestId('status-nav');
+  await expect(nav).toBeVisible();
+  await expect(nav.getByTestId('status-nav-row')).toHaveCount(5);
+
+  // A nav row takes you to its section, and the selection remembers which —
+  // so a section is a place the back button can return to.
+  await nav.locator('[data-target="fleet"]').click();
+  await expect(page.locator('[data-section="fleet"]')).toBeVisible();
+  await expect(nav.locator('[data-target="fleet"]')).toHaveAttribute('data-active', 'true');
+
+  // And no counts: a badge here would be the chrome nagging somebody to
+  // drain a queue, which is the rule that kept one off Knowledge and History.
+  await expect(nav).not.toContainText('3');
 });
 
 test('status: the gate board is the shared artifact, and never-evaluated is said out loud', async ({

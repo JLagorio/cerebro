@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Icon } from '@/components/ui/Icon';
 import * as ipc from '@/lib/ipc';
 import type {
   ChangesView,
@@ -10,6 +9,7 @@ import type {
 } from '@/lib/ipc';
 import { FleetSection } from '@/status/FleetSection';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
+import { StatusNav } from '@/status/StatusNav';
 import { SystemSection } from '@/status/SystemSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -613,67 +613,72 @@ export function EpistemicStatusPage() {
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto" data-testid="status-page">
-      <div className="mx-auto flex w-full min-w-0 max-w-[720px] flex-col gap-6 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <Icon name="brain" size={16} color="var(--n-600)" />
-          <h1 className="text-sm font-semibold text-n-800">Epistemic status</h1>
-        </div>
+    // M33.10: the hub carries its own nav instead of Home's sidebar, which
+    // lists types and views — a description of the RECORD corpus, with
+    // nothing to say about runs, budgets or queued proposals.
+    <div className="flex min-h-0 min-w-0 flex-1" data-testid="status-page">
+      <StatusNav />
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        {/* Left-aligned, not centred. The column was centred while the hub
+            filled the window; beside a 200px nav that leaves a dead gutter
+            between the two and reads as a layout accident. The max-width
+            stays — these are sentences to read, not a dashboard to spread. */}
+        <div className="flex w-full min-w-0 max-w-[860px] flex-col gap-6 px-6 py-4">
+          <Section
+            id="changed"
+            title="What changed"
+            blurb="Since the last time anybody looked at this."
+          >
+            <Changes feed={changes} />
+          </Section>
 
-        <Section
-          id="changed"
-          title="What changed"
-          blurb="Since the last time anybody looked at this."
-        >
-          <Changes feed={changes} />
-        </Section>
+          <Lanes feed={lanes} />
 
-        <Lanes feed={lanes} />
-
-        <Section
-          id="needs-review"
-          title="Needs review"
-          blurb="What the base wants to change and is waiting for you to decide."
-        >
-          {/* M33.3: the cards themselves, not a count and a door. The section
+          <Section
+            id="needs-review"
+            title="Needs review"
+            blurb="What the base wants to change and is waiting for you to decide."
+          >
+            {/* M33.3: the cards themselves, not a count and a door. The section
               owns its own read — the hub no longer needs a review feed. */}
-          <NeedsYouSection vaultPath={vaultPath} />
-        </Section>
+            <NeedsYouSection vaultPath={vaultPath} />
+          </Section>
 
-        <Section
-          id="system"
-          title="Background"
-          blurb="Whether anything is running, what it has left to spend, and what it is holding."
-        >
-          {/* M33.4: the controls themselves, not a two-line summary and a
+          <Section
+            id="system"
+            title="Background"
+            blurb="Whether anything is running, what it has left to spend, and what it is holding."
+          >
+            {/* M33.4: the controls themselves, not a two-line summary and a
               door. The section owns its own read. */}
-          <SystemSection vaultPath={vaultPath} />
-        </Section>
+            <SystemSection vaultPath={vaultPath} />
+          </Section>
 
-        <Section
-          id="fleet"
-          title="What has run"
-          blurb="Every run this app has booked, what it was for, and what it cost."
-        >
-          {/* M33.5: the fleet spans vaults, so this section takes no vault —
+          <Section
+            id="fleet"
+            title="What has run"
+            blurb="Every run this app has booked, what it was for, and what it cost."
+          >
+            {/* M33.5: the fleet spans vaults, so this section takes no vault —
               a caller that wants one says so in its own filter. */}
-          <FleetSection />
-        </Section>
+            <FleetSection />
+          </Section>
 
-        <Section
-          id="gates"
-          title="Deferral gates"
-          blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
-        >
-          <Gates
-            feed={gates}
-            onEvaluate={evaluateNow}
-            running={running}
-            report={runReport}
-            error={runError}
-          />
-          <R7Scope vaultPath={vaultPath} />
-        </Section>
+          <Section
+            id="gates"
+            title="Deferral gates"
+            blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
+          >
+            <Gates
+              feed={gates}
+              onEvaluate={evaluateNow}
+              running={running}
+              report={runReport}
+              error={runError}
+            />
+            <R7Scope vaultPath={vaultPath} />
+          </Section>
+        </div>
       </div>
     </div>
   );

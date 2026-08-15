@@ -10,6 +10,15 @@ import type { Entry } from '@/engine/types';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 import { sha256Hex } from './sha256';
+import {
+  demoChanges,
+  demoFleetDetails,
+  demoFleetRuns,
+  demoLanes,
+  demoPipelineOverview,
+  demoReviewCards,
+  demoRevertables,
+} from './demoOperational';
 import { loadRegistry } from './trigger/registry';
 import type { ParentRule, Variant as TriggerVariant } from './trigger/registry';
 
@@ -44,8 +53,29 @@ const times = new Map<string, { createdAt: string; modifiedAt: string }>();
 // represent an empty folder. Parity with real dirs on disk.
 const folders = new Set<string>();
 
-/** Re-seed the mock filesystem from demo-vault/. Exported for test isolation. */
-export function resetMockFs(): void {
+/**
+ * Restore the operational fixtures (M33.10). Exported for test isolation, and
+ * called by `resetMockFs` so one reset puts the whole mock back.
+ *
+ * The runs, the queue and the meter are as much part of the golden corpus as
+ * the notes are — they are simply kept here rather than in `demo-vault/`,
+ * because they live in SQLite rather than on disk.
+ */
+export function resetOperational(): void {
+  lanes = demoLanes();
+  changes = demoChanges();
+  review.cards = demoReviewCards();
+  review.applications = demoRevertables();
+  pipeline = demoPipelineOverview(LANES);
+  fleetRuns = demoFleetRuns();
+  fleetDetails = demoFleetDetails();
+  fleetAvailable = true;
+}
+
+/** Re-seed the file map alone. Split from `resetMockFs` because module init
+ * runs it BEFORE the operational fixtures below are initialized, and reaching
+ * them from here would be a temporal-dead-zone error at import time. */
+function seedFiles(): void {
   files.clear();
   times.clear();
   folders.clear();
@@ -60,7 +90,14 @@ export function resetMockFs(): void {
     times.set(rel, { createdAt: SEED_TIME, modifiedAt: SEED_TIME });
   }
 }
-resetMockFs();
+seedFiles();
+
+/** Re-seed the whole mock — files and the operational fixtures — for test
+ * isolation. Safe to call once the module has finished evaluating. */
+export function resetMockFs(): void {
+  seedFiles();
+  resetOperational();
+}
 
 /**
  * Vault format v2 containment (parity with the scan.rs post-pass): an
@@ -763,7 +800,16 @@ interface ReviewFixture {
   applications: RevertableApplication[];
 }
 
-const review: ReviewFixture = { cards: [], applications: [] };
+/**
+ * Seeded from the demo corpus (M33.10), not empty.
+ *
+ * The review queue lives in the vault ledger, which the browser does not
+ * have. Answering empty was fine while this surface was a door; M33.3 made it
+ * a body, and a body with nothing in it cannot be evaluated or designed
+ * against. `resetOperational()` restores these, so a spec that wants the
+ * empty case asks for it.
+ */
+const review: ReviewFixture = { cards: demoReviewCards(), applications: demoRevertables() };
 
 /** Test-only seam, mirroring `window.__cerebroMockFs`: a spec stages the
  * cards it wants to see and the surface renders them. */
@@ -1047,8 +1093,12 @@ export interface ChangesView {
 
 const NO_LANES: LanesView = { rule_version: 'lanes-v1', lanes: [], withheld: 0, incomplete: [] };
 
-let lanes: LanesView = NO_LANES;
-let changes: ChangesView | null = null;
+// Seeded from the demo corpus (M33.10), like the operational fixtures below.
+// A hub whose every section says "nothing" or "could not be read" cannot be
+// evaluated; `resetOperational()` restores these, and a spec that wants the
+// empty or refused case stages it.
+let lanes: LanesView = demoLanes();
+let changes: ChangesView | null = demoChanges();
 
 /** Test-only seam, mirroring `__cerebroSeedChips`. */
 export function __seedLanes(next: LanesView | null): void {
@@ -1186,7 +1236,7 @@ function emptyOverview(): PipelineOverview {
   };
 }
 
-let pipeline: PipelineOverview = emptyOverview();
+let pipeline: PipelineOverview = demoPipelineOverview(LANES);
 
 /** Test-only seam, mirroring `window.__cerebroSeedReview`. */
 export function __seedPipeline(fixture: Partial<PipelineOverview>): void {
@@ -1360,8 +1410,8 @@ export interface FleetFilter {
 const FLEET_MAX_LIMIT = 200;
 const FLEET_DEFAULT_LIMIT = 50;
 
-let fleetRuns: FleetRun[] = [];
-let fleetDetails: Record<string, FleetRunDetail> = {};
+let fleetRuns: FleetRun[] = demoFleetRuns();
+let fleetDetails: Record<string, FleetRunDetail> = demoFleetDetails();
 /** Null models a missing runtime DB: every fleet command refuses, which is
  * how the section reaches `unavailable` rather than `empty`. */
 let fleetAvailable = true;
