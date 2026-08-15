@@ -14,8 +14,11 @@
 //!
 //! **A synthesis run writes NOTHING.** Not files, not proposals, not the
 //! knowledge bundle. Everything it is entitled to say goes through
-//! `submit_answer`, and every other capability is an absence a missing field
-//! would grant — so every one of them is stated.
+//! `submit_answer` — and since M31.1a/M31.1b every capability, read or
+//! write, is stated. The WRITE capabilities were stated absences from day
+//! one (a scope of nothing); the READ surface was served to any live bearer
+//! until M31.1a narrowed the declaration to exactly `submit_answer` and
+//! M31.1b made the grant enforce it at dispatch.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::sync_channel;

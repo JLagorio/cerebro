@@ -1,11 +1,17 @@
 //! The governance rows (M26.7e) — what a later promotion will be argued from.
 //!
-//! **Nothing reads these yet, and that is the point.** A decision about
+//! **These rows were written before anything read them, and that was the
+//! point.** A decision about
 //! whether the resolver is good enough to run unattended, or whether a pass
 //! costs what it claims, has to be answerable from rows that were already
 //! being written when nobody was looking. M28's windows are supposed to be
 //! reproducible from persisted rows alone; that is only true if the rows
-//! exist before anybody asks.
+//! exist before anybody asks. Both halves have since arrived:
+//! `run_cost_components` and `assembly_metrics` have ONE production writer —
+//! the attended assembly path (M31.6, [`record_from_assembly`]); ingest and
+//! maintenance deliberately still write none — and the M28.1 trigger runner
+//! reads them (R1 through `trigger::cost`, the resolver rows through
+//! `trigger::evaluate`).
 //!
 //! **Zero is a quantity; absence is not.** A successful belief-affecting
 //! synthesis writes all ten cost components, and a component it did not use

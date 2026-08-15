@@ -765,10 +765,12 @@ pub const SCHEMA_V8: &str = "
 /// from.
 ///
 /// **These exist so later promotions are argued from records rather than from
-/// anecdotes.** Nothing reads them yet; that is the point. A decision about
-/// whether the resolver is good enough to run unattended, or whether a pass
-/// costs what it claims, has to be answerable from rows that were already
-/// being written when nobody was looking.
+/// anecdotes.** They were written before anything read them; that was the
+/// point. A decision about whether the resolver is good enough to run
+/// unattended, or whether a pass costs what it claims, has to be answerable
+/// from rows that were already being written when nobody was looking. The
+/// M28.1 trigger runner now reads them, and `run_cost_components` gained its
+/// one production writer — the attended assembly path — in M31.6.
 ///
 /// **`run_cost_components` is one row per component, not one wide row.** The
 /// unit belongs to the component and the component list is closed, so a CHECK

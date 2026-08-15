@@ -268,9 +268,12 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
 /// that kept the LLM phases off.** A default that spends money is not a
 /// default — and none of these spends any. They spawn no subprocess, hold no
 /// lease, and cannot be deferred by a budget gate. What they do cost is disk:
-/// conflict detection appends to the vault ledger, and the other three write
-/// app-data. That is the honest price of a base that notices things, and it
-/// is bounded by the base's own size rather than by a subscription.
+/// the four pre-gate phases — conflict detection, the classification
+/// gauntlet, the legacy-contradicts backfill, and the freshness scheduler —
+/// append to the vault ledger, and the attention/convergence/Source Monitor
+/// consumers write app-data. That is the honest price of a base that notices
+/// things, and it is bounded by the base's own size rather than by a
+/// subscription.
 ///
 /// Every one is reported and none is fatal. A base that could not compute its
 /// attention signals is a base that still wants its comparisons; a supervisor
