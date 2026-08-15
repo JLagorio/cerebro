@@ -29,10 +29,23 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 
 - `src/` — React app. `engine/` is the pure domain core (best-tested layer);
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
-  `git/` are surfaces; `stores/` is Zustand; `lib/` holds IPC + browser mocks.
+  `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
+  Zustand; `lib/` holds IPC + browser mocks.
+- **The Status hub is one page made of sections** (M33.3–M33.5).
+  `pages/EpistemicStatusPage.tsx` is the shell; each section is its own
+  component in `src/status/` owning its own read and its own failure.
+  `ReviewPage` and `PipelinePage` are gone — "Needs review" and "Background"
+  are sections, not tabs, and the rail is 10 buttons (Home, Status, Inbox,
+  Docs, Workspace, Knowledge, History, Assistant, Library, Settings), asserted
+  by name in `app/Rail.test.tsx`. Sections are addressed by `data-section`,
+  never by a per-section testid, and `Selection.status` carries an optional
+  `section` (plus `run`, for one fleet detail) so a section is a place the
+  back button returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
   (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
-  `connectors.rs`.
+  `connectors.rs`, `runtime/fleet.rs` (SELECT-only run history — it writes
+  nothing, and a phase that needs a new fact goes through the Meter or the
+  governance writers instead).
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
@@ -64,6 +77,17 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   Parity is the shared artifact plus `shared/policy/goldens/`; see that
   directory's README before editing either artifact (both have regeneration
   steps that are deliberate, `#[ignore]`d tests).
+- **Absent is never zero, and unavailable is never empty.** A number nobody
+  recorded renders as words ("not recorded", "unknown", "unattributed"), never
+  as `0` or `$0`; a total that had to skip unmetered rows says how many it
+  skipped rather than absorbing them. A read that FAILED renders
+  `section-unavailable`, never the empty state — "nothing is waiting" and "we
+  could not tell you what is waiting" are opposite sentences, and a surface
+  that says the first when it means the second is worse than one that says
+  nothing. M33 retired two `catch → empty` collapses (`ReviewPage`,
+  `PipelinePage`) for exactly this; do not reintroduce one. `Option`/`null`
+  from Rust means NOT RECORDED and an empty collection means measured-at-zero,
+  so never map one to the other on the way through.
 - **Two records, two destinies**: every refusal names a code whose
   ledger-or-operational destiny is declared in the shipped policy table —
   `shared/policy/policy.v3.json` since M27.4; v1 and v2 are frozen negative

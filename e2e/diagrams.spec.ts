@@ -1111,7 +1111,7 @@ async function bootVault(page: import('@playwright/test').Page): Promise<void> {
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 }
 
-async function openPipelinePage(page: import('@playwright/test').Page): Promise<void> {
+async function openPipelineDiagram(page: import('@playwright/test').Page): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('Pipeline');
   await page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first().click();
@@ -1125,7 +1125,7 @@ async function openPipelinePage(page: import('@playwright/test').Page): Promise<
 test('M29.53: a popover tracks its node through a wheel zoom', async ({ page }) => {
   test.setTimeout(90_000);
   await bootVault(page);
-  await openPipelinePage(page);
+  await openPipelineDiagram(page);
   const node = page.locator('g.node').first();
   await node.click();
   await page.getByRole('button', { name: 'Change shape' }).click();
@@ -1218,7 +1218,7 @@ test('M29.53: an exported svg carries the font it names', async ({ page, context
   test.setTimeout(90_000);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await bootVault(page);
-  await openPipelinePage(page);
+  await openPipelineDiagram(page);
   await page.getByRole('button', { name: 'Copy SVG' }).click();
   await page.waitForTimeout(1500);
   const svg = await page.evaluate(() => navigator.clipboard.readText());

@@ -55,11 +55,17 @@ export default defineConfig({
       // RATCHET floors (M14.4): set a hair under measured reality
       // (49.45 / 59.15 / 81.8 on 2026-08-01) so they can only move UP.
       // Never edit downward — raise them as coverage grows.
+      // Ratchets only tighten. Raised in M33.9 from 48/48/58/80, which was a
+      // floor set while coverage was still scoring vendored docs/ and
+      // worktrees (fixed in M15.19) and never re-set once the measurement was
+      // honest. Measured at M33.9: 79.42 statements / 83.38 branches / 74.74
+      // functions / 79.42 lines — these sit ~1.5 points under that, which is
+      // room for ordinary churn and not room for a surface to go untested.
       thresholds: {
-        lines: 48,
-        statements: 48,
-        functions: 58,
-        branches: 80,
+        lines: 78,
+        statements: 78,
+        functions: 73,
+        branches: 82,
       },
     },
   },
