@@ -1,0 +1,194 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import * as ipc from '@/lib/ipc';
+import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
+import { RunDetailPanel } from './RunDetailPanel';
+
+/**
+ * The fleet: every run the app has booked, on screen (M33.5).
+ *
+ * This replaces `PipelinePage`'s activity log, which was a 50-row table of
+ * every vault's runs with no filter, no attribution and no way to open one.
+ *
+ * **Nothing here is a persona.** The internal constructs appear as run
+ * HISTORY under the actor names they already answer to, never as standing
+ * agents with faces — a face implies memory and judgment a batched run does
+ * not have (D6, and M26's name-discipline trap).
+ *
+ * **Absent is never zero, in three separate places.** A run nobody attributed
+ * reads "unattributed"; a run whose usage was lost reads "unknown" rather
+ * than the zeros sitting in its columns; a run with no cost rows reads "not
+ * recorded" rather than $0. The old activity log could express exactly one of
+ * these, and could not tell "nothing has run" from "we could not read the
+ * runs" at all.
+ *
+ * The read is SELECT-only and recomputed on every filter change. Nothing is
+ * cached, so this list cannot drift from what the database holds.
+ */
+
+/** The three internal constructs, by the actor names Rust already stamps
+ * (`agent::meter::CONSTRUCT_ACTORS`). Offered as filter options even before a
+ * page contains one, so "has ingest run at all?" is a question the UI can
+ * answer with a no rather than by omitting the option. */
+const CONSTRUCT_ACTORS = ['agent:m26-ingest', 'agent:m26-maintenance', 'agent:m26-synthesis'];
+
+const MODES = ['attended', 'ambient'];
+
+type State = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; runs: FleetRun[] };
+
+/** A select that reads as a filter chip. `''` is "any", which is the absence
+ * of a filter rather than a value — `Filter`'s fields are optional in Rust
+ * for the same reason. */
+function Chip({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  options: string[];
+  onChange: (next: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-1 text-2xs text-n-500">
+      {label}
+      <select
+        data-testid={`fleet-filter-${id}`}
+        className="rounded border border-n-300 bg-n-0 px-1 py-0.5 text-2xs text-n-800"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">any</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function FleetSection() {
+  const [state, setState] = useState<State>({ kind: 'loading' });
+  const [mode, setMode] = useState('');
+  const [lane, setLane] = useState('');
+  const [actor, setActor] = useState('');
+  const [open, setOpen] = useState<FleetRunDetail | null>(null);
+
+  // Absent fields rather than nulls: an empty chip is no filter at all.
+  const filter = useMemo<FleetFilter>(
+    () => ({
+      ...(mode === '' ? {} : { mode }),
+      ...(lane === '' ? {} : { lane }),
+      ...(actor === '' ? {} : { actor }),
+    }),
+    [mode, lane, actor],
+  );
+
+  const load = useCallback(async () => {
+    try {
+      setState({ kind: 'ready', runs: await ipc.fleetRuns(filter) });
+    } catch {
+      // NOT the empty state. "Nothing has run" and "we could not read the
+      // runs" are opposite sentences, and the surface this replaces could
+      // only say the first one.
+      setState({ kind: 'unavailable' });
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Every actor the page can currently offer: the constructs, which exist
+  // whether or not they have run, plus whatever else this page is holding.
+  const actorOptions = useMemo(() => {
+    const seen = new Set(CONSTRUCT_ACTORS);
+    if (state.kind === 'ready') {
+      for (const run of state.runs) if (run.actor !== null) seen.add(run.actor);
+    }
+    return [...seen].sort();
+  }, [state]);
+
+  const laneOptions = useMemo(() => {
+    const seen = new Set<string>();
+    if (state.kind === 'ready') for (const run of state.runs) seen.add(run.lane);
+    return [...seen].sort();
+  }, [state]);
+
+  const openRun = async (runId: string) => {
+    try {
+      setOpen(await ipc.fleetRunDetail(runId));
+    } catch {
+      // A detail that will not open is not worth a toast behind a surface
+      // (the store-layer rule); the row stays closed and the list stands.
+      setOpen(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="fleet-section">
+      <div className="flex flex-wrap items-center gap-3">
+        <Chip id="mode" label="mode" value={mode} options={MODES} onChange={setMode} />
+        <Chip id="lane" label="lane" value={lane} options={laneOptions} onChange={setLane} />
+        <Chip id="actor" label="actor" value={actor} options={actorOptions} onChange={setActor} />
+      </div>
+
+      {state.kind === 'loading' && <p className="text-xs text-n-400">Reading…</p>}
+
+      {state.kind === 'unavailable' && (
+        <p data-testid="section-unavailable" className="text-xs text-n-500">
+          The run history could not be read, so nothing here is a statement about what has run.
+        </p>
+      )}
+
+      {state.kind === 'ready' && state.runs.length === 0 && (
+        <p data-testid="section-empty" className="text-xs text-n-500">
+          Nothing has run under these filters.
+        </p>
+      )}
+
+      {state.kind === 'ready' &&
+        state.runs.map((run) => (
+          <button
+            key={run.run_id}
+            type="button"
+            data-testid="fleet-row"
+            data-run={run.run_id}
+            data-outcome={run.outcome}
+            className="flex w-full items-center gap-2 rounded border border-n-200 px-2.5 py-1.5 text-left hover:bg-n-50"
+            onClick={() => void openRun(run.run_id)}
+          >
+            <span className="min-w-0 flex-1 truncate text-xs text-n-800">
+              {/* NULL is a category, not a blank. */}
+              {run.actor ?? 'unattributed'}
+            </span>
+            <span className="text-2xs text-n-500">{run.lane}</span>
+            <span
+              className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em]"
+              style={{ border: '1px solid var(--n-200)' }}
+              data-testid="fleet-outcome"
+            >
+              {run.outcome.replace(/_/g, ' ')}
+            </span>
+            <span className="tabular-nums text-2xs text-n-600">
+              {run.usage_state === 'exact' ? (
+                `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
+              ) : (
+                // The zeros in the columns are not a measurement.
+                <span data-testid="usage-unknown">unknown</span>
+              )}
+            </span>
+            <span className="tabular-nums text-2xs text-n-500">
+              {run.applied} applied · {run.rejected} rejected
+            </span>
+          </button>
+        ))}
+
+      {open !== null && <RunDetailPanel detail={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}

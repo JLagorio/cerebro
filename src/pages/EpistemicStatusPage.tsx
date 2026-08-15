@@ -8,6 +8,7 @@ import type {
   TriggerEntryStatus,
   TriggerRunReport,
 } from '@/lib/ipc';
+import { FleetSection } from '@/status/FleetSection';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
 import { SystemSection } from '@/status/SystemSection';
 import { useNavStore } from '@/stores/navStore';
@@ -647,6 +648,16 @@ export function EpistemicStatusPage() {
           {/* M33.4: the controls themselves, not a two-line summary and a
               door. The section owns its own read. */}
           <SystemSection vaultPath={vaultPath} />
+        </Section>
+
+        <Section
+          id="fleet"
+          title="What has run"
+          blurb="Every run this app has booked, what it was for, and what it cost."
+        >
+          {/* M33.5: the fleet spans vaults, so this section takes no vault —
+              a caller that wants one says so in its own filter. */}
+          <FleetSection />
         </Section>
 
         <Section

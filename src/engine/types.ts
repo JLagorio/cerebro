@@ -179,7 +179,7 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
  * parallel set of names — a second vocabulary would need a mapping table, and
  * the mapping table would be the thing that drifted.
  */
-export type StatusSection = 'changed' | 'needs-review' | 'system' | 'gates';
+export type StatusSection = 'changed' | 'needs-review' | 'fleet' | 'system' | 'gates';
 
 export type Selection =
   | { kind: 'home' }
