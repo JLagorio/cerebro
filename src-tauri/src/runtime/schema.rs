@@ -771,6 +771,10 @@ pub const SCHEMA_V8: &str = "
 /// from rows that were already being written when nobody was looking. The
 /// M28.1 trigger runner now reads them, and `run_cost_components` gained its
 /// one production writer — the attended assembly path — in M31.6.
+/// `resolver_outcomes` is the one table still in the original posture, and
+/// inverted: M28.1's R7 leg READS it, `record_attempt` is called only from
+/// tests, so it is a shape waiting for its producer rather than rows waiting
+/// for a reader. Whatever gives it one owes this comment an edit.
 ///
 /// **`run_cost_components` is one row per component, not one wide row.** The
 /// unit belongs to the component and the component list is closed, so a CHECK
@@ -1068,7 +1072,7 @@ pub const SCHEMA_V11: &str = "
 ";
 
 /// The M31.5 schema — the run facts the CLI was already sending, and the two
-/// columns M31.6 will write.
+/// columns M31.6 went on to write.
 ///
 /// **Landed whole, before anything writes the M31.6 halves (D5).** A
 /// committed migration's text is immutable — the runner only executes steps
@@ -1077,8 +1081,8 @@ pub const SCHEMA_V11: &str = "
 /// `estimated` (M31.6's exact-vs-estimated cost provenance on
 /// `run_cost_components`) and `answer_latency_micros` (M31.6 writes it on
 /// `assembly_metrics`, R15's gate reads it — a gate may only name a
-/// persisted primitive) are part of this step even though nothing writes
-/// them until M31.6.
+/// persisted primitive) were part of this step even though nothing wrote
+/// them until M31.6 landed.
 ///
 /// **Every fact column is nullable, and NULL is the honest answer** — for a
 /// run predating this migration, and for a stream that never said. Absent is

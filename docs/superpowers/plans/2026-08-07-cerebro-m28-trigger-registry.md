@@ -103,7 +103,13 @@ CRITICAL intended uses, and non-null component quantities for ≥95% of the
 sample. `shared/policy/cost-projection.v1.json` computes one independent
 Skeptic-tier run per sample. Complete means all ten M26 components exactly once
 with non-negative integer quantities and fixed units; zero is present, not
-absent. Apply exactly
+absent. Rows carrying `estimated = 1` (M31.6: `selected_context_tokens` and
+`prompt_template_tokens`, derived at four bytes per token) COUNT toward
+component completeness and are EXCLUDED from the projection — project only
+`estimated = 0` rows and keep the estimated ones out of the projected
+totals. The record field that names them separately does not exist yet and
+is not invented here; it lands with R1's first evaluator (see the spec's R1
+protocol). Apply exactly
 `ceil(q * multiplier_ppm / 1_000_000) + fixed_quantity`. Persist policy hash,
 all projected components, p50/p90 inputs/outputs/calls/cost when priced, and
 HIGH/CRITICAL daily load in the evaluation. Passing fires planning; no sample

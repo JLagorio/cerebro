@@ -210,6 +210,12 @@ one metric-vocabulary addition (`answer_latency`, unit `micros`, which also
 postdates the v1 metric tables) enter a successor artifact revision in the
 same commit as the first implemented R15–R17 evaluator, never speculatively —
 the same reasoning that keeps R14's `registered_connectors` honestly empty.
+One thing that revision must decide rather than inherit: R15's window opens
+"no earlier than M31.7", and every constant the artifact's `protocols` block
+admits today is an integer count, duration, or ppm (plus one artifact path).
+An epoch has no shape there. Either the revision adds a date-valued constant
+kind or the epoch stays a human-only rule no validator enforces — say which,
+in that commit, rather than letting it degrade silently.
 
 ## M28.0 — Implement the governance substrate, no promotion
 
@@ -265,9 +271,13 @@ unit matches M26's fixed table; zero counts, absence does not. Rows carrying
 `prompt_template_tokens`, derived at four bytes per token) COUNT toward
 component completeness — the run measured them, honestly labeled — and are
 EXCLUDED from the cost projection: apply the projection only to
-`estimated = 0` rows, and persist the estimated components separately in the
-evaluation record as `estimated_components`, never mixed into the projected
-totals. Apply
+`estimated = 0` rows, and persist the estimated components separately from
+the projected totals, never mixed into them. **That separate field does not
+exist in the closed `TriggerEvaluation` record yet, and this text does not
+invent it** — naming it `estimated_components` here would be a field no
+interpreter admits. It enters the record, in both interpreters and the
+goldens, in the same commit as R1's first evaluator; until then R1 is
+registered and unevaluatable, exactly as R15–R17 are. Apply
 `shared/policy/cost-projection.v1.json` component-by-component using exactly
 `ceil(q * multiplier_ppm / 1_000_000) + fixed_quantity`. Persist policy hash,
 every projected component, versioned p50/p90 input/output tokens and calls,

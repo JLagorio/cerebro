@@ -29,7 +29,12 @@ use crate::runtime::governance::Component;
 const REGISTRY_JSON: &str = include_str!("../../../shared/policy/trigger-registry.v1.json");
 const REGISTRY_DIGEST: &str = include_str!("../../../shared/policy/trigger-registry.v1.sha256");
 
-/// The registry ids, closed at fourteen. Growing this list is a format bump.
+/// The registry ids the v1 ARTIFACT declares, closed at fourteen. Growing this
+/// list is a format bump. The M28 spec registers three more — R15–R17 (M31.8) —
+/// which are deliberately absent here: an id this list does not name resolves
+/// to `gate_unknown`, so a registered-but-unevaluatable deferral cannot fire in
+/// any shipped build. Their keys enter a successor revision with their first
+/// evaluator, never before it.
 pub const REGISTRY_IDS: [&str; 14] = [
     "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "R13", "R14",
 ];
@@ -283,7 +288,9 @@ pub fn parse_str(json: &str) -> Result<Registry, String> {
     if ids != REGISTRY_IDS {
         return Err(format!(
             "the registry must declare exactly {REGISTRY_IDS:?} in order; found {ids:?} — the \
-             fourteen entries are closed by the design, and growing them is a format bump"
+             fourteen entries are closed by the v1 ARTIFACT (the design defers seventeen; \
+             R15–R17 are spec-registered and unevaluatable on purpose), and growing them is a \
+             format bump"
         ));
     }
     let mut capabilities: BTreeSet<&str> = BTreeSet::new();

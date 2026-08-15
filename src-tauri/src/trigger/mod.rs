@@ -1,6 +1,8 @@
 //! The trigger registry (M28.0) — deferral governance as data.
 //!
-//! **This module authorizes nothing.** M28+ defers fourteen capabilities, each
+//! **This module authorizes nothing.** M28+ defers seventeen capabilities (the
+//! fourteen frozen in the v1 artifact, plus R15–R17 registered in the M28 spec
+//! by M31.8 and deliberately absent here), each
 //! behind a named gate; what ships here is only the substrate that can
 //! EVALUATE and RECORD those gates: the closed registry artifact and its
 //! loader. A `fired` result permits exactly one thing — a dated plan document

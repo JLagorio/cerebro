@@ -86,11 +86,14 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   (`eslint.config.js`) — candidates to ratchet on, not free to violate.
 - **A retired workaround needs its original comment killed.** When a
   constraint stops being true, the fix includes deleting the comment that
-  explained the old shape. M31 found five in our own tree: the assembly
-  prompt's "no tools" claim, the three "Not narrowed here" rationales
-  (counted once), the assembly capability-absence comment, the
+  explained the old shape. M31 planned to kill five in our own tree — the
+  assembly prompt's "no tools" claim, the three "Not narrowed here"
+  rationales (counted once), the assembly capability-absence comment, the
   run_cost_components "no producer" note, and this file's own policy.v1
-  reference.
+  reference — and review found five more the same commits had falsified
+  (ambient's ledger-appender count, schema.rs's "nothing reads them yet",
+  and the trigger module's three "fourteen" claims). Budget for that: the
+  comment a change falsifies is rarely the comment the change is about.
 - **Ratchets only tighten**: coverage thresholds in `vite.config.ts` never go
   down.
 - `.gitattributes` pins sources to text after two files went binary from

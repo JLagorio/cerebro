@@ -988,6 +988,14 @@ mod tests {
         // site narrows to SUBMIT_TOOL alone and the prompt says so.
         assert!(RULES.contains("Your only tool is submit_answer"));
         assert!(!RULES.contains("You have no tools"));
+        // And the name in that sentence is bound to the constant, not merely
+        // equal to it today: SUBMIT_TOOL exists so the prompt, the grant, and
+        // the call instruction cannot disagree, and a rename that left RULES
+        // behind would otherwise pass this test.
+        assert!(
+            RULES.contains(SUBMIT_TOOL),
+            "RULES must name SUBMIT_TOOL itself"
+        );
     }
 
     #[test]
