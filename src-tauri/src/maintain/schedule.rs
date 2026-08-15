@@ -110,6 +110,8 @@ pub fn attempt<R: Runner>(
         RESERVATION,
         // No scheduler items: this pass reads the base's shape, not a queue.
         &[],
+        // M33.1 — maintenance owns the lease it takes with no items at all.
+        Some(pass::ACTOR),
         now,
     )? {
         Dispatched::Started(lease) => lease,

@@ -82,8 +82,9 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// at M24.2, `parked_promotions` at M24.6); M25.1 adds the scoped scheduler,
 /// meter, budget, coverage cache, and settings at 3. M28.0 adds the two
 /// trigger-governance tables at 11. M31.5 adds the run-fact columns — plus
-/// the two M31.6 will write, whole per D5 — at 12.
-pub const USER_VERSION: i64 = 12;
+/// the two M31.6 will write, whole per D5 — at 12. M33.1 adds `runs.actor`,
+/// nullable and never backfilled, at 13.
+pub const USER_VERSION: i64 = 13;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -231,7 +232,35 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V12,
         validate: validate_v12,
     },
+    Migration {
+        to: 13,
+        sql: schema::SCHEMA_V13,
+        validate: validate_v13,
+    },
 ];
+
+/// The one column `user_version = 13` promises (M33.1), checked the same way
+/// v12 checks its ALTERs: a `SELECT` that prepares is a column the app can
+/// actually read. The index is asserted too — without it every dossier query
+/// degrades to a table scan silently, which is the kind of regression that
+/// only shows up once somebody has a year of runs.
+fn validate_v13(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT actor FROM runs")
+        .map_err(|e| format!("validating runs.actor: {e}"))?;
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'runs_by_actor'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(|e| format!("validating runs_by_actor: {e}"))
+    .and_then(|found| {
+        if found == 1 {
+            Ok(())
+        } else {
+            Err("validating runs_by_actor: index missing".to_string())
+        }
+    })
+}
 
 /// The columns `user_version = 12` promises (M31.5). ALTERs rather than
 /// tables, so the check names every column: a `SELECT` that prepares is a

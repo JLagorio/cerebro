@@ -194,6 +194,9 @@ pub fn run_once<R: Runner, C: Commit>(
         &input.lane,
         input.reservation,
         &item_keys,
+        // M33.1 — ingest owns the row it claims, under whichever of its lanes
+        // the batch came from.
+        Some(super::driver::ACTOR),
         now,
     )? {
         Dispatched::Started(lease) => lease,

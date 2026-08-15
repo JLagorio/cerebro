@@ -101,6 +101,11 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                     store_uuid: Some(live.store_uuid.clone()),
                     started_at: chrono::Utc::now(),
                     elapsed_limit_seconds: Some(session.elapsed_limit_seconds),
+                    // Carried for completeness, not written here: a
+                    // supervised meter returns before touching `runs`, and
+                    // `dispatch::claim` already attributed the row this
+                    // lease belongs to with the same constant.
+                    actor: Some(ACTOR.to_string()),
                 }),
                 Some(tx),
             )?;

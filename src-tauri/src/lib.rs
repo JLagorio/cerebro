@@ -948,6 +948,11 @@ fn run_agent(
         store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
         started_at: chrono::Utc::now(),
         elapsed_limit_seconds: None,
+        // M33.1: the same actor the run's bearer token already stamps on
+        // every write it makes, so the operational row and the run's ledger
+        // writes agree about who did the work. `None` is bare chat, and it
+        // stays NULL — the fleet reads that as unattributed.
+        actor: request.actor.clone(),
     };
     agent::stream(
         app.clone(),

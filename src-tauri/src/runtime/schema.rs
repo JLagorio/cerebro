@@ -1104,3 +1104,26 @@ pub const SCHEMA_V12: &str = "
         CHECK (estimated IN (0, 1));
     ALTER TABLE assembly_metrics ADD COLUMN answer_latency_micros INTEGER;
 ";
+
+/// M33.1 — runs learn who ran them.
+///
+/// Nullable by design. Rows written before this migration are unattributed
+/// and STAY that way: nothing backfills, and nothing guesses. A run whose
+/// spawn site named nobody reads as "unattributed" in the fleet, which is
+/// the truth — absent is never zero, and in the one table whose whole job is
+/// to say honestly what the app spent, an invented attribution is worse than
+/// an admitted gap.
+///
+/// The value is an actor string, minted by the spawn site and shared with the
+/// ledger's `generated.by` for the same run rather than forked into a second
+/// vocabulary: `agent:m26-ingest` and its two siblings for the internal
+/// constructs (see `agent::meter::CONSTRUCT_ACTORS`), `process:<slug>` for an
+/// Agent record's run, absent for bare attended chat.
+///
+/// The index is `(actor, started_at)` because every query that filters by
+/// actor also orders by recency — an agent's dossier asks for exactly one
+/// actor's runs, newest first, and would otherwise scan the table.
+pub const SCHEMA_V13: &str = "
+    ALTER TABLE runs ADD COLUMN actor TEXT;
+    CREATE INDEX runs_by_actor ON runs (actor, started_at);
+";

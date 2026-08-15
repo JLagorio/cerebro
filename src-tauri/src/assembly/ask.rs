@@ -639,6 +639,8 @@ mod tests {
                 model_id: Some("claude-opus-5".into()),
                 ..Default::default()
             }),
+            // The actor the live path stamps for this construct (M33.1).
+            Some(ACTOR),
             now(),
             now(),
         )

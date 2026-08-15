@@ -71,6 +71,10 @@ impl Runner for Live<'_> {
                 store_uuid: Some(self.store_uuid.clone()),
                 started_at: chrono::Utc::now(),
                 elapsed_limit_seconds: Some(self.elapsed_limit_seconds),
+                // Carried for completeness, not written here: a supervised
+                // meter returns before touching `runs`, and `dispatch::claim`
+                // already attributed the row with the same constant.
+                actor: Some(super::pass::ACTOR.to_string()),
             }),
             Some(tx),
         )?;

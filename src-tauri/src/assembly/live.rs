@@ -91,6 +91,11 @@ impl Spawn for Live<'_> {
                 // themselves. A watchdog here would kill an answer somebody is
                 // watching arrive.
                 elapsed_limit_seconds: None,
+                // M33.1 — attended, so this meter writes the row itself. The
+                // construct is attributed by its existing actor rather than a
+                // persona: the fleet shows what assembly has run, never a
+                // standing agent with a face (D6).
+                actor: Some(super::ask::ACTOR.to_string()),
             }),
             Some(tx),
         )?;

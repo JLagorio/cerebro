@@ -27,6 +27,25 @@ use crate::runtime::{self, operational::LogEntry};
 
 use super::usage::{self, RunFacts, Usage};
 
+/// The three internal constructs, by the actor name they already answer to.
+///
+/// These are NOT new strings. Each construct has minted its actor since M26
+/// and stamps it on every ledger write through the MCP run token, so
+/// `runs.actor` reuses the same constant rather than forking a second
+/// vocabulary — a run's operational row and its epistemic writes have to
+/// agree about who did the work, and two inventories of actor names would
+/// drift the first time one of them was edited.
+///
+/// The list exists so the fleet UI's construct filter and these spawn sites
+/// read from ONE place (M31's no-twin-inventory rule applied to actor names).
+/// A construct added without appearing here is a construct the fleet cannot
+/// offer to filter by.
+pub const CONSTRUCT_ACTORS: [&str; 3] = [
+    crate::ingest::driver::ACTOR,
+    crate::maintain::pass::ACTOR,
+    crate::assembly::ask::ACTOR,
+];
+
 /// Which side of the budget a run sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -62,6 +81,11 @@ pub struct Meter {
     pub started_at: DateTime<Utc>,
     /// Seconds after which an ambient run is aborted. `None` for attended.
     pub elapsed_limit_seconds: Option<u64>,
+    /// Who this run is for (M33.1). `None` is bare attended chat — a run
+    /// nobody launched on a record's behalf — and it stays NULL rather than
+    /// being guessed at. Only [`Mode::Attended`] writes it here; the other
+    /// two modes work on a row `dispatch::claim` already attributed.
+    pub actor: Option<String>,
 }
 
 /// How a run ended, sent to whoever is waiting on it.
@@ -190,6 +214,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             outcome,
             counted,
             Some(&tally.facts),
+            meter.actor.as_deref(),
             meter.started_at,
             now,
         ),
@@ -375,6 +400,7 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
             },
             &tally,
             false,
@@ -444,6 +470,7 @@ mod tests {
             store_uuid: Some("store".into()),
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
+            actor: None,
         };
         // No committed fixture carries a non-empty array, and none is needed:
         // the array's SHAPE is what the parser reads, so an inline event with
@@ -530,6 +557,7 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
             },
             &tally,
             false,
@@ -590,6 +618,7 @@ mod tests {
                 output_tokens: 4_000,
             },
             &["records/a.md".to_string()],
+            None,
             Utc::now(),
         )
         .unwrap() else {
@@ -607,6 +636,7 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+                actor: None,
             },
             &tally,
             false,
@@ -651,6 +681,7 @@ mod tests {
                 store_uuid: None,
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
             },
             &Tally::default(),
             false,
@@ -668,6 +699,7 @@ mod tests {
             store_uuid: None,
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
+            actor: None,
         };
         let live = Arc::new(AtomicBool::new(true));
         let aborted = arm_watchdog(&meter, &super::super::AgentState::default(), 0, live);

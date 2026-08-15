@@ -97,6 +97,12 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// `now` is passed rather than read so a test can drive a whole simulated day
 /// without sleeping, and so every row written inside the transaction carries
 /// the same instant.
+///
+/// `actor` (M33.1) names the construct taking the lease, and is an argument
+/// rather than something derived from `lane` because the two are not the same
+/// axis: ingest claims under five of the seven lanes, and a lane→construct
+/// guess would attribute work to whoever happened to share a queue.
+#[allow(clippy::too_many_arguments)]
 pub fn claim(
     conn: &Connection,
     vault_id: &str,
@@ -104,6 +110,7 @@ pub fn claim(
     lane: &str,
     reservation: Reservation,
     items: &[String],
+    actor: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // The process-level status is checked before the transaction: a failed
@@ -115,7 +122,16 @@ pub fn claim(
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("dispatch: {e}"))?;
     crate::crash::crash_point("runtime-dispatch-begun");
-    let outcome = claim_inner(conn, vault_id, store_uuid, lane, reservation, items, now);
+    let outcome = claim_inner(
+        conn,
+        vault_id,
+        store_uuid,
+        lane,
+        reservation,
+        items,
+        actor,
+        now,
+    );
     match outcome {
         Ok(dispatched) => {
             conn.execute_batch("COMMIT")
@@ -130,6 +146,7 @@ pub fn claim(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn claim_inner(
     conn: &Connection,
     vault_id: &str,
@@ -137,6 +154,7 @@ fn claim_inner(
     lane: &str,
     reservation: Reservation,
     items: &[String],
+    actor: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // What is actually still claimable, BEFORE anything is written.
@@ -180,9 +198,9 @@ fn claim_inner(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, lease_expires_at, proposals_submitted, \
-         applied, rejected) \
+         applied, rejected, actor) \
          VALUES (?1, ?2, ?3, 'ambient', ?4, ?5, 'running', 'pending', 0, 0, 0, 0, ?6, ?7, ?8, \
-                 0, 0, 0)",
+                 0, 0, 0, ?9)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -192,6 +210,7 @@ fn claim_inner(
             reservation.total_tokens as i64,
             reservation.output_tokens as i64,
             lease_expires_at,
+            actor,
         ],
     )
     .map_err(|e| format!("runs: {e}"))?;
@@ -577,6 +596,7 @@ pub fn meter_attended(
     outcome: RunOutcome,
     usage: Option<Usage>,
     facts: Option<&RunFacts>,
+    actor: Option<&str>,
     started_at: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -584,8 +604,10 @@ pub fn meter_attended(
     conn.execute(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
          outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
-         reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected) \
-         VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, 0)",
+         reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
+         actor) \
+         VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, \
+                 0, ?12)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -598,6 +620,7 @@ pub fn meter_attended(
             counted.output_tokens as i64,
             counted.cache_read as i64,
             counted.cache_write as i64,
+            actor,
         ],
     )
     .map_err(|e| format!("runs (attended): {e}"))?;
@@ -791,6 +814,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             now,
         )
         .unwrap() else {
@@ -840,6 +864,7 @@ mod tests {
                 "filed",
                 small(),
                 &["a.md".into()],
+                None,
                 now
             )
             .unwrap(),
@@ -852,6 +877,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -883,6 +909,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -950,6 +977,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1000,6 +1028,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             at("2026-08-09T11:00:00Z"),
         )
         .unwrap() else {
@@ -1047,6 +1076,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1098,6 +1128,7 @@ mod tests {
                 "filed",
                 small(),
                 &["a.md".into()],
+                None,
                 now,
             )
             .unwrap() else {
@@ -1141,6 +1172,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -1167,6 +1199,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1214,6 +1247,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1263,6 +1297,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1321,6 +1356,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1367,6 +1403,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:05:00Z"),
         )
         .unwrap();
@@ -1397,6 +1434,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1450,6 +1488,7 @@ mod tests {
                 cache_write: 0,
             }),
             None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -1474,6 +1513,89 @@ mod tests {
     }
 
     #[test]
+    fn a_run_records_the_actor_its_spawn_site_named_and_absent_stays_absent() {
+        // M33.1 — attribution is recorded at INSERT and never backfilled.
+        // Both row-creating paths carry it: the ambient claim, where the
+        // construct that took the lease owns the row, and the attended
+        // meter, where the request's actor rides through. A spawn site that
+        // named nobody leaves NULL, which the fleet reads as
+        // "unattributed" — a guessed attribution in the one table whose
+        // whole job is honesty is worse than an admitted gap.
+        let (dir, conn, vault) = fixture("dispatch-actor");
+        let _lock = status::test_lock();
+        status::clear();
+        let now = at("2026-08-09T10:00:00Z");
+
+        seed_item(&conn, &vault, "a.md");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".to_string()],
+            Some(crate::ingest::driver::ACTOR),
+            now,
+        )
+        .unwrap() else {
+            panic!("a quiet day must dispatch");
+        };
+
+        // The attended path takes its actor as an argument the caller mints:
+        // `process:<slug>` for an agent record's run, absent for bare chat.
+        meter_attended(
+            &conn,
+            "chat-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:weekly-digest"),
+            now,
+            at("2026-08-09T10:01:00Z"),
+        )
+        .unwrap();
+        meter_attended(
+            &conn,
+            "chat-2",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            None,
+            now,
+            at("2026-08-09T10:02:00Z"),
+        )
+        .unwrap();
+
+        let actor_of = |run_id: &str| -> Option<String> {
+            conn.query_row("SELECT actor FROM runs WHERE run_id = ?1", [run_id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            actor_of(&lease.run_id).as_deref(),
+            Some(crate::ingest::driver::ACTOR),
+            "the construct that claimed the lease owns the run row"
+        );
+        assert_eq!(
+            actor_of("chat-1").as_deref(),
+            Some("process:weekly-digest"),
+            "an agent record's run is attributed to the record"
+        );
+        assert_eq!(
+            actor_of("chat-2"),
+            None,
+            "and a run nobody named stays unattributed rather than guessed"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_gate_refusal_leaves_no_run_no_lease_and_no_claim() {
         let (dir, conn, vault) = fixture("dispatch-deferred");
         let _lock = status::test_lock();
@@ -1488,6 +1610,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -1534,6 +1657,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap();
@@ -1558,6 +1682,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             at("2026-08-09T10:00:00Z"),
         );
     }
@@ -1579,6 +1704,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1761,6 +1887,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap();
