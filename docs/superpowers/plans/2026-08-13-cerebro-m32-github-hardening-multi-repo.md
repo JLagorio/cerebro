@@ -870,6 +870,19 @@ is the lane doing its job on day one.
 > CodeQL.** Clippy still does no taint analysis either. Registered as a
 > deferral in M32.12 rather than quietly dropped.
 
+> **First CI run of the new lane caught a real pre-existing defect —
+> and a hole in my local verification.** actionlint exited 0 locally but
+> FAILED on the runner: `mac-app.yml` ran
+> `pnpm tauri build --ci --target $TARGET` unquoted (SC2086), untouched
+> since M14. The runner has **shellcheck** installed and this Mac did
+> not, so every shellcheck-backed rule was silently skipped locally.
+> Fixed to `"$TARGET"`; `brew install shellcheck` makes local actionlint
+> match CI, and anyone verifying this lane by hand needs it installed or
+> they are running a weaker linter than CI and will not know.
+>
+> CodeQL final state: `state=configured`,
+> `languages=[actions, javascript-typescript]`, suite `default`.
+
 **Acceptance:** scanners run on `.github/**` changes only; zizmor is scoped
 away from vendored trees; actionlint is checksum-pinned; CodeQL default
 setup shows `state: configured`.

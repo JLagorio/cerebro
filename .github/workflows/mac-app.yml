@@ -198,7 +198,7 @@ jobs:
       # after the bundle is signed, so what ships inside it is the signed copy.
       # `--ci` so a prompt can never hold a runner open.
       - name: Build the app
-        run: pnpm tauri build --ci --target $TARGET --bundles app
+        run: pnpm tauri build --ci --target "$TARGET" --bundles app
 
       - name: Sign and package
         run: ./scripts/mac-package.sh "src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"

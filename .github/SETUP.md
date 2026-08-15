@@ -41,7 +41,14 @@ should pretend otherwise.
       `quality`/`e2e`, and this setting is the approval gate in front of that.
 - [ ] Private vulnerability reporting: verify ON; SECURITY.md points at it
       (M32.12).
-- [ ] CodeQL default setup: ON, advisory (M32.5).
+- [x] CodeQL default setup: ON, advisory, `default` query suite (M32.5).
+      Languages: `actions`, `javascript-typescript`. **Rust is NOT covered** —
+      default setup rejects it (422; allowed values are actions, c-cpp,
+      csharp, go, java-kotlin, javascript-typescript, python, ruby, swift),
+      so `mcp.rs`, `agent.rs` and `connectors.rs` get no taint tracking from
+      anything: clippy does not do taint analysis either. Registered as a
+      deferral in the M32 plan. Re-check when GitHub ships Rust support.
+      Verified: `gh api repos/JLagorio/cerebro/code-scanning/default-setup`.
 
 ## Bypass log
 
