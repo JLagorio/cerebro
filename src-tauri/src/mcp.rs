@@ -97,7 +97,10 @@ pub struct RunGrant {
 /// Since M31.2a a MINTED run token carries the durable id its spawner books
 /// (see `run_token`), so this derivation serves only bearers that never book
 /// a run: the endpoint's own base token, whose grant `resolve_grant` builds
-/// here. Domain-separated so a token can never be read back out of an id
+/// here. (`RunGrant::unrestricted` also calls it, but on the one production
+/// path that reaches it — the base branch of `resolve_grant` — that output
+/// is immediately overwritten; only test fixtures ever keep it.)
+/// Domain-separated so a token can never be read back out of an id
 /// that travels in the ledger, and 128-bit hex because
 /// `ProposalV1::validate` requires that shape.
 pub fn run_id_of(token: &str) -> String {
@@ -158,14 +161,47 @@ pub fn run_token_window() -> usize {
 
 fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunGrant) {
     runs.push((token, grant));
-    let excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
+    let mut excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
     // A run whose token is gone can never propose again, so its attempt
-    // counters go with it. Bounding the counters by the same window that
-    // bounds the tokens is what stops this map growing for the life of the
-    // process.
-    for (_, dropped) in runs.drain(..excess) {
+    // counters go with it — and its tool-call counts (M31.2b), for the same
+    // reason. Bounding the counters by the same window that bounds the
+    // tokens is what stops these maps growing for the life of the process.
+    //
+    // M31.2b — but an attended run has no elapsed limit, and enough ambient
+    // mints during one long run would evict its token mid-question: with it
+    // would go not just its tool-call counter but its authority to call
+    // submit_answer at all. So eviction RETAINS any run holding an open
+    // question and takes the next-oldest without one instead. If every
+    // older slot somehow holds an open question, the window grows past its
+    // cap — the cap is about leaks, not about live runs. The scan never
+    // reaches the just-pushed entry, which the old `drain(..excess)` could
+    // not evict either: minting a token and returning it dead would be
+    // worse than any leak.
+    let mut i = 0;
+    while excess > 0 && i + 1 < runs.len() {
+        if holds_open_question(&runs[i].1.run_id) {
+            i += 1;
+            continue;
+        }
+        let (_, dropped) = runs.remove(i);
         forget_attempts(&dropped.run_id);
+        forget_tool_calls(&dropped.run_id);
+        excess -= 1;
     }
+}
+
+/// Does this run hold an open question (M26.5e)? While it does, eviction
+/// must not touch it: the token is what authorizes `submit_answer`, and the
+/// tool-call counter is the measurement M31.6 will drain at finalize. On a
+/// poisoned questions mutex the answer is unknowable, and the fail-safe
+/// direction is `true` — retain rather than evict, leak over kill, for the
+/// same reason the cap may grow past its bound: it is about leaks, not
+/// about live runs.
+fn holds_open_question(run_id: &str) -> bool {
+    questions()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(true)
 }
 
 /// What one run has already tried for one piece of work (M26.4g).
@@ -193,6 +229,54 @@ fn attempts() -> &'static Mutex<BTreeMap<(String, String), Attempt>> {
 fn forget_attempts(run_id: &str) {
     if let Ok(mut map) = attempts().lock() {
         map.retain(|(run, _), _| run != run_id);
+    }
+}
+
+/// `run_id` → tool name → dispatch count (M31.2b). Per NAME because gap 3's
+/// own question — "did the run READ outside its manifest" — is unanswerable
+/// from a scalar. Process-global for the same reason the attempt map is:
+/// a run is a bearer token, not a connection. The panel base bearer's entry
+/// is immortal — its id is never in the eviction window — but bounded
+/// (catalog-sized keys, u64 counts) and app-side only: every spawned CLI
+/// gets a per-run token.
+fn tool_calls() -> &'static Mutex<BTreeMap<String, BTreeMap<String, u64>>> {
+    static TOOL_CALLS: OnceLock<Mutex<BTreeMap<String, BTreeMap<String, u64>>>> = OnceLock::new();
+    TOOL_CALLS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(crate) fn note_tool_call(run_id: &str, tool: &str) {
+    if let Ok(mut map) = tool_calls().lock() {
+        *map.entry(run_id.to_string())
+            .or_default()
+            .entry(tool.to_string())
+            .or_insert(0) += 1;
+    }
+}
+
+/// Drained by the ATTENDED ASSEMBLY PATH (M31.6) and by nothing else. The
+/// meter must never call this: it finishes before ask.rs resumes, so a
+/// meter-side drain would leave ask.rs reading zero and recording it as a
+/// measurement — the exact lie the Measured::zero rule forbids.
+///
+/// `None` is UNMEASURABLE — the lock failed, and nothing can honestly be
+/// said about what the run dispatched. `Some(empty)` is a MEASURED zero: a
+/// run with no entry made no loopback calls, and a retried finalize of an
+/// already-drained run reads the same honest empty, never a repeat.
+// TODO(M31.6): remove this allow when the attended assembly path drains the
+// counter in production; until then only tests call it.
+#[allow(dead_code)]
+pub(crate) fn take_tool_calls(run_id: &str) -> Option<BTreeMap<String, u64>> {
+    tool_calls()
+        .lock()
+        .ok()
+        .map(|mut m| m.remove(run_id).unwrap_or_default())
+}
+
+/// Discard without reading — the eviction-side cleanup, mirroring
+/// `forget_attempts`. Not a drain: nothing is measured, the run is gone.
+fn forget_tool_calls(run_id: &str) {
+    if let Ok(mut map) = tool_calls().lock() {
+        map.remove(run_id);
     }
 }
 
@@ -1144,6 +1228,11 @@ fn call_tool(
         .lock()
         .map_err(|_| "vault lock poisoned")?
         .clone();
+
+    // M31.2b — counted at the top so a REFUSED call is still a call the run
+    // chose to make: scope- and grant-refusals are dispatches too. Counted
+    // here rather than per-arm so a new tool cannot be added uncounted.
+    note_tool_call(&grant.run_id, name);
 
     // M17.13 — scope is enforced HERE, before the tool runs, and it is a
     // refusal rather than a request. An agent bound to `projects/atlas` cannot
@@ -2639,6 +2728,60 @@ mod tests {
         );
         let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
         assert!(actor_of(&newest, "base", &runs).is_some());
+    }
+
+    #[test]
+    fn eviction_does_not_eat_a_live_attended_run() {
+        // Mint RUN_TOKEN_WINDOW+1 tokens while one run holds an open question
+        // and a populated counter; assert BOTH survive: the token still
+        // resolves a grant (submit_answer stays authorized) and the counter
+        // still holds its counts.
+        let live = "run-m31-2b-live";
+        let _manifest = open_a_question(live);
+        note_tool_call(live, "get_note");
+
+        let mut runs = Vec::new();
+        let mut first = grant("agent:attended");
+        first.run_id = live.to_string();
+        push_run_token(&mut runs, "tok-live".into(), first);
+        for i in 1..=RUN_TOKEN_WINDOW {
+            push_run_token(&mut runs, format!("tok-{i}"), grant(&format!("actor-{i}")));
+        }
+
+        assert!(
+            resolve_grant("tok-live", "base", &runs).is_some(),
+            "the live run's token survives ambient mints while its question is open"
+        );
+        assert!(
+            actor_of("tok-1", "base", &runs).is_none(),
+            "the next-oldest entry WITHOUT an open question was evicted instead"
+        );
+        assert_eq!(runs.len(), RUN_TOKEN_WINDOW, "the cap still holds");
+        assert_eq!(
+            take_tool_calls(live)
+                .expect("a healthy lock is a measurement")
+                .get("get_note"),
+            Some(&1),
+            "and the counter was not zeroed by eviction"
+        );
+        // Close the question so the registry does not leak across tests.
+        assert!(take_answer(live).is_none(), "no answer was ever submitted");
+    }
+
+    #[test]
+    fn every_dispatched_tool_is_counted_per_name_and_drained_once() {
+        let run = "run-m31-2b";
+        forget_tool_calls(run);
+        note_tool_call(run, "get_note");
+        note_tool_call(run, "get_note");
+        note_tool_call(run, "propose_merge_entities");
+        let drained = take_tool_calls(run).expect("a healthy lock is a measurement");
+        assert_eq!(drained.get("get_note"), Some(&2));
+        assert_eq!(drained.values().sum::<u64>(), 3);
+        // A retried finalize cannot double-count: the second drain is a
+        // MEASURED empty — Some, because the lock held; the run just has
+        // nothing left to say.
+        assert!(take_tool_calls(run).expect("still measurable").is_empty());
     }
 
     /// M17.13 — scope is structural, and these are the property.
