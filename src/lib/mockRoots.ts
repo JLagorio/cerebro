@@ -6,7 +6,13 @@
  * traversal the Rust side refuses would make the Playwright suite prove the
  * opposite of the invariant. Every guard in `roots/read.rs` is mirrored below.
  */
-import type { GitRemoteStatus, GitWorkspaceInfo, ModifiedFile, PulseCommit } from '@/engine/git';
+import type {
+  GitRemoteStatus,
+  GitWorkspaceInfo,
+  ModifiedFile,
+  PulseCommit,
+  RemoteResult,
+} from '@/engine/git';
 import type { DirEntry, FileText, MountRefusal, Root, RootGitRefusal } from '@/engine/roots';
 
 export const MAX_BYTES = 2 * 1024 * 1024;
@@ -53,6 +59,14 @@ const gitModified = new Map<string, ModifiedFile[]>();
  * actually emit it rather than a test asserting two hand-written lists match.
  */
 const gitFailing = new Set<string>();
+/**
+ * rootPaths mounted INSIDE a larger repository.
+ *
+ * Mirrors `GitRootRelation::Parent`: reads resolve (status is pathspec-scoped)
+ * but sync refuses, because fetch/pull would act on the enclosing repo the
+ * user never mounted.
+ */
+const gitNested = new Set<string>();
 
 export function resetMockRoots(): void {
   roots = [];
@@ -63,6 +77,7 @@ export function resetMockRoots(): void {
   gitPulses.clear();
   gitModified.clear();
   gitFailing.clear();
+  gitNested.clear();
 }
 
 export function seedKnowledgeDir(path: string): void {
@@ -306,6 +321,81 @@ export async function rootGitFileUrl(
   return `https://example.test/repo/blob/${status.branch}/${path}`;
 }
 
+/** Mark a root as sitting inside a larger repository (`parent_repo`). */
+export function seedRootNested(rootPath: string): void {
+  gitNested.add(rootPath);
+}
+
+/**
+ * Mirrors `roots::git_workspace_for_sync` — the read gate PLUS the
+ * nested-mount refusal. Reads deliberately do not go through this.
+ */
+function syncGate(rootId: string): Root | RootGitRefusal {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  if (gitNested.has(gate.path)) {
+    return {
+      code: 'parent_repo',
+      message:
+        'this root sits inside a larger repository; syncing would act on the whole repo — run git there yourself',
+    };
+  }
+  return gate;
+}
+
+export async function rootGitFetch(rootId: string): Promise<RemoteResult | RootGitRefusal> {
+  const gate = syncGate(rootId);
+  if (refused(gate)) return gate;
+  const status = gitStatuses.get(gate.path);
+  if (status === undefined || !status.hasRemote) {
+    return {
+      status: 'no_remote',
+      message: 'No remote configured',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
+  }
+  return { status: 'updated', message: 'Fetched', updatedFiles: [], conflictFiles: [] };
+}
+
+/**
+ * Fast-forward only. A root seeded BOTH ahead and behind has diverged, so the
+ * pull is refused and nothing moves — the same answer `--ff-only` gives, for
+ * the same reason: Cerebro never creates a conflict in a repo it doesn't own.
+ */
+export async function rootGitPullFf(rootId: string): Promise<RemoteResult | RootGitRefusal> {
+  const gate = syncGate(rootId);
+  if (refused(gate)) return gate;
+  const status = gitStatuses.get(gate.path);
+  if (status === undefined || !status.hasRemote) {
+    return {
+      status: 'no_remote',
+      message: 'No remote configured',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
+  }
+  if (status.ahead > 0 && status.behind > 0) {
+    return {
+      status: 'rejected',
+      message: 'Local and remote have diverged; resolve outside Cerebro',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
+  }
+  if (status.behind === 0) {
+    return {
+      status: 'up_to_date',
+      message: 'Already up to date',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
+  }
+  // The fast-forward lands: nothing behind any more.
+  gitStatuses.set(gate.path, { ...status, behind: 0 });
+  return { status: 'updated', message: 'Fast-forwarded', updatedFiles: [], conflictFiles: [] };
+}
+
 // Exposed so Playwright can seed roots and files, mirroring how mockIpc.ts
 // exposes __cerebroMockFs.
 if (typeof window !== 'undefined') {
@@ -318,5 +408,6 @@ if (typeof window !== 'undefined') {
     seedRootGitPulse,
     seedRootGitModified,
     seedRootGitFailure,
+    seedRootNested,
   };
 }

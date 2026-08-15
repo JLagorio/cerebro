@@ -147,3 +147,41 @@ describe('root git parity', () => {
     expect(Array.isArray(await mock.rootGitPulse(repo.id))).toBe(true);
   });
 });
+
+describe('root git sync', () => {
+  it('refuses parent_repo for a root nested in a larger repository', async () => {
+    const nested = mock.seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+    mock.seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+    mock.seedRootNested('/work/mono/sub');
+
+    for (const call of [mock.rootGitFetch(nested.id), mock.rootGitPullFf(nested.id)]) {
+      const result = await call;
+      expect(isRootGitRefusal(result) && result.code).toBe('parent_repo');
+    }
+    // The READ surface still answers — status is pathspec-scoped.
+    const status = await mock.rootGitRemoteStatus(nested.id);
+    expect(isRootGitRefusal(status)).toBe(false);
+  });
+
+  it('refuses a diverged fast-forward and leaves the counts alone', async () => {
+    const repo = mock.seedRoot({ path: '/repos/div', label: 'div', git: true });
+    mock.seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+
+    const pulled = await mock.rootGitPullFf(repo.id);
+
+    expect(!isRootGitRefusal(pulled) && pulled.status).toBe('rejected');
+    const after = await mock.rootGitRemoteStatus(repo.id);
+    expect(!isRootGitRefusal(after) && after.behind).toBe(1);
+  });
+
+  it('fast-forwards a root that is only behind', async () => {
+    const repo = mock.seedRoot({ path: '/repos/ff', label: 'ff', git: true });
+    mock.seedRootGit('/repos/ff', { branch: 'main', ahead: 0, behind: 3 });
+
+    const pulled = await mock.rootGitPullFf(repo.id);
+
+    expect(!isRootGitRefusal(pulled) && pulled.status).toBe('updated');
+    const after = await mock.rootGitRemoteStatus(repo.id);
+    expect(!isRootGitRefusal(after) && after.behind).toBe(0);
+  });
+});

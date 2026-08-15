@@ -15,6 +15,7 @@ interface MockRootsWindow {
       status: { branch?: string; ahead?: number; behind?: number },
     ): void;
     seedRootGitFailure(rootId: string): void;
+    seedRootNested(rootPath: string): void;
   };
 }
 
@@ -277,5 +278,62 @@ test.describe('workspace git', () => {
     // `getByTestId('toast')` count would pass whether or not one appeared.
     await expect(page.getByTestId('toast-host')).toBeEmpty();
     await expect(page.getByTestId('tree-row').first()).toBeVisible();
+  });
+});
+
+test.describe('workspace git sync', () => {
+  test('a root that is only behind fast-forwards and the badge clears', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/repos/behind', label: 'behind', git: true });
+      w.__cerebroMockRoots.seedRootGit('/repos/behind', { branch: 'main', ahead: 0, behind: 2 });
+      w.__cerebroMockRoots.seedFile('/repos/behind', 'README.md', '# Behind');
+    });
+    await openWorkspace(page);
+
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↓2');
+    await page.getByTestId('root-git-sync').click();
+
+    // Fast-forwarded: nothing left to say, so the badge goes quiet entirely.
+    await expect(page.getByTestId('root-git-badge')).toHaveCount(0);
+  });
+
+  test('a diverged root is not pulled and its counts stand', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/repos/div', label: 'div', git: true });
+      w.__cerebroMockRoots.seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+      w.__cerebroMockRoots.seedFile('/repos/div', 'README.md', '# Div');
+    });
+    await openWorkspace(page);
+
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↑1 ↓1');
+    await page.getByTestId('root-git-sync').click();
+
+    // Diverged: Cerebro does not try to reconcile a repo it does not own.
+    await expect(page.getByTestId('root-git-badge')).toHaveText('main ↑1 ↓1');
+    await expect(page.getByTestId('toast-host')).toBeEmpty();
+  });
+
+  test('a root nested in a larger repository shows a quiet nested state', async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => {
+      const w = window as unknown as MockRootsWindow;
+      w.__cerebroMockRoots.resetMockRoots();
+      w.__cerebroMockRoots.seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+      w.__cerebroMockRoots.seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+      w.__cerebroMockRoots.seedRootNested('/work/mono/sub');
+      w.__cerebroMockRoots.seedFile('/work/mono/sub', 'README.md', '# Sub');
+    });
+    await openWorkspace(page);
+
+    await page.getByTestId('root-git-sync').click();
+
+    await expect(page.getByTestId('root-git-sync')).toHaveText('nested');
+    await expect(page.getByTestId('toast-host')).toBeEmpty();
   });
 });

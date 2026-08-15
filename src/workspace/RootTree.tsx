@@ -29,6 +29,8 @@ export function RootTree() {
   const gitStatus = useRootsStore((s) => s.gitStatus);
   const gitDirty = useRootsStore((s) => s.gitDirty);
   const loadGitStatus = useRootsStore((s) => s.loadGitStatus);
+  const syncRoot = useRootsStore((s) => s.syncRoot);
+  const gitRefusals = useRootsStore((s) => s.gitRefusals);
 
   /**
    * key → its row element. A map rather than a query, because a path is not a
@@ -225,10 +227,36 @@ export function RootTree() {
                 </span>
                 <Icon name={look.icon} size={14} color={look.color ?? 'var(--n-500)'} />
                 <span className="min-w-0 truncate text-n-700">{row.label}</span>
+                {row.isRoot && gitStatus[row.rootId] !== undefined && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    data-testid="root-git-sync"
+                    data-root={row.rootId}
+                    title={
+                      gitRefusals[row.rootId]?.code === 'parent_repo'
+                        ? 'Nested in a larger repository — sync it there'
+                        : 'Fetch, and fast-forward when it is safe'
+                    }
+                    aria-label={`Sync ${row.label}`}
+                    onClick={(e) => {
+                      // The row is a button; syncing must not also open it.
+                      e.stopPropagation();
+                      void syncRoot(row.rootId);
+                    }}
+                    className={`ml-auto flex-none rounded-sm px-1 text-2xs ${
+                      gitRefusals[row.rootId]?.code === 'parent_repo'
+                        ? 'text-n-300'
+                        : 'text-n-500 hover:bg-n-100'
+                    }`}
+                  >
+                    {gitRefusals[row.rootId]?.code === 'parent_repo' ? 'nested' : '\u21bb'}
+                  </span>
+                )}
                 {gitBadge(row) !== null && (
                   <span
                     data-testid="root-git-badge"
-                    className="ml-auto flex-none rounded-sm bg-n-100 px-1 font-normal text-2xs text-n-500"
+                    className="flex-none rounded-sm bg-n-100 px-1 font-normal text-2xs text-n-500"
                   >
                     {gitBadge(row)}
                   </span>

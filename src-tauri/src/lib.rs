@@ -1150,7 +1150,9 @@ pub fn run() {
             roots_git_commands::root_git_remote_status,
             roots_git_commands::root_git_modified_files,
             roots_git_commands::root_git_pulse,
-            roots_git_commands::root_git_file_url
+            roots_git_commands::root_git_file_url,
+            roots_git_commands::root_git_fetch,
+            roots_git_commands::root_git_pull_ff
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

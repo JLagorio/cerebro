@@ -1905,7 +1905,7 @@ proposal-channel exemption in AGENTS.md: the caller READS the outcome.
 - Modify: `src/stores/rootsStore.ts`, `src/workspace/RootTree.tsx`,
   `src/lib/mockRoots.ts` (+ tests), `e2e/workspace.spec.ts`
 
-- [ ] **Step 1: Failing tests for the two new remote operations**
+- [x] **Step 1: Failing tests for the two new remote operations**
 
 Honesty about the starting point: `remote.rs`'s test module today is **four
 string-input tests of `classify()`** — no repo fixtures, no clones, no
@@ -1940,7 +1940,7 @@ fn a_diverged_pull_ff_reports_rejected_and_changes_nothing() {
 }
 ```
 
-- [ ] **Step 2: Implement `fetch` and `pull_ff`**
+- [x] **Step 2: Implement `fetch` and `pull_ff`**
 
 In `remote.rs`, following `pull`'s existing shape (run, then `classify`
 stderr into an outcome):
@@ -2001,7 +2001,7 @@ on the closed set of snake_case strings, and a new variant would ripple
 through every consumer for one message's worth of nuance. Revisit only if
 the UI needs to *act* differently on divergence vs push-rejection.)
 
-- [ ] **Step 3: The nested-mount gate, commands, registration, UI**
+- [x] **Step 3: The nested-mount gate, commands, registration, UI**
 
 A mounted root can sit INSIDE a larger repository —
 `workspace::resolve` walks up and returns
@@ -2093,7 +2093,7 @@ parity test drives a `parent_repo` emission (extending M32.9's test). e2e:
 sync a mock root that fast-forwards (badge count clears) and one that
 diverges (message surfaces, HEAD badge unchanged).
 
-- [ ] **Step 4: Full gate, commit**
+- [x] **Step 4: Full gate, commit**
 
 ```sh
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
@@ -2101,6 +2101,30 @@ cd .. && pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY" || PORT=$p pnpm e2e
 git add -A && git commit -m "feat(roots): fetch and fast-forward pull per root, outcomes read not toasted (M32.11)"
 ```
+
+> **Executed 2026-08-15.** The `diverged_fixture` works as designed and is
+> the first real-repo fixture in `remote.rs` (its test module was four
+> string-input `classify()` tests before). Built through `temp_vault` +
+> `init_repo` + `run_str` only; the clone is by filesystem PATH, which
+> works because M32.10 pinned `protocol.file.allow=user` — the two phases
+> are coupled and the pins test now asserts that key for this reason.
+>
+> Added a third Rust test the plan did not list:
+> `fetch_updates_tracking_refs_without_touching_the_working_tree`. The
+> claim that fetch is "the safe half" is the reason it is offered on
+> mounted roots at all, and nothing tested that HEAD stays put.
+>
+> `pull_ff` reads `failure.stderr`, not a `.message()` — `GitFailure`
+> exposes the field; `message()` is the formatted form.
+>
+> Store `syncRoot` refuses to pull when `ahead > 0 && behind > 0` rather
+> than letting `--ff-only` refuse it. Both are safe; not asking is a
+> better answer than being refused, and it keeps the diverged case off the
+> network entirely.
+>
+> Full gate: Rust fmt/clippy clean, **1737 passed**; TS lint, format,
+> typecheck, **3513 unit tests**, coverage ratchet green; **95 e2e passed**
+> (92 before).
 
 **Acceptance:** a refused fast-forward provably moves nothing; no-remote is
 `no_remote`, never `error`; the store returns outcomes as values; mock

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import * as groups from '@/engine/editorGroups';
 import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
-import type { GitRemoteStatus } from '@/engine/git';
+import type { GitRemoteStatus, RemoteResult } from '@/engine/git';
 import type { DirEntry, MountRefusal, Root, RootGitRefusal } from '@/engine/roots';
 import { isRootGitRefusal } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
@@ -38,6 +38,14 @@ interface RootsState {
   loadRoots(): Promise<void>;
   /** Read one root's git status. Never throws; refusals are stored, not thrown. */
   loadGitStatus(rootId: string): Promise<void>;
+  /**
+   * Fetch, then fast-forward only when that is unambiguously safe.
+   *
+   * Returns the outcome for the CALLER TO RENDER — `auth_error` wants the
+   * credential hint, `rejected` wants the divergence message, `parent_repo`
+   * wants a quiet nested-repo state. None of them is a toast.
+   */
+  syncRoot(rootId: string): Promise<RemoteResult | RootGitRefusal | null>;
   /** Resolves to the refusal to be RENDERED, or null on success. Never throws. */
   mount(path: string): Promise<MountRefusal | null>;
   unmount(rootId: string): Promise<void>;
@@ -201,6 +209,47 @@ export const useRootsStore = create<RootsState>((set, get) => ({
       if (get().expanded[nodeKey(rootId, dir)] !== true) await get().toggle(rootId, dir);
     }
     set({ revealSeq: get().revealSeq + 1, revealing: { rootId, path } });
+  },
+
+  /**
+   * fetch → refresh status → pull only when behind and NOT ahead.
+   *
+   * The ahead check is the whole safety argument: a root that is both ahead
+   * and behind has diverged, and Cerebro must never try to reconcile a
+   * repository it does not own. `--ff-only` would refuse anyway; not asking
+   * is better than being refused.
+   */
+  async syncRoot(rootId) {
+    let outcome: RemoteResult | RootGitRefusal;
+    try {
+      outcome = await ipc.rootGitFetch(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not sync: ${String(err)}`);
+      return null;
+    }
+    if (isRootGitRefusal(outcome)) {
+      set({ gitRefusals: { ...get().gitRefusals, [rootId]: outcome } });
+      return outcome;
+    }
+    if (outcome.status === 'no_remote') return outcome;
+
+    await get().loadGitStatus(rootId);
+    const status = get().gitStatus[rootId];
+    if (status === undefined || status.behind === 0 || status.ahead > 0) return outcome;
+
+    let pulled: RemoteResult | RootGitRefusal;
+    try {
+      pulled = await ipc.rootGitPullFf(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not sync: ${String(err)}`);
+      return null;
+    }
+    if (isRootGitRefusal(pulled)) {
+      set({ gitRefusals: { ...get().gitRefusals, [rootId]: pulled } });
+      return pulled;
+    }
+    await get().loadGitStatus(rootId);
+    return pulled;
   },
 
   openFile(rootId, path, groupId) {

@@ -203,7 +203,8 @@ pub fn find(config_dir: &Path, id: &str) -> Option<Root> {
 /// let a UI match arm silently accept codes it never handles.
 ///
 /// Codes: `no_such_root`, `no_git_capability`, `config_unavailable`,
-/// `git_error`. The mock's parity test drives every browser-reachable one.
+/// `git_error`, and (from M32.11's mutation gate) `parent_repo`. The mock's
+/// parity test drives every browser-reachable one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RootGitRefusal {
@@ -238,6 +239,29 @@ pub fn git_workspace(
         return Err(RootGitRefusal::new(
             "no_git_capability",
             format!("{} is not a git repository", root.label),
+        ));
+    }
+    Ok(ws)
+}
+
+/// The MUTATION gate: like `git_workspace`, but additionally refuses roots
+/// mounted INSIDE a larger repository.
+///
+/// `workspace::resolve` walks up, so a root nested in a repo resolves to the
+/// enclosing one and `dir()` is that repo. Reads are fine there — status is
+/// pathspec-scoped and branch info is honest display — but a fetch or pull
+/// would act on the whole parent repository, i.e. on everything outside the
+/// scope the user actually mounted. New code: `parent_repo`.
+pub fn git_workspace_for_sync(
+    config_dir: &Path,
+    root_id: &str,
+) -> Result<crate::git::workspace::GitWorkspaceInfo, RootGitRefusal> {
+    let ws = git_workspace(config_dir, root_id)?;
+    if ws.git_root_relation != crate::git::workspace::GitRootRelation::Vault {
+        return Err(RootGitRefusal::new(
+            "parent_repo",
+            "this root sits inside a larger repository; syncing would act on \
+             the whole repo — run git there yourself",
         ));
     }
     Ok(ws)
@@ -427,6 +451,30 @@ mod tests {
         let root = mount(&config, repo.to_str().unwrap()).unwrap();
         let ws = git_workspace(&config, &root.id).unwrap();
         assert!(ws.is_repo());
+        let _ = std::fs::remove_dir_all(&config);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// A root mounted inside a larger repository can be READ (status is
+    /// pathspec-scoped) but never SYNCED — fetch/pull would act on the whole
+    /// enclosing repo, which the user never mounted.
+    #[test]
+    fn sync_on_a_subfolder_mount_refuses_parent_repo() {
+        let config = testutil::temp_vault("m32-sync-config");
+        let repo = testutil::temp_vault("m32-sync-parent");
+        crate::git::commit::init_repo(&repo).unwrap();
+        let sub = repo.join("nested");
+        std::fs::create_dir(&sub).unwrap();
+
+        let root = mount(&config, sub.to_str().unwrap()).unwrap();
+
+        assert_eq!(
+            git_workspace_for_sync(&config, &root.id).unwrap_err().code,
+            "parent_repo"
+        );
+        // The READ gate still resolves it — reads are pathspec-scoped.
+        assert!(git_workspace(&config, &root.id).is_ok());
+
         let _ = std::fs::remove_dir_all(&config);
         let _ = std::fs::remove_dir_all(&repo);
     }

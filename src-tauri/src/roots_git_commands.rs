@@ -60,6 +60,40 @@ pub fn root_git_pulse(
     git::pulse::vault_pulse(&ws, 50).map_err(|e| RootGitRefusal::new("git_error", e))
 }
 
+/// The MUTATION gate (M32.11) — stricter than `workspace()`: it also refuses
+/// a root mounted inside a larger repository.
+fn sync_workspace(
+    app: &tauri::AppHandle,
+    root_id: &str,
+) -> Result<GitWorkspaceInfo, RootGitRefusal> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| RootGitRefusal::new("config_unavailable", e.to_string()))?;
+    crate::roots::git_workspace_for_sync(&dir, root_id)
+}
+
+/// Fetch is the safe half of sync: it updates remote-tracking refs and
+/// touches no file in the working tree.
+#[tauri::command(async)]
+pub fn root_git_fetch(
+    app: tauri::AppHandle,
+    root_id: String,
+) -> Result<crate::git::remote::RemoteResult, RootGitRefusal> {
+    Ok(git::remote::fetch(&sync_workspace(&app, &root_id)?))
+}
+
+/// Fast-forward only: Cerebro can never CREATE a conflict in a repository it
+/// does not own. A pull that would need a merge comes back `rejected` and the
+/// user resolves it in their own tooling.
+#[tauri::command(async)]
+pub fn root_git_pull_ff(
+    app: tauri::AppHandle,
+    root_id: String,
+) -> Result<crate::git::remote::RemoteResult, RootGitRefusal> {
+    Ok(git::remote::pull_ff(&sync_workspace(&app, &root_id)?))
+}
+
 #[tauri::command(async)]
 pub fn root_git_file_url(
     app: tauri::AppHandle,

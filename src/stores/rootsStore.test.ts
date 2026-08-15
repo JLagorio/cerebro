@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetMockRoots, seedFile, seedKnowledgeDir, seedRoot, seedRootGit } from '@/lib/mockRoots';
+import {
+  resetMockRoots,
+  seedFile,
+  seedKnowledgeDir,
+  seedRoot,
+  seedRootGit,
+  seedRootNested,
+} from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from './rootsStore';
 
 beforeEach(() => {
@@ -130,5 +137,43 @@ describe('loadGitStatus', () => {
 
     expect(useRootsStore.getState().gitRefusals[root.id]).toBeUndefined();
     expect(useRootsStore.getState().gitStatus[root.id]?.branch).toBe('trunk');
+  });
+});
+
+describe('syncRoot', () => {
+  it('fast-forwards a root that is only behind, and refreshes the badge', async () => {
+    const root = seedRoot({ path: '/repos/behind', label: 'behind', git: true });
+    seedRootGit('/repos/behind', { branch: 'main', ahead: 0, behind: 2 });
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(result && 'status' in result && result.status).toBe('updated');
+    expect(useRootsStore.getState().gitStatus[root.id]?.behind).toBe(0);
+  });
+
+  it('never attempts a pull on a diverged root', async () => {
+    const root = seedRoot({ path: '/repos/div', label: 'div', git: true });
+    seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    // Fetch succeeded; the pull was not even asked for, so the counts stand.
+    expect(result && 'status' in result && result.status).toBe('updated');
+    expect(useRootsStore.getState().gitStatus[root.id]?.behind).toBe(1);
+    expect(useRootsStore.getState().gitStatus[root.id]?.ahead).toBe(1);
+  });
+
+  it('returns parent_repo as a value the caller renders, and does not toast', async () => {
+    const root = seedRoot({ path: '/work/mono/sub', label: 'sub', git: true });
+    seedRootGit('/work/mono/sub', { branch: 'main', behind: 2 });
+    seedRootNested('/work/mono/sub');
+    await useRootsStore.getState().loadRoots();
+
+    const result = await useRootsStore.getState().syncRoot(root.id);
+
+    expect(result && 'code' in result && result.code).toBe('parent_repo');
+    expect(useRootsStore.getState().gitRefusals[root.id]?.code).toBe('parent_repo');
   });
 });
