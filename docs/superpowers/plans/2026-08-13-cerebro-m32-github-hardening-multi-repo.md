@@ -233,6 +233,35 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY — pick another" || PORT=$p pnpm e2e
 ```
 
+## Execution deviations (recorded 2026-08-15, at start of execution)
+
+The plan's branch-topology premise expired between authoring and execution.
+Re-verified at start, as the plan instructs:
+
+**The m22-m28 branch MERGED** — `origin/main` is `7e1fe07`, the PR #13 merge,
+so main now carries the ledger/policy layer. M31 (`m31-claims-and-records`,
+PR #14, green) branched from `cb19f2e`, whose content is byte-identical to
+`origin/main`, and therefore already contains M30's `roots/` + `workspace/`.
+**M32 is built on M31, not on `origin/main`** — at the user's instruction, and
+the constraint that forced the original choice ("basing on the branch would
+mean rebuilding M30") no longer exists. M32's PR stacks on PR #14.
+
+Three phase-level consequences, each handled where it lands:
+
+| The plan says | True on this base | Phase |
+| --- | --- | --- |
+| no `e2e/boot.ts`; write a spec-local `boot()` | `e2e/boot.ts` exists and AGENTS.md mandates it — the instruction **inverts** | M32.9 |
+| AGENTS.md has no port-trap paragraph; ADD one | it has one (the `lsof` ritual) — **rewrite** it, don't add | M32.7 |
+| `playwright.config.ts` line 19 | line 24 | M32.7 |
+
+Two plan statements are now moot rather than wrong: "the ruleset should land
+before the m22-m28 branch ever merges" (it merged first — the ruleset still
+lands, it just no longer guards that particular merge), and M32.12's
+work-repo-writes trigger, "m22-m28 policy layer merged to main", is now
+**satisfied** — that deferral's gate has fired and the register says so.
+
+All GitHub API facts in the table above re-verified unchanged on 2026-08-15.
+
 ---
 
 # Track A — the gate becomes unskippable
@@ -247,7 +276,7 @@ token whose scope is only a repo *setting* away from write.
 **Files**
 - Modify: `.github/workflows/mac-app.yml`
 
-- [ ] **Step 1: Retarget the triggers**
+- [x] **Step 1: Retarget the triggers**
 
 Replace lines 12–16 (`on:` block) with:
 
@@ -267,7 +296,7 @@ tags additionally build; a PR that needs a DMG uses workflow_dispatch). A
 comment that contradicts its own file is the drift this milestone's SETUP.md
 lesson exists to prevent.
 
-- [ ] **Step 2: Clamp the token and document the rule**
+- [x] **Step 2: Clamp the token and document the rule**
 
 Immediately below the `on:` block (before `concurrency:`), add:
 
@@ -281,7 +310,7 @@ permissions:
   contents: read
 ```
 
-- [ ] **Step 3: Stop persisting credentials at checkout**
+- [x] **Step 3: Stop persisting credentials at checkout**
 
 All three `- uses: actions/checkout@v4` steps (quality line 35, e2e line 90,
 build line 127) become:
@@ -296,7 +325,7 @@ Nothing in this workflow pushes back to the repo, so nothing needs the token
 on disk where every subsequent step (pnpm lifecycle scripts, build.rs,
 Playwright) can read it.
 
-- [ ] **Step 4: Keep the macOS build off PR events**
+- [x] **Step 4: Keep the macOS build off PR events**
 
 The `build` job builds a release-shaped artifact; PRs only need the two
 gates. Add to the `build` job, directly under `needs: [quality, e2e]`:
@@ -307,7 +336,7 @@ gates. Add to the `build` job, directly under `needs: [quality, e2e]`:
     if: github.event_name != 'pull_request'
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```sh
 git add .github/workflows/mac-app.yml

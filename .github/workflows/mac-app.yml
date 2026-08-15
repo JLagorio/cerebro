@@ -1,19 +1,30 @@
 name: CI & Mac app
 
-# Two gates and a build (M14.4). `quality` and `e2e` run on Linux on every
-# push; the macOS build only starts once both pass, so a broken lint,
-# typecheck, test, or Playwright flow can no longer ship a DMG — which it
-# could until M14 (CI ran vitest + cargo test and nothing else; tsc breakage
-# reached main in 80ca071).
+# Two gates and a build (M14.4; triggers retargeted M32.1). `quality` and
+# `e2e` run on Linux for every pull request and every push to main; the macOS
+# build only starts once both pass, so a broken lint, typecheck, test, or
+# Playwright flow can no longer ship a DMG — which it could until M14 (CI ran
+# vitest + cargo test and nothing else; tsc breakage reached main in 80ca071).
 #
-# Every push produces a downloadable artifact (Actions → this run → Artifacts).
-# Pushing a `v*` tag additionally publishes a release.
+# A pull request runs the two gates and stops there — WIP pushes no longer
+# burn a macOS runner. Pushes to main and `v*` tags additionally produce a
+# downloadable artifact (Actions → this run → Artifacts), and a `v*` tag
+# publishes a release. A PR that genuinely needs a DMG dispatches one by hand.
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
+  pull_request:
   workflow_dispatch:
+
+# Least privilege: the ambient token is read-only for every job; `build`
+# alone elevates to contents:write for tag releases. The repo setting says
+# read-only too, but a setting is not reviewable — this line is.
+# House rule: no workflow in this repo may ever use pull_request_target.
+# It hands the base repo's secrets to fork code; nothing we do needs it.
+permissions:
+  contents: read
 
 # Pushing again supersedes the previous build for the same ref rather than
 # leaving it to finish a build nobody is waiting for any more.
@@ -33,6 +44,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
         with:
@@ -88,6 +101,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
         with:
@@ -118,6 +133,9 @@ jobs:
   build:
     runs-on: macos-14
     needs: [quality, e2e]
+    # PRs are gated by quality+e2e alone; the artifact build runs on main,
+    # tags, and manual dispatch. A PR that needs a DMG can dispatch one.
+    if: github.event_name != 'pull_request'
     # The whole job is minutes. Past this something is wedged, and failing says
     # so instead of holding a runner for hours.
     timeout-minutes: 45
@@ -125,6 +143,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
         with:
