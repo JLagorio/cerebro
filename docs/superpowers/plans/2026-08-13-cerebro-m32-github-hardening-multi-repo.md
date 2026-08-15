@@ -2143,7 +2143,7 @@ assume.
 - Modify: `.github/SETUP.md`
 - Modify: this plan doc (checkboxes + any deviations noted per phase)
 
-- [ ] **Step 1: SECURITY.md — the mounted-roots trust model**
+- [x] **Step 1: SECURITY.md — the mounted-roots trust model**
 
 SECURITY.md predates M30 and says nothing about mounted roots. Add a section
 after the existing trust-model material:
@@ -2185,7 +2185,7 @@ to this section. The guarded read path was built MCP-ready precisely so
 that PR is small — the barrier is this trust model, on purpose.
 ```
 
-- [ ] **Step 2: SETUP.md — verify private vulnerability reporting, tick the line**
+- [x] **Step 2: SETUP.md — verify private vulnerability reporting, tick the line**
 
 PVR is currently **disabled** (`{"enabled": false}`, checked 2026-08-13),
 and a bare `GET || PUT` would never run the PUT — the GET exits 0 whether
@@ -2200,7 +2200,7 @@ gh api repos/JLagorio/cerebro/private-vulnerability-reporting   # {"enabled": tr
 Point SECURITY.md's reporting section at the repo's Security → "Report a
 vulnerability" flow if it doesn't already, and tick the SETUP.md checkbox.
 
-- [ ] **Step 3: The deferral register (in this plan doc, below)**
+- [x] **Step 3: The deferral register (in this plan doc, below)**
 
 Confirm the following table is accurate as of the end of M32 execution and
 tick this box. These are analyzed-not-built, with their triggers:
@@ -2210,11 +2210,13 @@ tick this box. These are analyzed-not-built, with their triggers:
 | Rust coverage floor | next milestone that adds untested `src-tauri` surface | `cargo llvm-cov --fail-under-lines <measured actual>` in the quality job; mirror in pre-push behind the existing `src-tauri` change detection with `--no-clean`; floor ratchets up only (AGENTS.md rule) |
 | Updater + key custody | the day auto-update becomes a goal | generate the minisign keypair offline; private key ONLY in a GitHub Environment restricted to protected `v*` refs, never a plain repo secret; offline backup (losing it strands every install); unsigned-updater = RCE channel, never ship it casually |
 | Apple Developer ID + notarization | paid account decision | tolaria's ephemeral-keychain recipe (`release-build-artifacts.yml:84–99` in the vendored tree); delete the xattr instruction the same day |
-| Work-repo writes (commit/push under policy) | m22-m28 policy layer merged to main | proposal-card flow per M30 decision log; `RemoteOutcome` vocabulary already fits |
+| Work-repo writes (commit/push under policy) | **TRIGGER FIRED** — the m22-m28 policy layer merged to main in PR #13 (`7e1fe07`) on 2026-08-14, before M32 executed. The gate is open; the work is unscheduled, not blocked | proposal-card flow per M30 decision log; `RemoteOutcome` vocabulary already fits, and `git_workspace_for_sync` is where a write gate would hang |
 | Release channels (alpha/stable) | first need for a second lane | extract a `workflow_call` builder BEFORE duplicating any lane (tolaria release.yml pattern) |
 | Commit signing | collaborators arrive, or paranoia strikes | SSH-key signing + vigilant mode, 10 minutes; never a ruleset rule while agent-driven commits flow from many worktrees |
+| CodeQL for Rust | GitHub ships `rust` in code-scanning default setup | **Discovered during M32.5, not planned:** this plan asserted Rust was GA in default setup. The API rejects it (422; allowed: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, swift), so `mcp.rs`, `agent.rs` and `connectors.rs` get taint tracking from nothing — clippy does not do it either. Re-check the allowed list; the advanced-setup workflow route is the fallback if it stays unsupported |
+| Immutable releases dry-run | the toggle is flipped in Settings (browser-only; no API) | push `v0.0.1-rc`, assert `gh release view v0.0.1-rc --json isImmutable` is true, assert `gh release delete` is REFUSED. Not done in M32: enabling it is not scriptable, and tagging first would publish a MUTABLE release and burn the dry-run |
 
-- [ ] **Step 4: Commit, finish the PR**
+- [x] **Step 4: Commit, finish the PR**
 
 ```sh
 git add SECURITY.md .github/SETUP.md docs/superpowers/plans/2026-08-13-cerebro-m32-github-hardening-multi-repo.md
@@ -2222,6 +2224,22 @@ git commit -m "docs(security): the mounted-roots trust model, and six deferrals 
 git push
 gh pr ready && gh pr checks --watch
 ```
+
+> **Executed 2026-08-15.** PVR was enabled by VALUE-testing as the plan
+> insists (`--jq .enabled` was `false`, the PUT ran, it now reads `true`).
+> The agent-exposure claim was verified before writing it down, not
+> asserted: `grep root_ src-tauri/src/mcp.rs` is empty.
+>
+> The register grew from six deferrals to **eight**, and one of the
+> original six changed state:
+> - **Work-repo writes: its trigger has FIRED.** The plan gated it on
+>   "m22-m28 policy layer merged to main", which happened in PR #13 the
+>   day before M32 executed. Left deferred (M32's non-goals exclude it and
+>   nothing here builds toward it), but recorded as gate-open rather than
+>   silently carrying a condition that is already satisfied.
+> - **CodeQL for Rust** — new, from M32.5's 422.
+> - **Immutable releases dry-run** — new, because M32.4 Step 3 could not
+>   be completed from a terminal.
 
 **Acceptance:** SECURITY.md states the mounted-root model including the
 explicit agent-exposure OFF decision; PVR verified/enabled and witnessed;

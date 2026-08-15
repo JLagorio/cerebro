@@ -39,8 +39,11 @@ should pretend otherwise.
       request workflows from outside collaborators", then tick this.
       It matters more since M32.1: PRs now execute PR-controlled code in
       `quality`/`e2e`, and this setting is the approval gate in front of that.
-- [ ] Private vulnerability reporting: verify ON; SECURITY.md points at it
-      (M32.12).
+- [x] Private vulnerability reporting: ON (M32.12), and SECURITY.md's
+      reporting section points at the Security → "Report a vulnerability"
+      flow. Verified by VALUE, not by exit code — a bare GET on this endpoint
+      exits 0 whether `enabled` is true or false, so check
+      `gh api repos/JLagorio/cerebro/private-vulnerability-reporting --jq .enabled`.
 - [x] CodeQL default setup: ON, advisory, `default` query suite (M32.5).
       Languages: `actions`, `javascript-typescript`. **Rust is NOT covered** —
       default setup rejects it (422; allowed values are actions, c-cpp,
