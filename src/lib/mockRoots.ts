@@ -6,7 +6,8 @@
  * traversal the Rust side refuses would make the Playwright suite prove the
  * opposite of the invariant. Every guard in `roots/read.rs` is mirrored below.
  */
-import type { DirEntry, FileText, MountRefusal, Root } from '@/engine/roots';
+import type { GitRemoteStatus, GitWorkspaceInfo, ModifiedFile, PulseCommit } from '@/engine/git';
+import type { DirEntry, FileText, MountRefusal, Root, RootGitRefusal } from '@/engine/roots';
 
 export const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -38,11 +39,30 @@ let counter = 0;
 const files = new Map<string, Map<string, string>>();
 const knowledgeDirs = new Set<string>();
 
+/** rootPath → its canned remote status. */
+const gitStatuses = new Map<string, GitRemoteStatus>();
+/** rootPath → its canned recent commits. */
+const gitPulses = new Map<string, PulseCommit[]>();
+/** rootPath → its canned dirty files. */
+const gitModified = new Map<string, ModifiedFile[]>();
+/**
+ * rootIds whose next git call fails.
+ *
+ * A mock that cannot FAIL cannot prove parity: `git_error` is reachable on the
+ * Rust side whenever git itself exits non-zero, so the mock needs a way to
+ * actually emit it rather than a test asserting two hand-written lists match.
+ */
+const gitFailing = new Set<string>();
+
 export function resetMockRoots(): void {
   roots = [];
   counter = 0;
   files.clear();
   knowledgeDirs.clear();
+  gitStatuses.clear();
+  gitPulses.clear();
+  gitModified.clear();
+  gitFailing.clear();
 }
 
 export function seedKnowledgeDir(path: string): void {
@@ -159,6 +179,133 @@ export async function readFileText(rootId: string, path: string): Promise<FileTe
   return { kind: 'text', content };
 }
 
+// ---------------------------------------------------------------------------
+// Root git surface (M32.9). Mirrors `roots_git_commands.rs`, which puts every
+// command behind one gate so none can forget to apply it — the mock does the
+// same, for the same reason.
+
+/**
+ * Give a path a git status — which also makes it a repository.
+ *
+ * Seeding a status for a directory that is not git-capable would be a state
+ * the real backend cannot produce (`caps.git` is probed from the same `.git`
+ * that answers `git status`). Flipping the capability here is what lets a test
+ * model a directory that BECOMES a repo after mount, which is the case the
+ * Rust gate re-probes for.
+ */
+export function seedRootGit(rootPath: string, status: Partial<GitRemoteStatus>): void {
+  for (const root of roots) {
+    if (root.path === rootPath) root.caps = { ...root.caps, git: true };
+  }
+  gitStatuses.set(rootPath, {
+    branch: 'main',
+    ahead: 0,
+    behind: 0,
+    hasRemote: true,
+    hasUpstream: true,
+    upstream: 'origin/main',
+    ...status,
+  });
+}
+
+export function seedRootGitPulse(rootPath: string, commits: PulseCommit[]): void {
+  gitPulses.set(rootPath, commits);
+}
+
+export function seedRootGitModified(rootPath: string, dirty: ModifiedFile[]): void {
+  gitModified.set(rootPath, dirty);
+}
+
+/** Make this root's next git call fail, so `git_error` can be EMITTED. */
+export function seedRootGitFailure(rootId: string): void {
+  gitFailing.add(rootId);
+}
+
+/**
+ * Mirrors `roots::git_workspace` plus the command-level git failure. Order
+ * matters and matches Rust: unknown id, then capability, then git itself.
+ * `config_unavailable` has no browser analogue — there is no app config dir —
+ * and is documented as Rust-transport-only rather than faked.
+ */
+function gitGate(rootId: string): Root | RootGitRefusal {
+  const root = roots.find((r) => r.id === rootId);
+  if (root === undefined) {
+    return { code: 'no_such_root', message: `no mounted root with id ${rootId}` };
+  }
+  if (!root.caps.git) {
+    return { code: 'no_git_capability', message: `${root.label} is not a git repository` };
+  }
+  if (gitFailing.has(rootId)) {
+    return { code: 'git_error', message: 'git exited non-zero' };
+  }
+  return root;
+}
+
+function refused(gate: Root | RootGitRefusal): gate is RootGitRefusal {
+  return 'code' in gate;
+}
+
+export async function rootGitWorkspaceInfo(
+  rootId: string,
+): Promise<GitWorkspaceInfo | RootGitRefusal> {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  // The gate only opens for a repo, and a mounted repo IS its git root — a
+  // root nested inside a larger repository is M32.11's `parent_repo` case.
+  return {
+    vaultRoot: gate.path,
+    gitRoot: gate.path,
+    vaultPathspec: null,
+    gitRootRelation: 'vault',
+    resolutionFailure: null,
+  };
+}
+
+export async function rootGitRemoteStatus(
+  rootId: string,
+): Promise<GitRemoteStatus | RootGitRefusal> {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  return (
+    gitStatuses.get(gate.path) ?? {
+      branch: 'main',
+      ahead: 0,
+      behind: 0,
+      hasRemote: false,
+      hasUpstream: false,
+      upstream: null,
+    }
+  );
+}
+
+export async function rootGitModifiedFiles(
+  rootId: string,
+): Promise<ModifiedFile[] | RootGitRefusal> {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  return gitModified.get(gate.path) ?? [];
+}
+
+export async function rootGitPulse(rootId: string): Promise<PulseCommit[] | RootGitRefusal> {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  return gitPulses.get(gate.path) ?? [];
+}
+
+export async function rootGitFileUrl(
+  rootId: string,
+  path: string,
+): Promise<string | null | RootGitRefusal> {
+  const gate = gitGate(rootId);
+  if (refused(gate)) return gate;
+  // Rust returns `Option<String>`, so this is a bare `string | null` — NOT a
+  // wrapper object. Parity is the point of this file; a friendlier shape here
+  // would be a shape the real backend never sends.
+  const status = gitStatuses.get(gate.path);
+  if (status === undefined || !status.hasRemote) return null;
+  return `https://example.test/repo/blob/${status.branch}/${path}`;
+}
+
 // Exposed so Playwright can seed roots and files, mirroring how mockIpc.ts
 // exposes __cerebroMockFs.
 if (typeof window !== 'undefined') {
@@ -167,5 +314,9 @@ if (typeof window !== 'undefined') {
     seedRoot,
     seedFile,
     seedKnowledgeDir,
+    seedRootGit,
+    seedRootGitPulse,
+    seedRootGitModified,
+    seedRootGitFailure,
   };
 }

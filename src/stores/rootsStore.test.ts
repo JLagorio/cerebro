@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetMockRoots, seedFile, seedKnowledgeDir, seedRoot } from '@/lib/mockRoots';
+import { resetMockRoots, seedFile, seedKnowledgeDir, seedRoot, seedRootGit } from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from './rootsStore';
 
 beforeEach(() => {
@@ -96,5 +96,39 @@ describe('unmount', () => {
       rootId: alpha.id,
       path: 'README.md',
     });
+  });
+});
+
+describe('loadGitStatus', () => {
+  it('loads git status for a repo root and keeps refusals as values', async () => {
+    const repo = seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    const plain = seedRoot({ path: '/notes', label: 'notes', git: false });
+    seedRootGit('/repos/alpha', { branch: 'main', ahead: 0, behind: 2 });
+    await useRootsStore.getState().loadRoots();
+
+    await useRootsStore.getState().loadGitStatus(repo.id);
+    expect(useRootsStore.getState().gitStatus[repo.id]?.branch).toBe('main');
+    expect(useRootsStore.getState().gitRefusals[repo.id]).toBeUndefined();
+
+    await useRootsStore.getState().loadGitStatus(plain.id);
+    // READ, not toasted away — the typed-refusal exemption to the store rule.
+    expect(useRootsStore.getState().gitRefusals[plain.id]?.code).toBe('no_git_capability');
+    expect(useRootsStore.getState().gitStatus[plain.id]).toBeUndefined();
+  });
+
+  it('clears a stale refusal once the root resolves', async () => {
+    const root = seedRoot({ path: '/repos/late', label: 'late', git: false });
+    await useRootsStore.getState().loadRoots();
+    await useRootsStore.getState().loadGitStatus(root.id);
+    expect(useRootsStore.getState().gitRefusals[root.id]?.code).toBe('no_git_capability');
+
+    // The directory became a repo; the gate re-probes and the badge must not
+    // keep rendering yesterday's refusal.
+    seedRootGit('/repos/late', { branch: 'trunk' });
+    await useRootsStore.getState().loadRoots();
+    await useRootsStore.getState().loadGitStatus(root.id);
+
+    expect(useRootsStore.getState().gitRefusals[root.id]).toBeUndefined();
+    expect(useRootsStore.getState().gitStatus[root.id]?.branch).toBe('trunk');
   });
 });

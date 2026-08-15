@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import * as groups from '@/engine/editorGroups';
 import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
-import type { DirEntry, MountRefusal, Root } from '@/engine/roots';
+import type { GitRemoteStatus } from '@/engine/git';
+import type { DirEntry, MountRefusal, Root, RootGitRefusal } from '@/engine/roots';
+import { isRootGitRefusal } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
+import { useUiStore } from './uiStore';
 
 export type { EditorGroup, Layout, OpenTab };
 export { sameTab, tabKey } from '@/engine/editorGroups';
@@ -18,8 +21,23 @@ interface RootsState {
   children: Record<string, DirEntry[]>;
   /** Editor groups, left to right. See engine/editorGroups.ts. */
   layout: Layout;
+  /** rootId → its git status, once loaded. */
+  gitStatus: Record<string, GitRemoteStatus>;
+  /**
+   * rootId → the typed refusal its last git read returned.
+   *
+   * Refusals are VALUES here, not errors: `no_git_capability` is the ordinary
+   * answer for a mounted folder that is not a repository, and toasting it
+   * would be an error message on every non-repo root at startup. This is the
+   * proposal-channel exemption AGENTS.md carves out, same as `mount`.
+   */
+  gitRefusals: Record<string, RootGitRefusal>;
+  /** rootId → how many files are dirty, once loaded. */
+  gitDirty: Record<string, number>;
 
   loadRoots(): Promise<void>;
+  /** Read one root's git status. Never throws; refusals are stored, not thrown. */
+  loadGitStatus(rootId: string): Promise<void>;
   /** Resolves to the refusal to be RENDERED, or null on success. Never throws. */
   mount(path: string): Promise<MountRefusal | null>;
   unmount(rootId: string): Promise<void>;
@@ -71,7 +89,15 @@ export const selectActiveTab = (s: RootsState): OpenTab | null => groups.activeT
  */
 export const initialRootsState = (): Pick<
   RootsState,
-  'roots' | 'expanded' | 'children' | 'layout' | 'revealSeq' | 'revealing'
+  | 'roots'
+  | 'expanded'
+  | 'children'
+  | 'layout'
+  | 'revealSeq'
+  | 'revealing'
+  | 'gitStatus'
+  | 'gitRefusals'
+  | 'gitDirty'
 > => ({
   roots: [],
   expanded: {},
@@ -79,6 +105,9 @@ export const initialRootsState = (): Pick<
   layout: groups.emptyLayout(),
   revealSeq: 0,
   revealing: null,
+  gitStatus: {},
+  gitRefusals: {},
+  gitDirty: {},
 });
 
 export const useRootsStore = create<RootsState>((set, get) => ({
@@ -86,6 +115,39 @@ export const useRootsStore = create<RootsState>((set, get) => ({
 
   async loadRoots() {
     set({ roots: await ipc.listRoots() });
+  },
+
+  /**
+   * A refusal is stored and rendered; only a TRANSPORT failure (invoke itself
+   * rejecting with something that is not a refusal) follows the human-UI
+   * rule of catch/toast/null. Mixing those two up in either direction is a
+   * review-blocking defect per AGENTS.md.
+   */
+  async loadGitStatus(rootId) {
+    let result: GitRemoteStatus | RootGitRefusal;
+    try {
+      result = await ipc.rootGitRemoteStatus(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not read git status: ${String(err)}`);
+      return;
+    }
+    if (isRootGitRefusal(result)) {
+      const { [rootId]: _drop, ...status } = get().gitStatus;
+      set({ gitStatus: status, gitRefusals: { ...get().gitRefusals, [rootId]: result } });
+      return;
+    }
+    // Success clears any stale refusal: capability is re-probed live on the
+    // Rust side, so a folder that became a repo must stop rendering
+    // yesterday's answer.
+    const { [rootId]: _stale, ...refusals } = get().gitRefusals;
+    set({ gitStatus: { ...get().gitStatus, [rootId]: result }, gitRefusals: refusals });
+
+    // The dirty count is a second read; a refusal here is not worth
+    // overwriting a status we already have, so it only ever adds a count.
+    const dirty = await ipc.rootGitModifiedFiles(rootId).catch(() => null);
+    if (dirty !== null && !isRootGitRefusal(dirty)) {
+      set({ gitDirty: { ...get().gitDirty, [rootId]: dirty.length } });
+    }
   },
 
   /**

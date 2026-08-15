@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
+import { resetMockRoots, seedFile, seedRoot, seedRootGit } from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { RootTree } from './RootTree';
@@ -158,5 +158,44 @@ describe('RootTree', () => {
         .find((r) => r.getAttribute('data-path') === 'README.md');
       expect(row?.getAttribute('data-active')).toBe('true');
     });
+  });
+});
+
+describe('RootTree git badge', () => {
+  it('shows branch and counts for a repo root that has something to say', async () => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    seedRootGit('/repos/alpha', { branch: 'main', ahead: 2, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-badge').textContent).toBe('main ↑2 ↓1');
+    });
+  });
+
+  it('stays silent for a clean repo in sync — nothing speaks first', async () => {
+    seedRoot({ path: '/repos/quiet', label: 'quiet', git: true });
+    seedRootGit('/repos/quiet', { branch: 'main', ahead: 0, behind: 0 });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    await waitFor(() => {
+      expect(useRootsStore.getState().gitStatus['root-1']?.branch).toBe('main');
+    });
+    expect(screen.queryByTestId('root-git-badge')).toBeNull();
+  });
+
+  it('never badges a root that is not a repo, and stores the refusal instead', async () => {
+    seedRoot({ path: '/notes', label: 'notes', git: false });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    expect(screen.queryByTestId('root-git-badge')).toBeNull();
+    // No git capability means the tree never even asks, so nothing is refused
+    // and nothing is toasted — the row is simply a plain folder.
+    expect(useRootsStore.getState().gitRefusals['root-1']).toBeUndefined();
   });
 });

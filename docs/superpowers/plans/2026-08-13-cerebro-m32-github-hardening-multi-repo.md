@@ -1441,7 +1441,7 @@ never as noise on the single-vault case.
   handlers in the same place)
 - Modify: `e2e/workspace.spec.ts`
 
-- [ ] **Step 1: Write the failing store test**
+- [x] **Step 1: Write the failing store test**
 
 In `src/stores/rootsStore.test.ts`, following the file's existing fixture
 style (M30 wrote these tests — mirror them):
@@ -1459,7 +1459,7 @@ it('loads git status for a repo root and keeps refusals as values', async () => 
 });
 ```
 
-- [ ] **Step 2: Watch it fail, then implement**
+- [x] **Step 2: Watch it fail, then implement**
 
 Store shape: `gitStatus: Record<string, GitRemoteStatus>` and
 `gitRefusals: Record<string, RootGitRefusal>` (camelCase over the wire —
@@ -1469,7 +1469,7 @@ toasted** — the typed-refusal exemption to the store-layer rule, same as
 M30's mount flow. Only a transport-level failure (invoke itself rejecting
 with a non-refusal) follows the human-UI rule: catch, toast, null.
 
-- [ ] **Step 3: Mock parity, tested**
+- [x] **Step 3: Mock parity, tested**
 
 `mockRoots.ts` gains the five `root_git_*` handlers. Parity means the mock
 can **actually emit** what Rust emits — a test comparing two hand-written
@@ -1503,7 +1503,7 @@ the requirement is one driven emission per reachable code, not this exact
 API.) Mock roots carry a `caps.git` flag and a small canned
 `GitRemoteStatus`/`PulseCommit[]` fixture.
 
-- [ ] **Step 4: The badge**
+- [x] **Step 4: The badge**
 
 `RootTree.tsx`: on a root row whose status is loaded, render branch name +
 dirty-count + ahead/behind as a quiet inline badge (follow the tree's
@@ -1515,7 +1515,7 @@ keys on `!caps.writable && !caps.git` to render a vanished-directory root —
 an unavailable root gets that rendering and never a git badge; do not let
 the badge logic double-read `caps.git` in a way that changes it.
 
-- [ ] **Step 5: e2e**
+- [x] **Step 5: e2e**
 
 Extend `e2e/workspace.spec.ts` using **its own local `boot()` helper** —
 that is origin/main's convention (there is NO `e2e/boot.ts` on main; that
@@ -1524,13 +1524,53 @@ at merge time; origin/main's AGENTS.md says "copy an existing spec's boot").
 Mount a mock repo root, expect the badge with the mocked branch name; mount
 a non-repo root, expect no badge and no error toast.
 
-- [ ] **Step 6: Full gate (TS side ratchets!), commit**
+- [x] **Step 6: Full gate (TS side ratchets!), commit**
 
 ```sh
 pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage
 p=5573; lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null && echo "$p BUSY" || PORT=$p pnpm e2e
 git add -A && git commit -m "feat(workspace): root git badges, refusals read as values, mock parity tested (M32.9)"
 ```
+
+> **Executed 2026-08-15.** Five decisions worth recording.
+>
+> 1. **The e2e instruction inverted.** The plan said to use a spec-local
+>    `boot()` because `e2e/boot.ts` does not exist on main. On this base it
+>    does, and AGENTS.md says "never write your own". `workspace.spec.ts`
+>    still carried a local copy — missing the CLOCK PIN, i.e. exactly the
+>    sixth-copy-that-did-not-learn-it that boot.ts was extracted to
+>    prevent. Replaced with the import; the shared boot is a strict
+>    superset (same body plus `page.clock.setFixedTime`).
+> 2. **`root_git_file_url` returns `string | null`, not a wrapper.** Rust
+>    sends `Option<String>`; a friendlier `{ url }` in the mock would be a
+>    shape the real backend never sends, in the phase whose whole point is
+>    parity. `isRootGitRefusal` therefore takes `unknown` — `'code' in
+>    result` throws on a bare string and on null.
+> 3. **`seedRootGit` also flips `caps.git`.** A path with a git status but
+>    no git capability is a state the real backend cannot produce (both
+>    come from the same `.git`). This is also what lets a test model a
+>    directory that BECOMES a repo — the case M32.8's gate re-probes for.
+>    My first store test was wrong here: it set store state, which the
+>    mock gate does not read.
+> 4. **No eslint suppression was needed.** The status-loading effect
+>    writes `gitStatus`, so depending on it would re-run per status. Rather
+>    than disable `exhaustive-deps` (which IS active — only
+>    set-state-in-effect/refs/purity are off), the effect reads the loaded
+>    set fresh via `useRootsStore.getState()`. No suppression, no stale
+>    closure.
+> 5. **The no-toast e2e assertion nearly shipped vacuous.** There is no
+>    `data-testid="toast"`; a `toHaveCount(0)` on it passes whether or not
+>    a toast appears. `ToastHost` renders unconditionally and empty, so the
+>    real assertion is `toBeEmpty()` on `toast-host`.
+>
+> Badge design, per the plan's "nothing speaks first": `gitBadgeText` in
+> `engine/roots.ts` (pure, unit-tested) returns null for a clean in-sync
+> repo, so a quiet repository is undecorated and the branch name rides
+> along only when there is already a count to show. If that reads as too
+> quiet in use, the one-line change is to return the branch unconditionally.
+>
+> Gate: lint, format, typecheck, **3507 unit tests**, coverage ratchet
+> green, **92 e2e passed** (90 before).
 
 **Acceptance:** store keeps refusals as values; mock emits exactly the Rust
 refusal set and a test proves it; badge renders only when it disambiguates;
