@@ -569,16 +569,61 @@ fn maintain(
         store_uuid: store_uuid.to_string(),
         elapsed_limit_seconds: elapsed,
     };
-    match crate::maintain::schedule::attempt(conn, &context, state, &live, chrono::Utc::now())? {
+    // The proposal switch (M26.3c registers, M26.9 flips), read per tick from
+    // the SAME app-config file the MCP server's `tools/list` reads — the
+    // `config_dir` this supervisor was started with IS `app_config_dir`.
+    // Handed in as a bool because `schedule` deliberately holds no app
+    // handle; every failure path of the load reads OFF.
+    let proposals_enabled = crate::app_config::load(config_dir).agent_proposals_enabled;
+    match crate::maintain::schedule::attempt(
+        conn,
+        &context,
+        state,
+        &live,
+        proposals_enabled,
+        chrono::Utc::now(),
+    )? {
         crate::maintain::schedule::Scheduled::Deferred(reasons) => {
             eprintln!("maintenance: deferred ({reasons:?})");
         }
         crate::maintain::schedule::Scheduled::NothingNew => {}
+        crate::maintain::schedule::Scheduled::SkippedNoProposalSurface => {
+            eprintln!("maintenance: skipped (agent_proposals_enabled=false)");
+            record_proposal_surface_skip(conn, store_uuid);
+        }
         crate::maintain::schedule::Scheduled::Ran { said, .. } => {
             eprintln!("maintenance: said {said} finding(s)");
         }
     }
     Ok(())
+}
+
+/// One operational row per skipped maintenance pass (M31.4): the pass had
+/// findings and no surface to propose them on.
+///
+/// This is a CAPABILITY GAP, so it reuses the registered
+/// `capability_unavailable` code — operational by declared destiny, never
+/// the vault ledger — and stays distinguishable by its surface. A new
+/// dedicated code was considered and rejected: zero policy-table churn.
+/// `record_or_warn`, because a failed telemetry write must never fail the
+/// tick.
+fn record_proposal_surface_skip(conn: &rusqlite::Connection, store_uuid: &str) {
+    let Ok(table) = crate::policy::table::PolicyTable::load() else {
+        return;
+    };
+    let Ok(refusal) = crate::policy::rejection::OperationalRefusal::new(
+        &table,
+        "capability_unavailable",
+        "maintenance_schedule",
+        "agent_proposals_enabled=false — pass skipped before the lease",
+    ) else {
+        return;
+    };
+    crate::runtime::operational::record_or_warn(
+        conn,
+        &refusal,
+        &crate::runtime::operational::LogEntry::in_store(store_uuid),
+    );
 }
 
 /// Has the owner turned this on for this vault?
@@ -661,6 +706,31 @@ mod tests {
         assert!(crate::attention::store::read(&conn, &vault, &store)
             .unwrap()
             .is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_skipped_maintenance_pass_leaves_one_row_naming_its_surface() {
+        // M31.4. `maintain()` itself needs a live AppHandle, so what is
+        // pinned here is the recorder its skip arm calls: the row goes to
+        // the OPERATIONAL log (a capability gap, never the vault ledger),
+        // under the existing `capability_unavailable` code, distinguishable
+        // by surface.
+        let dir = testutil::temp_vault("ambient-skip-row");
+        let conn = crate::runtime::open(&dir).unwrap();
+        record_proposal_surface_skip(&conn, "cafebabecafebabecafebabecafebabe");
+        let (code, surface, store, run_id): (String, String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT code, surface, store_uuid, run_id FROM operational_log",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(code, "capability_unavailable");
+        assert_eq!(surface, "maintenance_schedule");
+        assert_eq!(store.as_deref(), Some("cafebabecafebabecafebabecafebabe"));
+        assert_eq!(run_id, None, "no run exists to attribute a skip to");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
