@@ -11,10 +11,11 @@ import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
-import { readNote } from '@/lib/ipc';
+import { fleetActorSummary, readNote, reviewQueue } from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
 import {
   agentRunPrompt,
+  currentStatePrompt,
   distillPrompt,
   refreshSourcePrompt,
   reviewConceptPrompt,
@@ -285,7 +286,34 @@ export function useJobRunner(): void {
                   ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
                   ...(trigger.do === undefined ? {} : { do: trigger.do }),
                 };
-          const message =
+          // M33.8 — push the state that goes stale, rather than trusting the
+          // agent's own notes about it. Both reads degrade to omitting their
+          // line: this is a human-action path in every sense that matters, and
+          // a run must never fail because a context fetch did.
+          const actorForState = agent?.actor ?? null;
+          const [lastOutcome, openReviews] = await Promise.all([
+            actorForState === null
+              ? Promise.resolve(null)
+              : fleetActorSummary(actorForState)
+                  .then((summary) => summary.last_outcome)
+                  .catch(() => null),
+            reviewQueue(vaultPath)
+              .then((cards) => cards.length)
+              // NOT 0. "We could not read the queue" and "the queue is empty"
+              // are different, and the block omits the line rather than
+              // telling an unattended agent that nothing is waiting.
+              .catch(() => null),
+          ]);
+          const state = currentStatePrompt({
+            vaultName: vaultPath.split('/').filter(Boolean).pop() ?? vaultPath,
+            // `todayIso` reads LOCAL date parts, which is the app's one
+            // convention for "today" and what the e2e clock is pinned against.
+            today: todayIso(),
+            lastOutcome,
+            openReviews,
+          });
+
+          const body =
             job.kind === 'agent'
               ? agentRunPrompt(
                   job.path,
@@ -309,6 +337,10 @@ export function useJobRunner(): void {
                     : job.kind === 'stale'
                       ? reviewConceptPrompt(job.path, job.title)
                       : distillPrompt(job.path, job.title);
+          // The block leads. A superseding clause after the instructions
+          // would be read as a footnote to them rather than a correction of
+          // them.
+          const message = `${state}\n\n${body}`;
           mcp.current ??= await startMcp(vaultPath);
           // Ownership re-check (PR #5 review): while this start-up was
           // parked on readNote or startMcp, a chat preemption may have taken

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentRunPrompt } from './prompts';
+import { agentRunPrompt, currentStatePrompt } from './prompts';
 
 /**
  * What an unattended run is actually told.
@@ -122,5 +122,49 @@ describe('per-trigger instructions (M18.5)', () => {
       do: 'HOW TO.',
     });
     expect(prompt.indexOf('SHOULD I?')).toBeLessThan(prompt.indexOf('HOW TO.'));
+  });
+});
+
+describe('currentStatePrompt (M33.8)', () => {
+  it('leads with the superseding clause, verbatim', () => {
+    // The clause is the whole point. An agent carrying notes it wrote weeks
+    // ago has no way to tell which parts are still true, and "here is some
+    // context" would not tell it which one wins.
+    const block = currentStatePrompt({
+      vaultName: 'demo-vault',
+      today: '2026-07-28',
+      lastOutcome: 'succeeded',
+      openReviews: 2,
+    });
+    expect(block.startsWith('CURRENT STATE (supersedes anything you remember)')).toBe(true);
+    expect(block).toContain('- Vault: demo-vault');
+    expect(block).toContain('- Today: 2026-07-28');
+    expect(block).toContain('- Your last run: succeeded');
+    expect(block).toContain('- Proposals waiting on a person: 2');
+  });
+
+  it('says "none" for an agent that has never run, not "succeeded"', () => {
+    const block = currentStatePrompt({
+      vaultName: 'v',
+      today: '2026-07-28',
+      lastOutcome: null,
+      openReviews: 0,
+    });
+    expect(block).toContain('- Your last run: none');
+    // Zero IS a reading here — the queue was read and it was empty.
+    expect(block).toContain('- Proposals waiting on a person: 0');
+  });
+
+  it('omits the review line entirely when the queue could not be read', () => {
+    // Absent is never zero: telling an unattended agent nothing is waiting
+    // when we do not know is the false calm this milestone exists to avoid.
+    const block = currentStatePrompt({
+      vaultName: 'v',
+      today: '2026-07-28',
+      lastOutcome: 'failed',
+      openReviews: null,
+    });
+    expect(block).not.toContain('Proposals waiting');
+    expect(block).toContain('- Your last run: failed');
   });
 });

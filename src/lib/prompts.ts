@@ -134,6 +134,47 @@ export function organizePrompt(path: string): string {
  * update_frontmatter, bounded, and visible as an ordinary property — so what
  * the agent carries forward is never hidden from the person it works for.
  */
+/**
+ * State pushed at a resumed run, rather than remembered by it (M33.8).
+ *
+ * An unattended run may carry notes it wrote weeks ago (`memory.recent`), and
+ * a model reading them has no way to tell which parts are still true. Pushing
+ * the few facts that go stale — and saying out loud that they SUPERSEDE what
+ * it remembers — is cheaper and more reliable than any instruction to
+ * distrust its own notes.
+ *
+ * Deliberately four lines. This block rides in front of every unattended run,
+ * so anything added here is paid for on every one of them; it holds only
+ * facts that (a) change without the agent doing anything and (b) change what
+ * a run should do.
+ *
+ * **Absent is never zero here either.** An agent that has never run says
+ * "none", not "succeeded"; a review count that could not be read is OMITTED
+ * rather than reported as 0, because telling an unattended agent that nothing
+ * is waiting when we do not know is exactly the false calm the rest of this
+ * milestone is built to avoid.
+ */
+export function currentStatePrompt(state: {
+  vaultName: string;
+  today: string;
+  /** The outcome of this agent's last run, or null if it has never run —
+   * which is different from a run that failed. */
+  lastOutcome: string | null;
+  /** Omitted from the block entirely when null (unreadable), which is not
+   * the same as 0 (read, and empty). */
+  openReviews: number | null;
+}): string {
+  return [
+    'CURRENT STATE (supersedes anything you remember)',
+    `- Vault: ${state.vaultName}`,
+    `- Today: ${state.today}`,
+    `- Your last run: ${state.lastOutcome ?? 'none'}`,
+    ...(state.openReviews === null
+      ? []
+      : [`- Proposals waiting on a person: ${state.openReviews}`]),
+  ].join('\n');
+}
+
 export function agentRunPrompt(
   path: string,
   title: string,

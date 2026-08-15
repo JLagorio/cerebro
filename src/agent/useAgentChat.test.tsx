@@ -84,6 +84,20 @@ describe('useAgentChat send expansion', () => {
     );
   });
 
+  it('pushes no CURRENT STATE block — a person is watching this one (M33.8)', async () => {
+    // The block exists for runs nobody is watching, which may be carrying
+    // weeks-old notes about the vault. The panel pushes its own live context
+    // every turn, so a second copy here would be duplication the user pays
+    // for on every message.
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('what is at risk?', undefined));
+
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(options.message).not.toContain('CURRENT STATE');
+    expect(options.systemPrompt).not.toContain('CURRENT STATE');
+  });
+
   it('shows the typed text but runs the expanded message', async () => {
     const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/weekly-review', () => Promise.resolve('EXPANDED BODY')));

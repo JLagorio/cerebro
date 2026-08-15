@@ -107,6 +107,23 @@ describe('useJobRunner stream ownership', () => {
     vi.useRealTimers();
   });
 
+  it('pushes current state in front of an unattended run, superseding its memory', async () => {
+    // M33.8 — the munder-difflin pattern: a resumed process is TOLD what is
+    // true now rather than trusting the notes it wrote weeks ago. The clause
+    // is asserted verbatim because it is the part that does the work.
+    renderHook(() => useJobRunner());
+    await startJob();
+
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(options.message.startsWith('CURRENT STATE (supersedes anything you remember)')).toBe(
+      true,
+    );
+    expect(options.message).toContain('- Your last run:');
+    // And the instructions still follow it — the block leads, it does not
+    // replace.
+    expect(options.message).toContain('playbook');
+  });
+
   it('finish() on the owned stream releases everything', async () => {
     renderHook(() => useJobRunner());
     await startJob();
