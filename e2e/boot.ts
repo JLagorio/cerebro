@@ -54,6 +54,44 @@ export async function boot(page: Page): Promise<void> {
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 }
 
+/**
+ * Stage a mock seam BEFORE the app boots. Call this above `boot(page)`.
+ *
+ * Several seams (`__cerebroSeedReview`, `__cerebroSeedFleet`, …) have to be
+ * populated before the first render, but they are installed by a module the
+ * page loads — so the script polls for the seam rather than assuming it. This
+ * used to be copy-pasted into whichever spec needed it, which is how
+ * `review.spec.ts` ended up with a private boot that never pinned the clock.
+ */
+export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[]): Promise<void> {
+  await page.addInitScript(
+    ({ seam, args }) => {
+      const install = () => {
+        const seed = (window as unknown as Record<string, unknown>)[seam];
+        if (typeof seed !== 'function') {
+          setTimeout(install, 10);
+          return;
+        }
+        (seed as (...a: unknown[]) => void)(...args);
+      };
+      install();
+    },
+    { seam, args },
+  );
+}
+
+/** Open the Status hub and return the given section's locator (M33.3).
+ *
+ * Sections are addressed by `data-section`, the attribute `Section` has
+ * always rendered — not by a second per-section testid. */
+export async function openStatusSection(page: Page, section: string) {
+  await page.getByRole('button', { name: 'Status' }).click();
+  await expect(page.getByTestId('status-page')).toBeVisible();
+  const located = page.locator(`[data-section="${section}"]`);
+  await expect(located).toBeVisible();
+  return located;
+}
+
 /** Read a file's full text (frontmatter + body) from the mock filesystem. */
 export async function readMockFile(page: Page, path: string): Promise<string> {
   const text = await page.evaluate((p) => window.__cerebroMockFs.get(p), path);
@@ -76,5 +114,8 @@ declare global {
     /** The M28.1 gate seam. Evaluations are Rust over a real runtime DB, so
      * a spec that wants a recorded result on the board paints it. */
     __cerebroSeedTriggerLatest: (gate: string, latest: unknown) => void;
+    /** The M24.9 review seam. The browser has no ledger, so a spec stages the
+     * cards `policy/review.rs` would have returned. */
+    __cerebroSeedReview: (fixture: unknown) => void;
   }
 }

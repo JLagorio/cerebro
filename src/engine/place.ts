@@ -150,8 +150,6 @@ export function placeLabel(
       return 'Docs';
     case 'changes':
       return 'Changes';
-    case 'review':
-      return 'Needs review';
     case 'pipeline':
       return 'Background';
     case 'status':

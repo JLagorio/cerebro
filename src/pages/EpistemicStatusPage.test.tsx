@@ -6,6 +6,7 @@ import type {
   LanesView,
   PipelineOverview,
   ReviewCard,
+  RevertableApplication,
   TriggerEntryStatus,
   TriggerRunReport,
   VerificationScope,
@@ -25,6 +26,10 @@ import { EpistemicStatusPage } from './EpistemicStatusPage';
 const converge = vi.fn<(vault: string) => Promise<ChangesView>>();
 const attentionLanes = vi.fn<(vault: string) => Promise<LanesView>>();
 const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
+// M33.3: the needs section reads BOTH halves of the queue itself, so the
+// revertables need a stub too — without one the section's own read throws and
+// it renders `unavailable`, which would quietly mask what these specs assert.
+const revertableApplications = vi.fn<(vault: string) => Promise<RevertableApplication[]>>();
 const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
 const triggerStatus = vi.fn<(vault: string) => Promise<TriggerEntryStatus[]>>();
 const triggerRun = vi.fn<(vault: string) => Promise<TriggerRunReport>>();
@@ -38,6 +43,7 @@ vi.mock('@/lib/ipc', async () => {
     converge: (vault: string) => converge(vault),
     attentionLanes: (vault: string) => attentionLanes(vault),
     reviewQueue: (vault: string) => reviewQueue(vault),
+    revertableApplications: (vault: string) => revertableApplications(vault),
     pipelineOverview: (vault: string) => pipelineOverview(vault),
     triggerStatus: (vault: string) => triggerStatus(vault),
     triggerRun: (vault: string) => triggerRun(vault),
@@ -165,6 +171,7 @@ describe('EpistemicStatusPage', () => {
     converge.mockResolvedValue(QUIET_CHANGES);
     attentionLanes.mockResolvedValue(EMPTY_LANES);
     reviewQueue.mockResolvedValue([]);
+    revertableApplications.mockResolvedValue([]);
     pipelineOverview.mockResolvedValue(HEALTH);
     triggerStatus.mockResolvedValue(BOARD);
     triggerRun.mockResolvedValue(RUN_REPORT);
@@ -259,15 +266,50 @@ describe('EpistemicStatusPage', () => {
     expect(note.textContent).toContain('under-reported');
   });
 
-  it('counts the queue and marks how much of it is HIGH or CRITICAL', async () => {
+  // M33.3 INVERTED this. It used to assert the section was a COUNT and a
+  // door — "3 cards are waiting, 2 at HIGH or CRITICAL" — because the cards
+  // themselves lived on a separate tab. The tab is gone, so the count is the
+  // thing that must not be here: the section renders the cards.
+  it('holds the cards themselves rather than a count and a door', async () => {
     const card = (risk: string): ReviewCard =>
-      ({ proposal_id: risk, effective_risk: risk }) as ReviewCard;
+      ({
+        proposal_id: risk,
+        effective_risk: risk,
+        op: `op_${risk}`,
+        queued_for: [],
+        targets: [],
+        evidence_refs: [],
+        coverage_refs: [],
+      }) as unknown as ReviewCard;
     reviewQueue.mockResolvedValue([card('LOW'), card('HIGH'), card('CRITICAL')]);
     render(<EpistemicStatusPage />);
 
-    const summary = await screen.findByTestId('review-summary');
-    expect(summary.getAttribute('data-urgent')).toBe('2');
-    expect(summary.textContent).toContain('3 cards are');
+    const cards = await screen.findAllByTestId('review-card');
+    expect(cards).toHaveLength(3);
+    expect(screen.getAllByTestId('card-risk').map((c) => c.textContent)).toEqual([
+      'LOW',
+      'HIGH',
+      'CRITICAL',
+    ]);
+    expect(screen.getAllByTestId('approve')).toHaveLength(3);
+    expect(screen.queryByTestId('review-summary')).toBeNull();
+  });
+
+  // The defect the merge retires: `ReviewPage` turned a failed read into an
+  // empty one, telling a person with an unreadable ledger that nothing was
+  // waiting on them.
+  it('says the review queue could not be read rather than borrowing the empty state', async () => {
+    reviewQueue.mockRejectedValue(new Error('no ledger store for this vault'));
+    render(<EpistemicStatusPage />);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId('section-unavailable')
+          .some((n) => n.textContent?.includes('The review queue')),
+      ).toBe(true),
+    );
+    expect(screen.queryByText('Nothing is waiting on a decision.')).toBeNull();
   });
 
   /** A day whose spend was lost is not a day with budget left. */

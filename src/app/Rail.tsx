@@ -97,7 +97,6 @@ export function Rail() {
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
   // M24.9: what the base is holding until a person decides. A queued card
   // outlives the session that made it, so it needs a door and not a toast.
-  const reviewActive = selection.kind === 'review';
   const pipelineActive = selection.kind === 'pipeline';
   // M27.8: what the base knows about itself. Deliberately NOT badged — a
   // count of contradictions on the rail is the chrome telling you your
@@ -132,12 +131,6 @@ export function Rail() {
         label="Home"
         active={homeActive}
         onClick={() => navigate({ kind: 'home' })}
-      />
-      <RailButton
-        icon="gavel"
-        label="Needs review"
-        active={reviewActive}
-        onClick={() => navigate({ kind: 'review' })}
       />
       <RailButton
         icon="activity"

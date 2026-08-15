@@ -15,7 +15,6 @@ import { DetailPanel } from '@/detail/DetailPanel';
 import { ChangesPage } from '@/pages/ChangesPage';
 import { EpistemicStatusPage } from '@/pages/EpistemicStatusPage';
 import { PipelinePage } from '@/pages/PipelinePage';
-import { ReviewPage } from '@/pages/ReviewPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
@@ -123,8 +122,6 @@ function CanvasOutlet() {
       return <TypePage selection={selection} />;
     case 'changes':
       return <ChangesPage />;
-    case 'review':
-      return <ReviewPage />;
     case 'pipeline':
       return <PipelinePage />;
     case 'status':

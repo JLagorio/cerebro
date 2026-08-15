@@ -63,17 +63,21 @@ const QUIET_CHANGES = {
 
 async function open(
   page: Page,
-  seed: { lanes?: unknown; changes?: unknown | null } = {},
+  seed: { lanes?: unknown; changes?: unknown | null; review?: unknown } = {},
 ): Promise<void> {
   await boot(page);
   await page.evaluate(
-    ({ lanes, changes }) => {
+    ({ lanes, changes, review }) => {
       window.__cerebroSeedLanes(lanes);
       window.__cerebroSeedChanges(changes);
+      // Seeded before the hub mounts, so its first read already has them
+      // (M33.3 — the needs section reads the queue itself now).
+      if (review !== undefined) window.__cerebroSeedReview(review);
     },
     {
       lanes: seed.lanes ?? LANES,
       changes: seed.changes === undefined ? QUIET_CHANGES : seed.changes,
+      review: seed.review,
     },
   );
   await page.getByTestId('rail').getByRole('button', { name: 'Epistemic status' }).click();
@@ -207,17 +211,51 @@ test('status: what changed is read aloud, and a quiet window says one sentence',
   await expect(page.locator('[data-section="changed"]')).toContainText('Nothing has changed');
 });
 
-test('status: the review summary is a door and not a second copy of the cards', async ({
-  page,
-}) => {
+test('status: needs-review holds the cards themselves, not a door to them', async ({ page }) => {
+  // M33.3 INVERTED this assertion. It used to prove the section was a count
+  // and a door — "not a second copy of the cards" — because the cards lived
+  // on their own tab. The tab is gone: the hub is where they live, so the
+  // door is what must not exist now. The card behaviours themselves are
+  // proved in `review.spec.ts`, against this same section.
+  // With nothing queued the honest answer is still the empty one.
   await open(page);
+  const section = page.locator('[data-section="needs-review"]');
+  await expect(section).toContainText('Nothing is waiting on a decision.');
 
-  // The demo vault seeds no proposals, so the honest answer is the empty one.
-  await expect(page.locator('[data-section="needs-review"]')).toContainText(
-    'Nothing is waiting on a decision.',
-  );
+  // And with a card queued, the card itself is here — no summary, no door.
+  await open(page, {
+    review: {
+      cards: [
+        {
+          proposal_id: '0000000000000000000000000000000a',
+          commit_set_id: '0000000000000000000000000000000f',
+          run_id: '9111111111111111111111111111111f',
+          actor: 'agent:claude',
+          op: 'tombstone_belief',
+          effective_risk: 'HIGH',
+          review: null,
+          queued_for: [],
+          intended_use_kind: 'ReversibleWork',
+          intended_use_stakes: 'LOW',
+          transition_cause: 'new_evidence',
+          evidence_refs: [],
+          coverage_refs: [],
+          authority_refs: [],
+          targets: [],
+          reason: 'this concept was superseded by the Q3 rewrite',
+          set_members: ['0000000000000000000000000000000a'],
+          set_ready: false,
+        },
+      ],
+    },
+  });
+  await expect(section.getByTestId('review-card')).toHaveCount(1);
+  await expect(section.getByTestId('card-op')).toHaveText('tombstone_belief');
+  await expect(section.getByRole('button', { name: 'Approve' })).toBeVisible();
+  await expect(section.getByTestId('review-summary')).toHaveCount(0);
 
-  // And the background summary takes you to the surface that can act on it.
+  // And the background summary still takes you to the surface that can act
+  // on it. (M33.4 turns this one into a body too.)
   await page.getByTestId('health-summary').click();
   await expect(page.getByTestId('pipeline-page')).toBeVisible();
 });

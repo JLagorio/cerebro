@@ -6,10 +6,10 @@ import type {
   LanesView,
   LaneView,
   PipelineOverview,
-  ReviewCard,
   TriggerEntryStatus,
   TriggerRunReport,
 } from '@/lib/ipc';
+import { NeedsYouSection } from '@/status/NeedsYouSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -210,35 +210,6 @@ function Changes({ feed }: { feed: Feed<ChangesView> }) {
           </div>
         ))}
     </>
-  );
-}
-
-/** The M24 queue, as a count and a door — not as cards. The cards live on
- * the review page, which knows how to decide them; a second rendering here
- * would be a second place for the decision UI to drift. */
-function NeedsReview({ feed }: { feed: Feed<ReviewCard[]> }) {
-  const navigate = useNavStore((s) => s.navigate);
-  if (feed.kind === 'loading') return <Loading />;
-  if (feed.kind === 'unavailable') return <Unavailable what="The review queue" />;
-  const cards = feed.data;
-  const urgent = cards.filter(
-    (card) => card.effective_risk === 'HIGH' || card.effective_risk === 'CRITICAL',
-  ).length;
-  if (cards.length === 0) return <Quiet text="Nothing is waiting on a decision." />;
-  return (
-    <button
-      type="button"
-      data-testid="review-summary"
-      data-urgent={urgent}
-      onClick={() => navigate({ kind: 'review' })}
-      className="flex w-full items-center justify-between rounded border border-n-200 px-2.5 py-2 text-left hover:bg-n-50"
-    >
-      <span className="text-xs text-n-800">
-        {cards.length === 1 ? '1 card is' : `${cards.length} cards are`} waiting on a decision
-        {urgent > 0 && `, ${urgent} at HIGH or CRITICAL`}
-      </span>
-      <Icon name="chevron-right" size={14} color="var(--n-500)" />
-    </button>
   );
 }
 
@@ -625,11 +596,33 @@ function Lanes({ feed }: { feed: Feed<LanesView> }) {
   );
 }
 
+/**
+ * Bring the deep-linked section into view (M33.3).
+ *
+ * `section` on the selection would be decorative without this — the hub is
+ * one scrolling column, so arriving at `{kind:'status', section:'needs-review'}`
+ * and landing at the top is the same as not carrying the section at all.
+ * A section the page does not render is a no-op rather than an error: the
+ * link is a request, and a missing target means the answer is just "here is
+ * the hub".
+ */
+function useScrollToSection(section: string | undefined, ready: boolean): void {
+  useEffect(() => {
+    if (section === undefined || !ready) return;
+    const target = document.querySelector(`[data-section="${section}"]`);
+    target?.scrollIntoView({ block: 'start' });
+  }, [section, ready]);
+}
+
 export function EpistemicStatusPage() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  const selection = useNavStore((s) => s.selection);
+  useScrollToSection(
+    selection.kind === 'status' ? selection.section : undefined,
+    vaultPath !== null,
+  );
   const changes = useFeed(vaultPath, ipc.converge);
   const lanes = useFeed(vaultPath, ipc.attentionLanes);
-  const review = useFeed(vaultPath, ipc.reviewQueue);
   const health = useFeed(vaultPath, ipc.pipelineOverview);
   const [gatesVersion, setGatesVersion] = useState(0);
   const gates = useFeed(vaultPath, ipc.triggerStatus, gatesVersion);
@@ -680,7 +673,9 @@ export function EpistemicStatusPage() {
           title="Needs review"
           blurb="What the base wants to change and is waiting for you to decide."
         >
-          <NeedsReview feed={review} />
+          {/* M33.3: the cards themselves, not a count and a door. The section
+              owns its own read — the hub no longer needs a review feed. */}
+          <NeedsYouSection vaultPath={vaultPath} />
         </Section>
 
         <Section
