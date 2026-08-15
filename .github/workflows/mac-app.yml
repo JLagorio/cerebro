@@ -156,6 +156,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+      id-token: write # provenance attestation (M32.7)
+      attestations: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -203,6 +205,16 @@ jobs:
       - name: Sign and package
         run: ./scripts/mac-package.sh "src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
 
+      # Attested bytes must BE the shipped bytes, so this runs after signing
+      # and packaging and before the upload. Without an Apple Developer ID
+      # this is the whole integrity story: it proves the DMG came out of this
+      # repo's CI at a given commit. It does not make macOS trust the app.
+      - name: Attest build provenance (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist-mac/*
+
       # Both the DMG and the zip when the DMG was produced, the zip alone when
       # hdiutil had to be abandoned — either one installs the same app.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -230,6 +242,13 @@ jobs:
 
             ```
             xattr -dr com.apple.quarantine /Applications/Cerebro.app
+            ```
+
+            You can verify this DMG was built by this repository's CI from the
+            tagged commit (requires the GitHub CLI):
+
+            ```
+            gh attestation verify Cerebro.dmg -R JLagorio/cerebro
             ```
 
             The assistant uses the Claude Code CLI already installed on your

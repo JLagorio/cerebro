@@ -21,7 +21,10 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    // Reuse is OPT-IN (M32.7): a busy port now fails loudly instead of
+    // silently testing another worktree's branch. Set CEREBRO_E2E_REUSE=1
+    // to attach to a dev server you know is yours.
+    reuseExistingServer: !process.env.CI && process.env.CEREBRO_E2E_REUSE === '1',
     timeout: 30_000,
   },
 });

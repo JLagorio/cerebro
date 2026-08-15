@@ -1037,7 +1037,7 @@ whole integrity story available without an Apple account; say so honestly.
 - Modify: `playwright.config.ts`
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Attest the shipped bytes**
+- [x] **Step 1: Attest the shipped bytes**
 
 In the `build` job: extend its `permissions` block and add a step **after**
 "Sign and package" (attested bytes must be shipped bytes) and before the
@@ -1058,7 +1058,7 @@ artifact upload:
           subject-path: dist-mac/*
 ```
 
-- [ ] **Step 2: Put the verify one-liner where the quarantine instructions are**
+- [x] **Step 2: Put the verify one-liner where the quarantine instructions are**
 
 In the release body (lines 171–183), after the `xattr` code block, add:
 
@@ -1074,7 +1074,7 @@ In the release body (lines 171–183), after the `xattr` code block, add:
 Same audience, and it partially redeems the quarantine instruction it sits
 next to.
 
-- [ ] **Step 3: `.gitignore` the future secret**
+- [x] **Step 3: `.gitignore` the future secret**
 
 Add to `.gitignore`:
 
@@ -1086,7 +1086,7 @@ Add to `.gitignore`:
 The app's architecture needs no secrets today; this is for the first day
 that stops being true.
 
-- [ ] **Step 4: One issue template — the one that isn't theater**
+- [x] **Step 4: One issue template — the one that isn't theater**
 
 Create `.github/ISSUE_TEMPLATE/bug.yml`:
 
@@ -1122,7 +1122,7 @@ body:
       description: Rough size and anything unusual — no contents needed.
 ```
 
-- [ ] **Step 5: The e2e reuse knob — configuration instead of ritual**
+- [x] **Step 5: The e2e reuse knob — configuration instead of ritual**
 
 AGENTS.md documents a trap: `reuseExistingServer` silently attaches to a dev
 server another worktree is holding, and the suite runs against a different
@@ -1157,7 +1157,7 @@ since M32.7; a busy port fails loudly with "port … is used"; set
 another worktree used to be silently reused, running the suite against a
 different branch's app).
 
-- [ ] **Step 6: Verify and commit**
+- [x] **Step 6: Verify and commit**
 
 ```sh
 pnpm e2e --list >/dev/null 2>&1 || PORT=5573 pnpm exec playwright test --list | head -3
@@ -1165,6 +1165,25 @@ git add -A
 git commit -m "ci(release): provenance attestation, and the hygiene sweep — env ignore, bug template, e2e reuse knob (M32.7)"
 git push && gh pr checks --watch
 ```
+
+> **Executed 2026-08-15.** Two plan-vs-reality deltas, both from the
+> M31 base (see Execution deviations at the top):
+>
+> - `attest-build-provenance` is **commit-pinned** to v4.2.2, not left on
+>   `@v4` — M32.5 removed the `actions/*` tag exemption, so a new `@v4`
+>   here would have failed the scanner lane this milestone just built.
+> - AGENTS.md **already had** a port-trap paragraph (the `lsof` ritual);
+>   the plan expected to add one. It was REWRITTEN to describe the new
+>   opt-in behaviour — leaving it would have made this file describe a
+>   workaround for a constraint the same commit retired, which is the
+>   named house rule about killing a retired workaround's comment.
+>   `playwright.config.ts` line was 24, not 19.
+>
+> Verified: `reuseExistingServer` evaluates false with the var unset, and
+> the full suite passes on a free port — **90 passed (1.9m)**. The
+> attestation step itself cannot be exercised until a real `v*` tag is
+> pushed; it is guarded by `startsWith(github.ref, 'refs/tags/v')` and
+> never runs on a PR.
 
 **Acceptance:** tag builds emit an attestation for `dist-mac/*`; the release
 body carries the verify command; `.env*` ignored; bug template renders; e2e

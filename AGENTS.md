@@ -10,17 +10,17 @@ server — no API key ever enters the app.
 
 ## Commands
 
-| What       | Command                             | Notes                                                                     |
-| ---------- | ----------------------------------- | ------------------------------------------------------------------------- |
-| Dev server | `pnpm dev`                          | Port 5173 strict; `PORT=5273 pnpm dev` for a second checkout              |
-| Unit tests | `pnpm test:run`                     | **`pnpm test` is watch mode — it never exits.**                           |
-| Coverage   | `pnpm test:coverage`                | Thresholds in `vite.config.ts` ratchet UP only                            |
-| E2E        | `pnpm e2e`                          | Playwright; reuses a running dev server outside CI. `PORT=...` to isolate |
-| Lint       | `pnpm lint`                         | Zero-warning policy (`--max-warnings=0`)                                  |
-| Format     | `pnpm format` / `pnpm format:check` | Prettier, 100 cols, single quotes                                         |
-| Typecheck  | `pnpm typecheck`                    | App (`tsconfig.json`) + tools (`tsconfig.tools.json` — scripts/, e2e/)    |
-| Rust       | `cd src-tauri && cargo test`        | Also `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`     |
-| Mac build  | `./scripts/mac-build.sh`            | Local build + install                                                     |
+| What       | Command                             | Notes                                                                                          |
+| ---------- | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Dev server | `pnpm dev`                          | Port 5173 strict; `PORT=5273 pnpm dev` for a second checkout                                   |
+| Unit tests | `pnpm test:run`                     | **`pnpm test` is watch mode — it never exits.**                                                |
+| Coverage   | `pnpm test:coverage`                | Thresholds in `vite.config.ts` ratchet UP only                                                 |
+| E2E        | `pnpm e2e`                          | Playwright; starts its own server. `CEREBRO_E2E_REUSE=1` to reuse yours; `PORT=...` to isolate |
+| Lint       | `pnpm lint`                         | Zero-warning policy (`--max-warnings=0`)                                                       |
+| Format     | `pnpm format` / `pnpm format:check` | Prettier, 100 cols, single quotes                                                              |
+| Typecheck  | `pnpm typecheck`                    | App (`tsconfig.json`) + tools (`tsconfig.tools.json` — scripts/, e2e/)                         |
+| Rust       | `cd src-tauri && cargo test`        | Also `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`                          |
+| Mac build  | `./scripts/mac-build.sh`            | Local build + install                                                                          |
 
 Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 `--no-verify`** — if a hook is wrong, fix the hook.
@@ -120,7 +120,11 @@ browser timezone is fixed to UTC in `playwright.config.ts` for the same
 reason. For live checks, chrome-devtools MCP against `pnpm dev` works;
 synthetic `blur` events don't fire React `onBlur` (call `el.blur()`).
 
-**Check the e2e port is FREE before running.** `reuseExistingServer` is on
-outside CI, so a port held by another worktree is silently reused and the
-suite runs against a different branch's app — producing confident, wrong
-failures. `lsof -iTCP:5173 -sTCP:LISTEN` first, then `PORT=<free> pnpm e2e`.
+**Reuse is opt-in since M32.7, and a busy port now fails loudly.** Playwright
+starts its own dev server; a port already held fails with "port … is used"
+instead of silently attaching. That noise is the feature — a port held by
+another worktree used to be reused without a word, running the suite against
+a different branch's app and producing confident, wrong failures. Set
+`CEREBRO_E2E_REUSE=1` only when the running server is yours, or
+`PORT=<free> pnpm e2e` to isolate. CI is unaffected (`CI=true` already
+disabled reuse there).

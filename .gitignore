@@ -24,3 +24,9 @@ coverage/
 
 # Agent worktrees and local scratch (M16.1)
 .claude/
+
+# The app's architecture needs no secrets today — the assistant is the user's
+# own CLI and no API key ever enters the app. This is for the first day that
+# stops being true, so it is here BEFORE there is anything to leak (M32.7).
+.env
+.env.*
