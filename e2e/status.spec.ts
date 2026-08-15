@@ -80,7 +80,7 @@ async function open(
       review: seed.review,
     },
   );
-  await page.getByTestId('rail').getByRole('button', { name: 'Epistemic status' }).click();
+  await page.getByTestId('rail').getByRole('button', { name: 'Status' }).click();
   await expect(page.getByTestId('status-page')).toBeVisible();
 }
 
@@ -151,12 +151,18 @@ test('status: a feed that refused says so, and does not borrow the empty state',
 
   await expect(page.getByTestId('section-unavailable')).toContainText('What changed');
   await expect(page.locator('[data-section="changed"]')).not.toContainText('Nothing has changed');
-  // Every other section still answered. Four separate reads, four separate
-  // answers — a missing ledger does not take the review queue with it.
+  // Every other section still answered. Separate reads, separate answers —
+  // a missing ledger does not take the review queue or the background with
+  // it, and after M33.3/M33.4 those two are BODIES rather than doors, which
+  // makes the independence claim stronger than it was: each merged section
+  // owns its own read and its own failure.
   await expect(page.locator('[data-section="contradiction"]')).toContainText(
     'Nothing in contradiction.',
   );
-  await expect(page.getByTestId('health-summary')).toBeVisible();
+  await expect(page.locator('[data-section="system"]').getByTestId('budget-meter')).toBeVisible();
+  await expect(page.locator('[data-section="needs-review"]')).toContainText(
+    'Nothing is waiting on a decision.',
+  );
 });
 
 test('status: what the backend could not see is named, not dropped', async ({ page }) => {
@@ -254,10 +260,10 @@ test('status: needs-review holds the cards themselves, not a door to them', asyn
   await expect(section.getByRole('button', { name: 'Approve' })).toBeVisible();
   await expect(section.getByTestId('review-summary')).toHaveCount(0);
 
-  // And the background summary still takes you to the surface that can act
-  // on it. (M33.4 turns this one into a body too.)
-  await page.getByTestId('health-summary').click();
-  await expect(page.getByTestId('pipeline-page')).toBeVisible();
+  // M33.4 did the same to the background summary: the controls are a body in
+  // the hub now, so neither of the two doors this page used to hold exists.
+  await expect(page.getByTestId('health-summary')).toHaveCount(0);
+  await expect(page.locator('[data-section="system"]').getByTestId('lane-toggles')).toBeVisible();
 });
 
 test('status: the gate board is the shared artifact, and never-evaluated is said out loud', async ({
@@ -289,7 +295,7 @@ test('status: a fired gate is loud, and even then licenses only a dated plan', a
       window_end: '2026-08-14T00:00:00+02:00',
     });
   });
-  await page.getByTestId('rail').getByRole('button', { name: 'Epistemic status' }).click();
+  await page.getByTestId('rail').getByRole('button', { name: 'Status' }).click();
 
   const row = page.locator('[data-gate="R13:root"]');
   await expect(row).toHaveAttribute('data-result', 'fired');

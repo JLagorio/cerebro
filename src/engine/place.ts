@@ -150,10 +150,8 @@ export function placeLabel(
       return 'Docs';
     case 'changes':
       return 'Changes';
-    case 'pipeline':
-      return 'Background';
     case 'status':
-      return 'Epistemic status';
+      return 'Status';
     case 'pulse':
       return 'Pulse';
     case 'library':

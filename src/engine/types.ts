@@ -179,7 +179,7 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
  * parallel set of names — a second vocabulary would need a mapping table, and
  * the mapping table would be the thing that drifted.
  */
-export type StatusSection = 'changed' | 'needs-review' | 'health' | 'gates';
+export type StatusSection = 'changed' | 'needs-review' | 'system' | 'gates';
 
 export type Selection =
   | { kind: 'home' }
@@ -210,10 +210,6 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
-  // M25.7 — what the background pipeline ran, what it spent, and what it is
-  // waiting on. A place rather than a modal because a paused pipeline and a
-  // held pile outlive the session that made them.
-  | { kind: 'pipeline' }
   // M27.8 — one coherent home for what the base knows about itself: what
   // changed, what it cannot see, what it contradicts itself about, what has
   // gone stale, what is waiting on a decision, and whether the background is

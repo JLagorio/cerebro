@@ -14,7 +14,6 @@ import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { ChangesPage } from '@/pages/ChangesPage';
 import { EpistemicStatusPage } from '@/pages/EpistemicStatusPage';
-import { PipelinePage } from '@/pages/PipelinePage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
@@ -122,8 +121,6 @@ function CanvasOutlet() {
       return <TypePage selection={selection} />;
     case 'changes':
       return <ChangesPage />;
-    case 'pipeline':
-      return <PipelinePage />;
     case 'status':
       return <EpistemicStatusPage />;
     case 'pulse':

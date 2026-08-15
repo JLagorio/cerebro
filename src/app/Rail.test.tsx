@@ -38,6 +38,41 @@ describe('Rail', () => {
   });
   afterEach(cleanup);
 
+  /**
+   * The rail's shape, asserted rather than assumed (M33.4).
+   *
+   * M33.3 and M33.4 each removed a button — Needs review and Background are
+   * sections of the Status hub now — and nothing in this file noticed, because
+   * nothing here had ever named the set. A merge that silently dropped a
+   * THIRD destination would have been just as invisible. The list is the
+   * assertion: adding or removing a rail button is a decision, and a decision
+   * belongs in a diff somebody reads.
+   */
+  it('carries exactly the ten destinations the shell has', () => {
+    render(<Rail />);
+
+    const labels = screen
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label'))
+      // The inbox label carries its count; everything else is a bare name.
+      .map((label) => label?.replace(/ \(\d+\)$/, ''));
+    expect(labels).toEqual([
+      'Home',
+      'Status',
+      'Inbox',
+      'Docs',
+      'Workspace',
+      'Knowledge',
+      'History',
+      'Assistant',
+      'Library',
+      'Settings',
+    ]);
+    // Both merged surfaces are gone from the rail, not merely renamed.
+    expect(labels).not.toContain('Needs review');
+    expect(labels).not.toContain('Background');
+  });
+
   it('navigates to the Docs surface', () => {
     render(<Rail />);
     fireEvent.click(screen.getByRole('button', { name: 'Docs' }));

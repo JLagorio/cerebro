@@ -312,7 +312,13 @@ describe('EpistemicStatusPage', () => {
     expect(screen.queryByText('Nothing is waiting on a decision.')).toBeNull();
   });
 
-  /** A day whose spend was lost is not a day with budget left. */
+  /**
+   * A day whose spend was lost is not a day with budget left.
+   *
+   * M33.4 INVERTED this too. It used to read the two-line `health-summary`
+   * door; the section is the controls now, so the same rule is asserted where
+   * it actually renders — on the meter itself.
+   */
   it('never reports a ceiling state over a meter that could not account for itself', async () => {
     pipelineOverview.mockResolvedValue({
       ...HEALTH,
@@ -320,9 +326,35 @@ describe('EpistemicStatusPage', () => {
     });
     render(<EpistemicStatusPage />);
 
-    const summary = await screen.findByTestId('health-summary');
-    expect(summary.textContent).toContain('not fully accounted for');
-    expect(summary.textContent).not.toContain('under budget');
+    const note = await screen.findByTestId('accounting-unknown');
+    expect(note.textContent).toContain('is not zero');
+    expect(screen.queryByTestId('health-summary')).toBeNull();
+  });
+
+  it('holds the background controls rather than a summary and a door', async () => {
+    render(<EpistemicStatusPage />);
+
+    await waitFor(() => expect(screen.getByTestId('lane-toggles')).toBeTruthy());
+    expect(screen.getByTestId('budget-meter')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause background work' })).toBeTruthy();
+    expect(screen.queryByTestId('health-summary')).toBeNull();
+  });
+
+  // The second collapse the merge retires: PipelinePage rendered "Nothing to
+  // report yet" over a failed read, the same words a genuinely quiet vault
+  // gets.
+  it('says background health could not be read rather than reporting calm', async () => {
+    pipelineOverview.mockRejectedValue(new Error('no runtime database'));
+    render(<EpistemicStatusPage />);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId('section-unavailable')
+          .some((n) => n.textContent?.includes('Background health')),
+      ).toBe(true),
+    );
+    expect(screen.queryByTestId('budget-meter')).toBeNull();
   });
 
   it('renders nothing about a vault that is not open', async () => {

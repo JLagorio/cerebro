@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { boot, openStatusSection, seedBeforeBoot } from './boot';
 
 /**
  * The M25.7 control surface: what the background ran, what it spent, and what
@@ -12,6 +13,17 @@ import { test, expect, type Page } from '@playwright/test';
  * that three faces of failure stay three banners, that an unaccounted day
  * says so rather than showing a confident zero, and that held work asks its
  * question instead of being guessed at.
+ *
+ * **M33.4 moved the home, not the behaviour.** These controls are the Status
+ * hub's "Background" section now; there is no background tab. Every testid
+ * below is unchanged on purpose — that is what makes this file able to prove
+ * the extraction dropped nothing.
+ *
+ * The activity-log tests that used to live here are GONE, not moved: the old
+ * 50-row table was not clickable and had no detail view, and M33.5's fleet
+ * section replaces it with one that filters, attributes and opens. Its specs
+ * are in `fleet.spec.ts`, including the "unknown, never zero" assertion this
+ * file used to carry.
  */
 
 const OVERVIEW = {
@@ -74,55 +86,30 @@ const OVERVIEW = {
 
 type Overview = typeof OVERVIEW;
 
-async function boot(page: Page, fixture: Partial<Overview>) {
-  await page.addInitScript(
-    ({ seed }) => {
-      window.localStorage.setItem('cerebro.autoLearn', 'false');
-      window.localStorage.setItem('cerebro.themeMode', 'light');
-      const pending = seed;
-      const install = () => {
-        const w = window as unknown as { __cerebroSeedPipeline?: (f: unknown) => void };
-        if (w.__cerebroSeedPipeline === undefined) {
-          setTimeout(install, 10);
-          return;
-        }
-        w.__cerebroSeedPipeline(pending);
-      };
-      install();
-    },
-    { seed: fixture },
-  );
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Background' }).click();
-  await expect(page.getByTestId('pipeline-page')).toBeVisible();
+/** Boot into the hub with this overview staged, and hand back the section
+ * that holds the background controls. */
+async function openSystem(page: Page, fixture: Partial<Overview>) {
+  await seedBeforeBoot(page, '__cerebroSeedPipeline', fixture);
+  await boot(page);
+  return openStatusSection(page, 'system');
 }
 
-test('background: the meter says today across every vault, and the activity log says who spent it', async ({
-  page,
-}) => {
-  await boot(page, OVERVIEW);
-  await expect(page.getByTestId('ceiling-state')).toHaveAttribute('data-state', 'under_budget');
-  await expect(page.getByTestId('meter-runs')).toContainText('3');
-  await expect(page.getByTestId('meter-runs')).toContainText('20');
-  await expect(page.getByTestId('meter-tokens')).toContainText('41,200');
-
-  const rows = page.getByTestId('activity-row');
-  await expect(rows).toHaveCount(2);
-  await expect(rows.first()).toContainText('behind');
-  await expect(rows.first()).toContainText('1 applied');
-  // A run whose usage was never reported says UNKNOWN, not zero.
-  await expect(page.getByTestId('usage-unknown')).toBeVisible();
+test('background: the meter says today across every vault', async ({ page }) => {
+  const section = await openSystem(page, OVERVIEW);
+  await expect(section.getByTestId('ceiling-state')).toHaveAttribute('data-state', 'under_budget');
+  await expect(section.getByTestId('meter-runs')).toContainText('3');
+  await expect(section.getByTestId('meter-runs')).toContainText('20');
+  await expect(section.getByTestId('meter-tokens')).toContainText('41,200');
+  // The activity half of this test moved to `fleet.spec.ts` with the table
+  // it asserted on — including "a run whose usage was never reported says
+  // UNKNOWN, not zero", which the fleet section carries verbatim.
+  await expect(section.getByTestId('activity-row')).toHaveCount(0);
 });
 
 test('background: three faces of failure stay three banners', async ({ page }) => {
   // A person who sees "quota" knows to wait; one who sees "ingestion" knows
   // to fix a file. One merged banner would tell them neither.
-  await boot(page, {
+  const section = await openSystem(page, {
     ...OVERVIEW,
     banners: [
       { kind: 'runtime_health', detail: 'the CLI reported a usage limit', count: 12 },
@@ -130,7 +117,7 @@ test('background: three faces of failure stay three banners', async ({ page }) =
       { kind: 'ingestion', detail: 'items could not be read', count: 3 },
     ],
   });
-  const banners = page.getByTestId('pipeline-banner');
+  const banners = section.getByTestId('pipeline-banner');
   await expect(banners).toHaveCount(3);
   await expect(banners.nth(0)).toHaveAttribute('data-kind', 'runtime_health');
   await expect(banners.nth(0)).toContainText('Claude Code is not answering');
@@ -142,53 +129,54 @@ test('background: three faces of failure stay three banners', async ({ page }) =
 test('background: an unaccounted day says so rather than showing a confident zero', async ({
   page,
 }) => {
-  await boot(page, {
+  const section = await openSystem(page, {
     ...OVERVIEW,
     meter: { ...OVERVIEW.meter, accounting_state: 'unknown', tokens_used: 0 },
     banners: [{ kind: 'accounting_unknown', detail: 'spend could not be counted', count: 0 }],
   });
-  await expect(page.getByTestId('accounting-unknown')).toContainText('is not zero');
-  await expect(page.getByTestId('pipeline-banner')).toHaveAttribute(
+  await expect(section.getByTestId('accounting-unknown')).toContainText('is not zero');
+  await expect(section.getByTestId('pipeline-banner')).toHaveAttribute(
     'data-kind',
     'accounting_unknown',
   );
 });
 
 test('background: the pause is one control for one subscription', async ({ page }) => {
-  await boot(page, OVERVIEW);
-  // `Button` does not forward data-testid, so the house convention for a
-  // button is its accessible name — which is also what a person reads.
-  const pause = page.getByRole('button', { name: 'Pause background work' });
+  const section = await openSystem(page, OVERVIEW);
+  // Located by accessible name, which is also what a person reads. (M33.3
+  // gave `Button` a real `testId` prop; this control never needed one.)
+  const pause = section.getByRole('button', { name: 'Pause background work' });
   await expect(pause).toBeVisible();
   await pause.click();
-  await expect(page.getByRole('button', { name: 'Resume background work' })).toBeVisible();
+  await expect(section.getByRole('button', { name: 'Resume background work' })).toBeVisible();
 });
 
 test('background: a lane can be turned off for this vault without touching the others', async ({
   page,
 }) => {
-  await boot(page, OVERVIEW);
-  await expect(page.getByTestId('lane')).toHaveCount(7);
-  const stale = page.getByTestId('lane-stale');
+  const section = await openSystem(page, OVERVIEW);
+  await expect(section.getByTestId('lane')).toHaveCount(7);
+  const stale = section.getByTestId('lane-stale');
   await expect(stale).toBeChecked();
   await stale.click();
   await expect(stale).not.toBeChecked();
-  await expect(page.getByTestId('lane-filed')).toBeChecked();
+  await expect(section.getByTestId('lane-filed')).toBeChecked();
 });
 
 test('background: held work asks its question instead of being guessed at', async ({ page }) => {
-  await boot(page, {
+  const section = await openSystem(page, {
     ...OVERVIEW,
     held: { baseline_held: 42, recovery_held: 0, pending_review: 0, pending: 0 },
   });
-  const held = page.getByTestId('baseline_held');
+  const held = section.getByTestId('baseline_held');
   await expect(held).toContainText('42 items');
   await expect(held).toContainText('nothing was assumed');
-  await page.getByRole('button', { name: 'Process these items' }).click();
-  await expect(page.getByTestId('held-items')).toBeHidden();
+  await section.getByRole('button', { name: 'Process these items' }).click();
+  await expect(section.getByTestId('held-items')).toBeHidden();
 });
 
-test('background: a vault with nothing to report says so plainly', async ({ page }) => {
-  await boot(page, { ...OVERVIEW, activity: [] });
-  await expect(page.getByTestId('activity-log')).toContainText('Nothing has run yet');
-});
+// DELETED in M33.4: 'a vault with nothing to report says so plainly'. It
+// asserted the activity log's empty text, and the activity log left with the
+// table. `fleet.spec.ts` carries the empty case for the surface that replaced
+// it — where "nothing has run" and "we could not read the runs" are also
+// finally two different sentences, which this one could not express.

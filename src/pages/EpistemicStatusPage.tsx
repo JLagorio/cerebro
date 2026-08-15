@@ -5,11 +5,11 @@ import type {
   ChangesView,
   LanesView,
   LaneView,
-  PipelineOverview,
   TriggerEntryStatus,
   TriggerRunReport,
 } from '@/lib/ipc';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
+import { SystemSection } from '@/status/SystemSection';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -210,44 +210,6 @@ function Changes({ feed }: { feed: Feed<ChangesView> }) {
           </div>
         ))}
     </>
-  );
-}
-
-/** M25's health, as the two facts that change what a reader should expect
- * from the rest of this page: whether the background is running at all, and
- * whether it has anything left to spend. */
-function SystemHealth({ feed }: { feed: Feed<PipelineOverview> }) {
-  const navigate = useNavStore((s) => s.navigate);
-  if (feed.kind === 'loading') return <Loading />;
-  if (feed.kind === 'unavailable') return <Unavailable what="Background health" />;
-  const overview = feed.data;
-  const held = overview.held.baseline_held + overview.held.recovery_held + overview.held.pending;
-  return (
-    <button
-      type="button"
-      data-testid="health-summary"
-      data-paused={overview.global_pause}
-      data-ceiling={overview.meter.ceiling_state}
-      onClick={() => navigate({ kind: 'pipeline' })}
-      className="flex w-full items-center justify-between rounded border border-n-200 px-2.5 py-2 text-left hover:bg-n-50"
-    >
-      <span className="flex flex-col gap-0.5">
-        <span className="text-xs text-n-800">
-          {overview.global_pause ? 'The background is paused.' : 'The background is running.'}
-        </span>
-        <span className="text-2xs text-n-500">
-          {/* `accounting_state` is the one that matters: a day whose spend was
-              lost is not a day with budget left, and saying "under budget"
-              over an unknown meter would be the page inventing good news. */}
-          {overview.meter.accounting_state === 'exact'
-            ? `Today's spend: ${overview.meter.ceiling_state.replaceAll('_', ' ')}.`
-            : "Today's spend is not fully accounted for."}
-          {held > 0 && ` ${held} item${held === 1 ? '' : 's'} held.`}
-          {overview.banners.length > 0 && ` ${overview.banners.length} open notice.`}
-        </span>
-      </span>
-      <Icon name="chevron-right" size={14} color="var(--n-500)" />
-    </button>
   );
 }
 
@@ -623,7 +585,6 @@ export function EpistemicStatusPage() {
   );
   const changes = useFeed(vaultPath, ipc.converge);
   const lanes = useFeed(vaultPath, ipc.attentionLanes);
-  const health = useFeed(vaultPath, ipc.pipelineOverview);
   const [gatesVersion, setGatesVersion] = useState(0);
   const gates = useFeed(vaultPath, ipc.triggerStatus, gatesVersion);
   const [running, setRunning] = useState(false);
@@ -679,11 +640,13 @@ export function EpistemicStatusPage() {
         </Section>
 
         <Section
-          id="health"
+          id="system"
           title="Background"
-          blurb="Whether anything is running, and what it has left to spend."
+          blurb="Whether anything is running, what it has left to spend, and what it is holding."
         >
-          <SystemHealth feed={health} />
+          {/* M33.4: the controls themselves, not a two-line summary and a
+              door. The section owns its own read. */}
+          <SystemSection vaultPath={vaultPath} />
         </Section>
 
         <Section
