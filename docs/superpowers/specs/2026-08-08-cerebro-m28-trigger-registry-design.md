@@ -3,9 +3,11 @@
 **Date:** 2026-08-08
 **Status:** Derived from the accepted Rev 3 roadmap (D7's consumer rule, D10's cuts) and the frozen coverage matrix (its M28+ rows and "Pulled forward" section). For owner review.
 **Scope:** M28.0 implements only the governance substrate that can evaluate and
-record gates; M28+ governs the deferred capability plans. Fourteen registry
-entries classify each gate as measurable or explicitly evidence-based
-discretionary, name its M22–M27 promotion source, and preserve an explicit
+record gates; M28+ governs the deferred capability plans. Seventeen registry
+entries (fourteen at freeze; R15–R17 registered 2026-08-14 by M31.8) classify
+each gate as measurable or explicitly evidence-based
+discretionary, name its promotion source (M22–M27 primitives for R1–R14, M31
+primitives for R15–R17), and preserve an explicit
 do-not-build-early boundary—plus a protected-names glossary and standing
 obligations that keep deferral honest.
 **Companion plan:** `../plans/2026-08-07-cerebro-m28-trigger-registry.md` implements
@@ -56,6 +58,7 @@ Every evaluation uses one closed record:
 TriggerResult = not_ready | not_fired | fired
 RegistryId = R1 | R2 | R3 | R4 | R5 | R6 | R7
            | R8 | R9 | R10 | R11 | R12 | R13 | R14
+           | R15 | R16 | R17
 GateKey { registry_id: RegistryId,
           subcapability: root | registered_subcapability_key }
 EvaluationScope = subscription_global
@@ -73,6 +76,7 @@ RatioMetricName = component_completeness | unused_headroom
 QuantityMetricName = projected_component { component: M26 CostComponent }
                    | projected_input | projected_output
                    | projected_calls | projected_cost | gap_duration
+                   | answer_latency
 MetricSeriesKey = aggregate | sample { run_id }
                 | source { store_uuid, source_id }
                 | day { local_date: YYYY-MM-DD }
@@ -134,10 +138,12 @@ root/subkey/variant combination refuses schema validation:
 | `R8:root`, `R9:root`, `R11:root` | discretionary | null |
 | `R12:<registered-tail-key>` | discretionary | required fired allowed parent below |
 | `R14:connector:<registered-connector-id>` | discretionary | null |
+| `R15:root` | measurable | null |
+| `R16:root`, `R17:root` | discretionary | null |
 
 R4/R5/R12/R14 root keys and subkeys on every other entry are invalid. The
 scope is equally closed: R1/R2 use `subscription_global` and intentionally
-aggregate all subscription usage/budget rows; R3–R14 use one non-null
+aggregate all subscription usage/budget rows; R3–R17 use one non-null
 `vault_store`, and every runtime/evidence row, source-series `store_uuid`, and
 parent evaluation must match it. Cross-scope input is a refusal, not a partial
 sample. The
@@ -167,7 +173,8 @@ closed R12 tail/allowed-parent map is:
 
 Quantity units are fixed: projected input/output use
 `tokens`, projected calls use `calls`, projected cost uses `micros`, gap
-duration uses `seconds`, and projected components use M26's component unit;
+duration uses `seconds`, answer latency uses `micros`, and projected
+components use M26's component unit;
 all other name/unit pairings refuse. `evaluation_id =
 sha256("cerebro-trigger-evaluation-v1\0" + canonical_gate_key + "\0" +
 canonical_scope +
@@ -190,6 +197,25 @@ evaluations require both homes joined by evaluation ID. A firing's
 dated plan references the evaluation ID and preserves its canonical record.
 Missing fields/data produce `not_ready`, never `fired`; rerunning one snapshot
 is idempotent.
+
+**Registry amendment (2026-08-14, M31.8).** R15–R17 were registered by M31's
+claims audit, not derived from the coverage matrix; their promotion sources
+are M31 primitives, and the matrix records them in its own dated section (its
+§1–§98 dispositions are unchanged). The shipped `trigger-registry.v1.json`
+artifact predates them and still holds exactly R1–R14. That is fail-closed by
+the artifact's own contract — a gate key the artifact does not name resolves
+to nothing, which IS the refusal — so no R15–R17 evaluation can be recorded,
+let alone fired, by any shipped build. Their gate keys, R15's floors, and the
+one metric-vocabulary addition (`answer_latency`, unit `micros`, which also
+postdates the v1 metric tables) enter a successor artifact revision in the
+same commit as the first implemented R15–R17 evaluator, never speculatively —
+the same reasoning that keeps R14's `registered_connectors` honestly empty.
+One thing that revision must decide rather than inherit: R15's window opens
+"no earlier than M31.7", and every constant the artifact's `protocols` block
+admits today is an integer count, duration, or ppm (plus one artifact path).
+An epoch has no shape there. Either the revision adds a date-valued constant
+kind or the epoch stays a human-only rule no validator enforces — say which,
+in that commit, rather than letting it degrade silently.
 
 ## M28.0 — Implement the governance substrate, no promotion
 
@@ -229,6 +255,9 @@ unchanged by M28.0.
 | R12 | **Named §-level tails** listed below | **Evidence-based discretionary per tail:** its parent gate must have fired **and** the owner must accept a tail-specific consumer evidence pack; parent activation alone never unlocks it | Each named parent + shipped primitive, below | Bundling tails with a parent without separate evidence |
 | R13 | **Curiosity + full discovery loop** (§66/§70/§71; pattern detection jointly with R2) | **Measurable:** R13 unexecuted-plan protocol below | M26 `discovery_plan_runs`; M24/M26 minimal stopping rule | A loop before the backlog threshold; renaming maintenance Curiosity |
 | R14 | **Live connectors as separate post-M27 milestones (§61)** | **Evidence-based discretionary:** owner schedules one connector after accepting a source-specific evidence pack covering consumer, auth/privacy, retention/scope, health semantics, and fixtures | `connectors.rs`; M22 nullable provenance | Route/scope machinery or a generic connector mega-milestone |
+| R15 | **Unprompted recall** — the attended assembler surfacing manifest items the question did not ask for (registered by M31.8; the M31 non-goal "no unprompted recall surface" made expressible) | **Measurable:** R15 attended-latency protocol below over 28 complete days after M31.7; a firing licenses a plan whose FIRST obligation is naming the third execution contract below. The fired plan's deciding owner is the vault owner, as for all promotions | M25 `runs.mode`; M26 `working_memory_manifests` receipts; M31.5 `assembly_metrics.answer_latency_micros` (schema landed whole per D5) with M31.6's attended-path writer | Any scalar salience score (§9 stays cut); routing unprompted work through `budget::gate` as if sanctioned ambient work; claiming `Mode::Attended`'s metered-never-gated exemption for output nobody asked for |
+| R16 | **Prior manifest as retrieval hint** — feeding the previous run's persisted manifest into the next assembly's retrieval (registered by M31.8) | **Evidence-based discretionary:** the vault owner accepts a consumer evidence pack that additionally answers the four recorded failure modes below; the recorded safe design is aliases-only widening | M26 `working_memory_manifests` receipts (the persisted prior manifest); the M26 `Retriever` trait seam | Any hint outside the `assembly_id` hash or around the `Retriever` trait; widening beyond aliases; reporting `exhausted` for an intent whose work a hint skipped |
+| R17 | **Folder-level ingest opt-out** (registered by M31.8) | **Evidence-based discretionary:** the vault owner accepts a pack that MUST contain the (a)/(b) product decision below | `ingest/ambient.rs`'s deterministic pre-gate phases; `vault::scan::scan_vault` (the one scan choke point) | Any per-folder flag before the (a)/(b) decision; shipping half an opt-out — the LLM half skips while the deterministic phases keep appending ledger records about the "ignored" folder — as if it honored the user's intent |
 
 ## Exact measurement protocols
 
@@ -237,7 +266,18 @@ evaluation record's IANA timezone after M26 default-on. Require ≥30 successful
 including ≥10 HIGH/CRITICAL intended uses, and non-null component quantities
 for ≥95% of the sample. A run is component-complete only when all ten M26
 components occur exactly once, quantities are non-negative integers, and each
-unit matches M26's fixed table; zero counts, absence does not. Apply
+unit matches M26's fixed table; zero counts, absence does not. Rows carrying
+`estimated = 1` (M31.6: `selected_context_tokens` and
+`prompt_template_tokens`, derived at four bytes per token) COUNT toward
+component completeness — the run measured them, honestly labeled — and are
+EXCLUDED from the cost projection: apply the projection only to
+`estimated = 0` rows, and persist the estimated components separately from
+the projected totals, never mixed into them. **That separate field does not
+exist in the closed `TriggerEvaluation` record yet, and this text does not
+invent it** — naming it `estimated_components` here would be a field no
+interpreter admits. It enters the record, in both interpreters and the
+goldens, in the same commit as R1's first evaluator; until then R1 is
+registered and unevaluatable, exactly as R15–R17 are. Apply
 `shared/policy/cost-projection.v1.json` component-by-component using exactly
 `ceil(q * multiplier_ppm / 1_000_000) + fixed_quantity`. Persist policy hash,
 every projected component, versioned p50/p90 input/output tokens and calls,
@@ -320,6 +360,35 @@ still in exact lifecycle state `pending` for at least 14 full days at
 all terminal rows are excluded; in particular `terminal(dismissed)` is not
 unexecuted. M26's content-addressed ID makes a re-render the same plan.
 
+**R15 attended-latency protocol.** Use the preceding 28 complete local
+calendar days in the evaluation record's IANA timezone, starting no earlier
+than M31.7 (the fold cache — the change that made per-ask latency a property
+of the cache rather than of ledger size; a window straddling it would measure
+two different assemblers). The sample is every attended assembly: a `runs`
+row with `mode = 'attended'` joined to its `assembly_metrics` row and,
+through `manifest_id` (the receipt's content-addressed `assembly_id`), to its
+persisted `working_memory_manifests` receipt. A sampled row must have (i) a
+receipt recording at least one selected item under the positive intent — a
+blocked/exhausted-only manifest retrieved nothing and has no recall latency
+to measure — and (ii) non-NULL `answer_latency_micros`; NULL rows (a run
+predating M31.5's migration, or one M31.6 refused to half-record) are
+excluded from floor and distribution alike, because absent is never zero.
+Require ≥200 such assemblies, persisted as `sample_runs`. Sort
+`answer_latency_micros` ascending and take nearest rank `x[ceil(p * n) - 1]`
+for p50 and p90 — R1's exact no-float rule; the gate reads p90 because the
+schema's quantile enum is `p50 | p90`, so a p95 would be unrepresentable.
+Fire only when `p90 < 250_000` micros: the attended path demonstrably has
+latency headroom at lived volume, the one measurable precondition for adding
+unasked-for recall work to it. A sample below the floor is `not_ready`; a
+floor-passing sample at or above the threshold is `not_fired` — headroom, not
+data quality, is this gate's question. Both quantiles persist as
+`answer_latency` quantity metrics under `statistic` series. The fired plan's
+FIRST obligation, before any mechanism: name the third execution contract
+unprompted recall would run under — it is neither `Mode::Attended` (metered,
+never gated: a person is waiting for the answer they asked for) nor
+sanctioned ambient work (gated by `budget::gate`), and no milestone doc has a
+word for a contract that spends on output nobody requested.
+
 ## Discretionary evidence packs and R12 tails
 
 A consumer evidence pack must name the deciding owner, concrete consumer and
@@ -330,7 +399,36 @@ one pack **per object**. R8 additionally includes skeleton usage and observed
 growth pains; R9 includes both independent shipped surface artifacts and the
 specific cross-run identity failure; R11 includes the two-writer concurrency
 requirement; R14 includes
-the source-specific auth, retention, scope, and health contract.
+the source-specific auth, retention, scope, and health contract; R16 and R17
+additionally carry the requirements recorded below.
+
+**R16's pack must answer the four failure modes recorded at registration
+(M31.8), each individually:** (1) the hint enters `assembly_id`'s hash, or
+assembly determinism breaks — two assemblies of the same question against the
+same head with different priors are different assemblies and must say so;
+(2) the hint is injected through the `Retriever` trait, or retriever purity
+breaks — a retriever that secretly consults the last run's manifest is a
+second retrieval authority nothing declared; (3) an intent whose work a hint
+skipped may not report `exhausted` — "we stopped early because last time
+sufficed" is a different claim needing its own honest status; (4) a prior
+manifest seeding the next retrieval is a retrieval-layer self-ancestry shape
+`policy/ancestry.rs` does not catch — the walk covers belief BASES, and a
+hint is not a basis — so the pack must name the check that closes that loop.
+The recorded safe design is aliases-only widening: the prior manifest may
+only widen alias candidates for entity resolution, never pre-select content.
+
+**R17's pack MUST contain the (a)/(b) product decision, stated against the
+tree as re-verified at registration (M31.8, 2026-08-14):** the deterministic
+pre-gate half of `ingest/ambient.rs` runs FOUR ledger-appending phases —
+conflict detection, the classification gauntlet, the legacy-contradicts
+backfill, and the freshness scheduler — plus the attention, convergence, and
+Source Monitor consumers writing app-data. "Opt out" therefore means either
+(a) the LLM half skips the folder while all four deterministic phases keep
+writing ledger records about files the user asked us to ignore, or (b) the
+app does not see the folder at all — and the only scan choke point
+(`vault::scan::scan_vault`) is also the UI's file list, so (b) removes the
+folder from the app, not just from ingest. A pack that does not choose one
+and own its consequence is not accepted.
 
 Every R12 tail is separately discretionary after its parent and uses that
 same pack: per-type temporal decay (R4 object) · full relation vocabulary
@@ -353,12 +451,15 @@ requires a registry amendment, never an improvisation.
 ## Acceptance
 
 This design is satisfied on an ongoing basis, not at a milestone exit: every
-deferred capability in the matrix appears exactly once in this registry with
+deferred capability in the matrix — and every M31-registered deferral —
+appears exactly once in this registry with
 either an exact measurable protocol or an explicit owner-approved evidence
 pack · every evaluation has the closed persisted record/result/idempotency
-contract · missing samples never fire · R1/R2/R3/R6/R7/R10/R13 evaluate from
+contract · missing samples never fire · R1/R2/R3/R6/R7/R10/R13/R15 evaluate
+from
 the specified persisted primitives/snapshots with exact distinct-ID filters,
 floors/windows/thresholds · R4/R5/R8/R9/
-R11/R12/R14 decisions retain dated written evidence · no code in M22–M27 takes a
+R11/R12/R14/R16/R17 decisions retain dated written evidence · no code in
+M22–M27 or M31 takes a
 protected name without meeting its definition · every firing produces a plan
 doc + matrix update in one commit · no promotion requires archaeology.

@@ -25,7 +25,7 @@ use serde_json::Value;
 use crate::runtime::dispatch::{self, ItemOutcome, RunOutcome};
 use crate::runtime::{self, operational::LogEntry};
 
-use super::usage::{self, Usage};
+use super::usage::{self, RunFacts, Usage};
 
 /// Which side of the budget a run sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +85,11 @@ pub struct Tally {
     /// turn's alone and the cached prefix repeats on every one of them, so
     /// summing them would over-count badly.
     usage: Option<Usage>,
+    /// The non-count facts (M31.5), accumulated across the whole stream:
+    /// each assistant turn overwrites `model_id`/`stop_reason` (last wins —
+    /// the final turn's stop reason is the run's), the terminal event fills
+    /// the rest once.
+    facts: RunFacts,
     failed: bool,
     quota: bool,
     unknown_fields: Vec<String>,
@@ -99,11 +104,17 @@ impl Tally {
                 self.unknown_fields.push(field);
             }
         }
+        if let Some(turn) = RunFacts::from_assistant(event) {
+            self.facts.merge(turn);
+        }
         if !usage::is_result(event) {
             return;
         }
         self.saw_terminal = true;
         self.usage = usage::parse(event);
+        if let Some(terminal) = RunFacts::parse(event) {
+            self.facts.merge(terminal);
+        }
         self.failed = usage::is_failure(event);
         self.quota = usage::is_quota_failure(event);
     }
@@ -178,6 +189,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             meter.store_uuid.as_deref(),
             outcome,
             counted,
+            Some(&tally.facts),
             meter.started_at,
             now,
         ),
@@ -186,6 +198,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             &meter.run_id,
             outcome,
             counted,
+            Some(&tally.facts),
             // M25.2 has no route matrix yet: a clean run consumes its items,
             // anything else returns them. M25.3 replaces this argument with
             // the receipt route, which is why it is an argument.
@@ -318,6 +331,174 @@ mod tests {
     }
 
     #[test]
+    fn the_final_turns_stop_reason_is_the_runs() {
+        let mut tally = Tally::default();
+        tally.observe(&json!({
+            "type": "assistant",
+            "message": { "model": "claude-opus-5", "stop_reason": "tool_use" }
+        }));
+        tally.observe(&json!({
+            "type": "assistant",
+            "message": { "model": "claude-opus-5", "stop_reason": "end_turn" }
+        }));
+        assert_eq!(tally.facts.stop_reason.as_deref(), Some("end_turn"));
+        assert_eq!(tally.facts.model_id.as_deref(), Some("claude-opus-5"));
+    }
+
+    #[test]
+    fn the_stream_facts_land_on_the_metered_run() {
+        let dir = crate::vault::testutil::temp_vault("meter-facts");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        // The committed fixtures, end to end: one turn, then the terminal.
+        let mut tally = Tally::default();
+        let turn: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/assistant-turn.json"
+        ))
+        .unwrap();
+        let terminal: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/result-success.json"
+        ))
+        .unwrap();
+        tally.observe(&turn);
+        tally.observe(&terminal);
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: "facts-1".into(),
+                mode: Mode::Attended,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: None,
+            },
+            &tally,
+            false,
+            Utc::now(),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        type Row = (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+        );
+        let (model, stop, tier, cost, turns, ttl_5m, server): Row = conn
+            .query_row(
+                "SELECT model_id, stop_reason, service_tier, total_cost_micros, num_turns, \
+                 cache_write_5m, server_tool_use FROM runs WHERE run_id = 'facts-1'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(stop.as_deref(), Some("tool_use"));
+        assert_eq!(tier.as_deref(), Some("standard"));
+        assert_eq!(cost, Some(41_200));
+        assert_eq!(turns, Some(3));
+        assert_eq!(
+            ttl_5m, None,
+            "the fixture carries no TTL split — NULL, not 0"
+        );
+        assert_eq!(
+            server,
+            Some(0),
+            "an object that sums to zero is zero, present"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_denied_permission_routes_one_operational_row_and_an_empty_array_none() {
+        let dir = crate::vault::testutil::temp_vault("meter-denials");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        let meter = |run: &str| Meter {
+            data_dir: dir.clone(),
+            run_id: run.into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+        };
+        // No committed fixture carries a non-empty array, and none is needed:
+        // the array's SHAPE is what the parser reads, so an inline event with
+        // two denial objects is the honest minimum.
+        let mut denied = Tally::default();
+        denied.observe(&json!({
+            "type": "result", "is_error": false, "result": "ok",
+            "usage": { "output_tokens": 5 },
+            "permission_denials": [
+                { "tool_name": "Bash", "tool_use_id": "toolu_01",
+                  "tool_input": { "command": "rm -rf /" } },
+                { "tool_name": "Write", "tool_use_id": "toolu_02",
+                  "tool_input": { "file_path": "/etc/hosts" } }
+            ]
+        }));
+        finish(&meter("denied"), &denied, false, Utc::now());
+
+        let mut clean = Tally::default();
+        clean.observe(&json!({
+            "type": "result", "is_error": false, "result": "ok",
+            "usage": { "output_tokens": 5 }, "permission_denials": []
+        }));
+        finish(&meter("clean"), &clean, false, Utc::now());
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (rows, detail): (i64, String) = conn
+            .query_row(
+                "SELECT count(*), coalesce(max(detail), '') FROM operational_log \
+                 WHERE surface = 'agent.permission' AND run_id = 'denied'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rows, 1, "one row per run with a non-empty denial array");
+        assert!(
+            detail.contains("reported 2 permission denial"),
+            "the detail names the count: {detail}"
+        );
+        let clean_rows: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM operational_log \
+                 WHERE surface = 'agent.permission' AND run_id = 'clean'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            clean_rows, 0,
+            "an empty array is Some(0) in RunFacts and log noise here"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn unknown_fields_are_collected_once_across_the_whole_stream() {
         let mut tally = Tally::default();
         for _ in 0..3 {
@@ -447,6 +628,7 @@ mod tests {
             &lease.run_id,
             RunOutcome::Succeeded,
             tally.outcome(false).1,
+            None,
             ItemOutcome::Land(crate::runtime::scheduler::SchedulerState::Consumed),
             Utc::now(),
         )

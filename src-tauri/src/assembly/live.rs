@@ -14,8 +14,11 @@
 //!
 //! **A synthesis run writes NOTHING.** Not files, not proposals, not the
 //! knowledge bundle. Everything it is entitled to say goes through
-//! `submit_answer`, and every other capability is an absence a missing field
-//! would grant — so every one of them is stated.
+//! `submit_answer` — and since M31.1a/M31.1b every capability, read or
+//! write, is stated. The WRITE capabilities were stated absences from day
+//! one (a scope of nothing); the READ surface was served to any live bearer
+//! until M31.1a narrowed the declaration to exactly `submit_answer` and
+//! M31.1b made the grant enforce it at dispatch.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::sync_channel;
@@ -40,7 +43,8 @@ pub struct Live<'a> {
     pub data_dir: PathBuf,
     pub vault_id: String,
     pub store_uuid: String,
-    /// The durable run id the meter books this run against.
+    /// The durable run id the meter books this run against — and, since
+    /// M31.2a, the id the run's grant carries.
     pub run_id: String,
 }
 
@@ -51,7 +55,20 @@ impl Spawn for Live<'_> {
         // one behind the user's back.
         self.mcp.ensure(self.app, self.vault)?;
         // Scoped to nothing. A synthesis run answers; it does not write.
-        self.mcp.run_token(Some(ACTOR), Some(vec![]))
+        // M31.1b: the grant carries the SAME narrowing the argv declares —
+        // one list, so the boundary and the advice cannot disagree.
+        // M31.2a: and the SAME durable id the meter books, so the run has one
+        // id from mint to meter to grant.
+        self.mcp.run_token(
+            Some(ACTOR),
+            Some(vec![]),
+            Some(declared_tools()),
+            self.run_id.clone(),
+        )
+    }
+
+    fn run_id(&self) -> &str {
+        &self.run_id
     }
 
     fn run(&self, token: &str, prompt: &str) -> Result<(), String> {
@@ -89,6 +106,17 @@ impl Spawn for Live<'_> {
     }
 }
 
+/// The one tool a synthesis run holds — declared in the request's argv
+/// (M31.1a) AND granted to its token (M31.1b) from this single list, so the
+/// two can never disagree. The constant, not a literal: `SUBMIT_TOOL` exists
+/// so the prompt and the served surface cannot disagree about the name, and
+/// a "submit_answer" string here would be a third spelling. `pub(crate)` so
+/// mcp's `test_submit_answer` fixture models the REAL grant rather than
+/// hand-writing a copy of it.
+pub(crate) fn declared_tools() -> Vec<String> {
+    vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]
+}
+
 fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
     AgentRequest {
         message: prompt.to_string(),
@@ -109,10 +137,14 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run answers, and an answer is not a write.
         scope: Some(vec![]),
-        // Not narrowed here. `policy::submit` already decides what an actor
-        // may call, and a second list in this file would be a second place for
-        // that decision to drift.
-        allowed_tools: None,
+        // M31.1a — a synthesis run answers from the manifest and nothing
+        // else. That was always the design (prompt::RULES); until now it was
+        // a sentence. The same list `mint_token` grants (M31.1b).
+        allowed_tools: Some(declared_tools()),
+        // Cerebro's own run: attended means a person awaits the ANSWER, not
+        // that anybody supervises the child, so the CLI built-ins are
+        // withdrawn here too. Only the three internal spawn sites set this.
+        internal: true,
     }
 }
 
@@ -145,6 +177,30 @@ mod tests {
 
     #[test]
     fn the_tools_are_left_to_the_policy_rather_than_listed_twice() {
-        assert_eq!(request("q", "t", "u").allowed_tools, None);
+        // Inverted in M31.1a: the narrowing is now DECLARED — one tool,
+        // spelled via the constant the prompt and the server already share.
+        // A synthesis run answers from the manifest and nothing else.
+        assert_eq!(
+            request("q", "t", "u").allowed_tools,
+            Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()])
+        );
+    }
+
+    #[test]
+    fn the_argv_and_the_grant_are_one_list() {
+        // M31.1b. `request` declares `declared_tools()` and `mint_token`
+        // grants `declared_tools()` — the invariant is that both draw from
+        // the ONE function, so a second hand-written list cannot drift.
+        assert_eq!(request("q", "t", "u").allowed_tools, Some(declared_tools()));
+    }
+
+    #[test]
+    fn a_synthesis_run_is_marked_as_cerebros_own_though_a_person_waits() {
+        // Attended is a METERING fact — someone awaits the answer; nobody
+        // supervises the child. The internal marker, not attendance, is what
+        // keys the CLI built-in withdrawal in build_args.
+        let request = request("q", "t", "u");
+        assert!(request.internal);
+        assert_eq!(request.attended, Some(true));
     }
 }

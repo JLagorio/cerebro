@@ -1,11 +1,17 @@
 //! The governance rows (M26.7e) — what a later promotion will be argued from.
 //!
-//! **Nothing reads these yet, and that is the point.** A decision about
+//! **These rows were written before anything read them, and that was the
+//! point.** A decision about
 //! whether the resolver is good enough to run unattended, or whether a pass
 //! costs what it claims, has to be answerable from rows that were already
 //! being written when nobody was looking. M28's windows are supposed to be
 //! reproducible from persisted rows alone; that is only true if the rows
-//! exist before anybody asks.
+//! exist before anybody asks. Both halves have since arrived:
+//! `run_cost_components` and `assembly_metrics` have ONE production writer —
+//! the attended assembly path (M31.6, [`record_from_assembly`]); ingest and
+//! maintenance deliberately still write none — and the M28.1 trigger runner
+//! reads them (R1 through `trigger::cost`, the resolver rows through
+//! `trigger::evaluate`).
 //!
 //! **Zero is a quantity; absence is not.** A successful belief-affecting
 //! synthesis writes all ten cost components, and a component it did not use
@@ -13,8 +19,12 @@
 //! not know whether there were cache reads" support opposite conclusions
 //! about whether caching is working.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{params, Connection};
 
+use crate::agent::usage::Usage;
+use crate::assembly::manifest::{Intent, IntentStatus, WorkingMemoryManifest};
 use crate::ingest::resolver::Attempt;
 
 /// The ten closed cost components. The unit belongs to the component — a
@@ -122,6 +132,14 @@ impl Measured {
 /// component completeness, and a run that recorded six of ten is a run M28
 /// cannot reason about. Refusing here is what makes the absence impossible
 /// rather than merely discouraged.
+///
+/// `estimated` names the components whose quantities are derived rather
+/// than wire-exact (M31.6); their rows are written `estimated = 1` so the
+/// R1 protocol can count them toward completeness while keeping them out of
+/// the cost projection. Callers with only exact measurements pass `&[]`.
+// Each argument is a distinct measured fact about ONE run; folding them into
+// a struct would only rename the list.
+#[allow(clippy::too_many_arguments)]
 pub fn record_costs(
     conn: &Connection,
     vault_id: &str,
@@ -129,6 +147,7 @@ pub fn record_costs(
     run_id: &str,
     model_id: &str,
     measured: &[Measured],
+    estimated: &[Component],
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), String> {
     let mut seen: Vec<Component> = measured.iter().map(|m| m.component).collect();
@@ -137,6 +156,10 @@ pub fn record_costs(
     if seen.len() != measured.len() {
         return Err("a component was measured twice — one row per component".to_string());
     }
+    debug_assert!(
+        estimated.iter().all(|component| seen.contains(component)),
+        "an estimated component must be one of the measured components"
+    );
     let missing: Vec<&str> = Component::ALL
         .iter()
         .filter(|c| !seen.contains(c))
@@ -159,8 +182,8 @@ pub fn record_costs(
         tx.execute(
             "INSERT INTO run_cost_components (
                  vault_id, store_uuid, run_id, component, unit, model_id, quantity,
-                 observed_cost_micros, pricing_snapshot_id, recorded_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 observed_cost_micros, pricing_snapshot_id, estimated, recorded_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 vault_id,
                 store_uuid,
@@ -171,6 +194,7 @@ pub fn record_costs(
                 row.quantity as i64,
                 row.observed_cost_micros.map(|v| v as i64),
                 row.pricing_snapshot_id,
+                estimated.contains(&row.component),
                 stamp,
             ],
         )
@@ -220,6 +244,10 @@ pub struct AssemblyMetrics {
     pub context_bytes: u64,
     pub retrieval_query_count: u64,
     pub blocked_intent_count: u64,
+    /// Wall time across the run, the latency R15's gate reads (M31.6).
+    /// `None` is a row written by something that did not measure — absent
+    /// is never zero.
+    pub answer_latency_micros: Option<u64>,
 }
 
 pub fn record_assembly(
@@ -233,8 +261,9 @@ pub fn record_assembly(
         "INSERT OR REPLACE INTO assembly_metrics (
              vault_id, store_uuid, run_id, manifest_id, intended_stakes,
              source_count, evidence_item_count, context_bytes,
-             retrieval_query_count, blocked_intent_count, recorded_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             retrieval_query_count, blocked_intent_count, answer_latency_micros,
+             recorded_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             vault_id,
             store_uuid,
@@ -246,11 +275,246 @@ pub fn record_assembly(
             metrics.context_bytes as i64,
             metrics.retrieval_query_count as i64,
             metrics.blocked_intent_count as i64,
+            // Degrade an overflowing value to NULL rather than wrapping into
+            // a negative — `write_facts`' rule, for the same reason.
+            metrics
+                .answer_latency_micros
+                .and_then(|v| i64::try_from(v).ok()),
             now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         ],
     )
     .map_err(|e| format!("assembly_metrics: {e}"))?;
     Ok(())
+}
+
+/// Why an assembly's costs were not recorded. `record_costs` keeps its
+/// String contract (eval/ and its tests untouched); the typed layer exists
+/// so "could not measure" and "could not store" stop being one string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CostError {
+    /// Names the components that had no measurable source — an honest
+    /// partial record is a `runs` row and NO component rows, never zeros.
+    Unmeasurable(Vec<&'static str>),
+    Storage(String),
+}
+
+impl std::fmt::Display for CostError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CostError::Unmeasurable(names) => {
+                write!(f, "unmeasurable components: {}", names.join(", "))
+            }
+            CostError::Storage(detail) => write!(f, "storage: {detail}"),
+        }
+    }
+}
+
+/// What the attended pass could observe about one finished run (M31.6).
+///
+/// Every `Option` is an honest absence: `None` means that source could not
+/// be measured, and an unmeasured component is never written as zero — the
+/// whole record is refused instead, leaving the runs row alone as the
+/// honest partial record.
+pub struct AssemblyObservation<'a> {
+    /// The receipt the pass kept before the run. Without it, five of the
+    /// ten components have no source.
+    pub manifest: Option<&'a WorkingMemoryManifest>,
+    /// The finalized runs row's four counts, only when its `usage_state` is
+    /// `exact` — the zeros a row holds under `unknown` are placeholders,
+    /// not measurements.
+    pub usage: Option<Usage>,
+    /// The finalized runs row's `model_id`. The four model-accounting rows
+    /// cannot be written without one, by the table's own CHECK.
+    pub model_id: Option<String>,
+    /// The per-name map drained EXACTLY ONCE by ask.rs (M31.2b) and passed
+    /// in — this function receives, it never drains. `None` is a failed
+    /// drain (unmeasurable); `Some(empty)` is a MEASURED zero.
+    pub tool_calls: Option<BTreeMap<String, u64>>,
+    /// `rendered.text.len()` — everything the run was shown, template and
+    /// evidence together.
+    pub prompt_bytes: u64,
+    /// Wall time across `Spawn::run`, measured at the call site.
+    pub answer_latency_micros: u64,
+}
+
+/// The two components whose quantities are derived at four bytes per token
+/// rather than read off the wire. Their rows carry `estimated = 1`; the R1
+/// protocol counts them toward completeness and keeps them out of the cost
+/// projection.
+const ESTIMATED: [Component; 2] = [
+    Component::SelectedContextTokens,
+    Component::PromptTemplateTokens,
+];
+
+/// The production producer for `run_cost_components` (M31.6): build the ten
+/// measured values from one attended assembly, record them, and write the
+/// `assembly_metrics` row beside them — same call site, same moment.
+///
+/// **No `Measured::zero` for an unmeasured component.** If any source is
+/// absent, nothing is written at all and the error names every component
+/// that had no source; a runs row with NO component rows is the honest
+/// partial record, where six-of-ten would be a lie a SUM cannot detect.
+pub fn record_from_assembly(
+    conn: &Connection,
+    vault_id: &str,
+    store_uuid: &str,
+    run_id: &str,
+    observation: AssemblyObservation<'_>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), CostError> {
+    let AssemblyObservation {
+        manifest,
+        usage,
+        model_id,
+        tool_calls,
+        prompt_bytes,
+        answer_latency_micros,
+    } = observation;
+
+    let mut missing: Vec<&'static str> = Vec::new();
+    if usage.is_none() || model_id.as_deref().is_none_or(str::is_empty) {
+        missing.extend(
+            [
+                Component::UncachedInputTokens,
+                Component::CacheReadTokens,
+                Component::CacheWriteTokens,
+                Component::OutputTokens,
+            ]
+            .map(Component::as_str),
+        );
+    }
+    if manifest.is_none() {
+        missing.extend(
+            [
+                Component::RetrievalCalls,
+                Component::SelectedContextBytes,
+                Component::SelectedContextTokens,
+                Component::PromptTemplateBytes,
+                Component::PromptTemplateTokens,
+            ]
+            .map(Component::as_str),
+        );
+    }
+    if tool_calls.is_none() {
+        missing.push(Component::ToolCalls.as_str());
+    }
+    if !missing.is_empty() {
+        return Err(CostError::Unmeasurable(missing));
+    }
+    let (Some(manifest), Some(usage), Some(model_id), Some(tool_calls)) =
+        (manifest, usage, model_id, tool_calls)
+    else {
+        unreachable!("every absence was collected above");
+    };
+
+    let retrieval_calls: u64 = Intent::ALL
+        .iter()
+        .map(|intent| manifest.intents.get(*intent).attempts.len() as u64)
+        .sum();
+    let context_bytes = manifest.actual.context_bytes;
+    // The template is what the prompt holds beyond the evidence bodies. The
+    // printed image can differ from the counted bytes by normalization and
+    // the truncation mark (M31.3b), so this saturates rather than trusting
+    // the difference to stay non-negative.
+    let template_bytes = prompt_bytes.saturating_sub(context_bytes);
+    let dispatched: u64 = tool_calls
+        .values()
+        .fold(0u64, |sum, count| sum.saturating_add(*count));
+
+    let exact = |component: Component, quantity: u64| Measured {
+        component,
+        quantity,
+        observed_cost_micros: None,
+        pricing_snapshot_id: None,
+    };
+    let measured = [
+        exact(Component::UncachedInputTokens, usage.input_tokens),
+        exact(Component::CacheReadTokens, usage.cache_read),
+        exact(Component::CacheWriteTokens, usage.cache_write),
+        exact(Component::OutputTokens, usage.output_tokens),
+        exact(Component::RetrievalCalls, retrieval_calls),
+        exact(Component::ToolCalls, dispatched),
+        exact(Component::SelectedContextBytes, context_bytes),
+        exact(Component::SelectedContextTokens, context_bytes / 4),
+        exact(Component::PromptTemplateBytes, template_bytes),
+        exact(Component::PromptTemplateTokens, template_bytes / 4),
+    ];
+    record_costs(
+        conn, vault_id, store_uuid, run_id, &model_id, &measured, &ESTIMATED, now,
+    )
+    .map_err(CostError::Storage)?;
+
+    let blocked_intent_count = Intent::ALL
+        .iter()
+        .filter(|intent| manifest.intents.get(**intent).status == IntentStatus::Blocked)
+        .count() as u64;
+    record_assembly(
+        conn,
+        vault_id,
+        store_uuid,
+        &AssemblyMetrics {
+            run_id: run_id.to_string(),
+            manifest_id: manifest.assembly_id.clone(),
+            intended_stakes: manifest.intended_use.stakes.as_str().to_string(),
+            source_count: manifest.actual.source_count,
+            evidence_item_count: manifest.actual.evidence_item_count,
+            context_bytes,
+            retrieval_query_count: retrieval_calls,
+            blocked_intent_count,
+            answer_latency_micros: Some(answer_latency_micros),
+        },
+        now,
+    )
+    .map_err(CostError::Storage)?;
+
+    log_tool_call_breakdown(conn, store_uuid, run_id, &tool_calls);
+    Ok(())
+}
+
+/// The per-name breakdown, filed operationally (M31.6). The component row
+/// holds the SUM; per name is gap 3's actual question — which tools the run
+/// reached for — and no table has a column for it, so it rides the
+/// operational log the way the meter's unknown-fields and permission-denial
+/// facts do (`capability_unavailable` is this codebase's code for "the run
+/// said more than the schema has structure for"). Best-effort by
+/// construction: a lost log line never unwinds a recorded run.
+fn log_tool_call_breakdown(
+    conn: &Connection,
+    store_uuid: &str,
+    run_id: &str,
+    tool_calls: &BTreeMap<String, u64>,
+) {
+    if tool_calls.is_empty() {
+        return;
+    }
+    let names: Vec<String> = tool_calls
+        .iter()
+        .map(|(name, count)| format!("{name}={count}"))
+        .collect();
+    let detail = format!(
+        "the run dispatched loopback tool calls: {}",
+        names.join(", ")
+    );
+    let refusal = crate::policy::table::PolicyTable::load()
+        .ok()
+        .and_then(|table| {
+            crate::policy::rejection::OperationalRefusal::new(
+                &table,
+                "capability_unavailable",
+                "assembly.tool_calls",
+                &detail,
+            )
+            .ok()
+        });
+    if let Some(refusal) = refusal {
+        let entry = crate::runtime::operational::LogEntry {
+            store_uuid: Some(store_uuid.to_string()),
+            proposal_id: None,
+            run_id: Some(run_id.to_string()),
+            rule: None,
+        };
+        crate::runtime::operational::record_or_warn(conn, &refusal, &entry);
+    }
 }
 
 /// Everything one resolver attempt needs beside its tagged outcome.
@@ -373,11 +637,23 @@ mod tests {
 
     fn conn() -> Connection {
         let conn = Connection::open_in_memory().expect("memory db");
+        // The stub `runs` table exists so SCHEMA_V12 — which also ALTERs the
+        // real one — executes here unedited, exactly like the taint stub
+        // exists for SCHEMA_V9's rebuild. `operational_log` is SCHEMA_V1's
+        // (which this fixture skips), stubbed with the real column list so
+        // `record_from_assembly`'s per-name breakdown row is assertable
+        // here rather than silently unfiled.
         conn.execute_batch(
             "CREATE TABLE vault_registry (vault_id TEXT PRIMARY KEY, path TEXT NOT NULL);
              CREATE TABLE source_taint_assessments (
                  vault_id TEXT, store_uuid TEXT, observation_event_id TEXT,
-                 classifier_version TEXT, signals TEXT, assessed_at TEXT);",
+                 classifier_version TEXT, signals TEXT, assessed_at TEXT);
+             CREATE TABLE runs (run_id TEXT PRIMARY KEY);
+             CREATE TABLE operational_log (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 recorded_at TEXT NOT NULL, store_uuid TEXT, surface TEXT NOT NULL,
+                 code TEXT NOT NULL, rule TEXT, detail TEXT NOT NULL,
+                 proposal_id TEXT, run_id TEXT);",
         )
         .expect("registry");
         conn.execute(
@@ -387,6 +663,11 @@ mod tests {
         .expect("register");
         conn.execute_batch(crate::runtime::schema::SCHEMA_V9)
             .expect("v9");
+        // V12 adds the columns M31.6 writes (`estimated`,
+        // `answer_latency_micros`) — applied here so this fixture holds the
+        // same tables the migrated file does.
+        conn.execute_batch(crate::runtime::schema::SCHEMA_V12)
+            .expect("v12");
         conn
     }
 
@@ -410,7 +691,7 @@ mod tests {
         let conn = conn();
         let mut short = full();
         short.retain(|m| m.component != Component::CacheReadTokens);
-        let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &short, now()).unwrap_err();
+        let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &short, &[], now()).unwrap_err();
         assert!(detail.contains("cache_read_tokens"), "{detail}");
         assert!(detail.contains("zero is a quantity"), "{detail}");
         assert!(
@@ -422,9 +703,9 @@ mod tests {
     #[test]
     fn all_ten_land_once_and_a_second_write_conflicts() {
         let conn = conn();
-        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), now()).unwrap();
+        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), &[], now()).unwrap();
         assert_eq!(costs(&conn, VAULT, STORE, RUN).unwrap().len(), 10);
-        let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &full(), now()).unwrap_err();
+        let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &full(), &[], now()).unwrap_err();
         assert!(detail.to_lowercase().contains("unique"), "{detail}");
     }
 
@@ -433,7 +714,7 @@ mod tests {
         // Two definitions of the same mapping — the enum's and the CHECK's —
         // and this is what keeps them one.
         let conn = conn();
-        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), now()).unwrap();
+        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), &[], now()).unwrap();
         let mut stmt = conn
             .prepare("SELECT component, unit FROM run_cost_components ORDER BY component")
             .unwrap();
@@ -451,7 +732,7 @@ mod tests {
     #[test]
     fn only_the_model_accounting_rows_carry_a_model() {
         let conn = conn();
-        record_costs(&conn, VAULT, STORE, RUN, "claude-x", &full(), now()).unwrap();
+        record_costs(&conn, VAULT, STORE, RUN, "claude-x", &full(), &[], now()).unwrap();
         let named: i64 = conn
             .query_row(
                 "SELECT count(*) FROM run_cost_components WHERE model_id IS NOT NULL",
@@ -605,8 +886,9 @@ mod tests {
             [],
         )
         .unwrap();
-        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), now()).unwrap();
-        let detail = record_costs(&conn, "vault-2", STORE, RUN, "m", &full(), now()).unwrap_err();
+        record_costs(&conn, VAULT, STORE, RUN, "m", &full(), &[], now()).unwrap();
+        let detail =
+            record_costs(&conn, "vault-2", STORE, RUN, "m", &full(), &[], now()).unwrap_err();
         assert!(
             detail.to_lowercase().contains("unique"),
             "the design's unique (run_id, component) is GLOBAL, so a shared run id across \
@@ -633,7 +915,7 @@ mod tests {
                 params![real_vault],
             )
             .expect("register");
-            record_costs(&conn, &real_vault, STORE, RUN, "m", &full(), now()).unwrap();
+            record_costs(&conn, &real_vault, STORE, RUN, "m", &full(), &[], now()).unwrap();
             record_attempt(
                 &conn,
                 &real_vault,
@@ -658,6 +940,200 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The shared manifest fixture, with an id `assembly_metrics` will hold:
+    /// the CHECK wants 32 lowercase hex, and the fixture's "asm-1" is for
+    /// modules that never persist it.
+    fn fixture_manifest() -> crate::assembly::manifest::WorkingMemoryManifest {
+        let mut manifest = crate::assembly::manifest::tests::manifest();
+        manifest.assembly_id = "d".repeat(32);
+        manifest
+    }
+
+    fn fixture_usage() -> crate::agent::usage::Usage {
+        crate::agent::usage::Usage {
+            input_tokens: 4,
+            output_tokens: 271,
+            cache_read: 14_678,
+            cache_write: 0,
+        }
+    }
+
+    fn tool_calls_map_of(count: u64) -> std::collections::BTreeMap<String, u64> {
+        [("submit_answer".to_string(), count)].into()
+    }
+
+    #[test]
+    fn an_attended_assembly_records_all_ten_components() {
+        let conn = conn();
+        let manifest = fixture_manifest();
+        record_from_assembly(
+            &conn,
+            VAULT,
+            STORE,
+            "run-m31-6",
+            AssemblyObservation {
+                manifest: Some(&manifest),
+                usage: Some(fixture_usage()),
+                model_id: Some("claude-opus-5".into()),
+                tool_calls: Some(tool_calls_map_of(2)),
+                prompt_bytes: 4_196,
+                answer_latency_micros: 1_250_000,
+            },
+            now(),
+        )
+        .unwrap();
+        // Query the table directly — `costs` keeps its existing 4-arg
+        // tuple-returning signature untouched; this phase adds no read API.
+        let mut stmt = conn
+            .prepare(
+                "SELECT component, estimated FROM run_cost_components \
+                 WHERE run_id = ?1 ORDER BY component",
+            )
+            .unwrap();
+        let rows: Vec<(String, bool)> = stmt
+            .query_map(["run-m31-6"], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(rows.len(), 10);
+        let estimated: Vec<&str> = rows
+            .iter()
+            .filter(|(_, e)| *e)
+            .map(|(c, _)| c.as_str())
+            .collect();
+        // ORDER BY component sorts the TEXT column, and
+        // "prompt_template_tokens" collates before "selected_context_tokens"
+        // — do not pin enum order here.
+        assert_eq!(
+            estimated,
+            ["prompt_template_tokens", "selected_context_tokens"]
+        );
+        // The arithmetic, pinned: the fixture holds one 100-byte item and one
+        // attempt per intent.
+        let quantity = |component: &str| -> i64 {
+            conn.query_row(
+                "SELECT quantity FROM run_cost_components \
+                 WHERE run_id = 'run-m31-6' AND component = ?1",
+                [component],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(quantity("uncached_input_tokens"), 4, "disjoint wire");
+        assert_eq!(quantity("cache_read_tokens"), 14_678);
+        assert_eq!(quantity("output_tokens"), 271);
+        assert_eq!(quantity("tool_calls"), 2, "the drained map summed");
+        assert_eq!(quantity("retrieval_calls"), 5, "one attempt per intent");
+        assert_eq!(quantity("selected_context_bytes"), 100);
+        assert_eq!(quantity("selected_context_tokens"), 25, "bytes / 4");
+        assert_eq!(quantity("prompt_template_bytes"), 4_096, "prompt − items");
+        assert_eq!(quantity("prompt_template_tokens"), 1_024);
+        let latency: Option<i64> = conn
+            .query_row(
+                "SELECT answer_latency_micros FROM assembly_metrics WHERE run_id = ?1",
+                ["run-m31-6"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            latency,
+            Some(1_250_000),
+            "the metrics row carries the latency R15's gate reads"
+        );
+        // The per-name breakdown is a phase deliverable, not a best-effort
+        // aside: its whole failure chain swallows (`.ok()` on the table
+        // load, `.ok()` on the refusal), so only an assertion notices a
+        // misspelled code or surface dropping it forever.
+        let (logged, detail): (i64, String) = conn
+            .query_row(
+                "SELECT count(*), coalesce(max(detail), '') FROM operational_log \
+                 WHERE surface = 'assembly.tool_calls' AND run_id = 'run-m31-6'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(logged, 1, "the per-name breakdown is filed operationally");
+        assert!(
+            detail.contains("submit_answer=2"),
+            "the detail names each tool's count: {detail}"
+        );
+    }
+
+    #[test]
+    fn a_run_with_no_manifest_records_nothing_rather_than_zeros() {
+        let conn = conn();
+        assert!(matches!(
+            record_from_assembly(
+                &conn,
+                VAULT,
+                STORE,
+                "r",
+                AssemblyObservation {
+                    manifest: None,
+                    usage: Some(fixture_usage()),
+                    model_id: Some("m".into()),
+                    tool_calls: None,
+                    prompt_bytes: 0,
+                    answer_latency_micros: 7,
+                },
+                now(),
+            ),
+            Err(CostError::Unmeasurable(_))
+        ));
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM run_cost_components WHERE run_id = 'r'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn a_failed_drain_is_unmeasurable_and_a_measured_empty_is_zero() {
+        // M31.2b's contract, read at the writer: `None` is a failed lock —
+        // nothing honest can be said — while `Some(empty)` is a run that
+        // measurably made no loopback calls.
+        let conn = conn();
+        let manifest = fixture_manifest();
+        let observed = |tool_calls| AssemblyObservation {
+            manifest: Some(&manifest),
+            usage: Some(fixture_usage()),
+            model_id: Some("claude-opus-5".into()),
+            tool_calls,
+            prompt_bytes: 4_196,
+            answer_latency_micros: 9,
+        };
+        let CostError::Unmeasurable(names) =
+            record_from_assembly(&conn, VAULT, STORE, "run-none", observed(None), now())
+                .unwrap_err()
+        else {
+            panic!("a failed drain is unmeasurable, not storage");
+        };
+        assert_eq!(names, vec!["tool_calls"]);
+        assert!(costs(&conn, VAULT, STORE, "run-none").unwrap().is_empty());
+
+        record_from_assembly(
+            &conn,
+            VAULT,
+            STORE,
+            "run-empty",
+            observed(Some(std::collections::BTreeMap::new())),
+            now(),
+        )
+        .unwrap();
+        let zero: i64 = conn
+            .query_row(
+                "SELECT quantity FROM run_cost_components \
+                 WHERE run_id = 'run-empty' AND component = 'tool_calls'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(zero, 0, "a measured empty is a real zero");
+    }
+
     #[test]
     fn an_assembly_row_round_trips() {
         let conn = conn();
@@ -670,6 +1146,7 @@ mod tests {
             context_bytes: 4096,
             retrieval_query_count: 2,
             blocked_intent_count: 1,
+            answer_latency_micros: None,
         };
         record_assembly(&conn, VAULT, STORE, &metrics, now()).unwrap();
         let blocked: i64 = conn

@@ -56,18 +56,139 @@ const COUNTED: [Counted; 4] = [
     ("cache_creation_input_tokens", |u, v| u.cache_write = v),
 ];
 
-/// Keys this build has seen and deliberately does not store.
-///
-/// Distinct from "unknown" on purpose: logging a field we decided to ignore
-/// on every single run would fill the operational log with noise and train
-/// everyone to stop reading it, which is how the genuinely new field gets
-/// missed.
-const KNOWN_UNCOUNTED: [&str; 4] = [
-    "server_tool_use",
+/// Keys consumed by RunFacts (M31.5) — not counts, so not COUNTED, but
+/// known and read; unknown_fields must not report them.
+const FACTS_CONSUMED: [&str; 4] = [
     "service_tier",
     "cache_creation",
     "ephemeral_1h_input_tokens",
+    "server_tool_use",
 ];
+
+/// Keys seen and deliberately not stored. Emptied by M31.5 — everything we
+/// used to shrug at is now consumed by RunFacts. The const and this doc
+/// stay so the logger's contract (report what is in NEITHER list) remains
+/// visible, and so the next suppressed key has a place to land with a
+/// reason.
+const KNOWN_UNCOUNTED: [&str; 0] = [];
+
+/// The non-count facts a run's stream already carries (M31.5).
+///
+/// Every field is best-effort `Option`, deliberately: measurement records
+/// what happened and must never become a second way for the run to fail. A
+/// value the wire spelled in a way this build cannot read degrades that ONE
+/// field to absent — and absent is never zero.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunFacts {
+    /// From the last `assistant` turn: the model that actually answered.
+    pub model_id: Option<String>,
+    /// From the last `assistant` turn — the final turn's stop reason is the
+    /// run's.
+    pub stop_reason: Option<String>,
+    pub service_tier: Option<String>,
+    /// `total_cost_usd` × 1e6, rounded. Only a finite, non-negative number
+    /// is a cost; anything else is absent.
+    pub total_cost_micros: Option<u64>,
+    pub num_turns: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub duration_api_ms: Option<u64>,
+    /// `usage.cache_creation.ephemeral_5m_input_tokens`.
+    pub cache_write_5m: Option<u64>,
+    /// `usage.cache_creation.ephemeral_1h_input_tokens`.
+    pub cache_write_1h: Option<u64>,
+    /// Length of the `permission_denials` array. Missing is `None`; an empty
+    /// array is `Some(0)` — different answers on purpose.
+    pub permission_denials: Option<u64>,
+    /// Sum of the `usage.server_tool_use` object's numeric values; absent
+    /// when the object is absent.
+    pub server_tool_use: Option<u64>,
+}
+
+impl RunFacts {
+    /// The result-event fields. `None` when the event is not terminal.
+    pub fn parse(event: &Value) -> Option<RunFacts> {
+        if !is_result(event) {
+            return None;
+        }
+        let usage = usage_object(event).and_then(Value::as_object);
+        Some(RunFacts {
+            model_id: None,
+            stop_reason: None,
+            service_tier: usage
+                .and_then(|u| u.get("service_tier"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            total_cost_micros: event
+                .get("total_cost_usd")
+                .and_then(Value::as_f64)
+                .filter(|usd| usd.is_finite() && *usd >= 0.0)
+                .map(|usd| (usd * 1e6).round() as u64),
+            num_turns: event.get("num_turns").and_then(Value::as_u64),
+            duration_ms: event.get("duration_ms").and_then(Value::as_u64),
+            duration_api_ms: event.get("duration_api_ms").and_then(Value::as_u64),
+            cache_write_5m: cache_creation(usage, "ephemeral_5m_input_tokens"),
+            cache_write_1h: cache_creation(usage, "ephemeral_1h_input_tokens"),
+            permission_denials: event
+                .get("permission_denials")
+                .and_then(Value::as_array)
+                .map(|denials| denials.len() as u64),
+            server_tool_use: usage
+                .and_then(|u| u.get("server_tool_use"))
+                .and_then(Value::as_object)
+                .map(|calls| {
+                    calls
+                        .values()
+                        .filter_map(Value::as_u64)
+                        .fold(0u64, u64::saturating_add)
+                }),
+        })
+    }
+
+    /// The assistant-turn fields. `None` when the event is not a turn.
+    pub fn from_assistant(event: &Value) -> Option<RunFacts> {
+        if event.get("type").and_then(Value::as_str) != Some("assistant") {
+            return None;
+        }
+        let message = event.get("message")?;
+        Some(RunFacts {
+            model_id: message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            stop_reason: message
+                .get("stop_reason")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            ..RunFacts::default()
+        })
+    }
+
+    /// Fold a later reading over this one, field-wise: a present field wins,
+    /// an absent one never erases what an earlier event said. Fed every
+    /// turn, this is what makes the FINAL turn's `stop_reason` the run's.
+    pub fn merge(&mut self, newer: RunFacts) {
+        self.model_id = newer.model_id.or_else(|| self.model_id.take());
+        self.stop_reason = newer.stop_reason.or_else(|| self.stop_reason.take());
+        self.service_tier = newer.service_tier.or_else(|| self.service_tier.take());
+        self.total_cost_micros = newer.total_cost_micros.or(self.total_cost_micros);
+        self.num_turns = newer.num_turns.or(self.num_turns);
+        self.duration_ms = newer.duration_ms.or(self.duration_ms);
+        self.duration_api_ms = newer.duration_api_ms.or(self.duration_api_ms);
+        self.cache_write_5m = newer.cache_write_5m.or(self.cache_write_5m);
+        self.cache_write_1h = newer.cache_write_1h.or(self.cache_write_1h);
+        self.permission_denials = newer.permission_denials.or(self.permission_denials);
+        self.server_tool_use = newer.server_tool_use.or(self.server_tool_use);
+    }
+}
+
+/// One TTL bucket of the `usage.cache_creation` object, absent when the
+/// object (or the bucket) is absent.
+fn cache_creation(usage: Option<&serde_json::Map<String, Value>>, key: &str) -> Option<u64> {
+    usage?
+        .get("cache_creation")?
+        .get(key)
+        .and_then(Value::as_u64)
+}
 
 /// The `usage` object of one CLI event, or `None` when the event carries no
 /// usage at all.
@@ -96,6 +217,7 @@ pub fn unknown_fields(event: &Value) -> Vec<String> {
         .keys()
         .filter(|key| {
             !COUNTED.iter().any(|(known, _)| known == *key)
+                && !FACTS_CONSUMED.contains(&key.as_str())
                 && !KNOWN_UNCOUNTED.contains(&key.as_str())
         })
         .cloned()
@@ -167,6 +289,7 @@ mod tests {
     const RESULT_QUOTA: &str = include_str!("../../fixtures/cli-stream/result-quota.json");
     const ASSISTANT_TURN: &str = include_str!("../../fixtures/cli-stream/assistant-turn.json");
     const RESULT_FUTURE: &str = include_str!("../../fixtures/cli-stream/result-future-fields.json");
+    const RESULT_CACHE_TTL: &str = include_str!("../../fixtures/cli-stream/result-cache-ttl.json");
 
     fn fixture(raw: &str) -> Value {
         serde_json::from_str(raw).expect("fixture is valid json")
@@ -244,9 +367,10 @@ mod tests {
     }
 
     #[test]
-    fn known_but_uncounted_fields_are_not_reported_as_unknown() {
-        // Otherwise every single run logs the same two lines and the log
-        // becomes something nobody reads.
+    fn fields_consumed_by_run_facts_are_not_reported_as_unknown() {
+        // These keys are read by RunFacts (M31.5), not counted by the budget
+        // — but they are known, and reporting them would log the same two
+        // lines on every run until nobody reads the log at all.
         let event = json!({
             "type": "result",
             "usage": { "input_tokens": 1, "service_tier": "standard", "server_tool_use": {} }
@@ -261,6 +385,74 @@ mod tests {
         assert_eq!(parse(&json!({ "type": "system", "subtype": "init" })), None);
         assert_eq!(parse(&json!({ "type": "result" })), None);
         assert_eq!(parse(&json!({ "type": "result", "usage": 7 })), None);
+    }
+
+    #[test]
+    fn the_terminal_event_yields_the_run_facts_we_already_receive() {
+        let event = fixture(RESULT_SUCCESS);
+        let facts = RunFacts::parse(&event).expect("the terminal event carries facts");
+        // Pinned to the committed fixture's actual bytes.
+        assert_eq!(
+            facts.total_cost_micros,
+            Some(41_200),
+            "0.0412 USD in micros"
+        );
+        assert_eq!(facts.num_turns, Some(3));
+        assert_eq!(facts.duration_ms, Some(8_421));
+        assert_eq!(facts.duration_api_ms, Some(7_994));
+        assert_eq!(facts.service_tier.as_deref(), Some("standard"));
+        assert_eq!(
+            facts.permission_denials,
+            Some(0),
+            "an empty array is zero, present — not absent"
+        );
+        assert_eq!(
+            facts.server_tool_use,
+            Some(0),
+            "the fixture's server_tool_use object sums to zero"
+        );
+        // result-success.json carries NO usage.cache_creation object — absent
+        // is absent, never zero. The TTL split gets its OWN fixture below.
+        assert_eq!(facts.cache_write_5m, None);
+        assert_eq!(facts.cache_write_1h, None);
+        // A result event has no assistant-message fields.
+        assert_eq!(facts.model_id, None);
+        assert_eq!(facts.stop_reason, None);
+    }
+
+    #[test]
+    fn the_cache_ttl_split_parses_when_the_wire_carries_it() {
+        let event = fixture(RESULT_CACHE_TTL);
+        let facts = RunFacts::parse(&event).unwrap();
+        assert_eq!(
+            facts.cache_write_5m,
+            Some(1_105),
+            "the split the NEW fixture carries"
+        );
+        assert_eq!(facts.cache_write_1h, Some(100));
+        assert_eq!(facts.total_cost_micros, Some(53_800));
+        assert_eq!(facts.server_tool_use, Some(2), "two web searches, summed");
+        assert!(
+            unknown_fields(&event).is_empty(),
+            "cache_creation is consumed, not unknown: {:?}",
+            unknown_fields(&event)
+        );
+    }
+
+    #[test]
+    fn the_assistant_event_yields_model_and_stop_reason() {
+        let event = fixture(ASSISTANT_TURN);
+        let facts = RunFacts::from_assistant(&event).unwrap();
+        assert_eq!(facts.model_id.as_deref(), Some("claude-opus-5"));
+        assert_eq!(facts.stop_reason.as_deref(), Some("tool_use"));
+    }
+
+    #[test]
+    fn a_malformed_cost_is_absent_and_never_zero() {
+        let event = json!({ "type": "result", "total_cost_usd": "banana" });
+        assert_eq!(RunFacts::parse(&event).unwrap().total_cost_micros, None);
+        let negative = json!({ "type": "result", "total_cost_usd": -0.5 });
+        assert_eq!(RunFacts::parse(&negative).unwrap().total_cost_micros, None);
     }
 
     #[test]

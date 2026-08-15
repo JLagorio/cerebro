@@ -765,10 +765,16 @@ pub const SCHEMA_V8: &str = "
 /// from.
 ///
 /// **These exist so later promotions are argued from records rather than from
-/// anecdotes.** Nothing reads them yet; that is the point. A decision about
-/// whether the resolver is good enough to run unattended, or whether a pass
-/// costs what it claims, has to be answerable from rows that were already
-/// being written when nobody was looking.
+/// anecdotes.** They were written before anything read them; that was the
+/// point. A decision about whether the resolver is good enough to run
+/// unattended, or whether a pass costs what it claims, has to be answerable
+/// from rows that were already being written when nobody was looking. The
+/// M28.1 trigger runner now reads them, and `run_cost_components` gained its
+/// one production writer — the attended assembly path — in M31.6.
+/// `resolver_outcomes` is the one table still in the original posture, and
+/// inverted: M28.1's R7 leg READS it, `record_attempt` is called only from
+/// tests, so it is a shape waiting for its producer rather than rows waiting
+/// for a reader. Whatever gives it one owes this comment an edit.
 ///
 /// **`run_cost_components` is one row per component, not one wide row.** The
 /// unit belongs to the component and the component list is closed, so a CHECK
@@ -1063,4 +1069,38 @@ pub const SCHEMA_V11: &str = "
     );
     CREATE INDEX trigger_evaluations_by_gate
         ON trigger_evaluations (registry_id, subkey, evaluated_at);
+";
+
+/// The M31.5 schema — the run facts the CLI was already sending, and the two
+/// columns M31.6 went on to write.
+///
+/// **Landed whole, before anything writes the M31.6 halves (D5).** A
+/// committed migration's text is immutable — the runner only executes steps
+/// with `to > version`, so a column added to committed DDL later would
+/// silently never reach a database already stamped 12. That is why
+/// `estimated` (M31.6's exact-vs-estimated cost provenance on
+/// `run_cost_components`) and `answer_latency_micros` (M31.6 writes it on
+/// `assembly_metrics`, R15's gate reads it — a gate may only name a
+/// persisted primitive) were part of this step even though nothing wrote
+/// them until M31.6 landed.
+///
+/// **Every fact column is nullable, and NULL is the honest answer** — for a
+/// run predating this migration, and for a stream that never said. Absent is
+/// never zero; the one non-null addition (`estimated`) defaults to 0 because
+/// every component row written before M31.6 was, in fact, exact.
+pub const SCHEMA_V12: &str = "
+    ALTER TABLE runs ADD COLUMN model_id TEXT;
+    ALTER TABLE runs ADD COLUMN stop_reason TEXT;
+    ALTER TABLE runs ADD COLUMN service_tier TEXT;
+    ALTER TABLE runs ADD COLUMN total_cost_micros INTEGER
+        CHECK (total_cost_micros IS NULL OR total_cost_micros >= 0);
+    ALTER TABLE runs ADD COLUMN num_turns INTEGER;
+    ALTER TABLE runs ADD COLUMN duration_ms INTEGER;
+    ALTER TABLE runs ADD COLUMN duration_api_ms INTEGER;
+    ALTER TABLE runs ADD COLUMN cache_write_5m INTEGER;
+    ALTER TABLE runs ADD COLUMN cache_write_1h INTEGER;
+    ALTER TABLE runs ADD COLUMN server_tool_use INTEGER;
+    ALTER TABLE run_cost_components ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0
+        CHECK (estimated IN (0, 1));
+    ALTER TABLE assembly_metrics ADD COLUMN answer_latency_micros INTEGER;
 ";

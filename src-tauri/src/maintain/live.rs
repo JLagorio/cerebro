@@ -44,7 +44,16 @@ impl Runner for Live<'_> {
         // and errors if none is running, rather than starting one behind the
         // user's back.
         let url = self.mcp.ensure(self.app, self.vault)?.url;
-        let token = self.mcp.run_token(Some(ACTOR), Some(vec![]))?;
+        // Scoped to nothing; granted the SAME tool narrowing the argv
+        // declares (M31.1b) — one list, so the boundary and the advice
+        // cannot disagree. M31.2a: and the SAME durable id — the dispatch
+        // lease's, which the meter books and `schedule::attempt` finalizes.
+        let token = self.mcp.run_token(
+            Some(ACTOR),
+            Some(vec![]),
+            Some(declared_tools()),
+            run_id.to_string(),
+        )?;
         let (tx, rx) = sync_channel::<RunEnd>(1);
         crate::agent::stream(
             self.app.clone(),
@@ -72,6 +81,17 @@ impl Runner for Live<'_> {
     }
 }
 
+/// The tools a maintenance run holds — declared in the request's argv
+/// (M31.1a) AND granted to its token (M31.1b) from this single list, so the
+/// two can never disagree. The pass proposes; its findings were computed
+/// deterministically before it spawned, so there is nothing to look up.
+/// Surface derived, not listed (policy-is-data).
+fn declared_tools() -> Vec<String> {
+    let mut tools = crate::mcp::proposal_tool_names();
+    tools.push(crate::mcp::ORGANIZE_TOOL.into());
+    tools
+}
+
 fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
     AgentRequest {
         message: prompt.to_string(),
@@ -89,9 +109,13 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
-        // Left to `policy::submit`; a second list here would be a second place
-        // for that decision to drift.
-        allowed_tools: None,
+        // M31.1a — see `declared_tools` for what is granted and why. The
+        // same list the mint grants (M31.1b).
+        allowed_tools: Some(declared_tools()),
+        // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
+        // tools are withdrawn in build_args. Only the three internal spawn
+        // sites ever set this.
+        internal: true,
     }
 }
 
@@ -117,6 +141,50 @@ mod tests {
 
     #[test]
     fn the_tools_are_left_to_the_policy_rather_than_listed_twice() {
-        assert_eq!(request("f", "t", "u").allowed_tools, None);
+        // Inverted in M31.1a: the narrowing is now DECLARED, and it is derived
+        // from the policy table rather than listed — the original test's
+        // don't-drift concern, honored the other way around.
+        let declared = request("f", "t", "u")
+            .allowed_tools
+            .expect("an internal run declares its tools");
+        assert!(
+            declared.iter().any(|t| t == crate::mcp::COMMIT_TOOL),
+            "the proposal surface is the point of the run"
+        );
+        assert!(
+            declared.iter().any(|t| t.starts_with("propose_")),
+            "at least one generated proposal op is granted"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("get_note")),
+            "no internal run has a reason to read arbitrary notes"
+        );
+        assert!(
+            !declared.iter().any(|t| t.contains("search_notes")),
+            "retrieval is the assembler's job, not the run's"
+        );
+        assert!(
+            !declared
+                .iter()
+                .any(|t| t == "write_concept" || t == "cache_source"),
+            "no direct writers on an unattended run — exact names on purpose: \
+             propose_cache_source is the REVIEWED channel and is a different \
+             tool (the propose_ prefix is injective by design)"
+        );
+    }
+
+    #[test]
+    fn the_argv_and_the_grant_are_one_list() {
+        // M31.1b. `request` declares `declared_tools()` and the mint grants
+        // `declared_tools()` — the invariant is that both draw from the ONE
+        // function, so a second hand-written list cannot drift.
+        assert_eq!(request("f", "t", "u").allowed_tools, Some(declared_tools()));
+    }
+
+    #[test]
+    fn a_maintenance_run_is_marked_as_cerebros_own() {
+        // The marker build_args keys the CLI built-in withdrawal on. Only the
+        // three internal spawn sites ever set it.
+        assert!(request("f", "t", "u").internal);
     }
 }

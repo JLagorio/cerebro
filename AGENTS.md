@@ -65,7 +65,9 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   directory's README before editing either artifact (both have regeneration
   steps that are deliberate, `#[ignore]`d tests).
 - **Two records, two destinies**: every refusal names a code whose
-  ledger-or-operational destiny is declared in `policy.v1.json`. Epistemic
+  ledger-or-operational destiny is declared in the shipped policy table —
+  `shared/policy/policy.v3.json` since M27.4; v1 and v2 are frozen negative
+  controls, never edited. Epistemic
   history goes in the vault ledger; schema mistakes, malformed arguments,
   and capability gaps go in `<app-data>/runtime.db`. When in doubt:
   operational. Promoting a code into the ledger needs a
@@ -82,6 +84,16 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 - **Suppressions carry reasons**: every `eslint-disable` states why, in place.
   The compiler-era react-hooks rules are off by documented choice
   (`eslint.config.js`) — candidates to ratchet on, not free to violate.
+- **A retired workaround needs its original comment killed.** When a
+  constraint stops being true, the fix includes deleting the comment that
+  explained the old shape. M31 planned to kill five in our own tree — the
+  assembly prompt's "no tools" claim, the three "Not narrowed here"
+  rationales (counted once), the assembly capability-absence comment, the
+  run_cost_components "no producer" note, and this file's own policy.v1
+  reference — and review found five more the same commits had falsified
+  (ambient's ledger-appender count, schema.rs's "nothing reads them yet",
+  and the trigger module's three "fourteen" claims). Budget for that: the
+  comment a change falsifies is rarely the comment the change is about.
 - **Ratchets only tighten**: coverage thresholds in `vite.config.ts` never go
   down.
 - `.gitattributes` pins sources to text after two files went binary from

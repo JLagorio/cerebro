@@ -60,14 +60,17 @@ fn normalize_actor(actor: Option<&str>) -> &str {
 pub struct RunGrant {
     pub actor: String,
     /// The durable 128-bit id every proposal this run submits carries
-    /// (M26.3c), DERIVED FROM THE BEARER TOKEN.
+    /// (M26.3c), RESOLVED FROM THE BEARER TOKEN's grant. Since M31.2a it is
+    /// the SAME id the meter and the `runs` table book the run under — one
+    /// run, one id, from mint to meter to grant.
     ///
     /// It rides the token for exactly the reason actor and scope do, and one
     /// more: `commit_proposals` refuses members belonging to another run
     /// (`policy/commit.rs`), so if a caller could name its own run id it
     /// could sweep another run's queued proposals into its own commit set.
     /// A caller only ever knows its own token, so it can only ever name its
-    /// own run.
+    /// own run — the protection is WHERE the id is resolved (from the grant,
+    /// server-side), not how it was derived.
     pub run_id: String,
     /// Vault-relative folders this run may write inside. `None` is unrestricted
     /// — the panel's own turns, which the user is watching.
@@ -82,13 +85,24 @@ pub struct RunGrant {
     /// A Collection is a folder, so "the Product collection" is expressible;
     /// its empty entry set (surface.ts) is not consulted and does not matter.
     pub scope: Option<Vec<String>>,
+    /// Tool names this token may dispatch. `None` is unrestricted — the
+    /// panel's own turns. Same upper-bound semantics as `scope`, and checked
+    /// in the same place, for the same reason: argv is advice, the grant is
+    /// the boundary.
+    pub tools: Option<Vec<String>>,
 }
 
-/// A run's durable id, derived from its bearer token.
+/// A run id derived from a bearer token by hash.
 ///
-/// Domain-separated so a token can never be read back out of an id that
-/// travels in the ledger, and 128-bit hex because `ProposalV1::validate`
-/// requires that shape.
+/// Since M31.2a a MINTED run token carries the durable id its spawner books
+/// (see `run_token`), so this derivation serves only bearers that never book
+/// a run: the endpoint's own base token, whose grant `resolve_grant` builds
+/// here. (`RunGrant::unrestricted` also calls it, but on the one production
+/// path that reaches it — the base branch of `resolve_grant` — that output
+/// is immediately overwritten; only test fixtures ever keep it.)
+/// Domain-separated so a token can never be read back out of an id
+/// that travels in the ledger, and 128-bit hex because
+/// `ProposalV1::validate` requires that shape.
 pub fn run_id_of(token: &str) -> String {
     crate::ledger::schema::sha256_first128(format!("cerebro-mcp-run-v1\0{token}").as_bytes())
 }
@@ -99,6 +113,7 @@ impl RunGrant {
             actor: actor.to_string(),
             run_id: run_id_of(actor),
             scope: None,
+            tools: None,
         }
     }
 
@@ -146,14 +161,47 @@ pub fn run_token_window() -> usize {
 
 fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunGrant) {
     runs.push((token, grant));
-    let excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
+    let mut excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
     // A run whose token is gone can never propose again, so its attempt
-    // counters go with it. Bounding the counters by the same window that
-    // bounds the tokens is what stops this map growing for the life of the
-    // process.
-    for (_, dropped) in runs.drain(..excess) {
+    // counters go with it — and its tool-call counts (M31.2b), for the same
+    // reason. Bounding the counters by the same window that bounds the
+    // tokens is what stops these maps growing for the life of the process.
+    //
+    // M31.2b — but an attended run has no elapsed limit, and enough ambient
+    // mints during one long run would evict its token mid-question: with it
+    // would go not just its tool-call counter but its authority to call
+    // submit_answer at all. So eviction RETAINS any run holding an open
+    // question and takes the next-oldest without one instead. If every
+    // older slot somehow holds an open question, the window grows past its
+    // cap — the cap is about leaks, not about live runs. The scan never
+    // reaches the just-pushed entry, which the old `drain(..excess)` could
+    // not evict either: minting a token and returning it dead would be
+    // worse than any leak.
+    let mut i = 0;
+    while excess > 0 && i + 1 < runs.len() {
+        if holds_open_question(&runs[i].1.run_id) {
+            i += 1;
+            continue;
+        }
+        let (_, dropped) = runs.remove(i);
         forget_attempts(&dropped.run_id);
+        forget_tool_calls(&dropped.run_id);
+        excess -= 1;
     }
+}
+
+/// Does this run hold an open question (M26.5e)? While it does, eviction
+/// must not touch it: the token is what authorizes `submit_answer`, and the
+/// tool-call counter is the measurement M31.6 will drain at finalize. On a
+/// poisoned questions mutex the answer is unknowable, and the fail-safe
+/// direction is `true` — retain rather than evict, leak over kill, for the
+/// same reason the cap may grow past its bound: it is about leaks, not
+/// about live runs.
+fn holds_open_question(run_id: &str) -> bool {
+    questions()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(true)
 }
 
 /// What one run has already tried for one piece of work (M26.4g).
@@ -181,6 +229,51 @@ fn attempts() -> &'static Mutex<BTreeMap<(String, String), Attempt>> {
 fn forget_attempts(run_id: &str) {
     if let Ok(mut map) = attempts().lock() {
         map.retain(|(run, _), _| run != run_id);
+    }
+}
+
+/// `run_id` → tool name → dispatch count (M31.2b). Per NAME because gap 3's
+/// own question — "did the run READ outside its manifest" — is unanswerable
+/// from a scalar. Process-global for the same reason the attempt map is:
+/// a run is a bearer token, not a connection. The panel base bearer's entry
+/// is immortal — its id is never in the eviction window — but bounded
+/// (catalog-sized keys, u64 counts) and app-side only: every spawned CLI
+/// gets a per-run token.
+fn tool_calls() -> &'static Mutex<BTreeMap<String, BTreeMap<String, u64>>> {
+    static TOOL_CALLS: OnceLock<Mutex<BTreeMap<String, BTreeMap<String, u64>>>> = OnceLock::new();
+    TOOL_CALLS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+pub(crate) fn note_tool_call(run_id: &str, tool: &str) {
+    if let Ok(mut map) = tool_calls().lock() {
+        *map.entry(run_id.to_string())
+            .or_default()
+            .entry(tool.to_string())
+            .or_insert(0) += 1;
+    }
+}
+
+/// Drained by the ATTENDED ASSEMBLY PATH (M31.6) and by nothing else. The
+/// meter must never call this: it finishes before ask.rs resumes, so a
+/// meter-side drain would leave ask.rs reading zero and recording it as a
+/// measurement — the exact lie the Measured::zero rule forbids.
+///
+/// `None` is UNMEASURABLE — the lock failed, and nothing can honestly be
+/// said about what the run dispatched. `Some(empty)` is a MEASURED zero: a
+/// run with no entry made no loopback calls, and a retried finalize of an
+/// already-drained run reads the same honest empty, never a repeat.
+pub(crate) fn take_tool_calls(run_id: &str) -> Option<BTreeMap<String, u64>> {
+    tool_calls()
+        .lock()
+        .ok()
+        .map(|mut m| m.remove(run_id).unwrap_or_default())
+}
+
+/// Discard without reading — the eviction-side cleanup, mirroring
+/// `forget_attempts`. Not a drain: nothing is measured, the run is gone.
+fn forget_tool_calls(run_id: &str) {
+    if let Ok(mut map) = tool_calls().lock() {
+        map.remove(run_id);
     }
 }
 
@@ -309,6 +402,8 @@ pub(crate) fn test_submit_answer(
             actor: crate::assembly::ask::ACTOR.to_string(),
             run_id: run_id.to_string(),
             scope: Some(vec![]),
+            // The narrowing the real mint site grants a synthesis run.
+            tools: Some(crate::assembly::live::declared_tools()),
         },
     )
     .map(|_| ())
@@ -447,10 +542,17 @@ impl McpState {
     /// Mint a bearer token for ONE run, bound to that run's actor (M13.4).
     /// None reads as the default actor. Written into that run's private MCP
     /// config and nowhere else; only the last few run tokens stay valid.
+    ///
+    /// `run_id` is the durable id the caller books the run under — the
+    /// meter's `runs`-table id (M31.2a). It goes into the grant, and the
+    /// grant is the ONLY place it is ever resolved from, so a run can still
+    /// never name another run's id.
     pub fn run_token(
         &self,
         actor: Option<&str>,
         scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
     ) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
@@ -464,11 +566,14 @@ impl McpState {
             token.clone(),
             RunGrant {
                 actor: normalize_actor(actor).to_string(),
-                run_id: run_id_of(&token),
+                run_id,
                 // An empty declaration is not "everywhere" — a record that
                 // declares `scope:` and lists nothing has scoped itself to
                 // nothing, and the only safe reading of that is no writes.
                 scope,
+                // Same reading (M31.1b): an empty tools list grants no
+                // dispatch, and only `None` — the panel — is unrestricted.
+                tools,
             },
         );
         Ok(token)
@@ -731,8 +836,38 @@ pub const PROPOSAL_PREFIX: &str = "propose_";
 /// it closes the run's set.
 pub const COMMIT_TOOL: &str = "commit_proposals";
 
+/// Served by base_tools as a literal (the TS parity test scrapes those
+/// bytes — leave them); this const exists so SPAWN SITES never spell the
+/// name: a drifted spelling would be silently dropped by narrow().
+pub const REPORT_TOOL: &str = "report_window_outcome";
+
+/// Same contract. propose_organize is hand-written, not generated from the
+/// policy table (`proposal_op_of` says why), so proposal_tool_names() cannot
+/// yield it.
+pub const ORGANIZE_TOOL: &str = "propose_organize";
+
 pub fn proposal_tool_name(op: &str) -> String {
     format!("{PROPOSAL_PREFIX}{op}")
+}
+
+/// Every generated proposal tool plus the terminal commit — the surface an
+/// internal run needs to act on what it finds. Derived from the same table
+/// that serves them: a hand-copied list at a spawn site would be the twin
+/// inventory policy-is-data forbids. A table that fails to load yields only
+/// the terminal commit — the run is narrowed harder, never wider
+/// (fail-closed).
+pub fn proposal_tool_names() -> Vec<String> {
+    let mut names: Vec<String> = crate::policy::table::PolicyTable::load()
+        .map(|table| {
+            table
+                .agent_facing_ops()
+                .into_iter()
+                .map(proposal_tool_name)
+                .collect()
+        })
+        .unwrap_or_default();
+    names.push(COMMIT_TOOL.to_string());
+    names
 }
 
 /// The op a proposal tool name refers to, or `None` for anything else.
@@ -1024,6 +1159,40 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
     }
 }
 
+/// M31.1b — the refusal an un-granted tool name earns, or `None` if the
+/// grant permits dispatch.
+///
+/// A function beside the check that uses it, like `may_write`, so the tests
+/// can hold the refusal itself. BOTH sides are normalized to the short
+/// spelling: loopback names arrive short, but a caller presenting the full
+/// `mcp__cerebro__` form names the same tool, and a grant DECLARED in the
+/// full form must admit the short-spelled call the loopback actually
+/// receives — a one-sided strip would refuse it, fail-closed but a silent
+/// drift channel. `MCP_PREFIX` lives in `agent/mod.rs` so the two spellings
+/// cannot drift.
+fn ungranted_tool_refusal(grant: &RunGrant, name: &str) -> Option<String> {
+    let tools = grant.tools.as_ref()?;
+    let strip = |t: &str| -> String {
+        t.strip_prefix(crate::agent::MCP_PREFIX)
+            .unwrap_or(t)
+            .to_string()
+    };
+    let short = strip(name);
+    // Equal names strip to equal names, so this one comparison also covers
+    // the verbatim `t == name` case.
+    if tools.iter().any(|t| strip(t) == short) {
+        return None;
+    }
+    Some(format!(
+        "This run is granted {} and cannot call {name}.",
+        if tools.is_empty() {
+            "nothing".to_string()
+        } else {
+            tools.join(", ")
+        }
+    ))
+}
+
 const PREFERENCES_REFUSAL: &str =
     "`preferences` is the user's memory for this agent and cannot be written by a run. Put what \
 you learned in `recent`, or record it as a concept with write_concept.";
@@ -1057,6 +1226,11 @@ fn call_tool(
         .map_err(|_| "vault lock poisoned")?
         .clone();
 
+    // M31.2b — counted at the top so a REFUSED call is still a call the run
+    // chose to make: scope- and grant-refusals are dispatches too. Counted
+    // here rather than per-arm so a new tool cannot be added uncounted.
+    note_tool_call(&grant.run_id, name);
+
     // M17.13 — scope is enforced HERE, before the tool runs, and it is a
     // refusal rather than a request. An agent bound to `projects/atlas` cannot
     // write outside it even if its instructions, or a note it just read, tell
@@ -1079,6 +1253,16 @@ fn call_tool(
                     .unwrap_or_default()
             )));
         }
+    }
+
+    // M31.1b — reads were the one surface the grant did not bound. Checked
+    // exactly like scope: a name outside the grant is refused before any
+    // tool body runs. And exactly like scope's refusal above, this is a
+    // plain error_result the model can read — no OperationalRefusal, no
+    // operational_log row. Deliberate, and symmetric: if either refusal
+    // ever starts recording operationally, both change together.
+    if let Some(refusal) = ungranted_tool_refusal(grant, name) {
+        return Ok(error_result(refusal));
     }
 
     if writes_preferences(&grant.actor, name, args) {
@@ -2543,6 +2727,60 @@ mod tests {
         assert!(actor_of(&newest, "base", &runs).is_some());
     }
 
+    #[test]
+    fn eviction_does_not_eat_a_live_attended_run() {
+        // Mint RUN_TOKEN_WINDOW+1 tokens while one run holds an open question
+        // and a populated counter; assert BOTH survive: the token still
+        // resolves a grant (submit_answer stays authorized) and the counter
+        // still holds its counts.
+        let live = "run-m31-2b-live";
+        let _manifest = open_a_question(live);
+        note_tool_call(live, "get_note");
+
+        let mut runs = Vec::new();
+        let mut first = grant("agent:attended");
+        first.run_id = live.to_string();
+        push_run_token(&mut runs, "tok-live".into(), first);
+        for i in 1..=RUN_TOKEN_WINDOW {
+            push_run_token(&mut runs, format!("tok-{i}"), grant(&format!("actor-{i}")));
+        }
+
+        assert!(
+            resolve_grant("tok-live", "base", &runs).is_some(),
+            "the live run's token survives ambient mints while its question is open"
+        );
+        assert!(
+            actor_of("tok-1", "base", &runs).is_none(),
+            "the next-oldest entry WITHOUT an open question was evicted instead"
+        );
+        assert_eq!(runs.len(), RUN_TOKEN_WINDOW, "the cap still holds");
+        assert_eq!(
+            take_tool_calls(live)
+                .expect("a healthy lock is a measurement")
+                .get("get_note"),
+            Some(&1),
+            "and the counter was not zeroed by eviction"
+        );
+        // Close the question so the registry does not leak across tests.
+        assert!(take_answer(live).is_none(), "no answer was ever submitted");
+    }
+
+    #[test]
+    fn every_dispatched_tool_is_counted_per_name_and_drained_once() {
+        let run = "run-m31-2b";
+        forget_tool_calls(run);
+        note_tool_call(run, "get_note");
+        note_tool_call(run, "get_note");
+        note_tool_call(run, "propose_merge_entities");
+        let drained = take_tool_calls(run).expect("a healthy lock is a measurement");
+        assert_eq!(drained.get("get_note"), Some(&2));
+        assert_eq!(drained.values().sum::<u64>(), 3);
+        // A retried finalize cannot double-count: the second drain is a
+        // MEASURED empty — Some, because the lock held; the run just has
+        // nothing left to say.
+        assert!(take_tool_calls(run).expect("still measurable").is_empty());
+    }
+
     /// M17.13 — scope is structural, and these are the property.
     ///
     /// The point is not that an agent is ASKED to stay inside its folder; it
@@ -2553,6 +2791,7 @@ mod tests {
             actor: "process:scout".into(),
             run_id: run_id_of("process:scout"),
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+            tools: None,
         }
     }
 
@@ -2710,6 +2949,123 @@ mod tests {
         }
     }
 
+    // --- The tools narrowing (M31.1b) ----------------------------------
+    //
+    // Same property as scope, one surface over: the point is not that a run
+    // is ASKED to stay inside its granted tools (that is argv, M31.1a); it
+    // is that dispatch refuses an un-granted name before any tool body runs.
+
+    #[test]
+    fn a_granted_narrowing_is_enforced_at_dispatch_not_just_argv() {
+        // M31.1b. A token minted with a tool narrowing refuses un-granted
+        // reads server-side — a compromised CLI that ignores its argv still
+        // cannot read the vault through the loopback. Minted through the REAL
+        // `run_token`, which needs state but no live socket.
+        let run_actors = Arc::new(Mutex::new(Vec::new()));
+        let state = McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                token: "base".into(),
+                vault: Arc::new(Mutex::new(PathBuf::new())),
+                run_actors: run_actors.clone(),
+            })),
+        };
+        let token = state
+            .run_token(
+                Some("agent:m26-ingest"),
+                Some(vec![]),
+                Some(vec![COMMIT_TOOL.into()]),
+                crate::ledger::new_run_id(),
+            )
+            .expect("minting needs state, not a socket");
+        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+            .expect("a minted token resolves to its grant");
+
+        let refusal = ungranted_tool_refusal(&grant, "get_note")
+            .expect("an un-granted read is refused before any tool body runs");
+        assert!(refusal.contains("get_note"), "names the tool: {refusal}");
+        assert!(
+            refusal.contains(COMMIT_TOOL),
+            "names the narrowing: {refusal}"
+        );
+        // What the grant names still dispatches.
+        assert!(ungranted_tool_refusal(&grant, COMMIT_TOOL).is_none());
+    }
+
+    #[test]
+    fn the_grant_carries_the_durable_run_id_the_meter_books() {
+        // M31.2a. One attended run used to have two ids: ledger::new_run_id()
+        // in the runs table, sha256(token) in the grant. Everything that joins
+        // runs to proposals, answers, or costs needs them to be ONE id.
+        // Minted through the REAL `run_token`, resolved through the REAL
+        // `resolve_grant` — state, no socket.
+        let run_actors = Arc::new(Mutex::new(Vec::new()));
+        let state = McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                token: "base".into(),
+                vault: Arc::new(Mutex::new(PathBuf::new())),
+                run_actors: run_actors.clone(),
+            })),
+        };
+        let durable = crate::ledger::new_run_id();
+        let token = state
+            .run_token(
+                Some("agent:m26-synthesis"),
+                Some(vec![]),
+                None,
+                durable.clone(),
+            )
+            .expect("minting needs state, not a socket");
+        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+            .expect("a minted token resolves to its grant");
+        assert_eq!(grant.run_id, durable);
+    }
+
+    #[test]
+    fn the_full_mcp_spelling_cannot_slip_past_the_narrowing() {
+        // Loopback names arrive short, so the strip is defensive — but both
+        // spellings must name the SAME tool: a granted short name admits the
+        // full spelling, and an un-granted one refuses both.
+        let mut grant = RunGrant::unrestricted("agent:m26-synthesis");
+        grant.tools = Some(vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()]);
+        let full = format!(
+            "{}{}",
+            crate::agent::MCP_PREFIX,
+            crate::assembly::prompt::SUBMIT_TOOL
+        );
+        assert!(ungranted_tool_refusal(&grant, &full).is_none());
+        let refusal = format!("{}get_note", crate::agent::MCP_PREFIX);
+        assert!(ungranted_tool_refusal(&grant, &refusal).is_some());
+        // And the declared side normalizes too: a grant WRITTEN in the full
+        // spelling admits the short-spelled call the loopback actually
+        // receives — a one-sided strip would refuse it, fail-closed but a
+        // silent drift channel.
+        grant.tools = Some(vec![full]);
+        assert!(ungranted_tool_refusal(&grant, crate::assembly::prompt::SUBMIT_TOOL).is_none());
+    }
+
+    #[test]
+    fn a_narrowing_that_lists_nothing_grants_nothing() {
+        // The same reading scope settled on: a declaration that lists nothing
+        // has narrowed itself to nothing, and the only safe reading of that
+        // is no dispatch — never "everything".
+        let mut grant = RunGrant::unrestricted("agent:x");
+        grant.tools = Some(vec![]);
+        let refusal = ungranted_tool_refusal(&grant, "get_note").expect("nothing is granted");
+        assert!(refusal.contains("get_note"), "{refusal}");
+    }
+
+    #[test]
+    fn an_unrestricted_grant_dispatches_the_whole_catalog() {
+        // The panel's own turns: `None` is no narrowing, not an empty one.
+        let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().unwrap();
+            assert!(ungranted_tool_refusal(&grant, name).is_none(), "{name}");
+        }
+    }
+
     /// One assembled question, opened for a run the way the app opens it.
     fn open_a_question(run_id: &str) -> crate::assembly::manifest::WorkingMemoryManifest {
         use crate::assembly::fixture;
@@ -2723,6 +3079,7 @@ mod tests {
             actor: "agent:m26-synthesis".into(),
             run_id: run_id.to_string(),
             scope: None,
+            tools: None,
         }
     }
 
@@ -2831,6 +3188,23 @@ mod tests {
             served.contains(&crate::assembly::prompt::SUBMIT_TOOL),
             "the prompt names {} and the server serves {served:?}",
             crate::assembly::prompt::SUBMIT_TOOL
+        );
+    }
+
+    #[test]
+    fn the_hand_served_tool_consts_name_tools_the_catalog_serves() {
+        // M31.1a. `base_tools` spells these names literally so the TS parity
+        // test can scrape the bytes; the consts exist so SPAWN SITES never
+        // spell them. This ties the two ends together: a const that drifted
+        // from the served literal would be silently dropped by narrow().
+        let served: Vec<String> = tool_catalog(true)
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect();
+        assert!(served.iter().any(|name| name == REPORT_TOOL), "{served:?}");
+        assert!(
+            served.iter().any(|name| name == ORGANIZE_TOOL),
+            "{served:?}"
         );
     }
 

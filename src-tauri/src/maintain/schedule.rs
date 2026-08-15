@@ -53,6 +53,14 @@ pub enum Scheduled {
     /// because a pass with nothing to say should not hold the one ambient
     /// lease while it decides that.
     NothingNew,
+    /// The proposal surface is off (`agent_proposals_enabled=false`): the
+    /// pass exists to propose, so spawning would be pure spend and
+    /// recording would silence findings nobody could act on. Checked
+    /// before the lease — a claimed lease is itself a cost — and after
+    /// the nothing-new check, so a base with nothing to say stays
+    /// [`Scheduled::NothingNew`] and a skip only ever describes findings
+    /// that exist.
+    SkippedNoProposalSurface,
     Ran {
         run_id: String,
         said: usize,
@@ -65,11 +73,17 @@ pub enum Scheduled {
 /// The findings are computed BEFORE the lease is claimed, deliberately: the
 /// one ambient lease is scarce, and taking it only to discover there was
 /// nothing to say would block an ingest tick that had real work.
+///
+/// `proposals_enabled` is `agent_proposals_enabled`, handed IN rather than
+/// read here: the switch lives in the app config, and this module
+/// deliberately holds no app handle. The caller who has one (the ambient
+/// supervisor) reads the file and passes the answer.
 pub fn attempt<R: Runner>(
     conn: &Connection,
     context: &pass::Context<'_>,
     state: &EpistemicState,
     runner: &R,
+    proposals_enabled: bool,
     now: DateTime<Utc>,
 ) -> Result<Scheduled, String> {
     // ONE derivation of "which beliefs are stale", shared with the lane a
@@ -78,6 +92,14 @@ pub fn attempt<R: Runner>(
     let stale = crate::attention::lanes::stale_beliefs(state, now)?;
     if !anything_new(conn, context, state, &stale)? {
         return Ok(Scheduled::NothingNew);
+    }
+
+    // There IS something to say — but with the proposal surface off, nobody
+    // could act on it. Spawning would spend a subprocess for nothing, and
+    // recording would mark findings as said that nobody ever heard. Skip
+    // before the lease: a claimed lease is itself a cost.
+    if !proposals_enabled {
+        return Ok(Scheduled::SkippedNoProposalSurface);
     }
 
     let lease = match dispatch::claim(
@@ -112,6 +134,8 @@ pub fn attempt<R: Runner>(
         run_outcome,
         // The meter books real usage against this run id; there is nothing
         // honest to report from here.
+        None,
+        // And the facts live with the meter's tally for the same reason.
         None,
         // No items were claimed, so there are none to land. `Consume` is the
         // no-op over an empty claim.
@@ -251,6 +275,7 @@ mod tests {
             &harness.context(),
             &fixture::state(),
             &spy,
+            true,
             now(),
         )
         .unwrap();
@@ -284,6 +309,7 @@ mod tests {
             &harness.context(),
             &EpistemicState::default(),
             &spy,
+            true,
             now(),
         )
         .unwrap();
@@ -297,12 +323,51 @@ mod tests {
     }
 
     #[test]
+    fn a_pass_that_cannot_propose_does_not_spend_and_does_not_silence() {
+        // M31.4. The M26.6c ordering fix ensured we never record before the
+        // run. This is the case ordering does not cover: a run that CANNOT
+        // act, whose findings would still be marked said.
+        let harness = Harness::open("maintain-schedule-no-proposal-surface");
+        let spy = Spy::default();
+        let state = fixture::state();
+        let outcome = attempt(
+            &harness.conn,
+            &harness.context(),
+            &state,
+            &spy,
+            false,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(outcome, Scheduled::SkippedNoProposalSurface);
+        assert_eq!(*spy.runs.borrow(), 0, "no CLI run was spawned");
+        let runs: i64 = harness
+            .conn
+            .query_row("SELECT count(*) FROM runs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(runs, 0, "no lease, no CLI, no tokens");
+        // Every finding the pass would have said is still unsaid, so the
+        // next tick — surface on — offers them again.
+        let findings = pass::keyed(
+            STORE,
+            &crate::maintain::candidates::find(&state, &std::collections::BTreeSet::new()),
+        );
+        assert!(!findings.is_empty(), "the fixture has findings");
+        for finding in &findings {
+            assert!(
+                !pass::said_before(&harness.conn, &harness.context(), &finding.key).unwrap(),
+                "a finding nobody could act on has not been said"
+            );
+        }
+    }
+
+    #[test]
     fn the_second_pass_over_an_unchanged_base_takes_no_lease_either() {
         let harness = Harness::open("maintain-schedule-twice");
         let spy = Spy::default();
         let state = fixture::state();
-        attempt(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
-        let second = attempt(&harness.conn, &harness.context(), &state, &spy, now()).unwrap();
+        attempt(&harness.conn, &harness.context(), &state, &spy, true, now()).unwrap();
+        let second = attempt(&harness.conn, &harness.context(), &state, &spy, true, now()).unwrap();
         assert_eq!(second, Scheduled::NothingNew);
         assert_eq!(*spy.runs.borrow(), 1);
         let runs: i64 = harness
@@ -329,6 +394,7 @@ mod tests {
             &harness.context(),
             &fixture::state(),
             &Broken,
+            true,
             now(),
         )
         .expect_err("the run failed");
@@ -358,6 +424,7 @@ mod tests {
             &harness.context(),
             &fixture::state(),
             &spy,
+            true,
             now(),
         )
         .unwrap();

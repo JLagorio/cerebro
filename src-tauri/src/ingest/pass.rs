@@ -272,6 +272,9 @@ pub fn run_once<R: Runner, C: Commit>(
             _ => RunOutcome::Succeeded,
         },
         usage,
+        // A supervised finalize has the runner's usage but no live tally —
+        // the facts stay with the reader thread, and absent is honest here.
+        None,
         ItemOutcome::Land(landed),
         now,
     )?;
@@ -296,6 +299,8 @@ fn finalize_held(
         run_id,
         RunOutcome::Failed,
         usage,
+        // A held finalize has usage but no live tally — no facts to report.
+        None,
         ItemOutcome::Land(SchedulerState::RecoveryHeld),
         now,
     )

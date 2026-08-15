@@ -10,14 +10,17 @@
 //! IS active is visible through `status`, never through behavior.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 
+use crate::assembly::corpus::Corpus;
+
 use super::index::Index;
 use super::recovery::{classify, Remembered, Verdict};
+use super::reduce::EpistemicState;
 use super::writer::{existing_writer_id, writer_id, LedgerWriter};
-use super::{ledger_dir, read_ledger, store};
+use super::{ledger_dir, read_ledger, store, LedgerHead, LedgerRead};
 
 /// The one active shadow target (the app has one vault open at a time —
 /// the watcher has the same shape). Replacing it drops the old writer,
@@ -28,6 +31,35 @@ struct Active {
     writer: Option<LedgerWriter>,
     index: Option<Index>,
     writer_id: String,
+    /// The M31.7 fold cache (D4): one `(state, corpus, head)` from ONE
+    /// read, validated against the live writer head before every serve.
+    /// `None` until the first cached read and after every conservative
+    /// clear — a memo, never an authority.
+    folded: Option<Arc<Folded>>,
+}
+
+/// One fold of one moment: what ask::read returns, cached whole so the
+/// three can never describe different moments (ask.rs's invariant).
+#[derive(Debug)]
+pub struct Folded {
+    pub state: EpistemicState,
+    pub corpus: Corpus,
+    /// Validation pair — comparable against `LedgerWriter::head()` and
+    /// `LedgerRead` alike. seq `None` = folded from an empty ledger (a
+    /// valid moment, not a sentinel).
+    pub head_seq: Option<u64>,
+    pub head_hash: String,
+    /// What ask::read RETURNS as its head: the last frame's `event_id`, or
+    /// its "genesis:" fallback. Carried, never compared — it is a different
+    /// value from the chain hash and no writer-side counterpart exists.
+    pub ask_head: String,
+}
+
+impl Folded {
+    /// Does this fold describe the moment `head` names?
+    fn describes(&self, head: &LedgerHead) -> bool {
+        self.head_seq == head.seq && self.head_hash == head.hash
+    }
 }
 
 fn active() -> &'static Mutex<Option<Active>> {
@@ -62,6 +94,7 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
                 writer: None,
                 index: None,
                 writer_id: String::new(),
+                folded: None,
             });
             return verdict;
         }
@@ -138,10 +171,104 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
         writer,
         index,
         writer_id: id,
+        folded: None,
     });
     // The verdict is "recorded" as the writer gate above and as the live
     // ledger_status surface — returned here for the startup caller.
     verdict
+}
+
+/// The M31.7 fold cache (D4): one `read_ledger` + `reduce` +
+/// `Corpus::from_frames`, cached as a whole triple and VALIDATED against
+/// the live writer head before every serve — so a ledger-first append that
+/// went through `with_writer` (which no shadow hook observes) turns a
+/// stale memo into a cache miss, never a divergence.
+///
+/// Snapshot under the lock, fold OUTSIDE it, install only if unchanged: a
+/// full-ledger fold under `active()`'s mutex would stall every note save's
+/// shadow event and every `with_writer` closure.
+///
+/// **The no-writer fallback is part of the contract.** When no Active
+/// writer holds this vault (a refused verdict, a second instance that lost
+/// the single-writer lock, tests without activation), this folds from disk
+/// and returns the result UNCACHED — today's pure-disk read-only ask path,
+/// preserved exactly. There is no live head to validate a memo against, so
+/// there is no memo.
+///
+/// Never call from inside a `with_writer`/`record` closure — the active
+/// lock is held there and `std::sync::Mutex` is non-reentrant; a closure
+/// calling this would deadlock. (Nothing does it today; this sentence is
+/// the fence.)
+pub fn state_of(vault: &Path) -> Result<Arc<Folded>, String> {
+    let vault = normalize(vault);
+    if let Some(cached) = cached_if_current(&vault) {
+        return Ok(cached);
+    }
+    // The miss path: fold from the committed bytes, holding no lock.
+    let read = read_ledger(&ledger_dir(&vault)).map_err(|e| format!("ledger: {e}"))?;
+    let folded = Arc::new(fold(&read));
+    install_if_unchanged(&vault, &folded);
+    Ok(folded)
+}
+
+/// The whole triple from one `LedgerRead` — the same three derivations
+/// ask::read performed inline before M31.7, taken from the same one pass.
+fn fold(read: &LedgerRead) -> Folded {
+    Folded {
+        state: super::reduce::reduce(&read.frames, &read.store.store_id),
+        corpus: Corpus::from_frames(&read.frames),
+        head_seq: read.head_seq,
+        head_hash: read.head_hash.clone(),
+        ask_head: read
+            .frames
+            .last()
+            .map(|frame| frame.event_id.clone())
+            .unwrap_or_else(|| format!("genesis:{}", read.store.store_id)),
+    }
+}
+
+/// Serve the memo only when it describes the writer's live head, this
+/// moment, under the lock. Any other answer — no Active entry, another
+/// vault, no writer, a fail-stopped writer with no head to compare, no
+/// memo, a stale memo — is a miss.
+fn cached_if_current(vault: &Path) -> Option<Arc<Folded>> {
+    let guard = active().lock().ok()?;
+    let active = guard.as_ref()?;
+    if active.vault != *vault {
+        return None;
+    }
+    let head = active.writer.as_ref()?.head()?;
+    let folded = active.folded.as_ref()?;
+    if folded.describes(&head) {
+        Some(Arc::clone(folded))
+    } else {
+        None
+    }
+}
+
+/// Re-lock and install ONLY if the writer's live head still equals the
+/// head the fold was read at. On a mismatch the fresh fold goes back to
+/// the caller UNCACHED rather than being refolded in a loop: the caller
+/// still gets one coherent moment (merely no longer the newest), which is
+/// exactly what the raw `read_ledger` gave it under a concurrent append
+/// before M31.7 — and a retry loop could chase a busy writer without
+/// bound.
+fn install_if_unchanged(vault: &Path, folded: &Arc<Folded>) {
+    let Ok(mut guard) = active().lock() else {
+        return;
+    };
+    let Some(active) = guard.as_mut() else {
+        return;
+    };
+    if active.vault != *vault {
+        return;
+    }
+    let Some(head) = active.writer.as_ref().and_then(LedgerWriter::head) else {
+        return;
+    };
+    if folded.describes(&head) {
+        active.folded = Some(Arc::clone(folded));
+    }
 }
 
 fn replace_active(next: Active) {
@@ -171,6 +298,10 @@ pub fn with_writer<T>(vault: &Path, f: impl FnOnce(&mut LedgerWriter) -> T) -> O
         return None;
     }
     let writer = active.writer.as_mut()?;
+    // Belt (M31.7): the closure may append, so the memo is conservatively
+    // dropped before it runs. `state_of`'s head check is the suspenders —
+    // a missed clear is a cache miss, never a divergence.
+    active.folded = None;
     Some(f(writer))
 }
 
@@ -190,6 +321,9 @@ pub fn record(vault: &Path, kind: &str, body: serde_json::Value) {
     let Some(writer) = active.writer.as_mut() else {
         return;
     };
+    // Belt (M31.7): every append through this door drops the memo before
+    // the write; the head check in `state_of` is the suspenders.
+    active.folded = None;
     if writer.append(kind, body).is_ok() {
         // Keep the secondary anchor fresh: remember the new head after
         // every commit (cheap meta upsert; events replay at next activate).
@@ -356,6 +490,124 @@ mod tests {
         assert_eq!(status.segments, 0);
         assert_eq!(status.anomalies, 0);
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// A config dir and a bare vault, ready for `activate` — the M31.7 fold
+    /// cache tests fold real ledgers, so the vault is real, just empty.
+    fn test_vault(label: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let config = testutil::temp_vault(&format!("{label}-config"));
+        let vault = testutil::temp_vault(label);
+        (config, vault)
+    }
+
+    /// Append one event through `with_writer` — DELIBERATELY the ledger-first
+    /// door `record` never sees. That choice is itself the regression test
+    /// for the bypass D4 exists to survive: the cache must stay honest even
+    /// when no shadow hook observed the append.
+    fn append_test_event(vault: &Path) {
+        with_writer(vault, |writer| {
+            writer
+                .append(
+                    "vault.write",
+                    serde_json::json!({ "path": "records/poke.md" }),
+                )
+                .unwrap();
+        })
+        .expect("an active writer holds this vault");
+    }
+
+    /// A vault whose ledger already holds `n` events, seeded through a raw
+    /// writer BEFORE activation (dropped at return so `activate` can take
+    /// the single-writer lock).
+    fn seeded_vault_with_events(label: &str, n: u64) -> (std::path::PathBuf, std::path::PathBuf) {
+        let (config, vault) = test_vault(label);
+        let id = writer_id(&config).unwrap();
+        let mut writer = LedgerWriter::open(&vault, &id).unwrap();
+        for i in 0..n {
+            writer
+                .append(
+                    "vault.write",
+                    serde_json::json!({ "path": format!("records/seed-{i}.md") }),
+                )
+                .unwrap();
+        }
+        (config, vault)
+    }
+
+    #[test]
+    fn the_state_is_folded_once_and_reused() {
+        let _guard = lock();
+        deactivate();
+        let (config, vault) = test_vault("fold-once");
+        activate(&config, &vault);
+        let a = state_of(&vault).unwrap();
+        let b = state_of(&vault).unwrap();
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "a second read re-folded the ledger"
+        );
+        deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn an_append_through_either_door_invalidates() {
+        let _guard = lock();
+        deactivate();
+        let (config, vault) = test_vault("either-door");
+        activate(&config, &vault);
+        // Door one: ledger-first, through `with_writer` — the door no
+        // shadow hook observes, the bypass D4 exists to survive.
+        let before = state_of(&vault).unwrap();
+        append_test_event(&vault);
+        let after = state_of(&vault).unwrap();
+        assert!(
+            !std::sync::Arc::ptr_eq(&before, &after),
+            "the cache served a fold from before the with_writer append"
+        );
+        // Door two: the vault-file shadow path, through `record`.
+        record(
+            &vault,
+            "vault.write",
+            serde_json::json!({ "path": "records/shadowed.md" }),
+        );
+        let again = state_of(&vault).unwrap();
+        assert!(
+            !std::sync::Arc::ptr_eq(&after, &again),
+            "the cache served a fold from before the record append"
+        );
+        deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn the_cache_is_a_memo_and_never_a_divergence() {
+        let _guard = lock();
+        deactivate();
+        let (config, vault) = seeded_vault_with_events("memo", 40);
+        activate(&config, &vault);
+        for _ in 0..5 {
+            append_test_event(&vault);
+            let cached = state_of(&vault).unwrap();
+            let read = read_ledger(&ledger_dir(&vault)).unwrap();
+            let fresh = crate::ledger::reduce::reduce(&read.frames, &read.store.store_id);
+            assert_eq!(
+                cached.state, fresh,
+                "a cached state equals a fresh fold, always"
+            );
+            // The cached UNIT is the triple (D4) — pin the other two limbs.
+            assert_eq!(cached.corpus, Corpus::from_frames(&read.frames));
+            assert_eq!(
+                cached.ask_head,
+                read.frames.last().unwrap().event_id,
+                "ask_head is the fresh last frame's event id"
+            );
+        }
+        deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
     }
 
     /// Copy the golden corpus READ-ONLY into a scratch vault. The source is

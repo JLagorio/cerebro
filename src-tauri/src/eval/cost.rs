@@ -21,11 +21,14 @@ const RUN: &str = "run-1";
 
 fn conn() -> Connection {
     let conn = Connection::open_in_memory().expect("memory db");
+    // The stub `runs` table exists so SCHEMA_V12 — which also ALTERs the real
+    // one — executes here unedited, like the taint stub for V9's rebuild.
     conn.execute_batch(
         "CREATE TABLE vault_registry (vault_id TEXT PRIMARY KEY, path TEXT NOT NULL);
          CREATE TABLE source_taint_assessments (
              vault_id TEXT, store_uuid TEXT, observation_event_id TEXT,
-             classifier_version TEXT, signals TEXT, assessed_at TEXT);",
+             classifier_version TEXT, signals TEXT, assessed_at TEXT);
+         CREATE TABLE runs (run_id TEXT PRIMARY KEY);",
     )
     .expect("registry");
     conn.execute(
@@ -35,6 +38,10 @@ fn conn() -> Connection {
     .expect("register");
     conn.execute_batch(crate::runtime::schema::SCHEMA_V9)
         .expect("v9");
+    // V12 adds the `estimated` column M31.6 writes; applied so this fixture
+    // holds the same table the migrated file does.
+    conn.execute_batch(crate::runtime::schema::SCHEMA_V12)
+        .expect("v12");
     conn
 }
 
@@ -57,7 +64,7 @@ fn a_run_that_measured_only_what_it_used_is_refused() {
     .into_iter()
     .map(Measured::zero)
     .collect();
-    let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &partial, now())
+    let detail = record_costs(&conn, VAULT, STORE, RUN, "m", &partial, &[], now())
         .expect_err("a partial set has to be refused, not stored");
     for missing in ["cache_read_tokens", "cache_write_tokens", "retrieval_calls"] {
         assert!(detail.contains(missing), "{detail}");
@@ -72,7 +79,7 @@ fn a_run_that_measured_only_what_it_used_is_refused() {
 fn zero_is_written_and_a_window_can_tell_it_from_nothing() {
     let conn = conn();
     let all: Vec<Measured> = Component::ALL.into_iter().map(Measured::zero).collect();
-    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, now()).unwrap();
+    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, &[], now()).unwrap();
     let rows = costs(&conn, VAULT, STORE, RUN).unwrap();
     assert_eq!(rows.len(), 10);
     assert!(rows.iter().all(|(_, quantity)| *quantity == 0));
@@ -91,7 +98,7 @@ fn the_unit_is_the_components_and_the_table_says_so_too() {
     // where they drifted could make any run look cheap.
     let conn = conn();
     let all: Vec<Measured> = Component::ALL.into_iter().map(Measured::zero).collect();
-    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, now()).unwrap();
+    record_costs(&conn, VAULT, STORE, RUN, "claude-x", &all, &[], now()).unwrap();
     let mut stmt = conn
         .prepare("SELECT component, unit FROM run_cost_components")
         .unwrap();

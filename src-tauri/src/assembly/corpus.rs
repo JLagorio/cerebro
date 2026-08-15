@@ -24,7 +24,8 @@
 //! for the number in the manifest and the text in the prompt to come from the
 //! same string. [`Assertion::statement`] is that string; the manifest's
 //! `byte_count` and `content_hash` are computed over it, and M26.5e's prompt
-//! prints it verbatim.
+//! prints its fence-safe image (normalized and capped, M31.3b — longer than
+//! the counted bytes only by the truncation mark, when the cap fires).
 
 use std::collections::BTreeMap;
 

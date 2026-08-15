@@ -30,7 +30,14 @@ export const REGISTRY_DIGEST_PATH = 'shared/policy/trigger-registry.v1.sha256';
 /** The format this build ships. */
 export const FORMAT = 1;
 
-/** The registry ids, closed at fourteen. Growing this list is a format bump. */
+/**
+ * The registry ids the v1 ARTIFACT declares, closed at fourteen. Growing this
+ * list is a format bump. The M28 spec registers three more — R15–R17 (M31.8) —
+ * deliberately absent here: an id this list does not name resolves to
+ * `gate_unknown`, so a registered-but-unevaluatable deferral cannot fire in any
+ * shipped build. Their keys enter a successor revision with their first
+ * evaluator, never before it.
+ */
 export const REGISTRY_IDS = [
   'R1',
   'R2',
@@ -165,8 +172,9 @@ export function parseRegistry(value: unknown): Registry {
   if (ids.length !== REGISTRY_IDS.length || ids.some((id, i) => id !== REGISTRY_IDS[i])) {
     fail(
       `the registry must declare exactly ${JSON.stringify(REGISTRY_IDS)} in order; found ` +
-        `${JSON.stringify(ids)} — the fourteen entries are closed by the design, and growing ` +
-        'them is a format bump',
+        `${JSON.stringify(ids)} — the fourteen entries are closed by the v1 ARTIFACT (the ` +
+        'design defers seventeen; R15–R17 are spec-registered and unevaluatable on purpose), ' +
+        'and growing them is a format bump',
     );
   }
   const capabilities = new Set<string>();

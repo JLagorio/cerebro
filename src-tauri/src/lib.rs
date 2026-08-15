@@ -921,17 +921,28 @@ fn run_agent(
     // child was gone — where the outgoing run's trailing writes stamped as
     // the incoming run (PR #5 security review).
     let mut request = request;
+    // M31.2a: the durable id is minted BEFORE the token so the grant and the
+    // meter carry the SAME one — an attended run used to hold two (the meter's
+    // here, a token-derived hash in the grant), and everything that joins runs
+    // to proposals, answers, or costs needs them to be one.
+    let run_id = ledger::new_run_id();
     // M17.13: the scope rides the same token. It is taken from the REQUEST,
     // which the app builds from the Agent record — the CLI never sees it and
-    // therefore cannot argue with it.
-    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone())?);
+    // therefore cannot argue with it. No tool narrowing (M31.1b): the
+    // panel's own turns are unrestricted, and a person is watching them.
+    request.mcp_token = Some(mcp_state.run_token(
+        request.actor.as_deref(),
+        request.scope.clone(),
+        None,
+        run_id.clone(),
+    )?);
     let dir = config_dir(&app)?;
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
-        run_id: ledger::new_run_id(),
+        run_id,
         mode: agent::meter::Mode::Attended,
         vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
         store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),

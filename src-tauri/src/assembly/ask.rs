@@ -22,9 +22,11 @@
 //! ceiling, no yesterday's ambient spend. See the module note on `assembly`.
 
 use chrono::{DateTime, Utc};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
-use crate::ledger::reduce::{reduce, EpistemicState};
+use crate::agent::usage::Usage;
+use crate::ledger::reduce::EpistemicState;
+use crate::runtime::governance::{self, AssemblyObservation, CostError};
 
 use super::answer::SynthesisAnswer;
 use super::assemble::{self, Assembly, Expansion, Refusal, Request};
@@ -37,11 +39,15 @@ pub const ACTOR: &str = "agent:m26-synthesis";
 
 /// What one run needs from the outside world.
 pub trait Spawn {
-    /// A bearer for this run. The run id is derived from it, so the caller
-    /// cannot name its own.
+    /// A bearer for this run, granted the durable id `run_id()` names. The
+    /// grant is the only place the id is ever resolved from (M31.2a), so a
+    /// caller still cannot name another run's id.
     fn mint_token(&self) -> Result<String, String>;
     /// Run the prompt. Returns when the run is over, however it ended.
     fn run(&self, token: &str, prompt: &str) -> Result<(), String>;
+    /// The durable run id this spawner books the run under — the same id
+    /// the grant carries after M31.2a.
+    fn run_id(&self) -> &str;
 }
 
 /// What the pass produced.
@@ -79,21 +85,26 @@ pub struct Context<'a> {
 ///
 /// One read, so the three cannot describe different moments. An assembly built
 /// from a projection at one head and a corpus at another would be a receipt
-/// for a base that never existed.
+/// for a base that never existed. Since M31.7 the read is served through
+/// [`crate::ledger::shadow::state_of`], which caches that whole triple from
+/// ONE pass and validates the cached head against the live writer head before
+/// serving (D4) — a hit re-folds nothing; a miss, or a vault with no active
+/// writer, is the same pure-disk read as before, uncached.
+///
+/// The store-uuid parameter is kept for the callers but no longer consumed:
+/// the fold names the ledger's OWN store id for both the reduction and the
+/// genesis fallback — the identity the runtime's `store_uuid` was registered
+/// from — because a shared cache cannot be keyed by a caller-supplied id.
 pub fn read(
     vault: &std::path::Path,
-    store_uuid: &str,
+    _store_uuid: &str,
 ) -> Result<(EpistemicState, Corpus, String), String> {
-    let read = crate::ledger::read_ledger(&crate::ledger::ledger_dir(vault))
-        .map_err(|e| format!("ledger: {e}"))?;
-    let head = read
-        .frames
-        .last()
-        .map(|frame| frame.event_id.clone())
-        .unwrap_or_else(|| format!("genesis:{store_uuid}"));
-    let state = reduce(&read.frames, store_uuid);
-    let corpus = Corpus::from_frames(&read.frames);
-    Ok((state, corpus, head))
+    let folded = crate::ledger::shadow::state_of(vault)?;
+    Ok((
+        folded.state.clone(),
+        folded.corpus.clone(),
+        folded.ask_head.clone(),
+    ))
 }
 
 /// Ask one question.
@@ -123,8 +134,11 @@ pub fn ask<S: Spawn>(
             })
         }
     };
-    let run_id = crate::mcp::run_id_of(&token);
-    crate::mcp::open_question(&run_id, &assembly.manifest);
+    // The durable id the spawner books the run under — since M31.2a the same
+    // id the grant carries, so the question opened here is the question
+    // `submit_answer` finds under `grant.run_id`.
+    let run_id = spawner.run_id();
+    crate::mcp::open_question(run_id, &assembly.manifest);
 
     let rendered = prompt::render(&prompt::Context {
         question: request.question,
@@ -133,10 +147,26 @@ pub fn ask<S: Spawn>(
         as_of: &stamp(now),
     });
 
+    let asked_at = std::time::Instant::now();
     let ran = spawner.run(&token, &rendered.text);
+    let answer_latency_micros = u64::try_from(asked_at.elapsed().as_micros()).unwrap_or(u64::MAX);
     // Taken whatever happened: a run that answered and THEN failed still
     // answered, and leaving the question open would leak the session.
-    let answer = crate::mcp::take_answer(&run_id);
+    let answer = crate::mcp::take_answer(run_id);
+
+    // M31.6: the meter finished before `Spawn::run` returned (the reader
+    // thread sends `done` after `meter::finish`), so the runs row is final
+    // and the ten cost components have their producer here — whatever the
+    // outcome below, because the run spent what it spent either way.
+    record_run_costs(
+        conn,
+        context,
+        run_id,
+        &assembly.manifest,
+        rendered.text.len() as u64,
+        answer_latency_micros,
+        now,
+    );
 
     Ok(match (answer, ran) {
         (Some(answer), _) => {
@@ -177,6 +207,113 @@ fn keep(
     )
     .map(|_| ())
     .map_err(|detail| Refusal::Invalid { detail })
+}
+
+/// Record what the run cost, from the rows the run already left (M31.6).
+///
+/// Best-effort and non-fatal, like `record_plan` below: measurement must
+/// not become a second way for the run to fail. A source that cannot be
+/// read — no runs row, NULL `model_id`, a `usage_state` that is not
+/// `exact`, a failed counter drain — makes the affected components
+/// UNMEASURABLE, and an unmeasurable run writes NO component rows (the runs
+/// row alone is the honest partial record) and files one operational row
+/// saying which sources were missing.
+fn record_run_costs(
+    conn: &Connection,
+    context: &Context<'_>,
+    run_id: &str,
+    manifest: &WorkingMemoryManifest,
+    prompt_bytes: u64,
+    answer_latency_micros: u64,
+    now: DateTime<Utc>,
+) {
+    // The finalized runs row, by the durable id (M31.2a). The token counts
+    // are only measurements when the row says `exact` — under `unknown` the
+    // columns hold placeholder zeros, which are exactly the lie the
+    // component table refuses to store.
+    type Row = (Option<String>, String, i64, i64, i64, i64);
+    let row: Option<Row> = conn
+        .query_row(
+            "SELECT model_id, usage_state, input_tokens, output_tokens, cache_read, cache_write \
+             FROM runs WHERE run_id = ?1",
+            [run_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .optional()
+        .unwrap_or_default();
+    let (model_id, usage) = match row {
+        Some((model_id, state, input, output, cache_read, cache_write)) => (
+            model_id,
+            (state == "exact").then(|| Usage {
+                input_tokens: input.max(0) as u64,
+                output_tokens: output.max(0) as u64,
+                cache_read: cache_read.max(0) as u64,
+                cache_write: cache_write.max(0) as u64,
+            }),
+        ),
+        None => (None, None),
+    };
+    let observation = AssemblyObservation {
+        manifest: Some(manifest),
+        usage,
+        model_id,
+        // The ONE drain (M31.2b): `None` is a failed lock — unmeasurable —
+        // and `Some(empty)` is a measured zero. Passed in; `governance`
+        // receives, it never drains.
+        tool_calls: crate::mcp::take_tool_calls(run_id),
+        prompt_bytes,
+        answer_latency_micros,
+    };
+    match governance::record_from_assembly(
+        conn,
+        context.vault_id,
+        context.store_uuid,
+        run_id,
+        observation,
+        now,
+    ) {
+        Ok(()) => {}
+        Err(detail @ CostError::Unmeasurable(_)) => {
+            // An honest gap, filed where operational gaps go — never a
+            // failed ask.
+            let detail = format!("run {run_id} cost accounting: {detail}");
+            let refusal = crate::policy::table::PolicyTable::load()
+                .ok()
+                .and_then(|table| {
+                    crate::policy::rejection::OperationalRefusal::new(
+                        &table,
+                        "capability_unavailable",
+                        "assembly.costs",
+                        &detail,
+                    )
+                    .ok()
+                });
+            if let Some(refusal) = refusal {
+                let entry = crate::runtime::operational::LogEntry {
+                    store_uuid: Some(context.store_uuid.to_string()),
+                    proposal_id: None,
+                    run_id: Some(run_id.to_string()),
+                    rule: None,
+                };
+                crate::runtime::operational::record_or_warn(conn, &refusal, &entry);
+            }
+        }
+        Err(CostError::Storage(detail)) => {
+            // The database that refused the rows is the database the
+            // operational log lives in; stderr is the honest fallback,
+            // exactly `record_or_warn`'s own.
+            eprintln!("attended synthesis: run {run_id} cost accounting: {detail}");
+        }
+    }
 }
 
 /// Open whatever discovery the answer proposed.
@@ -269,6 +406,9 @@ mod tests {
     struct Answers {
         answer: RefCell<Option<Compose>>,
         token: String,
+        /// Distinct per fixture: the answer registry is process-global, and
+        /// two tests are two runs.
+        run_id: String,
     }
 
     impl Answers {
@@ -279,6 +419,7 @@ mod tests {
             Answers {
                 answer: RefCell::new(Some(Box::new(build))),
                 token: token.to_string(),
+                run_id: format!("run-{token}"),
             }
         }
 
@@ -286,6 +427,7 @@ mod tests {
             Answers {
                 answer: RefCell::new(None),
                 token: token.to_string(),
+                run_id: format!("run-{token}"),
             }
         }
     }
@@ -295,13 +437,19 @@ mod tests {
             Ok(self.token.clone())
         }
 
-        fn run(&self, token: &str, _: &str) -> Result<(), String> {
+        fn run(&self, _: &str, _: &str) -> Result<(), String> {
             let Some(build) = self.answer.borrow_mut().take() else {
                 return Ok(());
             };
-            let run_id = crate::mcp::run_id_of(token);
-            let manifest = crate::mcp::test_open_manifest(&run_id).expect("the pass opened it");
-            crate::mcp::test_submit_answer(&run_id, build(&manifest))
+            // The real tool finds the question under `grant.run_id`, which
+            // since M31.2a is the durable id the spawner books — this one.
+            let run_id = self.run_id();
+            let manifest = crate::mcp::test_open_manifest(run_id).expect("the pass opened it");
+            crate::mcp::test_submit_answer(run_id, build(&manifest))
+        }
+
+        fn run_id(&self) -> &str {
+            &self.run_id
         }
     }
 
@@ -313,6 +461,9 @@ mod tests {
         }
         fn run(&self, _: &str, _: &str) -> Result<(), String> {
             unreachable!("nothing was minted")
+        }
+        fn run_id(&self) -> &str {
+            "run-unstartable"
         }
     }
 
@@ -391,6 +542,9 @@ mod tests {
             fn mint_token(&self) -> Result<String, String> {
                 Ok("tok-order".into())
             }
+            fn run_id(&self) -> &str {
+                "run-order"
+            }
             fn run(&self, _: &str, _: &str) -> Result<(), String> {
                 let count: i64 = self
                     .harness
@@ -426,6 +580,9 @@ mod tests {
             fn run(&self, _: &str, _: &str) -> Result<(), String> {
                 unreachable!()
             }
+            fn run_id(&self) -> &str {
+                "run-never"
+            }
         }
         // A cap too small for the counterevidence: §22's hard stop.
         let request = fixture::request(
@@ -454,6 +611,92 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn an_answered_question_books_ten_cost_rows_under_the_durable_run_id() {
+        // The end-to-end half of M31.6's acceptance: the wiring after
+        // `take_answer` reads the finalized runs row and produces the ten
+        // component rows plus the metrics row with its latency.
+        let harness = Harness::open("ask-costs");
+        // The real meter finalizes the runs row before `Spawn::run` returns
+        // (Live blocks on the reader thread's done). The fixture spawner has
+        // no meter, so the row it would have left is written up front —
+        // same writer, same shape.
+        crate::runtime::dispatch::meter_attended(
+            &harness.conn,
+            "run-tok-costs",
+            Some(&harness.vault_id),
+            Some(STORE),
+            crate::runtime::dispatch::RunOutcome::Succeeded,
+            Some(crate::agent::usage::Usage {
+                input_tokens: 4,
+                output_tokens: 271,
+                cache_read: 14_678,
+                cache_write: 0,
+            }),
+            Some(&crate::agent::usage::RunFacts {
+                model_id: Some("claude-opus-5".into()),
+                ..Default::default()
+            }),
+            now(),
+            now(),
+        )
+        .unwrap();
+        let outcome = asked(&harness, &Answers::with("tok-costs", answers::valid_for)).unwrap();
+        assert!(matches!(outcome, Outcome::Answered { .. }));
+        let components: i64 = harness
+            .conn
+            .query_row(
+                "SELECT count(*) FROM run_cost_components WHERE run_id = 'run-tok-costs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(components, 10);
+        let latency: Option<i64> = harness
+            .conn
+            .query_row(
+                "SELECT answer_latency_micros FROM assembly_metrics \
+                 WHERE run_id = 'run-tok-costs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(latency.is_some(), "the wiring measured across the run");
+    }
+
+    #[test]
+    fn a_run_the_meter_never_recorded_leaves_no_component_rows_and_still_answers() {
+        // Measurement must not become a second way for the run to fail: no
+        // runs row means unmeasurable, which is an operational log line and
+        // an untouched component table — never a failed ask and never zeros.
+        let harness = Harness::open("ask-unmetered");
+        let outcome = asked(
+            &harness,
+            &Answers::with("tok-unmetered", answers::valid_for),
+        )
+        .unwrap();
+        assert!(matches!(outcome, Outcome::Answered { .. }));
+        let components: i64 = harness
+            .conn
+            .query_row(
+                "SELECT count(*) FROM run_cost_components WHERE run_id = 'run-tok-unmetered'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(components, 0, "no zeros invented for an unmetered run");
+        let logged: i64 = harness
+            .conn
+            .query_row(
+                "SELECT count(*) FROM operational_log \
+                 WHERE surface = 'assembly.costs' AND run_id = 'run-tok-unmetered'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(logged, 1, "the gap is filed, not swallowed");
     }
 
     #[test]

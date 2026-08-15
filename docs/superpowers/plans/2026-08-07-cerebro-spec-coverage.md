@@ -187,6 +187,26 @@ preventive ancestry, committed conflict candidates, and measurable trigger
 telemetry; M27 orthogonal/replay-stable dynamics with separate review status;
 M28 measurable or explicitly discretionary gates.
 
+## Registered after the freeze — the M31 deferrals (M31.8, 2026-08-14)
+
+The M28 registry's governance text binds registry changes to this matrix, so
+the three capabilities M31's claims audit surfaced and deliberately did not
+build are recorded here in the same commit that registers them. They trace to
+the M31 plan's non-goals, not to a numbered section of the source spec: no §
+disposition above changes, and the section tallies below stay as written.
+
+| # | Capability | Disposition |
+|---|---|---|
+| R15 | Unprompted recall — the attended assembler surfacing manifest items the question did not ask for | M28+ (trigger) — measurable: over 28 complete days after M31.7, ≥200 attended assemblies with a non-empty positive intent and `assembly_metrics.answer_latency_micros` p90 < 250_000 micros (p90 because the schema's quantile enum is p50\|p90); a firing licenses a plan that must first name the third execution contract — neither attended-metered nor ambient-gated. Deciding owner: the vault owner |
+| R16 | Prior manifest as retrieval hint | M28+ (trigger) — evidence-based discretionary; the owner pack must answer the four recorded failure modes (`assembly_id` determinism, `Retriever`-trait purity, honest `exhausted`, and a retrieval-layer self-ancestry shape `policy/ancestry.rs` does not catch — it walks bases, a hint is not a basis); safe design is aliases-only widening. Owner: the vault owner |
+| R17 | Folder-level ingest opt-out | M28+ (trigger) — evidence-based discretionary; the pack MUST contain the (a)/(b) product decision: (a) the LLM half skips the folder while `ingest/ambient.rs`'s four deterministic ledger-appending phases (detection, gauntlet, backfill, freshness) keep writing about "ignored" files, or (b) the app does not see the folder at all — `vault::scan::scan_vault`, the one choke point, is also the UI's file list. Owner: the vault owner |
+
+R15–R17 are registered-deferred: analysis with an expressible gate, not
+shipped behaviour. `trigger-registry.v1.json` still holds exactly R1–R14 —
+an unnamed gate key resolves to nothing, which is the refusal — so none of
+the three can be evaluated, let alone fire, until a successor artifact
+revision lands with their first evaluator.
+
 ## Reading this matrix honestly
 
 Counts by disposition after Rev 3: roughly 32 sections land in M21–M27 fully,
