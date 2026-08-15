@@ -2247,6 +2247,31 @@ the deferral register is accurate; the PR is green and ready for review.
 
 ---
 
+## Found in execution: two pre-existing CI-flaky tests
+
+Recorded 2026-08-15. M32's PR needed three attempts at the `quality` job, and
+each failure was a DIFFERENT pre-existing test:
+
+| Attempt | Failed | Shape |
+| --- | --- | --- |
+| 1 | `ledger::writer::tests::appends_acknowledge_monotonic_seqs_that_survive_reopen` | the second `LedgerWriter::open` after `drop(writer)` hit `WouldBlock` on the flock — the lock had not been released yet |
+| 2 | `src/editor/NoteBodyEditor.test.tsx:75` | `waitFor` timed out; expected `"Renamed page"`, received `undefined` |
+| 3 | — | green |
+
+Neither file is touched by M32 (`git diff --name-only m31-claims-and-records...HEAD`
+contains no `ledger/` or `editor/` path), both pass locally under repetition
+(12/12 and 8/8 respectively), and the full Rust suite passes locally under
+`RUST_TEST_THREADS=2` — so this is CI-environment timing, not a defect this
+milestone introduced. Both are timeout-shaped, which is what a slower,
+2-core, more contended runner produces.
+
+They are still real flakes and they will bite someone else. **Not fixed here**
+— M32's non-goals keep it out of unrelated subsystems, and a flake fix wants
+its own change with its own reasoning. Filed as the first thing to look at if
+`quality` fails on an unrelated PR: the ledger one wants to know why a
+dropped `File` had not released its `flock` yet, and the editor one wants a
+longer `waitFor` or a deterministic seam.
+
 ## Traps
 
 - **Required-check names are the job names.** `quality` and `e2e` in the
