@@ -1,0 +1,33 @@
+# Weekly, grouped, with a cooldown: a 7-day-old release has had its window
+# to be caught and yanked (the npm-worm class). The github-actions ecosystem
+# is what keeps M32.2's SHA pins from rotting — Dependabot bumps pinned SHAs
+# natively and updates the version comment.
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    groups:
+      blocknote:
+        patterns: ['@blocknote/*'] # pinned lockstep — must move together
+      tauri-frontend:
+        patterns: ['@tauri-apps/*']
+      dev-dependencies:
+        dependency-type: 'development'
+        update-types: ['minor', 'patch']
+  - package-ecosystem: 'cargo'
+    directory: '/src-tauri'
+    schedule:
+      interval: 'weekly'
+    cooldown:
+      default-days: 7
+    groups:
+      tauri:
+        patterns: ['tauri*']
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'

@@ -487,7 +487,7 @@ or the 400+-crate Cargo tree. Two API calls and one file.
 **Files**
 - Create: `.github/dependabot.yml`
 
-- [ ] **Step 1: Turn the alerts on (settings-side)**
+- [x] **Step 1: Turn the alerts on (settings-side)**
 
 ```sh
 gh api -X PUT repos/JLagorio/cerebro/vulnerability-alerts
@@ -500,7 +500,7 @@ Expected: HTTP 204 (empty response) for both. Verify:
 gh api repos/JLagorio/cerebro/vulnerability-alerts   # now 204, not 404
 ```
 
-- [ ] **Step 2: Create `.github/dependabot.yml`**
+- [x] **Step 2: Create `.github/dependabot.yml`**
 
 ```yaml
 # Weekly, grouped, with a cooldown: a 7-day-old release has had its window
@@ -538,7 +538,7 @@ updates:
       interval: "weekly"
 ```
 
-- [ ] **Step 3: Commit and verify Dependabot parses it**
+- [x] **Step 3: Commit and verify Dependabot parses it**
 
 ```sh
 git add .github/dependabot.yml
@@ -549,6 +549,17 @@ git push
 After push, check https://github.com/JLagorio/cerebro/network/updates (or
 `gh api repos/JLagorio/cerebro/dependabot/alerts --jq length`) — a parse
 error surfaces there, not in CI.
+
+> **Executed 2026-08-15.** Both PUTs returned 204 and
+> `security_and_analysis.dependabot_security_updates` now reads `enabled`.
+> Group patterns verified non-vacuous before committing: 4 `@blocknote/*`
+> packages, 3 `@tauri-apps/*`, 3 `tauri*` crates; both lockfiles tracked.
+>
+> **Trap for every remaining YAML in this plan:** Prettier lints `.github/`
+> and the repo style is single quotes, so this plan's double-quoted snippets
+> fail `pnpm format:check` as written. Run `pnpm exec prettier --write` on
+> each new workflow/config before committing (M32.5, M32.6, M32.7 all add
+> YAML). `mac-app.yml` was already conformant.
 
 **Acceptance:** alerts endpoint returns 204; the config covers all three
 ecosystems; update PRs will arrive gated by the same quality+e2e checks as
