@@ -46,10 +46,14 @@ impl Runner for Live<'_> {
         let url = self.mcp.ensure(self.app, self.vault)?.url;
         // Scoped to nothing; granted the SAME tool narrowing the argv
         // declares (M31.1b) — one list, so the boundary and the advice
-        // cannot disagree.
-        let token = self
-            .mcp
-            .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))?;
+        // cannot disagree. M31.2a: and the SAME durable id — the dispatch
+        // lease's, which the meter books and `schedule::attempt` finalizes.
+        let token = self.mcp.run_token(
+            Some(ACTOR),
+            Some(vec![]),
+            Some(declared_tools()),
+            run_id.to_string(),
+        )?;
         let (tx, rx) = sync_channel::<RunEnd>(1);
         crate::agent::stream(
             self.app.clone(),

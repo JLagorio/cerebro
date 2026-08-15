@@ -37,11 +37,15 @@ pub const ACTOR: &str = "agent:m26-synthesis";
 
 /// What one run needs from the outside world.
 pub trait Spawn {
-    /// A bearer for this run. The run id is derived from it, so the caller
-    /// cannot name its own.
+    /// A bearer for this run, granted the durable id `run_id()` names. The
+    /// grant is the only place the id is ever resolved from (M31.2a), so a
+    /// caller still cannot name another run's id.
     fn mint_token(&self) -> Result<String, String>;
     /// Run the prompt. Returns when the run is over, however it ended.
     fn run(&self, token: &str, prompt: &str) -> Result<(), String>;
+    /// The durable run id this spawner books the run under — the same id
+    /// the grant carries after M31.2a.
+    fn run_id(&self) -> &str;
 }
 
 /// What the pass produced.
@@ -123,8 +127,11 @@ pub fn ask<S: Spawn>(
             })
         }
     };
-    let run_id = crate::mcp::run_id_of(&token);
-    crate::mcp::open_question(&run_id, &assembly.manifest);
+    // The durable id the spawner books the run under — since M31.2a the same
+    // id the grant carries, so the question opened here is the question
+    // `submit_answer` finds under `grant.run_id`.
+    let run_id = spawner.run_id();
+    crate::mcp::open_question(run_id, &assembly.manifest);
 
     let rendered = prompt::render(&prompt::Context {
         question: request.question,
@@ -136,7 +143,7 @@ pub fn ask<S: Spawn>(
     let ran = spawner.run(&token, &rendered.text);
     // Taken whatever happened: a run that answered and THEN failed still
     // answered, and leaving the question open would leak the session.
-    let answer = crate::mcp::take_answer(&run_id);
+    let answer = crate::mcp::take_answer(run_id);
 
     Ok(match (answer, ran) {
         (Some(answer), _) => {
@@ -269,6 +276,9 @@ mod tests {
     struct Answers {
         answer: RefCell<Option<Compose>>,
         token: String,
+        /// Distinct per fixture: the answer registry is process-global, and
+        /// two tests are two runs.
+        run_id: String,
     }
 
     impl Answers {
@@ -279,6 +289,7 @@ mod tests {
             Answers {
                 answer: RefCell::new(Some(Box::new(build))),
                 token: token.to_string(),
+                run_id: format!("run-{token}"),
             }
         }
 
@@ -286,6 +297,7 @@ mod tests {
             Answers {
                 answer: RefCell::new(None),
                 token: token.to_string(),
+                run_id: format!("run-{token}"),
             }
         }
     }
@@ -295,13 +307,19 @@ mod tests {
             Ok(self.token.clone())
         }
 
-        fn run(&self, token: &str, _: &str) -> Result<(), String> {
+        fn run(&self, _: &str, _: &str) -> Result<(), String> {
             let Some(build) = self.answer.borrow_mut().take() else {
                 return Ok(());
             };
-            let run_id = crate::mcp::run_id_of(token);
-            let manifest = crate::mcp::test_open_manifest(&run_id).expect("the pass opened it");
-            crate::mcp::test_submit_answer(&run_id, build(&manifest))
+            // The real tool finds the question under `grant.run_id`, which
+            // since M31.2a is the durable id the spawner books — this one.
+            let run_id = self.run_id();
+            let manifest = crate::mcp::test_open_manifest(run_id).expect("the pass opened it");
+            crate::mcp::test_submit_answer(run_id, build(&manifest))
+        }
+
+        fn run_id(&self) -> &str {
+            &self.run_id
         }
     }
 
@@ -313,6 +331,9 @@ mod tests {
         }
         fn run(&self, _: &str, _: &str) -> Result<(), String> {
             unreachable!("nothing was minted")
+        }
+        fn run_id(&self) -> &str {
+            "run-unstartable"
         }
     }
 
@@ -391,6 +412,9 @@ mod tests {
             fn mint_token(&self) -> Result<String, String> {
                 Ok("tok-order".into())
             }
+            fn run_id(&self) -> &str {
+                "run-order"
+            }
             fn run(&self, _: &str, _: &str) -> Result<(), String> {
                 let count: i64 = self
                     .harness
@@ -425,6 +449,9 @@ mod tests {
             }
             fn run(&self, _: &str, _: &str) -> Result<(), String> {
                 unreachable!()
+            }
+            fn run_id(&self) -> &str {
+                "run-never"
             }
         }
         // A cap too small for the counterevidence: §22's hard stop.

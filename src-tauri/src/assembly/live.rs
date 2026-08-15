@@ -40,7 +40,8 @@ pub struct Live<'a> {
     pub data_dir: PathBuf,
     pub vault_id: String,
     pub store_uuid: String,
-    /// The durable run id the meter books this run against.
+    /// The durable run id the meter books this run against — and, since
+    /// M31.2a, the id the run's grant carries.
     pub run_id: String,
 }
 
@@ -53,8 +54,18 @@ impl Spawn for Live<'_> {
         // Scoped to nothing. A synthesis run answers; it does not write.
         // M31.1b: the grant carries the SAME narrowing the argv declares —
         // one list, so the boundary and the advice cannot disagree.
-        self.mcp
-            .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))
+        // M31.2a: and the SAME durable id the meter books, so the run has one
+        // id from mint to meter to grant.
+        self.mcp.run_token(
+            Some(ACTOR),
+            Some(vec![]),
+            Some(declared_tools()),
+            self.run_id.clone(),
+        )
+    }
+
+    fn run_id(&self) -> &str {
+        &self.run_id
     }
 
     fn run(&self, token: &str, prompt: &str) -> Result<(), String> {

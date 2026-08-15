@@ -26,13 +26,13 @@ use super::pass::{Report, RunRequest, Runner};
 /// What the app needs in order to actually start a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
-    /// The bearer the CLI presents. Its derived id is what the MCP server
-    /// knows this run as — not the dispatch lease's id, which the server
-    /// never sees.
+    /// The bearer the CLI presents. The server resolves it to a grant
+    /// carrying `run_id` (M31.2a) — the token says who is asking, the grant
+    /// says which run it is.
     pub mcp_token: String,
-    /// The dispatch lease's id, which is what the METER names. Two ids for
-    /// one run, and they answer different questions: the token says who is
-    /// asking, the run id says whose budget it comes out of.
+    /// The dispatch lease's id: what the METER names, and — since M31.2a —
+    /// what the grant carries too. One run used to hold two ids here; now
+    /// the mint is handed this one and everything joins on it.
     pub run_id: String,
     pub elapsed_limit_seconds: u64,
     pub prompt: String,
@@ -40,6 +40,9 @@ pub struct Session {
 }
 
 /// Mint a run token on the live endpoint, and spawn a session against it.
+///
+/// The mint is handed the dispatch lease's id (M31.2a), so the grant it
+/// stores carries the SAME id the meter books and the window opens under.
 pub struct CliRunner<M, S> {
     pub mint_token: M,
     pub spawn: S,
@@ -47,21 +50,20 @@ pub struct CliRunner<M, S> {
 
 impl<M, S> Runner for CliRunner<M, S>
 where
-    M: Fn() -> Result<String, String>,
+    M: Fn(&str) -> Result<String, String>,
     S: Fn(&Session) -> Result<Option<Usage>, String>,
 {
     fn run(&self, request: &RunRequest) -> Result<Report, String> {
-        let token = match (self.mint_token)() {
+        let token = match (self.mint_token)(&request.run_id) {
             Ok(token) => token,
             // No token means no session and no window was ever opened, so
             // there is nothing to close.
             Err(detail) => return Ok(blocked(BlockedReason::RuntimeUnavailable, detail, None)),
         };
-        // The MCP server knows this run by its token, not by the dispatch
-        // lease. Opening the window under the wrong id would mean the run's
-        // report lands somewhere nothing ever reads.
-        let mcp_run_id = mcp::run_id_of(&token);
-        mcp::open_window(&mcp_run_id, &request.batch_key);
+        // The window opens under the dispatch lease's id — since M31.2a the
+        // id the run's grant carries, so `report_window_outcome` (which keys
+        // on `grant.run_id`) lands exactly here.
+        mcp::open_window(&request.run_id, &request.batch_key);
 
         let spawned = (self.spawn)(&Session {
             mcp_token: token,
@@ -72,7 +74,7 @@ where
         });
         // Taken on EVERY path: an open window is a leak, and a window whose
         // run has ended can never be reported anyway.
-        let reported = mcp::take_window_report(&mcp_run_id);
+        let reported = mcp::take_window_report(&request.run_id);
 
         Ok(match (spawned, reported) {
             (Err(detail), _) => blocked(BlockedReason::RuntimeUnavailable, detail, None),
@@ -109,7 +111,9 @@ mod tests {
 
     fn request(batch_key: &str) -> RunRequest {
         RunRequest {
-            run_id: "dispatch-lease-run".into(),
+            // Distinct per test: the window registry is process-global and
+            // keys on this id now, and two tests are two runs.
+            run_id: format!("lease-{batch_key}"),
             elapsed_limit_seconds: 600,
             batch_key: batch_key.into(),
             prompt: "the rendered window".into(),
@@ -127,18 +131,18 @@ mod tests {
     }
 
     /// A spawn that reports through the real server registry, exactly as a
-    /// CLI session would.
+    /// CLI session would: the real tool files the report under
+    /// `grant.run_id`, which since M31.2a is the dispatch lease's id.
     fn reporting_spawn(result: RunResult) -> impl Fn(&Session) -> Result<Option<Usage>, String> {
         let result = RefCell::new(Some(result));
         move |session: &Session| {
-            let run_id = mcp::run_id_of(&session.mcp_token);
-            mcp::test_report_window(&run_id, result.borrow_mut().take().unwrap());
+            mcp::test_report_window(&session.run_id, result.borrow_mut().take().unwrap());
             Ok(Some(usage()))
         }
     }
 
-    fn mint(token: &'static str) -> impl Fn() -> Result<String, String> {
-        move || Ok(token.to_string())
+    fn mint(token: &'static str) -> impl Fn(&str) -> Result<String, String> {
+        move |_: &str| Ok(token.to_string())
     }
 
     #[test]
@@ -197,7 +201,7 @@ mod tests {
     #[test]
     fn no_token_means_no_window_was_ever_opened() {
         let runner = CliRunner {
-            mint_token: || Err("the MCP endpoint is not running".to_string()),
+            mint_token: |_: &str| Err("the MCP endpoint is not running".to_string()),
             spawn: |_: &Session| panic!("must not spawn without a token"),
         };
         let report = runner.run(&request("window-4")).unwrap();
@@ -213,33 +217,42 @@ mod tests {
     #[test]
     fn the_window_is_closed_even_when_the_spawn_failed() {
         // An open window leaks a session that can never be reported.
-        let token = "cli-token-leak";
         let runner = CliRunner {
-            mint_token: mint(token),
+            mint_token: mint("cli-token-leak"),
             spawn: |_: &Session| Err("died".into()),
         };
-        runner.run(&request("window-5")).unwrap();
+        let request = request("window-5");
+        runner.run(&request).unwrap();
         assert!(
-            mcp::take_window_report(&mcp::run_id_of(token)).is_none(),
+            mcp::take_window_report(&request.run_id).is_none(),
             "the window is gone, not merely empty"
         );
     }
 
     #[test]
-    fn the_session_carries_the_token_the_window_was_opened_under() {
-        // Opening under the dispatch lease's id instead would put the run's
-        // report where nothing ever reads it.
+    fn the_mint_is_handed_the_dispatch_leases_id_and_the_session_carries_it() {
+        // M31.2a. One run, one id: the grant is minted with the SAME lease id
+        // the meter books and the session carries, so proposals, reports, and
+        // cost rows all join on it. (Before this phase the grant held a
+        // token-derived hash — a second id nothing else ever named.)
+        let minted_for: RefCell<Option<String>> = RefCell::new(None);
         let seen: RefCell<Option<String>> = RefCell::new(None);
         let runner = CliRunner {
-            mint_token: mint("cli-token-identity"),
+            mint_token: |run_id: &str| {
+                *minted_for.borrow_mut() = Some(run_id.to_string());
+                Ok("cli-token-identity".to_string())
+            },
             spawn: |session: &Session| {
-                *seen.borrow_mut() = Some(session.mcp_token.clone());
+                *seen.borrow_mut() = Some(session.run_id.clone());
                 Ok(None)
             },
         };
         let request = request("window-6");
         runner.run(&request).unwrap();
-        let token = seen.borrow().clone().unwrap();
-        assert_ne!(mcp::run_id_of(&token), request.run_id);
+        assert_eq!(
+            minted_for.borrow().as_deref(),
+            Some(request.run_id.as_str())
+        );
+        assert_eq!(seen.borrow().as_deref(), Some(request.run_id.as_str()));
     }
 }

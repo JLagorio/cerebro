@@ -65,7 +65,7 @@ pub struct Live<'a> {
 /// types the caller has no use for.
 pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
     CliRunner {
-        mint_token: move || {
+        mint_token: move |run_id: &str| {
             // The endpoint must already be up: `ensure` retargets a running
             // server at this vault, and returns an error if none is running
             // rather than starting one behind the user's back.
@@ -73,8 +73,14 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
             // Scoped to nothing. An ingest run proposes; it does not write.
             // M31.1b: the grant carries the SAME narrowing the argv declares
             // — one list, so the boundary and the advice cannot disagree.
-            live.mcp
-                .run_token(Some(ACTOR), Some(vec![]), Some(declared_tools()))
+            // M31.2a: and the SAME durable id — the dispatch lease's, which
+            // the meter books and the supervisor finalizes.
+            live.mcp.run_token(
+                Some(ACTOR),
+                Some(vec![]),
+                Some(declared_tools()),
+                run_id.to_string(),
+            )
         },
         spawn: move |session: &Session| {
             let url = live.mcp.ensure(live.app, live.vault)?.url;

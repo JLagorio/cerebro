@@ -60,14 +60,17 @@ fn normalize_actor(actor: Option<&str>) -> &str {
 pub struct RunGrant {
     pub actor: String,
     /// The durable 128-bit id every proposal this run submits carries
-    /// (M26.3c), DERIVED FROM THE BEARER TOKEN.
+    /// (M26.3c), RESOLVED FROM THE BEARER TOKEN's grant. Since M31.2a it is
+    /// the SAME id the meter and the `runs` table book the run under — one
+    /// run, one id, from mint to meter to grant.
     ///
     /// It rides the token for exactly the reason actor and scope do, and one
     /// more: `commit_proposals` refuses members belonging to another run
     /// (`policy/commit.rs`), so if a caller could name its own run id it
     /// could sweep another run's queued proposals into its own commit set.
     /// A caller only ever knows its own token, so it can only ever name its
-    /// own run.
+    /// own run — the protection is WHERE the id is resolved (from the grant,
+    /// server-side), not how it was derived.
     pub run_id: String,
     /// Vault-relative folders this run may write inside. `None` is unrestricted
     /// — the panel's own turns, which the user is watching.
@@ -89,11 +92,14 @@ pub struct RunGrant {
     pub tools: Option<Vec<String>>,
 }
 
-/// A run's durable id, derived from its bearer token.
+/// A run id derived from a bearer token by hash.
 ///
-/// Domain-separated so a token can never be read back out of an id that
-/// travels in the ledger, and 128-bit hex because `ProposalV1::validate`
-/// requires that shape.
+/// Since M31.2a a MINTED run token carries the durable id its spawner books
+/// (see `run_token`), so this derivation serves only bearers that never book
+/// a run: the endpoint's own base token, whose grant `resolve_grant` builds
+/// here. Domain-separated so a token can never be read back out of an id
+/// that travels in the ledger, and 128-bit hex because
+/// `ProposalV1::validate` requires that shape.
 pub fn run_id_of(token: &str) -> String {
     crate::ledger::schema::sha256_first128(format!("cerebro-mcp-run-v1\0{token}").as_bytes())
 }
@@ -455,11 +461,17 @@ impl McpState {
     /// Mint a bearer token for ONE run, bound to that run's actor (M13.4).
     /// None reads as the default actor. Written into that run's private MCP
     /// config and nowhere else; only the last few run tokens stay valid.
+    ///
+    /// `run_id` is the durable id the caller books the run under — the
+    /// meter's `runs`-table id (M31.2a). It goes into the grant, and the
+    /// grant is the ONLY place it is ever resolved from, so a run can still
+    /// never name another run's id.
     pub fn run_token(
         &self,
         actor: Option<&str>,
         scope: Option<Vec<String>>,
         tools: Option<Vec<String>>,
+        run_id: String,
     ) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
@@ -473,7 +485,7 @@ impl McpState {
             token.clone(),
             RunGrant {
                 actor: normalize_actor(actor).to_string(),
-                run_id: run_id_of(&token),
+                run_id,
                 // An empty declaration is not "everywhere" — a record that
                 // declares `scope:` and lists nothing has scoped itself to
                 // nothing, and the only safe reading of that is no writes.
@@ -2823,6 +2835,7 @@ mod tests {
                 Some("agent:m26-ingest"),
                 Some(vec![]),
                 Some(vec![COMMIT_TOOL.into()]),
+                crate::ledger::new_run_id(),
             )
             .expect("minting needs state, not a socket");
         let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
@@ -2837,6 +2850,36 @@ mod tests {
         );
         // What the grant names still dispatches.
         assert!(ungranted_tool_refusal(&grant, COMMIT_TOOL).is_none());
+    }
+
+    #[test]
+    fn the_grant_carries_the_durable_run_id_the_meter_books() {
+        // M31.2a. One attended run used to have two ids: ledger::new_run_id()
+        // in the runs table, sha256(token) in the grant. Everything that joins
+        // runs to proposals, answers, or costs needs them to be ONE id.
+        // Minted through the REAL `run_token`, resolved through the REAL
+        // `resolve_grant` — state, no socket.
+        let run_actors = Arc::new(Mutex::new(Vec::new()));
+        let state = McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                token: "base".into(),
+                vault: Arc::new(Mutex::new(PathBuf::new())),
+                run_actors: run_actors.clone(),
+            })),
+        };
+        let durable = crate::ledger::new_run_id();
+        let token = state
+            .run_token(
+                Some("agent:m26-synthesis"),
+                Some(vec![]),
+                None,
+                durable.clone(),
+            )
+            .expect("minting needs state, not a socket");
+        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+            .expect("a minted token resolves to its grant");
+        assert_eq!(grant.run_id, durable);
     }
 
     #[test]
