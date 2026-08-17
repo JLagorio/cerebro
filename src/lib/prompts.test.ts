@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentRunPrompt, currentStatePrompt } from './prompts';
+import { agentRunPrompt, currentStatePrompt, distillPrompt } from './prompts';
 
 /**
  * What an unattended run is actually told.
@@ -65,6 +65,17 @@ describe('agentRunPrompt', () => {
     );
     expect(prompt.indexOf('HUMAN CORRECTION')).toBeLessThan(prompt.indexOf('MY OWN NOTES'));
     expect(prompt).toContain('This outranks your own notes');
+  });
+});
+
+describe('distillPrompt', () => {
+  it('asks for the two fields a real vault came back empty on', () => {
+    // Measured on ~/Documents/test: 30 concepts, description 0/30,
+    // supersedes/refines/contradicts 0/30 — while the bodies narrated
+    // supersession in prose.
+    const prompt = distillPrompt('inbox/capture.md', 'A capture');
+    expect(prompt).toContain('description');
+    expect(prompt.toLowerCase()).toContain('in the body');
   });
 });
 
