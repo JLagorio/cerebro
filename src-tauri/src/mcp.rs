@@ -744,7 +744,7 @@ fn base_tools() -> Vec<Value> {
         }),
         json!({
             "name": "write_concept",
-            "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model.",
+            "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model. If the body says one thing replaced, narrowed or disagrees with another, say it in `supersedes`/`refines`/`contradicts` as well: prose is for the reader, the fields are what lets anything answer 'is this still true'. Only assert a relation whose target you read in this run.",
             "inputSchema": schema(json!({
                 "path": { "type": "string", "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md" },
                 "type": { "type": "string", "description": "OKF concept type, e.g. Metric, Playbook, Reference" },
@@ -3371,6 +3371,22 @@ mod tests {
         assert!(
             required.contains(&"description"),
             "description must be required, got {required:?}"
+        );
+    }
+
+    #[test]
+    fn write_concept_says_a_narrated_relation_must_also_be_recorded() {
+        // The measured failure: 30 concepts, 0 relations, and bodies full of
+        // "superseded by" in prose. A field description that only DEFINES the
+        // field does not tell a model to look back at what it just wrote.
+        let tool = tool_catalog(true)
+            .into_iter()
+            .find(|t| t["name"] == "write_concept")
+            .expect("write_concept is served");
+        let text = tool["description"].as_str().unwrap().to_lowercase();
+        assert!(
+            text.contains("body") && text.contains("supersedes"),
+            "the tool description must tie body prose back to the relation fields"
         );
     }
 
