@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "rule_version": "concept-types/2026-08-16",
+  "fallback": "Reference",
+  "types": [
+    { "id": "Program", "hint": "A named programme or project the work belongs to" },
+    { "id": "System", "hint": "A system, subsystem or component, and how it is built" },
+    { "id": "Decision", "hint": "A choice that was made, by whom, and what it settled" },
+    { "id": "Risk", "hint": "Something that could go wrong, and what it depends on" },
+    { "id": "Issue", "hint": "Something that HAS gone wrong and is open" },
+    { "id": "Action", "hint": "Work owed by someone, with a deadline where one was given" },
+    { "id": "Assumption", "hint": "Something taken as true without evidence yet" },
+    { "id": "Hypothesis", "hint": "A proposed explanation that could be tested" },
+    { "id": "Forecast", "hint": "A dated expectation about what will happen" },
+    { "id": "Question", "hint": "Something nobody could answer, worth returning to" },
+    { "id": "Finding", "hint": "Something measured or observed, with its basis" },
+    { "id": "Metric", "hint": "A number, how it is computed, and what moves it" },
+    { "id": "Playbook", "hint": "How to do something, in order" },
+    { "id": "Reference", "hint": "Background that fits none of the above" }
+  ]
+}
