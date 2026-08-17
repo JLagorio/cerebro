@@ -666,6 +666,13 @@ fn schema(properties: Value, required: &[&str]) -> Value {
 /// to derive them from — unlike the proposal surface below, which has an
 /// artifact.
 fn base_tools() -> Vec<Value> {
+    // Built from the artifact, never written out here: a second hand-kept
+    // list of type names is exactly the twin-inventory defect
+    // shared/policy/README.md exists to prevent.
+    let concept_types = format!(
+        "OKF concept type. Pick the closest of: {}. Use the vault's own type name instead when one fits better.",
+        crate::knowledge::concept_type_menu()
+    );
     vec![
         json!({
             "name": "get_vault_context",
@@ -747,7 +754,7 @@ fn base_tools() -> Vec<Value> {
             "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model. If the body says one thing replaced, narrowed or disagrees with another, say it in `supersedes`/`refines`/`contradicts` as well: prose is for the reader, the fields are what lets anything answer 'is this still true'. Only assert a relation whose target you read in this run.",
             "inputSchema": schema(json!({
                 "path": { "type": "string", "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md" },
-                "type": { "type": "string", "description": "OKF concept type, e.g. Metric, Playbook, Reference" },
+                "type": { "type": "string", "description": concept_types },
                 "title": { "type": "string" },
                 "description": { "type": "string", "description": "One sentence saying what this concept is. It is what appears beside the title wherever concepts are listed, so 'what it is' beats 'why it matters'." },
                 "about": {
@@ -3421,6 +3428,23 @@ mod tests {
                 && text.contains("contradicts"),
             "the tool description must tie body prose back to all three relation fields"
         );
+    }
+
+    #[test]
+    fn write_concept_offers_the_vocabulary_rather_than_three_examples() {
+        // "e.g. Metric, Playbook, Reference" is what produced 3 programs and 13
+        // systems all typed Reference: the model picked the safest word it had
+        // been shown.
+        let tool = write_concept_tool(true);
+        let text = tool["inputSchema"]["properties"]["type"]["description"]
+            .as_str()
+            .unwrap();
+        for name in crate::knowledge::concept_type_names() {
+            assert!(
+                text.contains(name),
+                "the type description must offer {name}; got {text}"
+            );
+        }
     }
 
     #[test]
