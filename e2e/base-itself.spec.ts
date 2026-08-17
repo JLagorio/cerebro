@@ -341,6 +341,14 @@ test('base itself: the gate board is the shared artifact, and never-evaluated is
 }) => {
   await open(page, 'Deferral gates');
 
+  // Collapsed, the tab is one line (M33a.2 / D5): a wall of "Never evaluated
+  // here" cards was 55% of the old page, and the count is the answer. The
+  // number is the registry's — spec D6 guessed 24, the artifact declares 14 —
+  // so this assertion drifts with the artifact rather than with the prose.
+  await expect(page.getByTestId('gates-summary')).toContainText('14 capabilities held back');
+  await expect(page.getByTestId('gate-row')).toHaveCount(0);
+  await page.getByTestId('gates-expand').click();
+
   // The mock derives the board from the SAME registry file the Rust runner
   // reads — 14 entries, 34 declared gates. A count drift here means the
   // surface and the artifact stopped agreeing.
@@ -369,10 +377,15 @@ test('base itself: a fired gate is loud, and even then licenses only a dated pla
   });
   await openKnowledgeTab(page, 'Deferral gates');
 
+  // A firing is the one thing the collapse does NOT hide: it is the only news
+  // this tab ever has, and a headline behind a click is a headline nobody
+  // reads.
+  await expect(page.locator('[data-section="gates"]')).toContainText('R13:root has fired');
+  await page.getByTestId('gates-expand').click();
+
   const row = page.locator('[data-gate="R13:root"]');
   await expect(row).toHaveAttribute('data-result', 'fired');
   await expect(row).toContainText('A firing licenses a dated plan, never code.');
-  await expect(page.locator('[data-section="gates"]')).toContainText('R13:root has fired');
 });
 
 test('base itself: evaluate answers honestly in the browser, where no runtime database exists', async ({

@@ -172,6 +172,13 @@ const RUN_REPORT: TriggerRunReport = {
   ],
 };
 
+/** The gate board is collapsed by default (M33a.2, spec D5), so a spec about
+ * what the ROWS say opens it first. The summary is what a reader gets for
+ * free; the board is for whoever asks a second question. */
+async function openBoard() {
+  fireEvent.click(await screen.findByTestId('gates-expand'));
+}
+
 describe('What the base knows about itself', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -421,8 +428,21 @@ describe('What the base knows about itself', () => {
     expect(converge).not.toHaveBeenCalled();
   });
 
+  it('says how much is held back without listing it', async () => {
+    // A wall of "Never evaluated here" cards was 55% of the old Status page.
+    // The count is the answer; the board is for whoever asks a second one.
+    render(<DeferralGates vaultPath={VAULT} />);
+    expect((await screen.findByTestId('gates-summary')).textContent).toContain('held back');
+    // The plan wrote this as `queryByTestId('gate-card')` — a testid that has
+    // never existed here, which would have made the assertion pass over an
+    // unchanged board. The rows are `gate-row` inside `gate-entry`.
+    expect(screen.queryByTestId('gate-row')).toBeNull();
+    expect(screen.queryByTestId('gate-entry')).toBeNull();
+  });
+
   it('renders every gate the board declares, and never-evaluated is said, not omitted', async () => {
     render(<DeferralGates vaultPath={VAULT} />);
+    await openBoard();
 
     const rows = await screen.findAllByTestId('gate-row');
     expect(rows.map((row) => row.getAttribute('data-gate'))).toEqual(['R8:root', 'R13:root']);
@@ -454,16 +474,24 @@ describe('What the base knows about itself', () => {
       },
     ]);
     render(<DeferralGates vaultPath={VAULT} />);
+    // The one thing loud enough to survive the collapse. A firing is the only
+    // news this tab ever has, so it belongs in the line you get for free —
+    // collapsing it behind a click would be the tab hiding its one headline.
+    expect((await screen.findByTestId('gates-summary')).textContent).toContain(
+      'R13:root has fired',
+    );
+    await openBoard();
 
     const row = await screen.findByTestId('gate-row');
     expect(row.getAttribute('data-result')).toBe('fired');
     expect(row.textContent).toContain('A firing licenses a dated plan, never code.');
-    expect(screen.getByText(/R13:root has fired/)).toBeTruthy();
   });
 
   it('evaluate runs once, says what each gate did, and re-reads the board', async () => {
     render(<DeferralGates vaultPath={VAULT} />);
-    await screen.findAllByTestId('gate-row');
+    // Evaluating does not need the board open: the action is the tab's, and
+    // what it did is a sentence, not a row.
+    await screen.findByTestId('gates-summary');
     expect(triggerStatus).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId('gates-evaluate'));
@@ -484,7 +512,7 @@ describe('What the base knows about itself', () => {
       new Error('an R7 verification scope is declared, but this vault has no active ledger writer'),
     );
     render(<DeferralGates vaultPath={VAULT} />);
-    await screen.findAllByTestId('gate-row');
+    await screen.findByTestId('gates-summary');
 
     fireEvent.click(screen.getByTestId('gates-evaluate'));
 

@@ -20,7 +20,9 @@ import { SystemSection } from '@/status/SystemSection';
  * `Deferral gates` alone was 3,225px — 55% of the page — of cards reading
  * "Never evaluated here." A nav that could only scroll you past four sections
  * to reach the fifth is not navigation, and the sections were never one
- * reading. Each is a tab now, and the Knowledge sidebar is the nav.
+ * reading. Each is a tab now, and the Knowledge sidebar is the nav — and the
+ * gate board sits behind its own count, because giving 3,225px of
+ * build-planning bookkeeping a tab of its own only MOVES it.
  *
  * **Why it lives under Knowledge.** What the base HOLDS and what it knows
  * about itself were two rail buttons describing one subject. A bundle that
@@ -470,6 +472,26 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
   );
 }
 
+/**
+ * The board, behind one line (M33a.2, spec D5/D6).
+ *
+ * R1–R14 rendered as a wall of "Never evaluated here" cards — 3,225px, 55% of
+ * the whole Status page — to say one thing: nothing has fired. That is
+ * build-planning bookkeeping, not a reading surface, so the count is what a
+ * reader gets and the board is what a second question gets. The count is
+ * READ off the registry rather than written here: spec D6 guessed 24 and the
+ * shipped artifact declares 14 entries, which is exactly the kind of number
+ * that must not be hard-coded into a sentence.
+ *
+ * Two things deliberately stay OUT of the collapse. A FIRING is the only news
+ * this tab ever has, so it is in the summary line itself — a headline behind
+ * a click is a headline nobody reads. And "Evaluate now" stays, because the
+ * action is the tab's rather than the board's, and what a run did is a
+ * sentence, not a row.
+ *
+ * D6 says this is reversible once it has been lived with, which is why the
+ * board is collapsed rather than deleted.
+ */
 function Gates({
   feed,
   onEvaluate,
@@ -483,6 +505,7 @@ function Gates({
   report: TriggerRunReport | null;
   error: string | null;
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') return <Unavailable what="The trigger registry" />;
   const board = feed.data;
@@ -491,7 +514,7 @@ function Gates({
   );
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           data-testid="gates-evaluate"
@@ -501,11 +524,24 @@ function Gates({
         >
           {running ? 'Evaluating…' : 'Evaluate now'}
         </button>
-        <span className="text-2xs text-n-500">
+        <span data-testid="gates-summary" className="text-2xs text-n-500">
+          {board.length} {board.length === 1 ? 'capability' : 'capabilities'} held back,{' '}
           {firedGates.length === 0
-            ? 'Nothing has fired.'
-            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired.`}
+            ? 'none fired'
+            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired`}
+          .
         </span>
+        {board.length > 0 && (
+          <button
+            type="button"
+            data-testid="gates-expand"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+            className="text-2xs text-n-500 underline underline-offset-2 hover:text-n-700"
+          >
+            {expanded ? 'Hide the board' : 'Show the board'}
+          </button>
+        )}
       </div>
       {error !== null && (
         <p data-testid="gates-run-error" className="text-2xs text-warn-700">
@@ -513,26 +549,27 @@ function Gates({
         </p>
       )}
       {report !== null && <RunOutcome report={report} />}
-      {board.map((entry) => (
-        <div
-          key={entry.registry_id}
-          data-testid="gate-entry"
-          data-entry={entry.registry_id}
-          className="flex flex-col gap-1"
-        >
-          <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
-            {entry.registry_id} — {entry.capability}
-          </span>
-          {entry.gates.map((gate) => (
-            <GateRow key={gate.gate} gate={gate} />
-          ))}
-          {entry.note !== null && (
-            <p data-testid="gate-entry-note" className="text-2xs text-n-500">
-              {entry.note}
-            </p>
-          )}
-        </div>
-      ))}
+      {expanded &&
+        board.map((entry) => (
+          <div
+            key={entry.registry_id}
+            data-testid="gate-entry"
+            data-entry={entry.registry_id}
+            className="flex flex-col gap-1"
+          >
+            <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
+              {entry.registry_id} — {entry.capability}
+            </span>
+            {entry.gates.map((gate) => (
+              <GateRow key={gate.gate} gate={gate} />
+            ))}
+            {entry.note !== null && (
+              <p data-testid="gate-entry-note" className="text-2xs text-n-500">
+                {entry.note}
+              </p>
+            )}
+          </div>
+        ))}
     </>
   );
 }
