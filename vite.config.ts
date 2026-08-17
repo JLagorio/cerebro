@@ -61,10 +61,16 @@ export default defineConfig({
       // honest. Measured at M33.9: 79.42 statements / 83.38 branches / 74.74
       // functions / 79.42 lines — these sit ~1.5 points under that, which is
       // room for ordinary churn and not room for a surface to go untested.
+      // Raised again at the end of M33b, measured 80.33 statements / 83.61
+      // branches / 75.52 functions / 80.33 lines. Same ~1.5-point gap kept, on
+      // the same reasoning; M33a and M33b together added the Knowledge tab,
+      // the thread view, the agent roster and two governance gates, and a
+      // floor left where M33.9 set it would have let all of that rot untested
+      // while still reporting green.
       thresholds: {
-        lines: 78,
-        statements: 78,
-        functions: 73,
+        lines: 79,
+        statements: 79,
+        functions: 74,
         branches: 82,
       },
     },
