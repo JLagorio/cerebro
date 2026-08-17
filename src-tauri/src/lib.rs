@@ -292,6 +292,19 @@ fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
 /// a real answer and is rendered as "not queued", never as an error.
 #[tauri::command(async)]
 fn ingest_item_state(
+/// How many background runs may be live at once (M33b.2). Subscription-wide
+/// and persisted, like the pause.
+///
+/// **This one THROWS, and must.** A ceiling below 1 or above the process cap
+/// is refused by name so the person who typed it learns which end they hit —
+/// clamping silently would leave the number on screen disagreeing with the
+/// number in force.
+#[tauri::command(async)]
+fn set_ambient_concurrency(app: tauri::AppHandle, ceiling: usize) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::settings::set_ambient_concurrency(&conn, ceiling)
+}
+
     app: tauri::AppHandle,
     vault: String,
     path: String,
@@ -1161,6 +1174,7 @@ pub fn run() {
             attention_lanes,
             resolve_held_items,
             create_note,
+            set_ambient_concurrency,
             set_note_title,
             list_views,
             save_view,

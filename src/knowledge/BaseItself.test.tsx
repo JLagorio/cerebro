@@ -98,6 +98,8 @@ const HEALTH: PipelineOverview = {
     timezone_id: 'UTC',
     ceiling_state: 'under_budget',
     ceiling_reasons: [],
+  ambient_concurrency: 1,
+  ambient_concurrency_max: 4,
     accounting_state: 'exact',
     runs_started: 0,
     max_daily_runs: 20,

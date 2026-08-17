@@ -97,6 +97,14 @@ pub struct Held {
 pub struct Overview {
     /// Subscription-wide. Persisted, so it survives a restart.
     pub global_pause: bool,
+    /// How many background runs may be live at once (M33b.2). Subscription-
+    /// wide for the same reason the pause is, and 1 unless somebody raised it.
+    pub ambient_concurrency: usize,
+    /// The highest this build will accept — `agent::MAX_CONCURRENT_RUNS`, sent
+    /// over the wire rather than restated in the renderer. A second `4` in
+    /// TypeScript would be the twin-constant defect, one language's build
+    /// away from disagreeing with the setter that enforces it.
+    pub ambient_concurrency_max: usize,
     /// Why the process itself is holding back, when it is: a failed
     /// migration or an unresolved recovery. Separate from the owner's pause
     /// because they are answered by different actions.
@@ -192,6 +200,8 @@ pub fn overview(
 
     Ok(Overview {
         global_pause: super::settings::global_pause(conn),
+        ambient_concurrency: super::settings::ambient_concurrency(conn),
+        ambient_concurrency_max: super::settings::AMBIENT_CONCURRENCY_MAX,
         runtime_status: super::status::current().code().to_string(),
         meter,
         lanes,
@@ -381,6 +391,15 @@ mod tests {
         crate::runtime::status::clear();
         let view = overview(&conn, &vault, "store", at("2026-08-09T10:00:00Z")).unwrap();
         assert!(!view.global_pause);
+        assert_eq!(
+            view.ambient_concurrency, 1,
+            "M33b ships inert: the ceiling a fresh workspace reports is one"
+        );
+        assert_eq!(
+            view.ambient_concurrency_max,
+            crate::agent::MAX_CONCURRENT_RUNS,
+            "the cap crosses the wire so the renderer never restates it"
+        );
         assert_eq!(view.runtime_status, "ready");
         assert_eq!(view.meter.ceiling_state, "under_budget");
         assert_eq!(view.meter.accounting_state, "exact");

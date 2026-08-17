@@ -9,6 +9,21 @@ import type {
 } from './mockIpc';
 
 /**
+ * The background concurrency ceiling's two ends (M33b.2), mirroring
+ * `runtime::settings::{AMBIENT_CONCURRENCY_DEFAULT, AMBIENT_CONCURRENCY_MAX}`
+ * — the maximum being Rust's `agent::MAX_CONCURRENT_RUNS`.
+ *
+ * They live in this module, which imports nothing at runtime, because both
+ * the fixture below and the mock's own refusal in `mockIpc.ts` need them and
+ * `mockIpc` already imports from here: one copy on this side of the wire, no
+ * cycle. Writing the cap out twice in TypeScript is the twin-constant defect
+ * `shared/policy/README.md` exists to prevent, and a real backend never reads
+ * either of these — it sends its own value on `pipelineOverview`.
+ */
+export const AMBIENT_CONCURRENCY_DEFAULT = 1;
+export const AMBIENT_CONCURRENCY_MAX = 4;
+
+/**
  * The operational half of the golden corpus (M33.10).
  *
  * `demo-vault/` is a story about a team shipping guided onboarding, and every
@@ -370,6 +385,11 @@ export function demoRevertables(): RevertableApplication[] {
 export function demoPipelineOverview(lanes: string[]): PipelineOverview {
   return {
     global_pause: false,
+    // The shipped ceiling, because the demo shows the app as it arrives
+    // (M33b.2) — a demo vault with the concurrency already raised would be
+    // showing a decision nobody made.
+    ambient_concurrency: AMBIENT_CONCURRENCY_DEFAULT,
+    ambient_concurrency_max: AMBIENT_CONCURRENCY_MAX,
     runtime_status: 'ready',
     meter: {
       window_start_utc: `${DAY}T00:00:00.000Z`,

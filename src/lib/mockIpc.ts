@@ -11,6 +11,8 @@ import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 import { sha256Hex } from './sha256';
 import {
+  AMBIENT_CONCURRENCY_DEFAULT,
+  AMBIENT_CONCURRENCY_MAX,
   demoChanges,
   demoFleetDetails,
   demoFleetRuns,
@@ -1199,6 +1201,11 @@ export interface PipelineHeld {
 
 export interface PipelineOverview {
   global_pause: boolean;
+  /** How many background runs may be live at once (M33b.2). 1 unless raised. */
+  ambient_concurrency: number;
+  /** The highest this build accepts, from Rust's `agent::MAX_CONCURRENT_RUNS`.
+   * Sent over the wire so no second copy of the number lives here. */
+  ambient_concurrency_max: number;
   runtime_status: string;
   meter: PipelineMeter;
   lanes: PipelineLane[];
@@ -1212,6 +1219,8 @@ const LANES = ['filed', 'scheduled', 'agent', 'behind', 'refresh', 'stale', 'sch
 function emptyOverview(): PipelineOverview {
   return {
     global_pause: false,
+    ambient_concurrency: AMBIENT_CONCURRENCY_DEFAULT,
+    ambient_concurrency_max: AMBIENT_CONCURRENCY_MAX,
     runtime_status: 'ready',
     meter: {
       window_start_utc: '2026-08-09T00:00:00.000Z',
@@ -1535,6 +1544,33 @@ export async function resolveHeldItems(
 
 export interface TriggerLatest {
   evaluation_id: string;
+/**
+ * The concurrency ceiling (M33b.2) — with both of Rust's guards, because a
+ * mock that accepted what the backend refuses would let a browser-only test
+ * prove a ceiling no database would ever hold.
+ *
+ * The refusal messages are the Rust ones' sense, not their bytes: what has to
+ * match is that both ends refuse, and that neither clamps. `mockIpc.test.ts`
+ * pins that parity; `settings.rs`'s
+ * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
+ * pins the same rule from the other language.
+ */
+export async function setAmbientConcurrency(ceiling: number): Promise<void> {
+  if (!Number.isInteger(ceiling) || ceiling < AMBIENT_CONCURRENCY_DEFAULT) {
+    throw new Error(
+      `a background concurrency of ${ceiling} is not a ceiling, it is a pause — ` +
+        'use the pause, which says so',
+    );
+  }
+  if (ceiling > AMBIENT_CONCURRENCY_MAX) {
+    throw new Error(
+      `${ceiling} background runs would exceed the ${AMBIENT_CONCURRENCY_MAX} this process ` +
+        'will ever have alive at once',
+    );
+  }
+  pipeline = { ...pipeline, ambient_concurrency: ceiling };
+}
+
   result: string;
   evaluated_at: string;
   window_end: string | null;

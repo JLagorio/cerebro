@@ -536,6 +536,25 @@ export function setGlobalPause(paused: boolean): Promise<void> {
   return inTauri() ? invokeTauri('set_global_pause', { paused }) : mock.setGlobalPause(paused);
 }
 
+/**
+ * How many background runs may be live at once (M33b.2). Subscription-wide
+ * and persisted, like the pause; 1 unless somebody raised it.
+ *
+ * The CURRENT value and the cap arrive on `pipelineOverview` rather than
+ * through a getter of their own — the section already does one read and owns
+ * one failure, and a second round trip would give the ceiling its own way to
+ * be unavailable. This is the write half only.
+ *
+ * **It rejects rather than clamping.** Below 1 or above the process cap comes
+ * back as a thrown refusal naming which end was hit, so the number on screen
+ * can never disagree with the number in force.
+ */
+export function setAmbientConcurrency(ceiling: number): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_ambient_concurrency', { ceiling })
+    : mock.setAmbientConcurrency(ceiling);
+}
+
 /** Per vault, because somebody may want scheduled agents at work and nothing
  * at all in their journal. */
 export function setLaneEnabled(vault: string, lane: string, enabled: boolean): Promise<void> {

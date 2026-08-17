@@ -663,6 +663,36 @@ describe('mockIpc', () => {
   });
 });
 
+/**
+ * The concurrency ceiling's mock parity (M33b.2).
+ *
+ * AGENTS.md: the mock backend must mirror every Rust-side guard. The Rust
+ * side is `runtime::settings::set_ambient_concurrency` and its test
+ * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
+ * — the rule observed from both languages rather than mirrored in prose.
+ */
+describe('the background concurrency ceiling (M33b.2)', () => {
+  it('ships at one, which is what the retired singleton lease row enforced', async () => {
+    const overview = await mock.pipelineOverview('/demo-vault');
+    expect(overview.ambient_concurrency).toBe(1);
+    expect(overview.ambient_concurrency_max).toBe(4);
+  });
+
+  it('refuses both ends rather than clamping, and stores nothing when it refuses', async () => {
+    await expect(mock.setAmbientConcurrency(0)).rejects.toThrow(/it is a pause/);
+    await expect(mock.setAmbientConcurrency(5)).rejects.toThrow(/alive at once/);
+    await expect(mock.setAmbientConcurrency(1.5)).rejects.toThrow(/it is a pause/);
+    expect((await mock.pipelineOverview('/demo-vault')).ambient_concurrency).toBe(1);
+  });
+
+  it('accepts the whole allowed range, boundary included', async () => {
+    for (const ceiling of [4, 2, 1]) {
+      await mock.setAmbientConcurrency(ceiling);
+      expect((await mock.pipelineOverview('/demo-vault')).ambient_concurrency).toBe(ceiling);
+    }
+  });
+});
+
 describe('the deferral gates (M28.1)', () => {
   it('the board is the shared artifact: 14 entries, 34 gates, R14 honestly empty', async () => {
     const board = await mock.triggerStatus('/demo-vault');

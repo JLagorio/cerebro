@@ -22,6 +22,13 @@ import { useUiStore } from '@/stores/uiStore';
  * background work run is a per-vault choice, because somebody may want
  * scheduled agents at work and nothing at all in their journal.
  *
+ * **The concurrency ceiling (M33b.2) joined the pause, and is global for the
+ * same reason.** How MUCH background work may run at once is a fact about one
+ * subscription, not about a folder. It ships at 1 — the number the retired
+ * `ambient_dispatch` singleton row used to enforce — so the surface arrives
+ * saying exactly what the app already did, and raising it is a human act in
+ * the same way writing a `schedule:` is.
+ *
  * **Three faces of failure stay three banners.** A quota death means wait; a
  * dead source means reality may be moving unobserved; a broken file means fix
  * one file. One merged "something went wrong" would tell a person none of
@@ -170,6 +177,50 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
         >
           {overview.global_pause ? 'Resume background work' : 'Pause background work'}
         </Button>
+      </div>
+
+      {/* The concurrency ceiling (M33b.2), beside the pause because they are
+          the same control at two settings: this says how much background at
+          once, and the pause says none. It ships at 1 — the number the old
+          singleton lease row enforced — so arriving here changes nothing until
+          somebody moves it, which is the point.
+
+          The options come from `ambient_concurrency_max`, which Rust sends,
+          so this control cannot offer a number the backend would refuse and
+          the cap is never written down twice. */}
+      <div className="flex items-center justify-between gap-3">
+        <label
+          className="text-xs text-n-600"
+          htmlFor="ambient-concurrency"
+          data-testid="concurrency-state"
+          data-ceiling={overview.ambient_concurrency}
+        >
+          {overview.ambient_concurrency === 1
+            ? 'Background work runs one job at a time.'
+            : `Background work runs up to ${overview.ambient_concurrency} jobs at a time, so it can spend that much of your subscription at once.`}
+        </label>
+        <select
+          id="ambient-concurrency"
+          data-testid="ambient-concurrency"
+          className="rounded border border-n-200 px-2 py-1 text-sm"
+          value={overview.ambient_concurrency}
+          disabled={busy}
+          onChange={(e) => {
+            const ceiling = Number(e.target.value);
+            void act(
+              () => ipc.setAmbientConcurrency(ceiling),
+              ceiling === 1
+                ? 'Background work will run one job at a time'
+                : `Background work may now run ${ceiling} jobs at once`,
+            );
+          }}
+        >
+          {Array.from({ length: overview.ambient_concurrency_max }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {n === 1 ? '1 at a time' : `${n} at a time`}
+            </option>
+          ))}
+        </select>
       </div>
 
       {overview.banners.map((banner) => (
