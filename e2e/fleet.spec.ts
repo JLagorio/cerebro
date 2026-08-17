@@ -237,6 +237,71 @@ test('fleet: clicking an agent narrows the history to its runs', async ({ page }
   await expect(section.getByTestId('fleet-row')).toHaveCount(2);
 });
 
+// --- Pause and resume, per agent (M33b.5) -----------------------------------
+//
+// Two things about the corpus shape these. The demo queue holds two of
+// release-scout's proposals and "waiting on you" outranks any pause — pausing
+// does not un-queue a decision somebody still owes — so these seed the queue
+// EMPTY to get at the states underneath. And demo-vault ships its one agent
+// deliberately WITHOUT a `schedule:`, so its resting state here is "not
+// activated"; the `background-paused` wording, which needs an activated agent,
+// is proved in `AgentRoster.test.tsx` rather than by editing the golden vault.
+//
+// Two init scripts before one boot, which is fine; what the note above forbids
+// is two boots in one test.
+async function openQuietFleet(page: Page, pipeline: Record<string, unknown> = {}) {
+  await seedBeforeBoot(page, '__cerebroSeedReview', {});
+  await seedBeforeBoot(page, '__cerebroSeedPipeline', pipeline);
+  return openFleet(page, [RUN]);
+}
+
+test('fleet: an agent can be stopped without deleting it', async ({ page }) => {
+  const section = await openQuietFleet(page);
+  const row = section.getByTestId('agent-row');
+  const chip = section.getByTestId('agent-state');
+  await expect(row).toHaveAttribute('data-actor', 'process:release-scout');
+  await expect(chip).toHaveAttribute('data-state', 'inactive');
+  await expect(section.getByTestId('agent-pause')).toContainText('Pause');
+
+  await section.getByTestId('agent-pause').click();
+
+  // The pause outranks "not activated": it is a human act on this row, and a
+  // row that declined to mention it would be the hidden button spec §6 warns
+  // about.
+  await expect(chip).toHaveAttribute('data-state', 'paused');
+  await expect(chip).toHaveText('paused');
+  await expect(section.getByTestId('agent-pause')).toContainText('Resume');
+  // Stopped, not deleted: the row, its duty line and its history are all still
+  // here, which is the whole point of a pause over deleting the record.
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText('Release scout');
+  await expect(section.getByTestId('agent-duty')).toContainText('description, not a daemon');
+
+  await section.getByTestId('agent-pause').click();
+  await expect(chip).toHaveAttribute('data-state', 'inactive');
+  await expect(section.getByTestId('agent-pause')).toContainText('Pause');
+});
+
+test('fleet: the background pause is not the same control as one row pause', async ({ page }) => {
+  // Task 5 at the surface. With everything stopped, the row still offers its
+  // OWN pause — an agent running inside a stopped background is one somebody
+  // may still want individually stopped — and resuming it hands it back to
+  // whatever else is holding it rather than starting it.
+  const section = await openQuietFleet(page, { global_pause: true });
+  const chip = section.getByTestId('agent-state');
+  await expect(section.getByTestId('agent-pause')).toContainText('Pause');
+
+  await section.getByTestId('agent-pause').click();
+  await expect(chip).toHaveAttribute('data-state', 'paused');
+
+  await section.getByTestId('agent-pause').click();
+  await expect(chip).toHaveAttribute('data-state', 'inactive');
+  // Resuming one agent under a global pause did not start it, and the row
+  // never says so.
+  await expect(chip).not.toHaveText('idle');
+  await expect(chip).not.toHaveText('working now');
+});
+
 test('fleet: a run row says when it happened', async ({ page }) => {
   // Carried from M33.1–.10. The rows named who, what lane, what outcome and
   // what it cost, and never once said WHEN — so "newest first" was an

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
+import { runAgent, stopAllAgents } from '@/agent/agentIpc';
 import * as mock from './mockIpc';
 
 beforeEach(() => {
@@ -945,5 +946,120 @@ describe('the deferral gates (M28.1)', () => {
     mock.__seedFleet(null);
     await expect(mock.fleetActorSummaries()).rejects.toThrow(/runtime database/);
     mock.__seedFleet([]);
+  });
+});
+
+/**
+ * The per-agent pause's mock parity (M33b.5).
+ *
+ * AGENTS.md: the mock backend must mirror every Rust-side guard, and this one
+ * is the phase's whole claim — spec §6, "if a paused agent can still be
+ * triggered from its record, the pause is a lie". The Rust side is
+ * `runtime::settings`' `agent_paused` / `set_agent_paused` / `paused_agents` /
+ * `refuse_if_agent_paused`, pinned by
+ * `an_agent_with_no_pause_row_is_not_paused_and_a_pause_survives_a_restart`,
+ * `a_pause_with_no_agent_to_be_about_is_refused_before_it_is_stored` and
+ * `the_refusal_names_the_agent_and_bare_chat_has_nothing_to_refuse` — one rule
+ * observed from both languages rather than described twice in prose.
+ */
+describe('the per-agent pause (M33b.5)', () => {
+  it('starts with nobody paused, which is measured and not missing', async () => {
+    expect(await mock.pausedAgents('/demo-vault')).toEqual([]);
+  });
+
+  it('pauses and resumes one agent, byte-sorted, saying nothing about the others', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await mock.setAgentPaused('/demo-vault', 'process:digest', true);
+    expect(await mock.pausedAgents('/demo-vault')).toEqual(['process:digest', 'process:scout']);
+
+    await mock.setAgentPaused('/demo-vault', 'process:digest', false);
+    expect(await mock.pausedAgents('/demo-vault')).toEqual(['process:scout']);
+  });
+
+  it('is vault-scoped, because an agent is a record and not a subscription', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    expect(await mock.pausedAgents('/other-vault')).toEqual([]);
+  });
+
+  it('refuses a pause with no agent to be about, before anything is stored', async () => {
+    await expect(mock.setAgentPaused('/demo-vault', '  ', true)).rejects.toThrow(
+      /no actor was named/,
+    );
+    expect(await mock.pausedAgents('/demo-vault')).toEqual([]);
+  });
+
+  it('refuses a run the paused agent would have started, and names it', async () => {
+    // The guard `agentIpc.runAgent` calls in browser mode. Rust refuses the
+    // same run in `run_agent`, ahead of the token and the child.
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:scout')).toThrow(
+      /process:scout is paused/,
+    );
+    // Bare chat has no pause to check, and neither does anybody else.
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', null)).not.toThrow();
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', undefined)).not.toThrow();
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:digest')).not.toThrow();
+
+    await mock.setAgentPaused('/demo-vault', 'process:scout', false);
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:scout')).not.toThrow();
+  });
+});
+
+/**
+ * The run path itself, in browser mode (M33b.5).
+ *
+ * `agentIpc.runAgent` does not go through this module's facade — in the
+ * browser it drives the scripted mock directly — so the guard has to be
+ * reached from there or a paused agent would run in dev and in every
+ * browser-mode test. In Tauri the same refusal lives in `run_agent`, ahead of
+ * the run token and the child. Spec §6: the phase includes proving the pause
+ * is not a lie.
+ */
+describe('a paused agent cannot be run (M33b.5)', () => {
+  it('refuses the run the agent would have started, by name', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await expect(
+      runAgent('/demo-vault', {
+        message: 'go',
+        actor: 'process:scout',
+        shell: false,
+        connectors: false,
+        attended: false,
+        mcp: null,
+      }),
+    ).rejects.toThrow(/process:scout is paused/);
+  });
+
+  it('leaves every other run alone — bare chat, and anybody not paused', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    const options = {
+      message: 'go',
+      shell: false,
+      connectors: false,
+      attended: false,
+      mcp: null,
+    };
+    await expect(runAgent('/demo-vault', options)).resolves.toBeDefined();
+    await expect(
+      runAgent('/demo-vault', { ...options, actor: 'process:digest' }),
+    ).resolves.toBeDefined();
+    // Nothing scripted is left running behind these assertions.
+    await stopAllAgents();
+  });
+
+  it('runs again the moment it is resumed — the pause stopped it, not deleted it', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await mock.setAgentPaused('/demo-vault', 'process:scout', false);
+    await expect(
+      runAgent('/demo-vault', {
+        message: 'go',
+        actor: 'process:scout',
+        shell: false,
+        connectors: false,
+        attended: false,
+        mcp: null,
+      }),
+    ).resolves.toBeDefined();
+    await stopAllAgents();
   });
 });

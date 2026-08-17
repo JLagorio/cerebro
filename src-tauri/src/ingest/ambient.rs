@@ -223,10 +223,17 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
     // Before anything else, and before the pause. See `sweep_abandoned`.
     sweep_abandoned(&conn, chrono::Utc::now());
 
-    // The pause governs EVERYTHING (M26.9). Somebody who pressed pause meant
-    // "stop", not "stop the expensive half" — and a deterministic phase that
-    // kept appending to the ledger under a pause would be the app arguing
+    // The GLOBAL pause governs EVERYTHING (M26.9). Somebody who pressed pause
+    // meant "stop", not "stop the expensive half" — and a deterministic phase
+    // that kept appending to the ledger under a pause would be the app arguing
     // with a control the owner just used.
+    //
+    // Its sibling since M33b.5, the per-agent pause, is deliberately NOT here:
+    // it stops one actor rather than the tick, so it is enforced where an
+    // actor is named — `budget::gate`, inside the claim transaction — and a
+    // whole-tick check could not express it. The standard is the same one: a
+    // paused agent must not do the cheap half either, which is why the gate
+    // refuses the claim rather than the spawn.
     if crate::runtime::settings::global_pause(&conn) {
         return Ok(());
     }

@@ -420,6 +420,69 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_actor_defers_this_scheduled_pass_and_says_nothing() {
+        // M33b.5, spec §6, on the scheduled path: the pass claims its lease
+        // under `pass::ACTOR`, so pausing that actor has to stop it exactly
+        // the way the global pause does — no CLI, no findings marked said,
+        // and the whole period offered again once it is resumed.
+        let harness = Harness::open("maintain-schedule-agent-paused");
+        crate::runtime::settings::set_agent_paused(
+            &harness.conn,
+            &harness.vault_id,
+            pass::ACTOR,
+            true,
+        )
+        .unwrap();
+        let spy = Spy::default();
+        let outcome = attempt(
+            &harness.conn,
+            &harness.context(),
+            &fixture::state(),
+            &spy,
+            true,
+            now(),
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, Scheduled::Deferred(reasons)
+                if reasons == &[crate::runtime::budget::GateReason::AgentPaused]),
+            "expected a deferral naming the agent pause, got {outcome:?}"
+        );
+        assert_eq!(*spy.runs.borrow(), 0, "no CLI ran");
+        let findings: i64 = harness
+            .conn
+            .query_row("SELECT count(*) FROM maintenance_findings", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(findings, 0, "a deferred pass leaves every finding unsaid");
+
+        // Resumed, the same pass runs — the pause stopped it, it did not
+        // consume it.
+        crate::runtime::settings::set_agent_paused(
+            &harness.conn,
+            &harness.vault_id,
+            pass::ACTOR,
+            false,
+        )
+        .unwrap();
+        let resumed = attempt(
+            &harness.conn,
+            &harness.context(),
+            &fixture::state(),
+            &spy,
+            true,
+            now(),
+        )
+        .unwrap();
+        assert!(
+            matches!(resumed, Scheduled::Ran { .. }),
+            "expected a run once resumed, got {resumed:?}"
+        );
+        assert_eq!(*spy.runs.borrow(), 1);
+    }
+
+    #[test]
     fn a_paused_runtime_defers_rather_than_running() {
         let harness = Harness::open("maintain-schedule-paused");
         crate::runtime::settings::set_global_pause(&harness.conn, true).unwrap();

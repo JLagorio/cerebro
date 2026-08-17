@@ -424,9 +424,10 @@ describe('What the base knows about itself', () => {
     // which is the change that made it one. It used to take no vault at all
     // ("the fleet spans them"), and that stopped being the whole story when
     // the tab started listing AGENTS: agents are records in a vault, and the
-    // proposal queue and the pause are read against it. Two of its three
-    // reads therefore have nothing to read here and say so; the run history
-    // still spans vaults and stands.
+    // proposal queue, the background pause and (since M33b.5) which agents
+    // are paused are all read against it. Three of its four reads therefore
+    // have nothing to read here and say so; the run history still spans
+    // vaults and stands.
     render(
       <>
         <WhatChanged vaultPath={null} />
@@ -438,7 +439,7 @@ describe('What the base knows about itself', () => {
       </>,
     );
 
-    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(8));
+    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(9));
     expect(converge).not.toHaveBeenCalled();
   });
 

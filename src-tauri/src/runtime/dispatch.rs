@@ -245,7 +245,11 @@ fn claim_inner(
         return Ok(Dispatched::NothingToClaim);
     }
 
-    let (decision, day) = budget::gate(conn, vault_id, store_uuid, lane, reservation, now)?;
+    // The gate takes the ACTOR as well as the lane (M33b.5): whether this one
+    // agent is paused is a gate decision like every other refusal, decided in
+    // the same transaction and recorded in the same deferral row, rather than
+    // a second check bolted on beside it.
+    let (decision, day) = budget::gate(conn, vault_id, store_uuid, lane, actor, reservation, now)?;
     let decision_id = crate::ledger::new_id128();
     budget::record_decision(
         conn,
@@ -1076,6 +1080,121 @@ mod tests {
                 .state,
             SchedulerState::Pending,
             "a deferred dispatch claims nothing, at any ceiling"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_paused_agent_is_refused_by_the_gate_and_claims_nothing() {
+        // M33b.5, spec §6: if a paused agent can still be dispatched, the
+        // pause is a lie. This is the AMBIENT path — every background run in
+        // the app comes through `claim`, so refusing here refuses ingest,
+        // maintenance and assembly at once — and the refusal is the gate's,
+        // in the same transaction as every other one, so a deferred agent
+        // claims no item, takes no lease and reserves no tokens.
+        let (dir, conn, vault) = fixture("dispatch-agent-paused");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+
+        let refused = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            Some("process:digest"),
+            now,
+        )
+        .unwrap();
+        assert_eq!(refused, Dispatched::Deferred(vec![GateReason::AgentPaused]));
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "a deferred dispatch claims nothing"
+        );
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "and reserves nothing");
+        assert_eq!(day.ambient_runs_started, 0);
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            leases, 0,
+            "and takes no lease the ceiling would have to hold"
+        );
+
+        // Nobody ELSE is paused: the pause is about one colleague, and a
+        // fleet-wide stop is a different control with a different sentence.
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                Some("process:scout"),
+                now
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resuming_one_agent_under_the_global_pause_still_starts_nothing() {
+        // The two pauses are collected separately and either is enough. A
+        // person who resumed one agent while everything is stopped has not
+        // started it, and the deferral says which control is holding it.
+        let (dir, conn, vault) = fixture("dispatch-agent-resume-under-global");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        crate::runtime::settings::set_global_pause(&conn, true).unwrap();
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+        let call = |conn: &Connection| {
+            claim(
+                conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["a.md".into()],
+                Some("process:digest"),
+                now,
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            call(&conn),
+            Dispatched::Deferred(vec![GateReason::AgentPaused, GateReason::GlobalPause]),
+            "both are true and both are named"
+        );
+
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", false).unwrap();
+        assert_eq!(
+            call(&conn),
+            Dispatched::Deferred(vec![GateReason::GlobalPause]),
+            "resuming the agent did not start it — the global pause still wins"
+        );
+
+        crate::runtime::settings::set_global_pause(&conn, false).unwrap();
+        assert!(
+            matches!(call(&conn), Dispatched::Started(_)),
+            "and only with both released does it run"
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);

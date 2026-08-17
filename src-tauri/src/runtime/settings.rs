@@ -1,13 +1,13 @@
-//! Durable runtime settings — the global pause, lane toggles, and the
+//! Durable runtime settings — the two pauses, lane toggles, and the
 //! markers a one-shot upgrade may only claim once (M25.1).
 //!
 //! **Scoping is the whole design.** A key with `vault_id IS NULL` is global
-//! to the subscription (the pause is a property of one CLI account, not of a
-//! folder); a key with a vault is that vault's own (lane toggles are
-//! per-vault by the design's explicit choice). SQLite will not enforce
-//! uniqueness across a nullable column, so the two shapes have two partial
-//! unique indexes and this module never relies on `vault_id = NULL` matching
-//! anything.
+//! to the subscription (the global pause is a property of one CLI account,
+//! not of a folder); a key with a vault is that vault's own (lane toggles are
+//! per-vault by the design's explicit choice, and so is one agent's own pause
+//! — see [`agent_pause_key`]). SQLite will not enforce uniqueness across a
+//! nullable column, so the two shapes have two partial unique indexes and this
+//! module never relies on `vault_id = NULL` matching anything.
 //!
 //! **This table is not an authority for a budget decision.** Current settings
 //! say what the NEXT window will copy; a gate decision reads the immutable
@@ -19,6 +19,12 @@ use rusqlite::Connection;
 /// The subscription-wide pause. Persisted so it survives a restart — a pause
 /// that forgot itself overnight would be the least trustworthy control in the
 /// app.
+///
+/// **One of TWO pauses since M33b.5**, and the wider one. This stops every
+/// background run on this subscription; [`agent_pause_key`] stops one agent
+/// wherever it would have been started from. Neither overrides the other —
+/// they are collected as separate reasons and either is enough to refuse, so
+/// resuming one agent while this is on starts nothing.
 pub const GLOBAL_PAUSE: &str = "ambient.global_pause";
 
 /// How many ambient leases may be live at once (M33b.1/.2).
@@ -177,6 +183,122 @@ pub fn set_global_pause(conn: &Connection, paused: bool) -> Result<(), String> {
     )
 }
 
+// --- One agent's own pause (M33b.5) -----------------------------------------
+
+/// `agent.paused.<actor>` — one agent stopped without deleting its record.
+///
+/// **Operational, therefore here and not in the vault.** A pause is not
+/// something the base believes; it is something the app was told to stop
+/// doing. The two-records rule puts that in `<app-data>/runtime.db`, beside
+/// the global pause, rather than in frontmatter beside the agent's brief —
+/// which also means pausing an agent never rewrites the record a person is
+/// reading, and never turns into a git commit.
+///
+/// **Vault-scoped, where the global pause is not, and for the opposite
+/// reason.** The global pause is a property of one CLI subscription, spent
+/// once however many vaults debit it. An agent is a RECORD: two vaults may
+/// each hold a `digest` without them being the same colleague, and a pause
+/// that crossed vaults would stop a stranger.
+pub fn agent_pause_key(actor: &str) -> String {
+    format!("agent.paused.{actor}")
+}
+
+/// Is this one agent paused in this vault?
+///
+/// **An absent row is NOT paused, and that is a measurement rather than a
+/// gap** — an agent nobody has ever paused has no row, which is the state
+/// every agent ships in.
+///
+/// **A read that FAILED is an `Err`, never a `false`.** Every caller is about
+/// to decide whether to start a run, and "we could not tell" must not become
+/// "go ahead" — that would make the pause a lie under exactly the conditions
+/// nobody tests. So this has [`lane_enabled`]'s shape and not [`flag`]'s:
+/// `flag` is for questions whose safe answer is a default, and this one's safe
+/// answer is to refuse. The gate already fails closed on an unreadable lane
+/// row for the same reason.
+pub fn agent_paused(conn: &Connection, vault_id: &str, actor: &str) -> Result<bool, String> {
+    Ok(get(conn, &agent_pause_key(actor), Some(vault_id))?.as_deref() == Some("true"))
+}
+
+/// Pause or resume one agent. Refused without an agent to be about, before a
+/// byte is stored — a blank actor would mint a settings key nothing will ever
+/// read and a pause nothing will ever enforce.
+pub fn set_agent_paused(
+    conn: &Connection,
+    vault_id: &str,
+    actor: &str,
+    paused: bool,
+) -> Result<(), String> {
+    let actor = actor.trim();
+    if actor.is_empty() {
+        return Err("a pause needs an agent to be about, and no actor was named".to_string());
+    }
+    set(
+        conn,
+        &agent_pause_key(actor),
+        Some(vault_id),
+        if paused { "true" } else { "false" },
+    )
+}
+
+/// Every agent paused in this vault, by actor, byte-sorted.
+///
+/// An EMPTY vector is measured-at-zero: the rows were read and nobody is
+/// paused. A read that failed is an `Err`, so the surface can say it could not
+/// tell rather than drawing a fleet that claims to be running.
+///
+/// Resuming stores `false` rather than deleting the row — the same shape the
+/// global pause has — so the filter is on the value and not on the key's mere
+/// existence.
+pub fn paused_agents(conn: &Connection, vault_id: &str) -> Result<Vec<String>, String> {
+    let prefix = agent_pause_key("");
+    let mut statement = conn
+        .prepare(
+            "SELECT key FROM settings WHERE vault_id = ?1 AND value = 'true' \
+             AND key LIKE ?2 || '%' ORDER BY key",
+        )
+        .map_err(|e| format!("settings (paused agents): {e}"))?;
+    let rows = statement
+        .query_map(rusqlite::params![vault_id, prefix], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| format!("settings (paused agents): {e}"))?;
+    let keys = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("settings (paused agents): {e}"))?;
+    Ok(keys
+        .into_iter()
+        .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+        .collect())
+}
+
+/// The refusal a run start must not get past (M33b.5, spec §6).
+///
+/// `None` is bare chat — a run nobody launched on any agent's behalf — and has
+/// no pause to check.
+///
+/// The sentence NAMES the agent, because a person who paused one of several
+/// and then triggered another needs to know which one just refused them. It is
+/// a returned refusal rather than a silent no-op for the same reason: a pause
+/// that swallows the trigger and says nothing is indistinguishable from a
+/// broken button.
+pub fn refuse_if_agent_paused(
+    conn: &Connection,
+    vault_id: &str,
+    actor: Option<&str>,
+) -> Result<(), String> {
+    let Some(actor) = actor else {
+        return Ok(());
+    };
+    if agent_paused(conn, vault_id, actor)? {
+        return Err(format!(
+            "{actor} is paused, so this run did not start. Resume it on the fleet — \
+             a paused agent that still ran would make the pause a lie."
+        ));
+    }
+    Ok(())
+}
+
 /// How many ambient leases may be live at once. Never fails, and never
 /// answers zero.
 ///
@@ -327,6 +449,104 @@ mod tests {
         assert!(
             global_pause(&conn),
             "a pause that forgets itself is not one"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_agent_with_no_pause_row_is_not_paused_and_a_pause_survives_a_restart() {
+        // Absent is a MEASUREMENT here, not a gap: every agent ships with no
+        // row, and that state is "running", not "unknown".
+        let (dir, conn) = db("settings-agent-pause");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        assert!(!agent_paused(&conn, &vault, "process:digest").unwrap());
+        assert_eq!(paused_agents(&conn, &vault).unwrap(), Vec::<String>::new());
+
+        set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        assert!(agent_paused(&conn, &vault, "process:digest").unwrap());
+        assert_eq!(
+            paused_agents(&conn, &vault).unwrap(),
+            vec!["process:digest"]
+        );
+        drop(conn);
+
+        let conn = super::super::open(&dir).unwrap();
+        assert!(
+            agent_paused(&conn, &vault, "process:digest").unwrap(),
+            "a pause that forgets itself overnight is not one"
+        );
+
+        // And resuming is a state, not a deletion: the row stays, saying so.
+        set_agent_paused(&conn, &vault, "process:digest", false).unwrap();
+        assert!(!agent_paused(&conn, &vault, "process:digest").unwrap());
+        assert_eq!(paused_agents(&conn, &vault).unwrap(), Vec::<String>::new());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_agents_pause_says_nothing_about_another_or_about_another_vault() {
+        // Two vaults may each hold an agent whose slug is the same word
+        // without them being the same colleague, which is why this key is
+        // vault-scoped where the global pause is not.
+        let (dir, conn) = db("settings-agent-pause-scope");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        let other_dir = crate::vault::testutil::temp_vault("settings-agent-pause-scope-b");
+        let other = super::super::scope::register(&conn, &other_dir).unwrap();
+
+        set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        assert!(!agent_paused(&conn, &vault, "process:scout").unwrap());
+        assert!(!agent_paused(&conn, &other, "process:digest").unwrap());
+        assert_eq!(paused_agents(&conn, &other).unwrap(), Vec::<String>::new());
+
+        set_agent_paused(&conn, &vault, "process:scout", true).unwrap();
+        assert_eq!(
+            paused_agents(&conn, &vault).unwrap(),
+            vec!["process:digest", "process:scout"],
+            "byte-sorted, so a roster does not reshuffle between reads"
+        );
+        // The global pause is a different key with a different scope, and
+        // neither read sees the other.
+        set_global_pause(&conn, true).unwrap();
+        assert!(!agent_paused(&conn, &vault, "process:nobody").unwrap());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other_dir);
+    }
+
+    #[test]
+    fn a_pause_with_no_agent_to_be_about_is_refused_before_it_is_stored() {
+        let (dir, conn) = db("settings-agent-pause-blank");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        for blank in ["", "   "] {
+            let err = set_agent_paused(&conn, &vault, blank, true).unwrap_err();
+            assert!(err.contains("no actor was named"), "{err}");
+        }
+        assert_eq!(paused_agents(&conn, &vault).unwrap(), Vec::<String>::new());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_refusal_names_the_agent_and_bare_chat_has_nothing_to_refuse() {
+        let (dir, conn) = db("settings-agent-pause-refusal");
+        let vault = super::super::scope::register(&conn, &dir).unwrap();
+        // No actor: a run nobody launched on an agent's behalf.
+        assert_eq!(refuse_if_agent_paused(&conn, &vault, None), Ok(()));
+        assert_eq!(
+            refuse_if_agent_paused(&conn, &vault, Some("process:digest")),
+            Ok(())
+        );
+
+        set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let err = refuse_if_agent_paused(&conn, &vault, Some("process:digest")).unwrap_err();
+        assert!(err.contains("process:digest"), "{err}");
+        assert!(err.contains("paused"), "{err}");
+        // A different agent is untouched by it.
+        assert_eq!(
+            refuse_if_agent_paused(&conn, &vault, Some("process:scout")),
+            Ok(())
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);

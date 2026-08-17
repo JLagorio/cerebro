@@ -24,6 +24,8 @@ const fleetActorSummaries = vi.fn<() => Promise<FleetActorSummary[]>>();
 const fleetRuns = vi.fn<() => Promise<unknown[]>>();
 const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
 const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
+const pausedAgents = vi.fn<(vault: string) => Promise<string[]>>();
+const setAgentPaused = vi.fn<(vault: string, actor: string, paused: boolean) => Promise<void>>();
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -33,6 +35,9 @@ vi.mock('@/lib/ipc', async () => {
     fleetRuns: () => fleetRuns(),
     reviewQueue: (vault: string) => reviewQueue(vault),
     pipelineOverview: (vault: string) => pipelineOverview(vault),
+    pausedAgents: (vault: string) => pausedAgents(vault),
+    setAgentPaused: (vault: string, actor: string, paused: boolean) =>
+      setAgentPaused(vault, actor, paused),
   };
 });
 
@@ -92,33 +97,57 @@ function card(over: Partial<ReviewCard> = {}): ReviewCard {
 
 const roster = () => <AgentRoster vaultPath={VAULT} focus={null} onFocus={() => {}} now={NOW} />;
 
-describe('liveState (M33b.4)', () => {
+describe('liveState (M33b.4, two pauses since M33b.5)', () => {
   const facts = {
     running: 0,
     waiting: 0,
     onDuty: true,
-    paused: false,
+    agentPaused: false,
+    backgroundPaused: false,
   };
 
   it('lets a run in flight beat everything else', () => {
-    expect(liveState({ ...facts, running: 1, waiting: 3, paused: true })).toBe('working');
+    expect(
+      liveState({ ...facts, running: 1, waiting: 3, agentPaused: true, backgroundPaused: true }),
+    ).toBe('working');
   });
 
-  it('puts a queued decision above the pause, which does not un-queue it', () => {
-    expect(liveState({ ...facts, waiting: 2, paused: true })).toBe('waiting');
+  it('puts a queued decision above both pauses, which do not un-queue it', () => {
+    expect(liveState({ ...facts, waiting: 2, agentPaused: true, backgroundPaused: true })).toBe(
+      'waiting',
+    );
   });
 
-  it('calls an agent nothing can fire not-activated rather than paused', () => {
-    // A description is not a stopped daemon, and calling it paused would
-    // imply a resume button exists for it.
-    expect(liveState({ ...facts, onDuty: false, paused: true })).toBe('inactive');
+  it('calls an agent nothing can fire not-activated rather than background-paused', () => {
+    // A description is not a stopped daemon, and blaming the background pause
+    // for it would point at the wrong control.
+    expect(liveState({ ...facts, onDuty: false, backgroundPaused: true })).toBe('inactive');
+  });
+
+  it('says paused, not not-activated, when somebody paused this very agent', () => {
+    // The pause is a human act ON THIS ROW and there is a button beside it
+    // that undoes it — a row that declined to mention it would be the hidden
+    // button spec §6 warns about.
+    expect(liveState({ ...facts, onDuty: false, agentPaused: true })).toBe('paused');
+  });
+
+  it('tells one agent being stopped apart from everything being stopped', () => {
+    // Two true states, two sentences. "Everything is stopped" and "this
+    // colleague is stopped" want different actions.
+    expect(liveState({ ...facts, agentPaused: true })).toBe('paused');
+    expect(liveState({ ...facts, backgroundPaused: true })).toBe('background-paused');
+    // Stopped twice reads as the control with a button next to it — and
+    // pressing that button leaves it stopped by the other one, which is
+    // exactly what resuming under a global pause does.
+    expect(liveState({ ...facts, agentPaused: true, backgroundPaused: true })).toBe('paused');
   });
 
   it('refuses to say idle when a fact the idle claim rests on was not read', () => {
     expect(liveState({ ...facts, waiting: null })).toBe('unknown');
-    expect(liveState({ ...facts, paused: null })).toBe('unknown');
+    expect(liveState({ ...facts, backgroundPaused: null })).toBe('unknown');
+    expect(liveState({ ...facts, agentPaused: null })).toBe('unknown');
     expect(liveState({ ...facts, running: null })).toBe('unknown');
-    // And with all three known and quiet, it is allowed to say it.
+    // And with all four known and quiet, it is allowed to say it.
     expect(liveState(facts)).toBe('idle');
   });
 });
@@ -134,6 +163,8 @@ describe('AgentRoster', () => {
     fleetRuns.mockResolvedValue([]);
     reviewQueue.mockResolvedValue([]);
     pipelineOverview.mockResolvedValue({ global_pause: false } as PipelineOverview);
+    pausedAgents.mockResolvedValue([]);
+    setAgentPaused.mockResolvedValue(undefined);
   });
 
   it('lists an agent that has never run, rather than only ones that are busy', async () => {
@@ -287,6 +318,100 @@ describe('AgentRoster', () => {
     );
     fireEvent.click(await screen.findByTestId('agent-row'));
     expect(onFocus).toHaveBeenCalledWith(null);
+  });
+
+  it('offers a pause on the row and writes it for that agent alone', async () => {
+    // M33b.5. The button is a button a person presses — no badge, no colour
+    // ladder, and no count of paused agents anywhere on this surface.
+    useVaultStore.setState({
+      entries: [agentEntry('Release scout', { slug: 'release-scout', schedule: 'daily 09:00' })],
+    });
+    render(roster());
+
+    const pause = await screen.findByTestId('agent-pause');
+    expect(pause.textContent).toContain('Pause');
+    fireEvent.click(pause);
+    await waitFor(() =>
+      expect(setAgentPaused).toHaveBeenCalledWith(VAULT, 'process:release-scout', true),
+    );
+
+    // The write is re-read rather than assumed, so the row cannot claim a
+    // state the backend refused to store.
+    pausedAgents.mockResolvedValue(['process:release-scout']);
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('paused'),
+    );
+    expect(screen.getByTestId('agent-pause').textContent).toContain('Resume');
+  });
+
+  it('says "paused" for this agent and "background paused" for everything', async () => {
+    // Two true states, and the row must not spell them the same way.
+    useVaultStore.setState({
+      entries: [agentEntry('Release scout', { slug: 'release-scout', schedule: 'daily 09:00' })],
+    });
+    pausedAgents.mockResolvedValue(['process:release-scout']);
+    render(roster());
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('paused'),
+    );
+    expect(screen.getByTestId('agent-state').textContent).toBe('paused');
+
+    cleanup();
+    pausedAgents.mockResolvedValue([]);
+    pipelineOverview.mockResolvedValue({ global_pause: true } as PipelineOverview);
+    render(roster());
+    const chip = await screen.findByTestId('agent-state');
+    await waitFor(() => expect(chip.getAttribute('data-state')).toBe('background-paused'));
+    expect(chip.textContent).toBe('background paused');
+    // And the row still offers its own pause: an agent running inside a
+    // stopped background is one somebody may still want individually stopped.
+    expect(screen.getByTestId('agent-pause').textContent).toContain('Pause');
+  });
+
+  it('does not start an agent by resuming it while the background is paused', async () => {
+    // Task 5, on the surface: the resume lands, and the row goes on saying
+    // stopped — by the other control, which is the truthful answer.
+    useVaultStore.setState({
+      entries: [agentEntry('Release scout', { slug: 'release-scout', schedule: 'daily 09:00' })],
+    });
+    pipelineOverview.mockResolvedValue({ global_pause: true } as PipelineOverview);
+    pausedAgents.mockResolvedValue(['process:release-scout']);
+    render(roster());
+
+    const resume = await screen.findByTestId('agent-pause');
+    await waitFor(() => expect(resume.textContent).toContain('Resume'));
+    pausedAgents.mockResolvedValue([]);
+    fireEvent.click(resume);
+
+    await waitFor(() =>
+      expect(setAgentPaused).toHaveBeenCalledWith(VAULT, 'process:release-scout', false),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe(
+        'background-paused',
+      ),
+    );
+    expect(screen.getByTestId('agent-state').textContent).not.toBe('idle');
+  });
+
+  it('offers no pause button, and says why, when it could not read the pauses', async () => {
+    // A control whose label would be a guess is worse than none, and the row
+    // must never fall back to claiming the agent is running.
+    useVaultStore.setState({
+      entries: [agentEntry('Release scout', { slug: 'release-scout', schedule: 'daily 09:00' })],
+    });
+    pausedAgents.mockRejectedValue(new Error('no runtime database'));
+    render(roster());
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId('section-unavailable')
+          .some((n) => n.textContent?.includes('Which agents are paused')),
+      ).toBe(true),
+    );
+    expect(screen.queryByTestId('agent-pause')).toBeNull();
+    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('unknown');
   });
 
   it('says there are no agent records rather than rendering an empty list', async () => {

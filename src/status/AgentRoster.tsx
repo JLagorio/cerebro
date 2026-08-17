@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAgentEvent } from '@/agent/agentIpc';
+import { Button } from '@/components/ui/Button';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
 import { nextFire, parseSchedule } from '@/engine/skills';
 import { localStamp, relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetActorSummary } from '@/lib/ipc';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -38,12 +40,27 @@ import { useVaultStore } from '@/stores/vaultStore';
  * record behind it, so "who works here" has a complete answer without the
  * surface inventing three colleagues.
  *
- * **Three reads, three failures, and none of them becomes a zero.** The run
- * summaries, the proposal queue and the pause are separate calls. Any one of
- * them failing says so and leaves the other two standing — and the state chip
- * refuses to say "idle" when a fact it would need is missing, because "nothing
- * is waiting" and "we could not tell you what is waiting" are opposite
- * sentences.
+ * **A row can be stopped without being deleted (M33b.5).** Each row carries
+ * its own pause, which is the cheapest answer to a misbehaving agent that is
+ * not deleting its record. It is a button a person presses and nothing else:
+ * no badge, no colour, and nowhere on this surface is there a count of how
+ * many agents are paused — spec §6 warns this is where the fleet would turn
+ * into the nagging screen M8 exists to prevent, and counting up at somebody is
+ * how it would start.
+ *
+ * The button is not the enforcement and must never be mistaken for it. A
+ * paused agent is refused in Rust — at the budget gate for every background
+ * run and in `run_agent` for every run a surface starts — so a pause holds
+ * whether or not this component is on screen.
+ *
+ * **Four reads, four failures, and none of them becomes a zero.** The run
+ * summaries, the proposal queue, the background pause and the paused agents
+ * are separate calls. Any one of them failing says so and leaves the others
+ * standing — and the state chip refuses to say "idle" when a fact it would
+ * need is missing, because "nothing is waiting" and "we could not tell you
+ * what is waiting" are opposite sentences. A row whose pause could not be read
+ * offers no pause button either: a control whose label would be a guess is
+ * worse than none.
  */
 
 /** One read's three states. `loading` is distinct from `unavailable` so a slow
@@ -63,24 +80,36 @@ type RunFacts =
   { kind: 'unavailable' } | { kind: 'never' } | { kind: 'some'; summary: FleetActorSummary };
 
 /**
- * What an agent is doing right now (M33b.4).
+ * What an agent is doing right now (M33b.4; two pauses since M33b.5).
  *
- * Derived, never stored, from the run table and the proposal queue. The order
- * is the argument:
+ * Derived, never stored, from the run table, the proposal queue and the two
+ * pauses. The order is the argument:
  *
  * - **working** wins outright. A run the dispatcher opened and has not
  *   finalized is the loudest true thing about an agent.
- * - **waiting on you** outranks the pause, because pausing the background does
- *   not un-queue a decision somebody still owes.
- * - **not activated** outranks the pause too. An agent nothing can fire is not
- *   paused; it was never started, and calling that "paused" would imply a
- *   resume button exists for it.
+ * - **waiting on you** outranks both pauses, because pausing does not un-queue
+ *   a decision somebody still owes.
+ * - **paused** — this ONE agent, by somebody pressing the button on this row —
+ *   outranks everything below it, including "not activated". A human act on
+ *   this agent is the fact the row exists to report, and a pause the row
+ *   declined to mention would be the hidden button spec §6 warns about. It
+ *   also outranks the background pause: an agent stopped twice reads as
+ *   stopped by the control with a button next to it, and pressing that button
+ *   flips the row to `background-paused` — which is exactly the lesson, since
+ *   resuming one agent under a global pause starts nothing.
+ * - **not activated** outranks the BACKGROUND pause, unchanged from M33b.4:
+ *   an agent nothing can fire was never started by anybody, and calling that
+ *   "the background is paused" would blame the wrong control.
+ * - **background paused** is the global pause, and is a different sentence
+ *   from `paused`. "Everything is stopped" and "this colleague is stopped"
+ *   want different actions, and one word for both would hide which is true.
  * - **unknown** is what stands where `idle` would go when a fact the idle
  *   claim rests on could not be read. Idle asserts that nothing is running,
- *   nothing is queued and nothing is stopped — three claims, and a surface
+ *   nothing is queued and nothing is stopped — four claims now, and a surface
  *   that makes them on a failed read is inventing calm.
  */
-export type AgentState = 'working' | 'waiting' | 'inactive' | 'paused' | 'unknown' | 'idle';
+export type AgentState =
+  'working' | 'waiting' | 'inactive' | 'paused' | 'background-paused' | 'unknown' | 'idle';
 
 export function liveState(facts: {
   /** Rows open right now. `null` = the run summaries could not be read. */
@@ -89,14 +118,24 @@ export function liveState(facts: {
   waiting: number | null;
   /** Whether anything — a schedule or a trigger — can fire it. */
   onDuty: boolean;
-  /** The background pause. `null` = it could not be read. */
-  paused: boolean | null;
+  /** This agent's own pause (M33b.5). `null` = it could not be read. */
+  agentPaused: boolean | null;
+  /** The subscription-wide background pause. `null` = it could not be read. */
+  backgroundPaused: boolean | null;
 }): AgentState {
   if (facts.running !== null && facts.running > 0) return 'working';
   if (facts.waiting !== null && facts.waiting > 0) return 'waiting';
+  if (facts.agentPaused === true) return 'paused';
   if (!facts.onDuty) return 'inactive';
-  if (facts.paused === true) return 'paused';
-  if (facts.running === null || facts.waiting === null || facts.paused === null) return 'unknown';
+  if (facts.backgroundPaused === true) return 'background-paused';
+  if (
+    facts.running === null ||
+    facts.waiting === null ||
+    facts.agentPaused === null ||
+    facts.backgroundPaused === null
+  ) {
+    return 'unknown';
+  }
   return 'idle';
 }
 
@@ -105,6 +144,7 @@ const STATE_TEXT: Record<AgentState, string> = {
   waiting: 'waiting on you',
   inactive: 'not activated',
   paused: 'paused',
+  'background-paused': 'background paused',
   unknown: 'state unknown',
   idle: 'idle',
 };
@@ -242,15 +282,22 @@ export function AgentRoster({
 
   const [summaries, setSummaries] = useState<Read<FleetActorSummary[]>>({ kind: 'loading' });
   const [queue, setQueue] = useState<Read<Map<string, number>>>({ kind: 'loading' });
-  const [paused, setPaused] = useState<Read<boolean>>({ kind: 'loading' });
+  const [background, setBackground] = useState<Read<boolean>>({ kind: 'loading' });
+  const [paused, setPaused] = useState<Read<Set<string>>>({ kind: 'loading' });
+  /** Bumped by a pause or a resume, so the four reads run again against what
+   * was just written rather than against a copy this component is holding. */
+  const [written, setWritten] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const toast = useUiStore((s) => s.toast);
 
   useEffect(() => {
     let live = true;
     setSummaries({ kind: 'loading' });
     setQueue({ kind: 'loading' });
+    setBackground({ kind: 'loading' });
     setPaused({ kind: 'loading' });
 
-    // Three reads, fired together and landing independently. A read behind a
+    // Four reads, fired together and landing independently. A read behind a
     // surface goes quiet rather than toasting (the store-layer rule) and the
     // row says what it could not find out.
     void ipc.fleetActorSummaries().then(
@@ -260,8 +307,10 @@ export function AgentRoster({
 
     if (vaultPath === null) {
       // No vault, no ledger and no pause to read. Unavailable rather than
-      // empty: there is no claim to make about a queue nobody can open.
+      // empty: there is no claim to make about a queue nobody can open, and
+      // "nobody is paused" would be a claim about a vault that is not open.
       setQueue({ kind: 'unavailable' });
+      setBackground({ kind: 'unavailable' });
       setPaused({ kind: 'unavailable' });
     } else {
       void ipc.reviewQueue(vaultPath).then(
@@ -274,7 +323,13 @@ export function AgentRoster({
         () => live && setQueue({ kind: 'unavailable' }),
       );
       void ipc.pipelineOverview(vaultPath).then(
-        (overview) => live && setPaused({ kind: 'ready', data: overview.global_pause }),
+        (overview) => live && setBackground({ kind: 'ready', data: overview.global_pause }),
+        () => live && setBackground({ kind: 'unavailable' }),
+      );
+      void ipc.pausedAgents(vaultPath).then(
+        // An empty list is measured-at-zero: nobody is paused. It is never
+        // conflated with the read having failed.
+        (actors) => live && setPaused({ kind: 'ready', data: new Set(actors) }),
         () => live && setPaused({ kind: 'unavailable' }),
       );
     }
@@ -283,8 +338,33 @@ export function AgentRoster({
       live = false;
     };
     // `pulse` is the deliberate re-read: a run started or ended, so what these
-    // three reads would say has changed.
-  }, [vaultPath, pulse]);
+    // four reads would say has changed. `written` is the same thing for a
+    // pause somebody just pressed.
+  }, [vaultPath, pulse, written]);
+
+  /**
+   * Pause or resume one agent. A human UI action, so the store-layer rule
+   * applies: it catches, toasts, and re-reads rather than propagating.
+   *
+   * The toast is deliberately about the ACT and not about the outcome —
+   * "paused" is a thing that just happened, and telling somebody who resumed
+   * an agent under a global pause that it is now running would be a lie the
+   * chip beside it immediately contradicts.
+   */
+  const setAgentPause = (actor: string, next: boolean) => {
+    if (busy || vaultPath === null) return;
+    setBusy(true);
+    void ipc
+      .setAgentPaused(vaultPath, actor, next)
+      .then(
+        () => toast(next ? `${actor} paused` : `${actor} resumed`),
+        (e: unknown) => toast(e instanceof Error ? e.message : 'That did not take'),
+      )
+      .finally(() => {
+        setBusy(false);
+        setWritten((previous) => previous + 1);
+      });
+  };
 
   const factsFor = (actor: string): RunFacts => {
     if (summaries.kind !== 'ready') return { kind: 'unavailable' };
@@ -323,9 +403,14 @@ export function AgentRoster({
           The proposal queue could not be read, so no row here says what is waiting on you.
         </p>
       )}
-      {paused.kind === 'unavailable' && (
+      {background.kind === 'unavailable' && (
         <p data-testid="section-unavailable" className="text-xs text-n-500">
           The background pause could not be read, so no row here says whether work is stopped.
+        </p>
+      )}
+      {paused.kind === 'unavailable' && (
+        <p data-testid="section-unavailable" className="text-xs text-n-500">
+          Which agents are paused could not be read, so no row here offers to pause or resume one.
         </p>
       )}
 
@@ -340,58 +425,78 @@ export function AgentRoster({
         const facts = factsFor(ref.actor);
         const waiting = waitingFor(ref.actor);
         const onDuty = agentActive(duty);
+        const agentPaused = paused.kind === 'ready' ? paused.data.has(ref.actor) : null;
         const state = liveState({
           running: facts.kind === 'some' ? facts.summary.running_runs : null,
           waiting,
           onDuty,
-          paused: paused.kind === 'ready' ? paused.data : null,
+          agentPaused,
+          backgroundPaused: background.kind === 'ready' ? background.data : null,
         });
         const focused = focus === ref.actor;
         return (
-          <button
-            key={ref.path}
-            type="button"
-            data-testid="agent-row"
-            data-actor={ref.actor}
-            data-state={state}
-            aria-pressed={focused}
-            // Clicking narrows the history below to this agent's runs — the
-            // "one level down" D5 asks for. Clicking again lets go of it,
-            // because a filter you cannot clear is a trap.
-            onClick={() => onFocus(focused ? null : ref.actor)}
-            className={[
-              'flex w-full flex-col gap-0.5 rounded border px-2.5 py-2 text-left',
-              focused ? 'border-n-400 bg-n-50' : 'border-n-200 hover:bg-n-50',
-            ].join(' ')}
-          >
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-xs font-medium text-n-800">
-                {ref.title}
+          // The row and its pause are SIBLINGS, not nested: the row is a
+          // button (clicking it narrows the history below) and a button inside
+          // a button is not a thing a browser will render.
+          <div key={ref.path} className="flex items-start gap-1.5">
+            <button
+              type="button"
+              data-testid="agent-row"
+              data-actor={ref.actor}
+              data-state={state}
+              aria-pressed={focused}
+              // Clicking narrows the history below to this agent's runs — the
+              // "one level down" D5 asks for. Clicking again lets go of it,
+              // because a filter you cannot clear is a trap.
+              onClick={() => onFocus(focused ? null : ref.actor)}
+              className={[
+                'flex min-w-0 flex-1 flex-col gap-0.5 rounded border px-2.5 py-2 text-left',
+                focused ? 'border-n-400 bg-n-50' : 'border-n-200 hover:bg-n-50',
+              ].join(' ')}
+            >
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-n-800">
+                  {ref.title}
+                </span>
+                <Chip state={state} />
               </span>
-              <Chip state={state} />
-            </span>
-            <span data-testid="agent-duty" className="text-2xs text-n-600">
-              {dutyText(duty.schedule, onDuty, now)}
-            </span>
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
-              <span
-                data-testid="agent-last-run"
-                // The exact stamp is one hover away, so nothing is rounded
-                // out of reach.
-                title={
-                  facts.kind === 'some' ? (facts.summary.last_started_at ?? undefined) : undefined
-                }
+              <span data-testid="agent-duty" className="text-2xs text-n-600">
+                {dutyText(duty.schedule, onDuty, now)}
+              </span>
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
+                <span
+                  data-testid="agent-last-run"
+                  // The exact stamp is one hover away, so nothing is rounded
+                  // out of reach.
+                  title={
+                    facts.kind === 'some' ? (facts.summary.last_started_at ?? undefined) : undefined
+                  }
+                >
+                  {lastRunText(facts, now)}
+                </span>
+                <span data-testid="agent-spend" className="tabular-nums">
+                  {spendText(facts)}
+                </span>
+                <span data-testid="agent-waiting" className="tabular-nums">
+                  {waitingText(waiting)}
+                </span>
+              </span>
+            </button>
+            {/* Absent when the pause could not be read: a button whose label
+                would be a guess is worse than no button, and the note above
+                already says why it is missing. */}
+            {agentPaused !== null && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                testId="agent-pause"
+                onClick={() => setAgentPause(ref.actor, !agentPaused)}
               >
-                {lastRunText(facts, now)}
-              </span>
-              <span data-testid="agent-spend" className="tabular-nums">
-                {spendText(facts)}
-              </span>
-              <span data-testid="agent-waiting" className="tabular-nums">
-                {waitingText(waiting)}
-              </span>
-            </span>
-          </button>
+                {agentPaused ? 'Resume' : 'Pause'}
+              </Button>
+            )}
+          </div>
         );
       })}
 

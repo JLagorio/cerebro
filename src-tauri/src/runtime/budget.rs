@@ -462,6 +462,11 @@ impl CeilingReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GateReason {
     AccountingUnknown,
+    /// This ONE agent is paused (M33b.5). Distinct from [`GateReason::GlobalPause`]
+    /// on purpose: "everything is stopped" and "this colleague is stopped" are
+    /// different sentences, and a deferral record that merged them could not
+    /// tell an owner which control they pressed.
+    AgentPaused,
     AmbientBusy,
     ConsecutiveFailures,
     DailyOutputTokens,
@@ -478,6 +483,7 @@ impl GateReason {
     pub fn as_str(self) -> &'static str {
         match self {
             GateReason::AccountingUnknown => "accounting_unknown",
+            GateReason::AgentPaused => "agent_paused",
             GateReason::AmbientBusy => "ambient_busy",
             GateReason::ConsecutiveFailures => "consecutive_failures",
             GateReason::DailyOutputTokens => "daily_output_tokens",
@@ -675,11 +681,22 @@ fn shed_threshold(warning_ppm: u64, priority: u64, lanes: u64) -> u64 {
 ///
 /// Call inside the dispatch transaction — the counters it reads are the ones
 /// the reservation is about to change.
+///
+/// `actor` (M33b.5) is who this dispatch would be attributed to, and it is a
+/// separate axis from `lane` for the same reason `dispatch::claim` takes both:
+/// ingest claims under five of the seven lanes, so a lane→construct guess
+/// would refuse work on behalf of whoever happened to share a queue. `None` is
+/// a dispatch nobody is attributed for, which has no per-agent pause to check.
+///
+/// **Both pauses are collected, and either is enough.** Resuming one agent
+/// while the global pause is on still defers — with `global_pause` alone as
+/// the reason, which is the truthful answer to "why did nothing happen".
 pub fn gate(
     conn: &Connection,
     vault_id: &str,
     store_uuid: &str,
     lane: &str,
+    actor: Option<&str>,
     reservation: Reservation,
     now: DateTime<Utc>,
 ) -> Result<(Decision, Day), String> {
@@ -688,6 +705,15 @@ pub fn gate(
 
     if settings::global_pause(conn) {
         reasons.push(GateReason::GlobalPause);
+    }
+    // The per-agent pause, beside the global one because they are the same
+    // control at two widths. `?` and not a swallowed default: an unreadable
+    // pause row must refuse rather than wave a run through (see
+    // `settings::agent_paused`), exactly as the unreadable lane row below does.
+    if let Some(actor) = actor {
+        if settings::agent_paused(conn, vault_id, actor)? {
+            reasons.push(GateReason::AgentPaused);
+        }
     }
     if !day.accounting_exact {
         reasons.push(GateReason::AccountingUnknown);
@@ -1113,7 +1139,7 @@ mod tests {
 
         // Runs only.
         spend(&conn, &window, 0, 0, 20);
-        let (decision, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (decision, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(
             decision.reasons(),
             &[
@@ -1124,7 +1150,7 @@ mod tests {
 
         // Total tokens only.
         spend(&conn, &window, 200_000, 0, 0);
-        let (decision, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (decision, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(
             decision.reasons(),
             &[
@@ -1135,7 +1161,7 @@ mod tests {
 
         // Output tokens only.
         spend(&conn, &window, 0, 40_000, 0);
-        let (decision, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (decision, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(
             decision.reasons(),
             &[
@@ -1158,6 +1184,7 @@ mod tests {
                 &vault,
                 "store",
                 &lane,
+                None,
                 Reservation {
                     total_tokens: 20_000,
                     output_tokens: 4_000,
@@ -1185,9 +1212,9 @@ mod tests {
             total_tokens: 10,
             output_tokens: 5,
         };
-        let (schema, _) = gate(&conn, &vault, "store", "schema", small, now).unwrap();
+        let (schema, _) = gate(&conn, &vault, "store", "schema", None, small, now).unwrap();
         assert_eq!(schema.reasons(), &[GateReason::DailyTokens]);
-        let (filed, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (filed, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert!(filed.is_proceed(), "{:?}", filed.reasons());
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1208,6 +1235,7 @@ mod tests {
                 &vault,
                 "store",
                 &lane,
+                None,
                 Reservation {
                     total_tokens: 10,
                     output_tokens: 5,
@@ -1234,6 +1262,7 @@ mod tests {
             &vault,
             "store",
             "filed",
+            None,
             Reservation {
                 total_tokens: 20_001,
                 output_tokens: 4_000,
@@ -1248,6 +1277,7 @@ mod tests {
             &vault,
             "store",
             "filed",
+            None,
             Reservation {
                 total_tokens: 100,
                 output_tokens: 4_001,
@@ -1275,6 +1305,7 @@ mod tests {
             &vault,
             "store",
             "filed",
+            None,
             Reservation {
                 total_tokens: 20_000,
                 output_tokens: 100,
@@ -1294,6 +1325,69 @@ mod tests {
     }
 
     #[test]
+    fn one_agents_pause_is_its_own_gate_reason_and_never_the_global_ones() {
+        // M33b.5. Two controls, two reasons, recorded separately — an owner
+        // reading a deferral has to be able to tell "I stopped everything"
+        // from "I stopped this one".
+        let (dir, conn, vault) = fixture("budget-agent-paused");
+        append_version(&conn, &settings_in("UTC"), at("2026-08-09T00:30:00Z")).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+        let small = Reservation {
+            total_tokens: 10,
+            output_tokens: 5,
+        };
+
+        // A dispatch nobody is attributed for has no per-agent pause to check.
+        settings::set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let (anonymous, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
+        assert!(anonymous.is_proceed(), "{:?}", anonymous.reasons());
+
+        let (paused, _) = gate(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            Some("process:digest"),
+            small,
+            now,
+        )
+        .unwrap();
+        assert_eq!(paused.reasons(), &[GateReason::AgentPaused]);
+        assert_eq!(GateReason::AgentPaused.as_str(), "agent_paused");
+
+        // And it is written into the deferral record under its own name, so
+        // the reason survives the run that never happened.
+        let day = ensure_day(&conn, now).unwrap();
+        record_decision(
+            &conn, "d-paused", &vault, "store", "filed", small, &day, &paused, now,
+        )
+        .unwrap();
+        let reasons: String = conn
+            .query_row(
+                "SELECT reasons FROM ambient_gate_decisions WHERE decision_id = 'd-paused'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reasons, r#"["agent_paused"]"#);
+
+        // Somebody else entirely is not stopped by it.
+        let (other, _) = gate(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            Some("process:scout"),
+            small,
+            now,
+        )
+        .unwrap();
+        assert!(other.is_proceed(), "{:?}", other.reasons());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn pause_accounting_lane_failures_backoff_and_busy_each_defer_on_their_own() {
         let (dir, conn, vault) = fixture("budget-gate-others");
         append_version(&conn, &settings_in("UTC"), at("2026-08-09T00:30:00Z")).unwrap();
@@ -1305,12 +1399,12 @@ mod tests {
         };
 
         settings::set_global_pause(&conn, true).unwrap();
-        let (paused, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (paused, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(paused.reasons(), &[GateReason::GlobalPause]);
         settings::set_global_pause(&conn, false).unwrap();
 
         mark_accounting_unknown(&conn, &window).unwrap();
-        let (unknown, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (unknown, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(unknown.reasons(), &[GateReason::AccountingUnknown]);
         conn.execute(
             "UPDATE budget_days SET accounting_state = 'exact' WHERE window_start_utc = ?1",
@@ -1319,7 +1413,7 @@ mod tests {
         .unwrap();
 
         settings::set_lane_enabled(&conn, &vault, "filed", false).unwrap();
-        let (off, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (off, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(off.reasons(), &[GateReason::LaneDisabled]);
         settings::set_lane_enabled(&conn, &vault, "filed", true).unwrap();
 
@@ -1329,7 +1423,7 @@ mod tests {
             [&vault],
         )
         .unwrap();
-        let (failing, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (failing, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(failing.reasons(), &[GateReason::ConsecutiveFailures]);
         conn.execute("DELETE FROM ambient_gate_state", []).unwrap();
 
@@ -1339,7 +1433,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let (backed_off, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (backed_off, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(backed_off.reasons(), &[GateReason::QuotaBackoff]);
         conn.execute("DELETE FROM backoff", []).unwrap();
 
@@ -1360,7 +1454,7 @@ mod tests {
             [&vault],
         )
         .unwrap();
-        let (busy, _) = gate(&conn, &vault, "store", "filed", small, now).unwrap();
+        let (busy, _) = gate(&conn, &vault, "store", "filed", None, small, now).unwrap();
         assert_eq!(busy.reasons(), &[GateReason::AmbientBusy]);
 
         // An EXPIRED lease is the crash-recovery path, not a busy signal.
@@ -1369,6 +1463,7 @@ mod tests {
             &vault,
             "store",
             "filed",
+            None,
             small,
             at("2026-08-09T12:00:00Z"),
         )
@@ -1389,7 +1484,8 @@ mod tests {
             total_tokens: 10,
             output_tokens: 5,
         };
-        let (decision, day) = gate(&conn, &vault, "store", "filed", reservation, now).unwrap();
+        let (decision, day) =
+            gate(&conn, &vault, "store", "filed", None, reservation, now).unwrap();
         record_decision(
             &conn,
             "d1",
@@ -1454,7 +1550,8 @@ mod tests {
             total_tokens: 10,
             output_tokens: 5,
         };
-        let (decision, day) = gate(&conn, &vault, "store", "filed", reservation, now).unwrap();
+        let (decision, day) =
+            gate(&conn, &vault, "store", "filed", None, reservation, now).unwrap();
         record_decision(
             &conn,
             "d2",

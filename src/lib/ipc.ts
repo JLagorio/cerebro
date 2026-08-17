@@ -531,7 +531,14 @@ export function askQuestion(
     : mock.askQuestion(vault, question, aliases, intendedUse);
 }
 
-/** Subscription-wide, and persisted: one CLI account, one pause. */
+/**
+ * Subscription-wide, and persisted: one CLI account, one background.
+ *
+ * The WIDER of two pauses since M33b.5 — `setAgentPaused` stops one agent
+ * wherever it would have been started from. Neither overrides the other: both
+ * are collected at the gate and either is enough to refuse, so resuming one
+ * agent while this is on starts nothing.
+ */
 export function setGlobalPause(paused: boolean): Promise<void> {
   return inTauri() ? invokeTauri('set_global_pause', { paused }) : mock.setGlobalPause(paused);
 }
@@ -656,4 +663,41 @@ export function triggerRecordPack(
  */
 export function fleetActorSummaries(): Promise<FleetActorSummary[]> {
   return inTauri() ? invokeTauri('fleet_actor_summaries') : mock.fleetActorSummaries();
+}
+
+// --- One agent's own pause (M33b.5) -----------------------------------------
+
+/**
+ * Which agents are paused in this vault.
+ *
+ * Vault-scoped, unlike `setGlobalPause`, and for the opposite reason: the
+ * global pause is a property of one CLI subscription, spent once however many
+ * vaults debit it, while an agent is a RECORD — two vaults may each hold a
+ * `digest` without them being the same colleague.
+ *
+ * An EMPTY array is measured-at-zero: the rows were read and nobody is paused.
+ * A missing runtime database REFUSES, and the roster renders that as
+ * unavailable rather than as a fleet it is sure is running.
+ */
+export function pausedAgents(vault: string): Promise<string[]> {
+  return inTauri() ? invokeTauri('paused_agents', { vault }) : mock.pausedAgents(vault);
+}
+
+/**
+ * Stop or restart ONE agent, without deleting its record (M33b.5).
+ *
+ * **It THROWS rather than no-opping** when there is nowhere to store the
+ * answer. A pause that silently failed to persist would be the worst outcome
+ * this control has: the button would look pressed and the agent would keep
+ * running.
+ *
+ * Resuming is not the same as starting. The global pause is collected
+ * separately and either is enough to refuse a run, so an agent resumed while
+ * the background is paused stays stopped — and the roster row says which of
+ * the two is holding it.
+ */
+export function setAgentPaused(vault: string, actor: string, paused: boolean): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_agent_paused', { vault, actor, paused })
+    : mock.setAgentPaused(vault, actor, paused);
 }

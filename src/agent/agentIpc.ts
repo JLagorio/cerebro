@@ -1,5 +1,6 @@
 import { runMockAgent, type MockRun } from './mockAgent';
 import type { AgentEvent, AgentStatus, CliWorkspace, McpInfo, UiAction } from './types';
+import { refuseIfAgentPaused } from '@/lib/mockIpc';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -122,6 +123,13 @@ export interface RunHandle {
  * durable id of the row this run will be recorded in. */
 export async function runAgent(vault: string, options: RunOptions): Promise<RunHandle> {
   if (!inTauri()) {
+    // M33b.5 — the browser mirrors the Rust guard rather than skipping it. In
+    // Tauri the refusal lives in `run_agent`, ahead of the token and the
+    // child; here there is no backend to reach, so a paused agent would run
+    // in dev and in every browser-mode test unless this stands. AGENTS.md
+    // makes that parity a rule, and spec §6 makes this particular one the
+    // point of the phase.
+    refuseIfAgentPaused(vault, options.actor);
     const run = ++mockRunSeq;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.

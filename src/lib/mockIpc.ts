@@ -72,6 +72,7 @@ export function resetOperational(): void {
   fleetRuns = demoFleetRuns();
   fleetDetails = demoFleetDetails();
   fleetAvailable = true;
+  resetAgentPauses();
 }
 
 /** Re-seed the file map alone. Split from `resetMockFs` because module init
@@ -1825,5 +1826,63 @@ export async function triggerRecordPack(
   // made-up evaluation id would be a governance record nobody can audit.
   throw new Error(
     'browser mock — recording an evidence pack needs the real runtime database and repository',
+  );
+}
+
+// --- One agent's own pause (M33b.5) -----------------------------------------
+//
+// Mirrors `runtime::settings`' three functions and, crucially, its REFUSAL:
+// AGENTS.md requires the browser mock to enforce every Rust-side guard, and a
+// per-agent pause the browser would let a run walk past is exactly the "the
+// pause is a lie" failure this phase exists to disprove. `mockIpc.test.ts`
+// pins the parity from this side; `settings.rs`'s
+// `the_refusal_names_the_agent_and_bare_chat_has_nothing_to_refuse` pins the
+// same rule from the other language.
+//
+// Vault-scoped, like Rust's key, because an agent is a record: two vaults may
+// each hold a `digest` without them being the same colleague.
+
+/** `vault` → the actors paused in it. Absent is NOT paused — that is the state
+ * every agent ships in, and it is a measurement rather than a gap. */
+const pausedByVault = new Map<string, Set<string>>();
+
+function resetAgentPauses(): void {
+  pausedByVault.clear();
+}
+
+/** Which agents are paused in this vault. Empty is measured-at-zero. */
+export async function pausedAgents(vault: string): Promise<string[]> {
+  return [...(pausedByVault.get(vault) ?? [])].sort();
+}
+
+/** Stop or restart one agent. Refused without an agent to be about, before
+ * anything is stored — Rust refuses the same blank for the same reason. */
+export async function setAgentPaused(vault: string, actor: string, paused: boolean): Promise<void> {
+  const named = actor.trim();
+  if (named === '') {
+    throw new Error('a pause needs an agent to be about, and no actor was named');
+  }
+  const set = pausedByVault.get(vault) ?? new Set<string>();
+  if (paused) set.add(named);
+  else set.delete(named);
+  pausedByVault.set(vault, set);
+}
+
+/**
+ * The guard `agentIpc.runAgent` must not get past in browser mode.
+ *
+ * `null` is bare chat — a run nobody launched on any agent's behalf — and has
+ * no pause to check. The sentence names the agent, because a person who paused
+ * one of several and then triggered another needs to know which one refused
+ * them. It is thrown rather than swallowed for the same reason Rust returns an
+ * `Err`: a pause that eats the trigger silently is indistinguishable from a
+ * broken button.
+ */
+export function refuseIfAgentPaused(vault: string, actor: string | null | undefined): void {
+  if (actor === null || actor === undefined) return;
+  if (pausedByVault.get(vault)?.has(actor) !== true) return;
+  throw new Error(
+    `${actor} is paused, so this run did not start. Resume it on the fleet — ` +
+      'a paused agent that still ran would make the pause a lie.',
   );
 }

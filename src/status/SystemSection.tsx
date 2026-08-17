@@ -22,6 +22,13 @@ import { useUiStore } from '@/stores/uiStore';
  * background work run is a per-vault choice, because somebody may want
  * scheduled agents at work and nothing at all in their journal.
  *
+ * **The pause here is the WIDER of two (M33b.5).** This one stops every
+ * background run on the subscription. Stopping ONE agent is a button on that
+ * agent's row in the fleet, not a control here — this section is about the
+ * background as a whole, and a list of colleagues on it would be a second,
+ * worse roster. Neither pause overrides the other: both are collected at the
+ * gate and either is enough to refuse.
+ *
  * **The concurrency ceiling (M33b.2) joined the pause, and is global for the
  * same reason.** How MUCH background work may run at once is a fact about one
  * subscription, not about a folder. It ships at 1 — the number the retired

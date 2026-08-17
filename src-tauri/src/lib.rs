@@ -292,6 +292,39 @@ fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
     runtime::settings::set_global_pause(&conn, paused)
 }
 
+/// Stop or restart ONE agent, without deleting its record (M33b.5).
+///
+/// Vault-scoped, unlike the global pause: an agent is a record, and two vaults
+/// may each hold one whose slug is the same word.
+///
+/// **This THROWS rather than no-opping** when there is no runtime database or
+/// the vault is unregistered. A pause that silently failed to store would be
+/// the worst possible outcome for this control — the button would look pressed
+/// and the agent would keep running.
+#[tauri::command(async)]
+fn set_agent_paused(
+    app: tauri::AppHandle,
+    vault: String,
+    actor: String,
+    paused: bool,
+) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    runtime::settings::set_agent_paused(&conn, &vault_id, &actor, paused)
+}
+
+/// Which agents are paused in this vault (M33b.5).
+///
+/// An EMPTY array is measured-at-zero — the rows were read and nobody is
+/// paused. A missing runtime database REFUSES, and the roster renders that as
+/// unavailable rather than as a fleet that is definitely running.
+#[tauri::command(async)]
+fn paused_agents(app: tauri::AppHandle, vault: String) -> Result<Vec<String>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    runtime::settings::paused_agents(&conn, &vault_id)
+}
+
 /// How many background runs may be live at once (M33b.2). Subscription-wide
 /// and persisted, like the pause.
 ///
@@ -1008,6 +1041,31 @@ fn run_agent(
     // child was gone — where the outgoing run's trailing writes stamped as
     // the incoming run (PR #5 security review).
     let mut request = request;
+    // M25.2: attended chat is METERED and never gated. The run is recorded
+    // with its tokens; no reservation, no lease, and no ceiling can refuse it.
+    let scope = runtime::open_vault(Path::new(&vault));
+    // M33b.5 — the ONE gate an agent-attributed run does pass, and it is not a
+    // budget question. Every frontend path that starts a CLI child funnels
+    // here (the job runner's schedules and triggers, and a thread addressing an
+    // agent by name), so this is where a per-agent pause has to be enforced;
+    // enforcing it in whichever surface remembered to check would be enforcing
+    // it nowhere. Before the token is minted and long before a child is
+    // spawned: a refused run must leave no run token behind for the CLI to
+    // present.
+    //
+    // The check needs a runtime database to read, and `open_vault` is `None`
+    // when there is none — in which case there is also nowhere a pause could
+    // have been stored, so there is nothing being waved through.
+    if let Some(scope) = scope.as_ref() {
+        runtime::sink::with_sink(|conn| {
+            runtime::settings::refuse_if_agent_paused(
+                conn,
+                &scope.vault_id,
+                request.actor.as_deref(),
+            )
+        })
+        .unwrap_or(Ok(()))?;
+    }
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
     // meter carry the SAME one — an attended run used to hold two (the meter's
     // here, a token-derived hash in the grant), and everything that joins runs
@@ -1028,9 +1086,6 @@ fn run_agent(
         run_id.clone(),
     )?);
     let dir = config_dir(&app)?;
-    // M25.2: attended chat is METERED and never gated. The run is recorded
-    // with its tokens; no reservation, no lease, and no ceiling can refuse it.
-    let scope = runtime::open_vault(Path::new(&vault));
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
         run_id,
@@ -1174,6 +1229,8 @@ pub fn run() {
             fleet_actor_summary,
             fleet_actor_summaries,
             set_global_pause,
+            set_agent_paused,
+            paused_agents,
             set_ambient_concurrency,
             set_lane_enabled,
             trigger_status,
