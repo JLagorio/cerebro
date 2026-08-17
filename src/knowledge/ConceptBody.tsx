@@ -27,6 +27,18 @@ export interface ConceptBodyProps {
   onOpenConcept?: (path: string) => void;
   /** A `[^id]` citation was clicked. */
   onCite?: (sourceId: string) => void;
+  /**
+   * A `[[wikilink]]` was clicked, by its raw target (M33a.4).
+   *
+   * The target, not a path: resolution is the vault's rule and needs the
+   * whole entry list, which this renderer deliberately does not have. The
+   * page that mounts it resolves — and it is the page that knows whether a
+   * hit is a concept to open here or a record to open elsewhere.
+   *
+   * Without a handler the link renders as its own text. The brackets are
+   * syntax; a reader should never have to read them.
+   */
+  onOpenWikilink?: (target: string) => void;
 }
 
 // Link resolution (OKF §6.1) lives in the engine — the log timeline resolves
@@ -38,14 +50,21 @@ export { resolveBundleLink as resolveLink } from '@/engine/okf';
 // Order matters: code spans win over emphasis so `**` inside a fence-span
 // stays literal, and footnotes are matched before links so `[^id]` is never
 // read as a link with an empty target.
+//
+// The wikilink alternative is last and can afford to be: at a `[[`, every
+// alternative above it fails — `[^` needs a caret, and the markdown-link
+// pattern needs a `](` it will never find because `[^\]]+` cannot cross the
+// inner `]`. Tried and ordered that way rather than hoisted, so no existing
+// capture group had to be renumbered.
 const INLINE =
-  /(`[^`]+`)|(\[\^([^\]\s]+)\](?!:))|(\[([^\]]+)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
+  /(`[^`]+`)|(\[\^([^\]\s]+)\](?!:))|(\[([^\]]+)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(\[\[([^\]|]+)(?:\|([^\]]+))?\]\])/g;
 
 interface InlineContext {
   fromPath: string;
   sources: Source[];
   onOpenConcept?: (path: string) => void;
   onCite?: (sourceId: string) => void;
+  onOpenWikilink?: (target: string) => void;
 }
 
 function Citation({ id, ctx }: { id: string; ctx: InlineContext }) {
@@ -122,6 +141,29 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
       nodes.push(<strong key={key++}>{m[7].slice(2, -2)}</strong>);
     } else if (m[8] !== undefined) {
       nodes.push(<em key={key++}>{m[8].slice(1, -1)}</em>);
+    } else if (m[9] !== undefined) {
+      // M33a.4 — `[[gcs-5-client-architecture]]` used to fall through as raw
+      // text, so the one syntax that ties a concept to the rest of the vault
+      // was the one thing on the page you could not click.
+      const target = m[10].trim();
+      const label = (m[11] ?? m[10]).trim();
+      const open = ctx.onOpenWikilink;
+      nodes.push(
+        open === undefined ? (
+          label
+        ) : (
+          <button
+            key={key++}
+            type="button"
+            data-testid="concept-wikilink"
+            data-target={target}
+            onClick={() => open(target)}
+            className="cursor-pointer border-0 bg-transparent p-0 text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
+          >
+            {label}
+          </button>
+        ),
+      );
     }
   }
   if (cursor < text.length) nodes.push(text.slice(cursor));
@@ -166,9 +208,10 @@ export function ConceptBody({
   sources,
   onOpenConcept,
   onCite,
+  onOpenWikilink,
   fromPath,
 }: ConceptBodyProps) {
-  const ctx: InlineContext = { fromPath, sources, onOpenConcept, onCite };
+  const ctx: InlineContext = { fromPath, sources, onOpenConcept, onCite, onOpenWikilink };
   const lines = markdown.split('\n');
   const blocks: React.ReactNode[] = [];
   let key = 0;
