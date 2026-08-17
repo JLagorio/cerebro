@@ -235,10 +235,12 @@ pub const SCHEMA_V3: &str = r#"
     CREATE INDEX runs_by_window ON runs (mode, started_at);
     CREATE INDEX runs_by_vault ON runs (vault_id, started_at);
 
-    -- The singleton ambient lease: background LLM concurrency is ONE, inside
-    -- the process-wide cap of four, so attended chat always has headroom.
-    -- Encoded as a one-row table rather than a comment, because a comment has
-    -- never stopped a second dispatcher.
+    -- The singleton ambient lease, as v3 shipped it: background LLM
+    -- concurrency was ONE, encoded as a one-row table rather than a comment.
+    -- SUPERSEDED AT v14 (M33b.1), which rebuilds this table keyed by run_id
+    -- so the ceiling is a counted number rather than a primary key. This
+    -- statement is history and stays true of v3; nothing here describes the
+    -- schema the app runs on.
     CREATE TABLE ambient_dispatch (
         singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'ambient'),
         run_id TEXT NOT NULL UNIQUE REFERENCES runs (run_id),
@@ -1126,4 +1128,54 @@ pub const SCHEMA_V12: &str = "
 pub const SCHEMA_V13: &str = "
     ALTER TABLE runs ADD COLUMN actor TEXT;
     CREATE INDEX runs_by_actor ON runs (actor, started_at);
+";
+
+/// M33b.1 — the ambient lease stops being a singleton.
+///
+/// **What the singleton row guaranteed, and what replaces it.** The v3 table
+/// carried `singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'ambient')`,
+/// so the database could hold at most one ambient lease. Four properties fell
+/// out of that one column, and each is now carried by something else:
+///
+/// 1. *Mutual exclusion at claim time.* Now the claim transaction, which was
+///    always the real mechanism: `dispatch::claim` opens `BEGIN IMMEDIATE`,
+///    and the gate counts live leases inside it. Two dispatchers cannot
+///    interleave a count and an insert, so the count a claim acts on is the
+///    count at commit. The primary key only ever fired in one case the gate
+///    did not already cover — see `budget::ambient_leases_held`.
+/// 2. *Crash recovery.* Unchanged, and it never lived here: recovery sweeps
+///    `runs` by `lease_expires_at`, not this table.
+/// 3. *Accounting.* Unchanged, and it never lived here either. Spend is a
+///    `runs` row plus a `budget_days` reservation, one pair per run; N runs
+///    make N pairs, and the gate sums them.
+/// 4. *Headroom for attended chat inside `agent::MAX_CONCURRENT_RUNS`.* Now
+///    the Settings ceiling, which defaults to 1 — the same headroom, until a
+///    person raises it.
+///
+/// **`run_id` is the key now, and it is the honest one.** It was already
+/// `NOT NULL UNIQUE` in v3, so no row's identity changes and the copy cannot
+/// collide; a lease has always been one run's, and the singleton column was
+/// the only thing pretending otherwise. SQLite cannot drop a primary key in
+/// place, so this is the create-new / copy / drop / rename dance — with the
+/// live rows carried across, because a database migrated mid-run must come
+/// back holding the lease it held.
+///
+/// The index is on `lease_expires_at` because the gate's one question is "how
+/// many leases have not expired", asked on every dispatch attempt.
+pub const SCHEMA_V14: &str = "
+    ALTER TABLE ambient_dispatch RENAME TO ambient_dispatch_v13;
+    CREATE TABLE ambient_dispatch (
+        run_id TEXT PRIMARY KEY REFERENCES runs (run_id),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        lane TEXT NOT NULL REFERENCES lane_registry (lane),
+        acquired_at TEXT NOT NULL CHECK (acquired_at LIKE '____-__-__T%Z'),
+        lease_expires_at TEXT NOT NULL CHECK (lease_expires_at LIKE '____-__-__T%Z')
+    );
+    INSERT INTO ambient_dispatch
+        (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at)
+        SELECT run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at
+        FROM ambient_dispatch_v13;
+    DROP TABLE ambient_dispatch_v13;
+    CREATE INDEX ambient_dispatch_live ON ambient_dispatch (lease_expires_at);
 ";

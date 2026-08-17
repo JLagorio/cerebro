@@ -11,8 +11,9 @@
 //! it reads the base's shape rather than a queue of files. An empty claim is
 //! a supported shape (`claim_inner` only reports `NothingToClaim` when items
 //! were named and none survived), and it still buys the one thing that
-//! matters: the ambient lease, so a maintenance run and an ingest run cannot
-//! spend the same subscription at the same moment.
+//! matters: an ambient lease, so a maintenance run and an ingest run spend the
+//! same subscription only as concurrently as the ceiling allows — which at
+//! the shipped ceiling of one (M33b.1) means not at all.
 //!
 //! **Findings are still recorded only after a real run.** The lease is
 //! claimed first, the pass writes second — so a deferral leaves every finding
@@ -70,9 +71,10 @@ pub enum Scheduled {
 
 /// Try one maintenance pass.
 ///
-/// The findings are computed BEFORE the lease is claimed, deliberately: the
-/// one ambient lease is scarce, and taking it only to discover there was
-/// nothing to say would block an ingest tick that had real work.
+/// The findings are computed BEFORE the lease is claimed, deliberately: an
+/// ambient lease is scarce — there is one, by default — and taking it only to
+/// discover there was nothing to say would block an ingest tick that had real
+/// work.
 ///
 /// `proposals_enabled` is `agent_proposals_enabled`, handed IN rather than
 /// read here: the switch lives in the app config, and this module
@@ -302,8 +304,9 @@ mod tests {
 
     #[test]
     fn a_pass_with_nothing_to_say_never_takes_the_lease_at_all() {
-        // The one ambient lease is scarce. Taking it to discover there was
-        // nothing to say would block an ingest tick that had real work.
+        // An ambient lease is scarce — there is one, by default. Taking it to
+        // discover there was nothing to say would block an ingest tick that
+        // had real work.
         let harness = Harness::open("maintain-schedule-quiet");
         let spy = Spy::default();
         let outcome = attempt(

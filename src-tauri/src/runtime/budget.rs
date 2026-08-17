@@ -815,19 +815,38 @@ fn backoff_active(
     .map_err(|e| format!("backoff: {e}"))
 }
 
-/// Is the one ambient lease held by a run whose lease has not expired?
+/// How many ambient leases are held by runs whose leases have not expired?
 ///
 /// An EXPIRED lease is not busy — that is the crash-recovery path, and
 /// treating it as busy would wedge ambient work forever after one kill.
-fn ambient_busy(conn: &Connection, now: DateTime<Utc>) -> Result<bool, String> {
+///
+/// **This is the one place the retired singleton primary key did something
+/// this count does not.** With a stale, expired, not-yet-swept row present,
+/// v3's `INSERT` failed its primary key and rolled the whole claim back; the
+/// count says zero and the claim proceeds. The accounting is untouched either
+/// way — the abandoned run's reservation is still debited against the day
+/// until `recover_expired_leases` finalizes it `abandoned_usage_unknown` — so
+/// what was lost is an ordering accident that reported itself as an error,
+/// not a guarantee.
+pub fn ambient_leases_held(conn: &Connection, now: DateTime<Utc>) -> Result<usize, String> {
     let now = stamp(now);
     conn.query_row(
         "SELECT count(*) FROM ambient_dispatch WHERE lease_expires_at > ?1",
         [now],
         |row| row.get::<_, i64>(0),
     )
-    .map(|n| n > 0)
+    .map(|n| n.max(0) as usize)
     .map_err(|e| format!("ambient_dispatch: {e}"))
+}
+
+/// Is the background already running as many leases as it is allowed?
+///
+/// The ceiling is read here, inside the caller's transaction, rather than
+/// passed in: a claim is checked against the number in force at the instant it
+/// commits, and a ceiling lowered while a run is in flight takes effect on the
+/// NEXT claim rather than retroactively refusing one already granted.
+fn ambient_busy(conn: &Connection, now: DateTime<Utc>) -> Result<bool, String> {
+    Ok(ambient_leases_held(conn, now)? >= settings::ambient_concurrency(conn))
 }
 
 /// Record what the gate saw and what it decided. Every column is the value
@@ -1335,8 +1354,8 @@ mod tests {
         .unwrap();
         conn.execute(
             "INSERT INTO ambient_dispatch \
-             (singleton_key, run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
-             VALUES ('ambient', 'r1', ?1, 'store', 'filed', '2026-08-09T09:00:00.000Z', \
+             (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
+             VALUES ('r1', ?1, 'store', 'filed', '2026-08-09T09:00:00.000Z', \
                      '2026-08-09T11:00:00.000Z')",
             [&vault],
         )

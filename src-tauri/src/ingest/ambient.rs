@@ -3,9 +3,9 @@
 //! An owner decision, and worth restating: the driver is here and not in the
 //! renderer's `useJobRunner`. A background pass that spends the user's
 //! subscription must survive a window reload, must not run twice because two
-//! windows are open, and must hold the one ambient lease the dispatcher
-//! grants. All three are properties of the process, and the renderer is not
-//! the process.
+//! windows are open, and must hold an ambient lease the dispatcher grants —
+//! one of however many the concurrency ceiling allows (M33b.1). All three are
+//! properties of the process, and the renderer is not the process.
 //!
 //! **The SPENDING half is off unless the owner turns it on.** [`ENABLED`]
 //! defaults to false and gates ingest and maintenance: an app may not start
@@ -235,8 +235,9 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
     }
     // The maintenance pass rides the SAME switch and the same tick, AFTER
     // ingest. Two reasons for the order: reading what changed is what makes
-    // the base worth maintaining, and the one ambient lease is better spent
-    // on new bytes than on tidying when both have work. It gets no default of
+    // the base worth maintaining, and an ambient lease is better spent on new
+    // bytes than on tidying when both have work — which at the shipped
+    // ceiling of one is still the same single lease. It gets no default of
     // its own — `ambient.ingest_enabled` is off until asked, and maintenance
     // should not be the thing that starts spending somebody's subscription.
     //

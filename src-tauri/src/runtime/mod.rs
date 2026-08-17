@@ -84,8 +84,9 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// meter, budget, coverage cache, and settings at 3. M28.0 adds the two
 /// trigger-governance tables at 11. M31.5 adds the run-fact columns — plus
 /// the two M31.6 will write, whole per D5 — at 12. M33.1 adds `runs.actor`,
-/// nullable and never backfilled, at 13.
-pub const USER_VERSION: i64 = 13;
+/// nullable and never backfilled, at 13. M33b.1 rebuilds `ambient_dispatch`
+/// keyed by `run_id` at 14, retiring the singleton column.
+pub const USER_VERSION: i64 = 14;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -238,7 +239,61 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V13,
         validate: validate_v13,
     },
+    Migration {
+        to: 14,
+        sql: schema::SCHEMA_V14,
+        validate: validate_v14,
+    },
 ];
+
+/// What `user_version = 14` promises (M33b.1) — and, unusually, one thing it
+/// promises is ABSENT.
+///
+/// A rebuild that created the new table and never dropped the old one would
+/// leave two tables with the same rows and no error, so the check names the
+/// column that had to disappear: a `SELECT singleton_key` that still PREPARES
+/// means the rename/copy/drop dance stopped halfway and every claim after it
+/// would be gated against a table nothing writes. The old table's absence is
+/// asserted the same way v9 asserts its predecessor's.
+fn validate_v14(conn: &Connection) -> Result<(), String> {
+    conn.query_row("SELECT count(*) FROM ambient_dispatch", [], |row| {
+        row.get::<_, i64>(0)
+    })
+    .map_err(|e| format!("validating ambient_dispatch: {e}"))?;
+    if conn
+        .prepare("SELECT singleton_key FROM ambient_dispatch")
+        .is_ok()
+    {
+        return Err("the singleton column survived its own migration".to_string());
+    }
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE name = 'ambient_dispatch_v13'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(|e| format!("checking for the old lease table: {e}"))
+    .and_then(|left| {
+        if left == 0 {
+            Ok(())
+        } else {
+            Err("the v13 lease table survived its own migration".to_string())
+        }
+    })?;
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master \
+         WHERE type = 'index' AND name = 'ambient_dispatch_live'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(|e| format!("validating ambient_dispatch_live: {e}"))
+    .and_then(|found| {
+        if found == 1 {
+            Ok(())
+        } else {
+            Err("validating ambient_dispatch_live: index missing".to_string())
+        }
+    })
+}
 
 /// The one column `user_version = 13` promises (M33.1), checked the same way
 /// v12 checks its ALTERs: a `SELECT` that prepares is a column the app can
@@ -771,6 +826,88 @@ mod tests {
             drop(conn);
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// A database that was upgraded MID-RUN comes back holding the lease it
+    /// held (M33b.1).
+    ///
+    /// The v14 rebuild is a create/copy/drop dance, and the failure mode a
+    /// dance has that an `ALTER` does not is silently losing the rows: an
+    /// empty new table looks exactly like a quiet background, and the run
+    /// whose lease vanished would never be swept, never finalized, and never
+    /// counted. So this asserts the row survived by run id — not that the
+    /// table exists.
+    #[test]
+    fn a_lease_held_across_the_v14_rebuild_survives_it() {
+        let dir = testutil::temp_vault("runtime-upgrade-13-lease");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        let mut sql = String::from("BEGIN;");
+        for migration in MIGRATIONS.iter().filter(|m| m.to <= 13) {
+            sql.push_str(migration.sql);
+        }
+        sql.push_str("PRAGMA user_version = 13; COMMIT;");
+        conn.execute_batch(&sql).unwrap();
+        // The lane registry is seeded by v3's `validate`, which raw SQL does
+        // not run — and the lease's `lane` is a foreign key into it.
+        for (lane, priority, enabled) in schema::LANES {
+            conn.execute(
+                "INSERT INTO lane_registry (lane, priority, enabled_by_default, \
+                 introduced_version) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![lane, priority, i64::from(enabled), schema::LANE_INTRODUCED],
+            )
+            .unwrap();
+        }
+        let vault = "a".repeat(32);
+        conn.execute(
+            "INSERT INTO vault_registry (vault_id, vault_path, first_seen_at) \
+             VALUES (?1, '/somewhere', '2026-08-09T00:00:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
+             usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+             reserved_total_tokens, reserved_output_tokens, lease_expires_at, \
+             proposals_submitted, applied, rejected) \
+             VALUES ('mid-flight', ?1, 'store', 'ambient', 'filed', \
+             '2026-08-09T10:00:00.000Z', 'running', 'pending', 0, 0, 0, 0, 5000, 1000, \
+             '2026-08-09T10:20:00.000Z', 0, 0, 0)",
+            [&vault],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ambient_dispatch \
+             (singleton_key, run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
+             VALUES ('ambient', 'mid-flight', ?1, 'store', 'filed', \
+             '2026-08-09T10:00:00.000Z', '2026-08-09T10:20:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        let (run_id, expires): (String, String) = conn
+            .query_row(
+                "SELECT run_id, lease_expires_at FROM ambient_dispatch",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("the lease must have crossed the rebuild");
+        assert_eq!(run_id, "mid-flight");
+        assert_eq!(expires, "2026-08-09T10:20:00.000Z");
+        assert!(
+            conn.prepare("SELECT singleton_key FROM ambient_dispatch")
+                .is_err(),
+            "and the column that used to be the ceiling is gone"
+        );
+        // Which the validator would also have caught — asserted here too
+        // because a validator that stopped running is the failure this pair
+        // is meant to survive.
+        assert!(validate_v14(&conn).is_ok());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

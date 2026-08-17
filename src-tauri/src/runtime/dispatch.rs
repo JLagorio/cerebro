@@ -1,12 +1,12 @@
-//! One ambient dispatch, start to finish (M25.2).
+//! One ambient dispatch, start to finish (M25.2; N leases at M33b.1).
 //!
 //! **The claim is one transaction or it is nothing.** Gate, token
-//! reservation, scheduler claim, run row, and the singleton ambient lease all
-//! commit together, and the subprocess spawns only afterwards. Split across
-//! two transactions — or worse, across the IPC boundary — every crash
-//! boundary becomes a way to lose the accounting: a run that spent tokens
-//! with no row, a reservation nothing will release, an item claimed by a run
-//! that never started.
+//! reservation, scheduler claim, run row, and the ambient lease all commit
+//! together, and the subprocess spawns only afterwards. Split across two
+//! transactions — or worse, across the IPC boundary — every crash boundary
+//! becomes a way to lose the accounting: a run that spent tokens with no row,
+//! a reservation nothing will release, an item claimed by a run that never
+//! started.
 //!
 //! **Finalization is the other transaction.** Exact usage lands, the
 //! reservation and the lease are released, and each claimed item is consumed
@@ -19,10 +19,76 @@
 //! accounting `unknown`, and pause ambient dispatch. A day whose spend was
 //! lost is not a day with budget left.
 //!
-//! **Background concurrency is one.** The singleton `ambient_dispatch` row is
-//! the enforcement, not a comment: chat keeps its headroom inside the
-//! process-wide cap of four because the database will not hand out a second
-//! ambient lease.
+//! # Background concurrency is a number, not a row (M33b.1)
+//!
+//! Until v14 the ceiling was `ambient_dispatch.singleton_key`, a primary key
+//! that could hold exactly one value. It is now `settings::ambient_concurrency`
+//! — one global number, defaulting to 1, counted against live leases by
+//! [`budget::gate`]. Four properties fell out of that one column. Each is
+//! named here with what carries it now, because three survive and one is
+//! genuinely weaker, and pretending otherwise is how an invariant gets lost.
+//!
+//! **1. Mutual exclusion at claim time — carried by the transaction, which
+//! was always the real mechanism.** [`claim`] opens `BEGIN IMMEDIATE`, and
+//! `ambient_leases_held` is counted inside it. Two dispatchers cannot
+//! interleave a count and an insert: SQLite serialises the writers, so the
+//! second one's count already includes the first one's committed lease and it
+//! defers with `ambient_busy`. Under the singleton this was true as well —
+//! the gate refused first and the primary key never fired — with one
+//! exception, documented at `budget::ambient_leases_held`: a stale expired
+//! lease used to roll a claim back with an error and now does not. That case
+//! traded an accidental error for a clean decision; it never protected any
+//! accounting.
+//!
+//! **2. Crash recovery — unchanged, because it never lived in this table.**
+//! [`recover_expired_leases`] sweeps `runs` by `lease_expires_at`. It has
+//! never read `ambient_dispatch`, and N rows change nothing about it: each
+//! abandoned run is finalized on its own row, `abandoned_usage_unknown`, its
+//! items requeued, its day marked unknown.
+//!
+//! **3. Accounting — unchanged, and it never lived here either.** Spend is a
+//! `runs` row plus a `budget_days` reservation, one pair per run. N
+//! concurrent runs make N pairs; the gate sums them through
+//! `Day::committed_total`, so the second lease is checked against a day that
+//! already owes the first one's reservation. There is no shared counter for a
+//! second run to trample and no per-lease field for it to overwrite.
+//!
+//! **4. Headroom for attended chat inside `agent::MAX_CONCURRENT_RUNS` —
+//! WEAKER, and deliberately so.** The singleton guaranteed three free process
+//! slots as a side effect of allowing one. The ceiling guarantees
+//! `MAX_CONCURRENT_RUNS - ceiling`, which is the same three at the shipped
+//! default of 1 and zero at the maximum of 4. What remains at the maximum is
+//! `agent::spawn`'s own refusal — a visible message, not a silent eviction.
+//! This is a choice the owner makes by typing a number, not one the schema
+//! makes for them.
+//!
+//! ## Every crash boundary, walked
+//!
+//! - **Between the gate and the insert.** Same transaction. Nothing commits,
+//!   no run row, no reservation, no claimed item, and the decision row goes
+//!   with it. Identical at any N.
+//! - **Between the insert and the spawn.** The claim is committed and the
+//!   subprocess never existed. The run row is `running` with a lease, so the
+//!   sweep finalizes it `abandoned_usage_unknown`: the reservation is
+//!   released, the items requeue, the day goes unknown. At N > 1 the sibling
+//!   leases are untouched — the sweep is per run row.
+//! - **Mid-run.** As above; the difference is only that tokens were really
+//!   spent, which is exactly why the outcome is `unknown` rather than zero.
+//! - **During finalization.** One transaction: the run row, the reservation
+//!   release, the lease `DELETE` and the scheduler update roll back together.
+//!   The run stays `running` holding its lease, and is swept later. The
+//!   `DELETE` matches one row by primary key, as it did when `run_id` was
+//!   merely `UNIQUE`.
+//! - **Two dispatchers at the same instant.** `BEGIN IMMEDIATE` admits one.
+//!   The loser blocks up to the 5s busy timeout and then either counts the
+//!   winner's lease and defers, or takes the next slot if the ceiling has one.
+//!   It cannot observe a half-written claim, because there is no point in the
+//!   sequence where one exists.
+//!
+//! In none of these does a run reach a terminal state without its usage being
+//! either counted exactly or recorded as unknown. That is the invariant N
+//! leases had to preserve, and the reason it survives is that it was never a
+//! property of the singleton.
 
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
@@ -236,12 +302,15 @@ fn claim_inner(
     )
     .map_err(|e| format!("budget_days: {e}"))?;
 
-    // The singleton. A second concurrent dispatcher fails the primary key
-    // here rather than discovering the conflict after spawning a subprocess.
+    // The lease. What enforces the ceiling is the transaction this statement
+    // is inside: `budget::gate` counted the live leases a few lines up, under
+    // the same `BEGIN IMMEDIATE`, so no other dispatcher can have inserted one
+    // in between. The primary key is `run_id` now and stops nothing but a run
+    // leasing twice — the ceiling is a counted number, not a column.
     conn.execute(
         "INSERT INTO ambient_dispatch \
-         (singleton_key, run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
-         VALUES ('ambient', ?1, ?2, ?3, ?4, ?5, ?6)",
+         (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -251,7 +320,7 @@ fn claim_inner(
             lease_expires_at
         ],
     )
-    .map_err(|e| format!("ambient_dispatch (the one ambient lease): {e}"))?;
+    .map_err(|e| format!("ambient_dispatch (this run's lease): {e}"))?;
 
     conn.execute(
         "INSERT INTO ambient_gate_state (vault_id, store_uuid, lane, consecutive_failures, \
@@ -844,11 +913,14 @@ mod tests {
     }
 
     #[test]
-    fn global_ambient_concurrency_never_exceeds_one() {
-        // Two vaults, one subscription, one background slot. The second
-        // dispatch is refused by the gate rather than by luck.
-        let (dir, conn, vault_a) = fixture("dispatch-singleton");
-        let other = testutil::temp_vault("dispatch-singleton-b");
+    fn global_ambient_concurrency_never_exceeds_the_configured_ceiling() {
+        // Two vaults, one subscription, and — at the SHIPPED default of one —
+        // one background slot. The second dispatch is refused by the gate
+        // rather than by luck, and this is the test that used to be called
+        // `..._never_exceeds_one`: converted, not deleted, because "today's
+        // behaviour is the default behaviour" is a claim that needs a test.
+        let (dir, conn, vault_a) = fixture("dispatch-ceiling-default");
+        let other = testutil::temp_vault("dispatch-ceiling-default-b");
         let vault_b = crate::runtime::scope::register(&conn, &other).unwrap();
         let _lock = status::test_lock();
         status::clear();
@@ -890,9 +962,273 @@ mod tests {
             SchedulerState::Pending,
             "a deferred dispatch claims nothing"
         );
+
+        // Raise the ceiling and the SAME refusal becomes a grant — which is
+        // the whole of M33b.1: the number moved out of the primary key.
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault_b,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                None,
+                now
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn at_a_ceiling_of_two_the_second_lease_is_granted_and_the_third_is_refused() {
+        // The ceiling is a number, so N is a real question and not a rewording
+        // of "one". Three claims, one vault: two land, the third is deferred
+        // by the gate — and the refusal is the same `ambient_busy` a single
+        // run has always been refused with, because it is the same rule.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-two");
+        let _lock = status::test_lock();
+        status::clear();
+        for key in ["a.md", "b.md", "c.md"] {
+            seed_item(&conn, &vault, key);
+        }
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+
+        for key in ["a.md", "b.md"] {
+            assert!(
+                matches!(
+                    claim(
+                        &conn,
+                        &vault,
+                        "store",
+                        "filed",
+                        small(),
+                        &[key.into()],
+                        None,
+                        now
+                    )
+                    .unwrap(),
+                    Dispatched::Started(_)
+                ),
+                "{key} fits under a ceiling of two"
+            );
+        }
+        assert_eq!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["c.md".into()],
+                None,
+                now
+            )
+            .unwrap(),
+            Dispatched::Deferred(vec![GateReason::AmbientBusy]),
+            "the third is refused BY THE GATE — it does not start and then lose a race"
+        );
+
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leases, 2, "exactly the ceiling, never the ceiling plus one");
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert_eq!(
+            day.reserved_total_tokens,
+            2 * 5_000,
+            "each lease reserves its own tokens; the day owes both"
+        );
+        assert_eq!(day.ambient_runs_started, 2);
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "c.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "a deferred dispatch claims nothing, at any ceiling"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_expired_lease_does_not_count_toward_the_ceiling() {
+        // The reasoning is v3's, unchanged: an expired lease is the
+        // crash-recovery path, and counting it as busy would wedge ambient
+        // work forever after one kill. What changed is the OUTCOME — under
+        // the singleton primary key this claim rolled back with an error,
+        // because the stale row still owned the only key. Now it dispatches,
+        // and the stale run is still recoverable on its own row.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-expired");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        let Dispatched::Started(stale) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("the first claim must start");
+        };
+        assert_eq!(stale.lease_expires_at, "2026-08-09T10:20:00.000Z");
+
+        // Nothing finalized it and nothing swept it. At the DEFAULT ceiling of
+        // one, the next claim still proceeds.
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                None,
+                at("2026-08-09T10:21:00Z"),
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leases, 2, "the stale row survives — it is the sweep's job");
+
+        // And the abandoned run's accounting is still owed and still
+        // recoverable: the count did not free it, the sweep does.
+        assert_eq!(
+            recover_expired_leases(&conn, at("2026-08-09T10:21:00Z")).unwrap(),
+            1,
+            "exactly the stale one — the live lease is not swept"
+        );
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert!(
+            !day.accounting_exact,
+            "the abandoned run's spend is unknown, not zero"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "and its work came back"
+        );
+        status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_unknown_usage_path_is_unchanged_with_several_leases_held() {
+        // The invariant M33b.1 had to preserve verbatim: missing usage never
+        // becomes zero. One of two concurrent runs comes back with nothing to
+        // report — its work requeues, the DAY is marked unknown, ambient is
+        // paused — and the sibling lease is untouched, because accounting is
+        // per run row and always was.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-unknown");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+        let Dispatched::Started(first) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            now,
+        )
+        .unwrap() else {
+            panic!("the first claim must start");
+        };
+        let Dispatched::Started(second) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["b.md".into()],
+            None,
+            now,
+        )
+        .unwrap() else {
+            panic!("the second claim must start");
+        };
+
+        finalize(
+            &conn,
+            &first.run_id,
+            RunOutcome::AbandonedUsageUnknown,
+            None,
+            None,
+            ItemOutcome::Requeue,
+            at("2026-08-09T10:05:00Z"),
+        )
+        .unwrap();
+
+        let day = budget::read_day(&conn, &first.window_start_utc).unwrap();
+        assert!(
+            !day.accounting_exact,
+            "a day that lost one run's spend is not a day with budget left"
+        );
+        assert!(!status::ambient_allowed(), "and ambient work is paused");
+        assert_eq!(
+            day.reserved_total_tokens, 5_000,
+            "only the abandoned run's reservation was released; the live one still owes"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "the abandoned run's work requeued"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "b.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Claimed,
+            "and the sibling run still owns its own"
+        );
+        let held: Vec<String> = {
+            let mut statement = conn
+                .prepare("SELECT run_id FROM ambient_dispatch ORDER BY run_id")
+                .unwrap();
+            let rows = statement
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        };
+        assert_eq!(
+            held,
+            vec![second.run_id.clone()],
+            "one lease released, one still held — the DELETE is per run"
+        );
+        status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1726,7 +2062,7 @@ mod tests {
 
     /// At every dispatch kill point the item is either PENDING or owned by
     /// exactly one recoverable lease, and global ambient concurrency never
-    /// exceeds one.
+    /// exceeds the ceiling — which here is the shipped default of one.
     ///
     /// This is the acceptance row that makes the whole claim transaction
     /// worth its complexity: without it, a kill between "reserve" and "claim"

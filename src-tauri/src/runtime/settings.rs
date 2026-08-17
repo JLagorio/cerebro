@@ -21,6 +21,32 @@ use rusqlite::Connection;
 /// app.
 pub const GLOBAL_PAUSE: &str = "ambient.global_pause";
 
+/// How many ambient leases may be live at once (M33b.1/.2).
+///
+/// Global for the same reason the pause is: one CLI subscription is spent
+/// once, however many vaults debit it, so a per-vault answer would be N
+/// vaults each politely allowing one background run and four of them running.
+pub const AMBIENT_CONCURRENCY: &str = "ambient.concurrency";
+
+/// What an absent key means, and what ships. **One** — so M33b changes no
+/// behaviour until a person changes this number, exactly as an Agent record
+/// without a `schedule:` runs nothing until somebody writes one.
+pub const AMBIENT_CONCURRENCY_DEFAULT: usize = 1;
+
+/// The hard cap, borrowed rather than restated. [`crate::agent::MAX_CONCURRENT_RUNS`]
+/// is how many CLI children this process will ever have alive; a background
+/// ceiling above it would be a number the spawner refuses anyway, and a second
+/// `4` written here is the twin-constant defect `shared/policy/README.md`
+/// exists to prevent.
+///
+/// **At the cap, attended chat has no reserved headroom left**, and that is
+/// said out loud rather than engineered away: the singleton used to guarantee
+/// three free slots as a side effect. What remains is `agent::spawn`'s own
+/// refusal, which turns the collision into a visible message rather than a
+/// silent eviction. Anyone who sets this to the maximum has chosen background
+/// throughput over a responsive chat box, and only they can make that call.
+pub const AMBIENT_CONCURRENCY_MAX: usize = crate::agent::MAX_CONCURRENT_RUNS;
+
 /// `lane.enabled.<lane>` — per-vault lane toggles.
 pub fn lane_key(lane: &str) -> String {
     format!("lane.enabled.{lane}")
@@ -151,6 +177,50 @@ pub fn set_global_pause(conn: &Connection, paused: bool) -> Result<(), String> {
     )
 }
 
+/// How many ambient leases may be live at once. Never fails, and never
+/// answers zero.
+///
+/// Every way of not knowing — an absent key, an unreadable row, a value that
+/// does not parse, a value outside the range the setter enforces — answers
+/// [`AMBIENT_CONCURRENCY_DEFAULT`]. That is the same choice [`flag`] makes for
+/// the pause and for the same reason: the conservative answer is the shipped
+/// one, and a gate that refused to run because a settings row was corrupt
+/// would turn a cosmetic fault into a stopped background.
+///
+/// Zero is not reachable. A ceiling of zero is spelled `global_pause`, which
+/// is a different control with a different sentence on it, and letting this
+/// number reach zero would give the app two ways to say "stopped" of which
+/// only one has a button.
+pub fn ambient_concurrency(conn: &Connection) -> usize {
+    match get(conn, AMBIENT_CONCURRENCY, None) {
+        Ok(Some(value)) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (AMBIENT_CONCURRENCY_DEFAULT..=AMBIENT_CONCURRENCY_MAX).contains(n))
+            .unwrap_or(AMBIENT_CONCURRENCY_DEFAULT),
+        _ => AMBIENT_CONCURRENCY_DEFAULT,
+    }
+}
+
+/// Raise or lower the ceiling. Refused outside `1..=AMBIENT_CONCURRENCY_MAX`,
+/// before a byte is stored — a stored value the reader would silently clamp is
+/// a setting whose displayed number and effective number disagree.
+pub fn set_ambient_concurrency(conn: &Connection, ceiling: usize) -> Result<(), String> {
+    if ceiling < AMBIENT_CONCURRENCY_DEFAULT {
+        return Err(format!(
+            "a background concurrency of {ceiling} is not a ceiling, it is a pause — \
+             use the pause, which says so"
+        ));
+    }
+    if ceiling > AMBIENT_CONCURRENCY_MAX {
+        return Err(format!(
+            "{ceiling} background runs would exceed the {AMBIENT_CONCURRENCY_MAX} this process \
+             will ever have alive at once"
+        ));
+    }
+    set(conn, AMBIENT_CONCURRENCY, None, &ceiling.to_string())
+}
+
 /// Is this lane enabled for this vault? Falls back to the lane registry's
 /// `enabled_by_default`, so a lane added by a later migration arrives in the
 /// state its migration declared rather than in whatever `false` implies.
@@ -258,6 +328,64 @@ mod tests {
             global_pause(&conn),
             "a pause that forgets itself is not one"
         );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_concurrency_ceiling_is_one_until_somebody_raises_it_and_then_it_persists() {
+        // M33b ships INERT: an absent key is one, which is what the singleton
+        // row enforced, so nothing about background behaviour changes until a
+        // person types a bigger number.
+        let (dir, conn) = db("settings-concurrency");
+        assert_eq!(ambient_concurrency(&conn), 1);
+        set_ambient_concurrency(&conn, 3).unwrap();
+        assert_eq!(ambient_concurrency(&conn), 3);
+        drop(conn);
+
+        let conn = super::super::open(&dir).unwrap();
+        assert_eq!(
+            ambient_concurrency(&conn),
+            3,
+            "a ceiling that forgets itself overnight is not one"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored() {
+        let (dir, conn) = db("settings-concurrency-range");
+        let over = set_ambient_concurrency(&conn, AMBIENT_CONCURRENCY_MAX + 1).unwrap_err();
+        assert!(over.contains("will ever have alive"), "{over}");
+        let under = set_ambient_concurrency(&conn, 0).unwrap_err();
+        assert!(under.contains("it is a pause"), "{under}");
+        assert_eq!(
+            get(&conn, AMBIENT_CONCURRENCY, None).unwrap(),
+            None,
+            "a refused ceiling stores nothing"
+        );
+        assert_eq!(ambient_concurrency(&conn), 1);
+        // The boundary itself is allowed — the cap is the process cap, not one
+        // below it, and it is borrowed from `agent::MAX_CONCURRENT_RUNS`
+        // rather than written twice.
+        set_ambient_concurrency(&conn, AMBIENT_CONCURRENCY_MAX).unwrap();
+        assert_eq!(ambient_concurrency(&conn), AMBIENT_CONCURRENCY_MAX);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stored_ceiling_that_makes_no_sense_reads_as_one_rather_than_as_nothing() {
+        // The setter cannot write these, but a hand-edited row, an older
+        // build, or a corrupt value can exist. Every one of them answers with
+        // the conservative shipped default — never zero, which would be a
+        // second, buttonless way to say "paused".
+        let (dir, conn) = db("settings-concurrency-junk");
+        for junk in ["0", "-1", "9", "many", ""] {
+            set(&conn, AMBIENT_CONCURRENCY, None, junk).unwrap();
+            assert_eq!(ambient_concurrency(&conn), 1, "{junk:?}");
+        }
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
