@@ -9,7 +9,7 @@ import { ALL_TOOLS, matchedToolset, TOOLSETS, unknownTools, writesAnything } fro
  *
  * `src-tauri/src/mcp.rs` serves the tools and enforces the narrowing; this
  * module only exists so a person can pick from a list instead of typing
- * thirteen identifiers from memory. A mirror that drifts is worse than no
+ * identifiers from memory. A mirror that drifts is worse than no
  * mirror: the picker would offer a tool the server does not have, and the
  * resulting `allowed-tools:` would narrow a run to nothing while looking
  * deliberate.
@@ -24,7 +24,7 @@ const RUST = readFileSync(resolve(process.cwd(), 'src-tauri/src/mcp.rs'), 'utf8'
  * `base_tools` and not `tool_catalog` since M26.3c: the catalog now appends a
  * half GENERATED from the policy artifact, which carries no `"name": "literal"`
  * for a source scrape to find. Scraping the whole catalog would silently see
- * only the hand-written twelve and call the mirror complete.
+ * only the hand-written half and call the mirror complete.
  */
 function rustToolNames(): string[] {
   const start = RUST.indexOf('fn base_tools()');

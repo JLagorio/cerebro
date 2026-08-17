@@ -4,7 +4,7 @@
  * The tool names have only ever existed in `src-tauri/src/mcp.rs`, which is
  * correct — that is where they are served and where a narrowing is enforced.
  * But it left the UI with nothing to offer: `allowed-tools:` was a free-text
- * box, so choosing a policy meant knowing thirteen identifiers by heart and
+ * box, so choosing a policy meant knowing every identifier by heart and
  * getting each one exactly right. A typo did not error; it silently narrowed
  * the run to nothing, which looks identical to a model that decided not to act.
  *
@@ -14,8 +14,8 @@
  *
  * ## Toolsets
  *
- * Grouped the way ClickUp groups them, for the reason they do: nobody picks
- * thirteen checkboxes. They pick "reading" or "reading and writing", and the
+ * Grouped the way ClickUp groups them, for the reason they do: nobody picks a
+ * dozen checkboxes. They pick "reading" or "reading and writing", and the
  * individual tools are there for the one case that needs a scalpel. The groups
  * are drawn on the axis that matters here — what a run can CHANGE — so the
  * dangerous ones cannot hide in a bundle labelled after a workflow.
@@ -51,6 +51,11 @@ export const TOOLSETS: Toolset[] = [
       },
       { name: 'search_notes', summary: 'Search titles, bodies and frontmatter', writes: false },
       { name: 'get_note', summary: 'Read one note in full', writes: false },
+      {
+        name: 'knowledge_about',
+        summary: 'What the knowledge base already knows about one entity',
+        writes: false,
+      },
       { name: 'list_inbox', summary: 'Captures waiting to be filed', writes: false },
     ],
   },

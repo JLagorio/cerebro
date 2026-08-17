@@ -1,6 +1,7 @@
 //! Files-first vault engine: parsing, scanning, writing, watching.
 
 pub mod entry;
+pub mod link;
 pub mod parse;
 pub mod scan;
 pub mod watcher;

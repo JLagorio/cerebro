@@ -5,6 +5,7 @@ import { listConcepts, relatedConcepts } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { useNavStore } from '@/stores/navStore';
+import { askBasePrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -16,9 +17,13 @@ import { useVaultStore } from '@/stores/vaultStore';
  * being somewhere you go and starts appearing beside the work it describes.
  *
  * It is deliberately PASSIVE. Nothing here interrupts, animates, or asks; it
- * sits below the fold and waits to be scrolled to. The one active affordance
- * is a button the user presses, because the difference between an assistant
- * and a nag is who started the conversation.
+ * sits below the fold and waits to be scrolled to. Every active affordance on
+ * it is a button the user presses, because the difference between an
+ * assistant and a nag is who started the conversation.
+ *
+ * M33a.5 made the read INVOCABLE: `Ask the base` hands the assistant the same
+ * question this list renders, and the assistant answers it with the
+ * `knowledge_about` tool rather than by guessing at the bundle.
  */
 
 export interface RelatedKnowledgeProps {
@@ -60,6 +65,13 @@ export function RelatedKnowledge({
   const ask = () => {
     if (askPrompt === undefined) return;
     askAgent(askPrompt, askSubject ?? null);
+  };
+
+  // The record travels WITH the prompt (M17.6) — it becomes a context chip,
+  // so the agent reads this record rather than whatever surface the user
+  // happened to be standing on when they pressed the button.
+  const askBase = () => {
+    askAgent(askBasePrompt(entry.path, entry.title), entry.path);
   };
 
   // An empty state that still offers the ask: "nothing yet" is exactly when
@@ -119,13 +131,22 @@ export function RelatedKnowledge({
 
       {rest > 0 && <p className="m-0 mt-1.5 px-2 text-xs text-n-400">and {rest} more</p>}
 
-      {askPrompt !== undefined && (
-        <div className="mt-2.5">
+      {/* Two questions, and they are genuinely different. "Ask the base" goes
+          to the SUBJECT — knowledge_about answers by anchor, so it reaches
+          concepts this list cannot, the ones filed under entities the record
+          only reaches through its project or a link it never made. The
+          optional second button goes to the DRAFT. Both are buttons, pressed
+          by a person; neither counts up at anyone (M8.1). */}
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
+          Ask the base
+        </Button>
+        {askPrompt !== undefined && (
           <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
             {askLabel}
           </Button>
-        </div>
-      )}
+        )}
+      </div>
     </section>
   );
 }

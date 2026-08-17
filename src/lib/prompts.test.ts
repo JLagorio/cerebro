@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { agentRunPrompt, currentStatePrompt, distillPrompt } from './prompts';
+import { agentRunPrompt, askBasePrompt, currentStatePrompt, distillPrompt } from './prompts';
+import { ALL_TOOLS } from '@/engine/tools';
 
 /**
  * What an unattended run is actually told.
@@ -76,6 +77,40 @@ describe('distillPrompt', () => {
     const prompt = distillPrompt('inbox/capture.md', 'A capture');
     expect(prompt).toContain('description');
     expect(prompt.toLowerCase()).toContain('in the body');
+  });
+});
+
+describe('askBasePrompt (M33a.5)', () => {
+  const prompt = () => askBasePrompt('records/reqs/rq-84b.md', 'RQ-84B Kestrel');
+
+  it('names the tool that answers by anchor, and names it first', () => {
+    // Told only to "see what you know", a model keyword-searches the bundle
+    // and returns whatever shares words with the title — which is a different
+    // question. The tool answers by `about:` anchor, which is this one.
+    const text = prompt();
+    expect(text).toContain('knowledge_about');
+    expect(text.indexOf('knowledge_about')).toBeLessThan(text.indexOf('get_note'));
+    expect(text).toContain('records/reqs/rq-84b.md');
+    expect(text).toContain('RQ-84B Kestrel');
+  });
+
+  it('names a tool the server actually serves', () => {
+    // A prompt naming a tool the catalog does not hold narrows the run to a
+    // model improvising — the same drift `tools.test.ts` guards on the picker.
+    expect(ALL_TOOLS.map((t) => t.name)).toContain('knowledge_about');
+  });
+
+  it('asks a question and forbids the answer arriving as writes', () => {
+    // The user pressed a button that asks. An answer that lands as three new
+    // concepts is not the thing they asked for.
+    expect(prompt()).toContain('Do not write or revise anything');
+  });
+
+  it('makes "almost nothing yet" an available answer', () => {
+    // Otherwise the model pads Held and Unsettled to look useful, which is
+    // exactly how a knowledge surface stops being trusted.
+    expect(prompt()).toContain('almost nothing yet');
+    expect(prompt()).toContain('Not covered');
   });
 });
 

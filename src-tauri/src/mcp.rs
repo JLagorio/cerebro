@@ -659,7 +659,7 @@ fn schema(properties: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": properties, "required": required })
 }
 
-/// The hand-written tools: read, note-write, and UI. Twelve, spelled out.
+/// The hand-written tools: read, note-write, and UI. Spelled out, one by one.
 ///
 /// Kept as literal `json!` entries in one scrapeable function because the TS
 /// picker mirrors them by name (`src/engine/tools.ts`) and there is nothing
@@ -694,6 +694,14 @@ fn base_tools() -> Vec<Value> {
             "inputSchema": schema(json!({
                 "path": { "type": "string", "description": "Vault-relative path, e.g. records/risks/r-1.md" }
             }), &["path"])
+        }),
+        json!({
+            "name": "knowledge_about",
+            "description": "What the knowledge/ bundle already knows about one entity — the same read the app shows beside a record. Call it before answering a question about something the vault holds, so you build on what the base has already worked out instead of rediscovering it. Reports each concept's description, type, lifecycle, whether a human has verified it, whether it is due a recheck, what replaced it, and what it disagrees with. Reading only: nothing here writes. An entity nobody has written about comes back empty and says so — that is an answer, not a failure.",
+            "inputSchema": schema(json!({
+                "target": { "type": "string", "description": "A vault path (records/risks/r-1.md) or a bare wikilink target (rq-84b-kestrel, atlas). Resolved the way the app resolves a wikilink: filename stem, then project folder, then exact title, case-insensitively." },
+                "limit": { "type": "number", "description": "Max concepts (default 20). Any it cannot fit are counted, never dropped silently." }
+            }), &["target"])
         }),
         json!({
             "name": "report_window_outcome",
@@ -1281,6 +1289,7 @@ fn call_tool(
         "get_vault_context" => tool_vault_context(&vault),
         "search_notes" => tool_search(&vault, args),
         "get_note" => tool_get_note(&vault, args),
+        "knowledge_about" => tool_knowledge_about(&vault, args),
         "list_inbox" => tool_list_inbox(&vault),
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
@@ -1772,7 +1781,7 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
             .unwrap_or_else(|| "(untyped)".into())
     );
     if crate::knowledge::is_knowledge_path(&path) {
-        header.push_str(&format!("Trust: {}\n", trust_tier(entry)));
+        header.push_str(&format!("Trust: {}\n", crate::knowledge::trust_tier(entry)));
     }
     if !entry.properties.is_empty() {
         header.push_str(&format!(
@@ -1783,30 +1792,115 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
     Ok(text_result(format!("{header}\n---\n{body}")))
 }
 
-/// Mirrors engine/okf.ts trustTier: derived from `verified`, never stored.
-fn trust_tier(entry: &vault::entry::Entry) -> &'static str {
-    let Some(verified) = entry.properties.get("verified") else {
-        return "unverified";
+/// What the bundle knows about one entity, as an agent workflow can ask it
+/// (M33a.5).
+///
+/// The same question `conceptsAbout` answers for the surfaces beside a
+/// record — `RelatedKnowledge`, `EntityDossier` — served as a tool so a run
+/// can ask it before it starts guessing. A READ, end to end: it opens no
+/// write path into the bundle, which stays `write_concept`'s alone.
+///
+/// Three answers, and keeping them apart is the point. A subject with
+/// concepts is what the base holds. A subject with none is a MEASUREMENT —
+/// nobody has written about this — and says so in words. And a target that
+/// names nothing in the workspace is an OPEN THREAD (M33a D7), not a broken
+/// link: the base tracks things nobody has written up yet. A read that fails
+/// returns `Err`, which reaches the model as `isError` content, so "we hold
+/// nothing" and "we could not tell you" never wear the same sentence.
+fn tool_knowledge_about(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    let target = arg_str(args, "target").ok_or("knowledge_about needs a target")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(20)
+        .min(100) as usize;
+    let entries = vault::scan::scan_vault(vault)?;
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let answer = crate::knowledge::about(&entries, &target, &today, limit);
+
+    let subject = match &answer.subject {
+        Some((path, title)) => format!("{path} (\"{title}\")"),
+        None => format!("\"{target}\""),
     };
-    let stamps: Vec<&Value> = match verified {
-        Value::Array(list) => list.iter().collect(),
-        other => vec![other],
+    if answer.concepts.is_empty() {
+        // Two empties, and they are different facts. A note that exists and
+        // has never been distilled is a measurement of the base; a name the
+        // workspace does not carry and the base has not tracked is a
+        // measurement of both. Neither is a failed read — that is an `Err`.
+        return Ok(text_result(if answer.subject.is_some() {
+            format!(
+                "The knowledge bundle holds nothing about {subject}. Nothing has been written \
+about it yet — this is an empty answer, not a failed one. Distil a note that concerns it \
+with write_concept if you want the base to know."
+            )
+        } else {
+            format!(
+                "Nothing in the workspace is named {subject}, and the knowledge bundle holds \
+nothing anchored to that name either. This is an empty answer, not a failed one — check the \
+spelling with search_notes if you expected a match."
+            )
+        }));
+    }
+
+    // An anchor to a name nothing carries is an OPEN THREAD, not a broken
+    // link (M33a D7): the base tracks things nobody has written up yet, and
+    // reporting that as an error would teach a run to discard real knowledge.
+    let thread = if answer.subject.is_none() {
+        format!(
+            "Nothing in the workspace is named {subject}, so this is an open thread: the base \
+is tracking something nobody has written up yet. That is legitimate, not a broken link.\n"
+        )
+    } else {
+        String::new()
     };
-    let mut any = false;
-    for stamp in stamps {
-        let Some(by) = stamp.get("by").and_then(Value::as_str) else {
-            continue;
-        };
-        any = true;
-        if by.starts_with("human:") {
-            return "human-reviewed";
+    let mut out = format!(
+        "The knowledge bundle holds {} concept(s) about {subject}.\n{thread}",
+        answer.concepts.len() + answer.omitted
+    );
+    if answer.omitted > 0 {
+        out.push_str(&format!(
+            "Showing the first {} by path; {} more were not listed — raise `limit` to see them.\n",
+            answer.concepts.len(),
+            answer.omitted
+        ));
+    }
+    for concept in &answer.concepts {
+        out.push_str(&format!(
+            "\n- {} — \"{}\" [{}]\n  What it is: {}\n  {} · {} · {}\n",
+            concept.path,
+            concept.title,
+            concept
+                .concept_type
+                .as_deref()
+                .unwrap_or("type not recorded"),
+            concept.description.as_deref().unwrap_or("not recorded"),
+            concept.lifecycle,
+            concept.trust,
+            match (&concept.stale_after, concept.stale) {
+                (None, _) => "no recheck date recorded".to_string(),
+                (Some(after), true) => format!("stale, was due a recheck on {after}"),
+                (Some(after), false) => format!("recheck due {after}"),
+            }
+        ));
+        if !concept.superseded_by.is_empty() {
+            out.push_str(&format!(
+                "  Superseded by: {}\n",
+                concept.superseded_by.join(", ")
+            ));
+        }
+        if !concept.contradicts.is_empty() {
+            let edges: Vec<String> = concept
+                .contradicts
+                .iter()
+                .map(|edge| match &edge.path {
+                    Some(path) => path.clone(),
+                    None => format!("{} (names no concept in the bundle)", edge.target),
+                })
+                .collect();
+            out.push_str(&format!("  Contradicts: {}\n", edges.join(", ")));
         }
     }
-    if any {
-        "machine-confirmed"
-    } else {
-        "unverified"
-    }
+    Ok(text_result(out))
 }
 
 fn tool_list_inbox(vault: &Path) -> Result<Value, String> {
@@ -2920,6 +3014,7 @@ mod tests {
             ("get_vault_context", "reads"),
             ("search_notes", "reads"),
             ("get_note", "reads"),
+            ("knowledge_about", "reads"),
             ("list_inbox", "reads"),
             ("open_note", "moves the UI, changes nothing on disk"),
             ("navigate", "moves the UI, changes nothing on disk"),
@@ -3366,6 +3461,117 @@ mod tests {
         }
     }
 
+    // --- knowledge_about (M33a.5) ------------------------------------------
+
+    #[test]
+    fn knowledge_about_is_served_as_a_read_that_takes_one_target() {
+        let tool = tool_catalog(true)
+            .into_iter()
+            .find(|t| t["name"] == "knowledge_about")
+            .expect("knowledge_about is in the catalog");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["required"], json!(["target"]));
+        assert_eq!(schema["properties"]["target"]["type"], "string");
+        assert_eq!(schema["properties"]["limit"]["type"], "number");
+        // The phase adds a READ. A field that named a place to write would be
+        // a second door into a bundle write_concept is supposed to own alone.
+        let properties = schema["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 2, "got {properties:?}");
+    }
+
+    fn about_vault(label: &str) -> std::path::PathBuf {
+        let vault = crate::vault::testutil::temp_vault(label);
+        crate::vault::testutil::write(
+            &vault,
+            "records/reqs/rq-84b-kestrel.md",
+            "---\ntype: Requirement\n---\n\n# RQ-84B Kestrel\n",
+        );
+        crate::vault::testutil::write(
+            &vault,
+            "records/reqs/tx-6-np.md",
+            "---\ntype: Requirement\n---\n\n# TX-6 NP\n",
+        );
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/risks/thermal-margin.md",
+            "---\ntype: Risk\ndescription: The 60C case has never been run.\nabout:\n  - \"[[rq-84b-kestrel]]\"\nstale_after: 2026-08-01\n---\n\n# Thermal margin unproven\n",
+        );
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/duty-cycle.md",
+            "---\ntype: System\nabout:\n  - \"[[mpm-410]]\"\n---\n\n# MPM-410 duty cycle\n",
+        );
+        vault
+    }
+
+    fn about_text(vault: &Path, target: &str) -> String {
+        let mut args = Map::new();
+        args.insert("target".into(), json!(target));
+        let value = tool_knowledge_about(vault, &args).expect("the read succeeds");
+        value["content"][0]["text"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn knowledge_about_answers_the_same_read_the_surfaces_show() {
+        let vault = about_vault("knowledge-about");
+        // A path and the bare wikilink target reach the same subject.
+        for target in ["records/reqs/rq-84b-kestrel.md", "rq-84b-kestrel"] {
+            let text = about_text(&vault, target);
+            assert!(text.contains("1 concept(s)"), "{text}");
+            assert!(text.contains("knowledge/risks/thermal-margin.md"), "{text}");
+            assert!(
+                text.contains("The 60C case has never been run."),
+                "the description is the line every list shows: {text}"
+            );
+            assert!(text.contains("unverified"), "{text}");
+            assert!(text.contains("stale"), "2026-08-01 has passed: {text}");
+        }
+        std::fs::remove_dir_all(&vault).ok();
+    }
+
+    #[test]
+    fn knowledge_about_says_nothing_written_rather_than_nothing_found() {
+        let vault = about_vault("knowledge-about-empty");
+
+        // A record that exists and nobody has distilled. Measured at zero, and
+        // it says which — "nothing is here" and "we could not tell you" are
+        // opposite sentences.
+        let quiet = about_text(&vault, "tx-6-np");
+        assert!(quiet.contains("holds nothing about"), "{quiet}");
+        assert!(quiet.contains("records/reqs/tx-6-np.md"), "{quiet}");
+        assert!(quiet.contains("empty answer, not a failed one"), "{quiet}");
+        assert!(!quiet.contains("open thread"), "the record exists: {quiet}");
+
+        // A name nothing in the workspace carries, that the base tracks anyway
+        // — an open thread (M33a D7), never a broken link.
+        let thread = about_text(&vault, "mpm-410");
+        assert!(thread.contains("1 concept(s)"), "{thread}");
+        assert!(thread.contains("open thread"), "{thread}");
+        assert!(
+            thread.contains("knowledge/systems/duty-cycle.md"),
+            "{thread}"
+        );
+
+        // Neither: no note, no concepts. Still an answer — and NOT the
+        // open-thread sentence, which would claim the base is tracking
+        // something when it is tracking nothing.
+        let nothing = about_text(&vault, "kos-3.2");
+        assert!(
+            nothing.contains("Nothing in the workspace is named"),
+            "{nothing}"
+        );
+        assert!(
+            nothing.contains("empty answer, not a failed one"),
+            "{nothing}"
+        );
+        assert!(!nothing.contains("open thread"), "{nothing}");
+
+        // And a read that CANNOT happen is an Err, which reaches the model as
+        // isError content — never an empty set wearing the same words.
+        assert!(tool_knowledge_about(&vault, &Map::new()).is_err());
+        std::fs::remove_dir_all(&vault).ok();
+    }
+
     /// The write_concept tool's catalog entry, with (`true`) or without the
     /// proposal surface on.
     fn write_concept_tool(with_proposals: bool) -> Value {
@@ -3455,34 +3661,6 @@ mod tests {
             properties.get("verified").is_none(),
             "an agent that can stamp `verified` can self-certify, which empties the trust model"
         );
-    }
-
-    #[test]
-    fn trust_tier_matches_the_typescript_engine() {
-        use crate::vault::entry::Entry;
-        let mut entry = Entry::empty_for_test("knowledge/a.md");
-        assert_eq!(trust_tier(&entry), "unverified");
-
-        entry.properties.insert(
-            "verified".into(),
-            json!([{ "by": "process:nightly", "at": "2026-07-01" }]),
-        );
-        assert_eq!(trust_tier(&entry), "machine-confirmed");
-
-        entry.properties.insert(
-            "verified".into(),
-            json!([
-                { "by": "process:nightly", "at": "2026-07-01" },
-                { "by": "human:josef", "at": "2026-07-02" }
-            ]),
-        );
-        assert_eq!(trust_tier(&entry), "human-reviewed");
-
-        // A bare mapping must read as a one-element list (OKF §5.2).
-        entry
-            .properties
-            .insert("verified".into(), json!({ "by": "human:josef", "at": "x" }));
-        assert_eq!(trust_tier(&entry), "human-reviewed");
     }
 
     #[test]

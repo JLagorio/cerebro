@@ -411,6 +411,293 @@ pub fn concept_type_menu() -> String {
         .join("; ")
 }
 
+// --- What the bundle knows about one entity (M33a.5) -----------------------
+
+/// OKF §3.1 — reserved filenames that are structure, not concepts.
+const RESERVED_FILENAMES: [&str; 2] = ["index.md", "log.md"];
+
+/// True for notes inside the bundle that are concepts. Mirrors `isConcept` in
+/// src/engine/okf.ts.
+pub fn is_concept(entry: &crate::vault::entry::Entry) -> bool {
+    is_knowledge_path(&entry.path) && !RESERVED_FILENAMES.contains(&entry.filename.as_str())
+}
+
+/// The trust tier a reader should apply to a concept. Mirrors `trustTier` in
+/// src/engine/okf.ts: DERIVED from `verified`, never stored, because a tier
+/// written into a file goes stale the moment anything changes (OKF §5.3).
+pub fn trust_tier(entry: &crate::vault::entry::Entry) -> &'static str {
+    let Some(verified) = entry.properties.get("verified") else {
+        return "unverified";
+    };
+    let stamps: Vec<&Value> = match verified {
+        Value::Array(list) => list.iter().collect(),
+        other => vec![other],
+    };
+    let mut any = false;
+    for stamp in stamps {
+        let Some(by) = stamp.get("by").and_then(Value::as_str) else {
+            continue;
+        };
+        any = true;
+        if by.starts_with("human:") {
+            return "human-reviewed";
+        }
+    }
+    if any {
+        "machine-confirmed"
+    } else {
+        "unverified"
+    }
+}
+
+/// Wikilink targets under one frontmatter key. The scanner hands wikilink
+/// fields back in `relationships`, already bracket-stripped; a plain string
+/// is accepted too, because a concept that names its subject imprecisely
+/// still beats one that never names it. Mirrors `parseAbout`/`parseRelations`.
+fn link_field(entry: &crate::vault::entry::Entry, key: &str) -> Vec<String> {
+    if let Some(linked) = entry.relationships.get(key) {
+        if !linked.is_empty() {
+            return linked.clone();
+        }
+    }
+    match entry.properties.get(key) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        Some(Value::String(s)) if !s.trim().is_empty() => vec![s.trim().to_string()],
+        _ => Vec::new(),
+    }
+}
+
+/// One end of a concept-to-concept relation.
+#[derive(Debug, Clone)]
+pub struct RelationTarget {
+    /// The concept it names, when it names one this bundle holds. `None` is
+    /// not a defect — OKF §6.1 tolerates a link to something that is not
+    /// there — but the caller must be able to tell the two apart.
+    pub path: Option<String>,
+    /// The link as written, for the end that declared it. An edge found by
+    /// reading the graph backwards was never written on this concept at all,
+    /// so it carries the other concept's path — which is the only thing
+    /// anybody wrote down about it.
+    pub target: String,
+}
+
+/// One concept, as `knowledge_about` reports it.
+///
+/// Every optional field means NOT RECORDED and is rendered as words by the
+/// caller. A concept with no `description` is not a concept with an empty
+/// description, and a concept with no `stale_after` has not been declared
+/// fresh — it has had no recheck date set.
+#[derive(Debug, Clone)]
+pub struct AboutConcept {
+    pub path: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub concept_type: Option<String>,
+    pub lifecycle: String,
+    pub trust: &'static str,
+    pub stale_after: Option<String>,
+    pub stale: bool,
+    /// Concepts that declared they REPLACE this one. Read backwards on
+    /// purpose: a replaced concept is never rewritten to say so, so without
+    /// the reverse pass a retired claim looks exactly like a current one.
+    pub superseded_by: Vec<String>,
+    /// Disagreements touching this concept, in both directions —
+    /// `contradicts` is symmetric (`RELATION_LABELS` in okf.ts says so), and
+    /// the end that did not declare it has no way to know from its own file.
+    pub contradicts: Vec<RelationTarget>,
+}
+
+/// What the bundle holds about one entity.
+#[derive(Debug, Clone)]
+pub struct About {
+    /// The workspace note the target named, as `(path, title)`. `None` means
+    /// nothing in the workspace carries that name — a legitimate state, not
+    /// an error: the base tracks open threads about things nobody has written
+    /// up yet (M33a design, D7).
+    pub subject: Option<(String, String)>,
+    /// The grouping key the anchors were matched on — the resolved path, else
+    /// the lowercased target. Same key `listSubjects` groups by.
+    pub key: String,
+    pub concepts: Vec<AboutConcept>,
+    /// How many matches the limit cut. A total that skipped rows says how
+    /// many it skipped rather than absorbing them.
+    pub omitted: usize,
+}
+
+/// Resolve one relation target to a concept in this bundle.
+///
+/// Two spellings, for the reason `about:` accepts two: the agent writes
+/// `[[pick-queue-drain]]` because that is what it writes everywhere else, and
+/// `/systems/pick-queue-drain.md` is what OKF §6.1 recommends. Refusing
+/// either would lose a real edge over punctuation. Mirrors `resolveConcept`
+/// in src/engine/okf.ts.
+fn resolve_concept(
+    target: &str,
+    concept_paths: &std::collections::HashSet<&str>,
+    index: &crate::vault::link::TargetIndex<'_>,
+) -> Option<String> {
+    let by_path = |path: &str| concept_paths.get(path).map(|p| (*p).to_string());
+    let trimmed = target.trim();
+    if trimmed.starts_with('/') {
+        if let Some(hit) = by_path(&format!("{KNOWLEDGE_DIR}{trimmed}")) {
+            return Some(hit);
+        }
+    } else if trimmed.ends_with(".md") {
+        let relative = trimmed.strip_prefix("./").unwrap_or(trimmed);
+        if let Some(hit) =
+            by_path(relative).or_else(|| by_path(&format!("{KNOWLEDGE_DIR}/{relative}")))
+        {
+            return Some(hit);
+        }
+    }
+    by_path(&index.resolve(trimmed)?.path)
+}
+
+/// Everything the bundle knows about the entity `target` names.
+///
+/// `target` may be a vault path (`records/risks/r-1.md`) or a bare wikilink
+/// target (`rq-84b-kestrel`). The path pass comes first because a path is
+/// unambiguous; everything after it is the app's own wikilink rule, so this
+/// answers the same question `conceptsAbout` answers in the UI.
+///
+/// An empty `concepts` is a MEASUREMENT — the base has written nothing about
+/// this — and is never how a failed read is reported. A read that cannot
+/// happen never reaches here at all: the caller's scan returns `Err` first.
+pub fn about(
+    entries: &[crate::vault::entry::Entry],
+    target: &str,
+    today: &str,
+    limit: usize,
+) -> About {
+    let index = crate::vault::link::TargetIndex::build(entries);
+    let subject = entries
+        .iter()
+        .find(|e| e.path == target.trim())
+        .or_else(|| index.resolve(target));
+    let key = match subject {
+        Some(entry) => entry.path.clone(),
+        None => target.trim().to_lowercase(),
+    };
+
+    let concepts: Vec<&crate::vault::entry::Entry> =
+        entries.iter().filter(|e| is_concept(e)).collect();
+    let concept_paths: std::collections::HashSet<&str> =
+        concepts.iter().map(|c| c.path.as_str()).collect();
+
+    // The graph is walked ONCE, forwards, and read backwards out of these two
+    // maps. Both relations have to be answerable from the end that did not
+    // declare them: a replaced concept is never rewritten to say so, and
+    // `contradicts` is symmetric — so a concept asked about itself would look
+    // current and uncontested however retired it was.
+    let mut replaced_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut contradicted_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for other in &concepts {
+        for (field, into) in [
+            ("supersedes", &mut replaced_by),
+            ("contradicts", &mut contradicted_by),
+        ] {
+            for declared in link_field(other, field) {
+                let Some(hit) = resolve_concept(&declared, &concept_paths, &index) else {
+                    continue;
+                };
+                if hit != other.path {
+                    into.entry(hit).or_default().push(other.path.clone());
+                }
+            }
+        }
+    }
+
+    // The same key `listSubjects` groups by: an anchor that resolves is keyed
+    // by the note it found, and one that does not is keyed by what it said.
+    let anchor_key = |anchor: &str| match index.resolve(anchor) {
+        Some(entry) => entry.path.clone(),
+        None => anchor.trim().to_lowercase(),
+    };
+
+    let mut matched: Vec<&crate::vault::entry::Entry> = concepts
+        .iter()
+        .copied()
+        .filter(|c| link_field(c, "about").iter().any(|a| anchor_key(a) == key))
+        .collect();
+    matched.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let omitted = matched.len().saturating_sub(limit);
+    matched.truncate(limit);
+
+    let out = matched
+        .iter()
+        .map(|entry| {
+            let stale_after = entry
+                .properties
+                .get("stale_after")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let mut contradicts: Vec<RelationTarget> = link_field(entry, "contradicts")
+                .into_iter()
+                .map(|target| RelationTarget {
+                    path: resolve_concept(&target, &concept_paths, &index),
+                    target,
+                })
+                .filter(|edge| edge.path.as_deref() != Some(entry.path.as_str()))
+                .collect();
+            for other in contradicted_by.get(&entry.path).into_iter().flatten() {
+                // Declared by both ends: one edge, not two.
+                if contradicts
+                    .iter()
+                    .any(|e| e.path.as_deref() == Some(other.as_str()))
+                {
+                    continue;
+                }
+                contradicts.push(RelationTarget {
+                    path: Some(other.clone()),
+                    target: other.clone(),
+                });
+            }
+
+            AboutConcept {
+                path: entry.path.clone(),
+                title: entry
+                    .properties
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| entry.title.clone()),
+                description: entry
+                    .properties
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                concept_type: entry.entry_type.clone(),
+                lifecycle: match entry.properties.get("lifecycle").and_then(Value::as_str) {
+                    Some(raw @ ("draft" | "deprecated")) => raw.to_string(),
+                    _ => "stable".to_string(),
+                },
+                trust: trust_tier(entry),
+                // `stale_after` is an ABSOLUTE date, so staleness is a plain
+                // comparison with no reference to when it was read (OKF §5.5).
+                stale: stale_after.as_deref().is_some_and(|after| today >= after),
+                stale_after,
+                superseded_by: replaced_by.get(&entry.path).cloned().unwrap_or_default(),
+                contradicts,
+            }
+        })
+        .collect();
+
+    About {
+        subject: subject.map(|e| (e.path.clone(), e.title.clone())),
+        key,
+        concepts: out,
+        omitted,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,6 +957,270 @@ mod tests {
         // And the fallback must still be offerable, or a concept that is honestly
         // background has nowhere to go.
         assert!(names.contains(&"Reference"));
+    }
+
+    // --- What the bundle knows about one entity (M33a.5) -------------------
+
+    use crate::vault::entry::Entry;
+
+    #[test]
+    fn trust_tier_matches_the_typescript_engine() {
+        let mut entry = Entry::empty_for_test("knowledge/a.md");
+        assert_eq!(trust_tier(&entry), "unverified");
+
+        entry.properties.insert(
+            "verified".into(),
+            serde_json::json!([{ "by": "process:nightly", "at": "2026-07-01" }]),
+        );
+        assert_eq!(trust_tier(&entry), "machine-confirmed");
+
+        entry.properties.insert(
+            "verified".into(),
+            serde_json::json!([
+                { "by": "process:nightly", "at": "2026-07-01" },
+                { "by": "human:josef", "at": "2026-07-02" }
+            ]),
+        );
+        assert_eq!(trust_tier(&entry), "human-reviewed");
+
+        // A bare mapping must read as a one-element list (OKF §5.2).
+        entry.properties.insert(
+            "verified".into(),
+            serde_json::json!({ "by": "human:josef", "at": "x" }),
+        );
+        assert_eq!(trust_tier(&entry), "human-reviewed");
+    }
+
+    #[test]
+    fn structure_files_are_not_concepts() {
+        assert!(is_concept(&Entry::empty_for_test("knowledge/risks/r.md")));
+        assert!(!is_concept(&Entry::empty_for_test("knowledge/index.md")));
+        assert!(!is_concept(&Entry::empty_for_test("knowledge/log.md")));
+        assert!(!is_concept(&Entry::empty_for_test("records/risks/r.md")));
+    }
+
+    const TODAY: &str = "2026-08-16";
+
+    fn note(path: &str, title: &str) -> Entry {
+        let mut e = Entry::empty_for_test(path);
+        e.title = title.to_string();
+        e
+    }
+
+    fn concept_entry(path: &str, title: &str, anchors: &[&str]) -> Entry {
+        let mut e = note(path, title);
+        e.entry_type = Some("Risk".into());
+        e.relationships.insert(
+            "about".into(),
+            anchors.iter().map(|a| (*a).to_string()).collect(),
+        );
+        e
+    }
+
+    /// One vault: a project reachable only by its folder, a record reachable
+    /// by stem and by title, and four concepts anchored across them.
+    fn corpus() -> Vec<Entry> {
+        let mut kestrel = concept_entry(
+            "knowledge/risks/thermal-margin.md",
+            "Thermal margin unproven",
+            &["rq-84b-kestrel"],
+        );
+        kestrel.properties.insert(
+            "description".into(),
+            Value::String("The 60C case has never been run.".into()),
+        );
+        kestrel
+            .properties
+            .insert("stale_after".into(), Value::String("2026-08-01".into()));
+
+        let mut replacement = concept_entry(
+            "knowledge/risks/thermal-margin-rev-b.md",
+            "Thermal margin, rev B",
+            &["rq-84b-kestrel"],
+        );
+        replacement
+            .relationships
+            .insert("supersedes".into(), vec!["thermal-margin".to_string()]);
+        replacement
+            .relationships
+            .insert("contradicts".into(), vec!["thermal-margin".to_string()]);
+        replacement
+            .properties
+            .insert("lifecycle".into(), Value::String("draft".into()));
+
+        vec![
+            note("projects/atlas/project.md", "Atlas rollout"),
+            note("records/reqs/rq-84b-kestrel.md", "RQ-84B Kestrel"),
+            kestrel,
+            replacement,
+            concept_entry(
+                "knowledge/systems/atlas-gateway.md",
+                "Atlas gateway",
+                &["atlas"],
+            ),
+            // An anchor to something nobody has written up — an open thread,
+            // not a broken link (M33a D7). Its own filename must NOT be the
+            // anchor, or the concept would resolve as its own subject.
+            concept_entry(
+                "knowledge/systems/duty-cycle.md",
+                "MPM-410 duty cycle",
+                &["mpm-410"],
+            ),
+            // Bundle structure: never a concept, never an answer.
+            note("knowledge/index.md", "Index"),
+        ]
+    }
+
+    #[test]
+    fn a_target_resolves_by_path_stem_folder_and_title_alike() {
+        let entries = corpus();
+        for target in [
+            "records/reqs/rq-84b-kestrel.md",
+            "rq-84b-kestrel",
+            "RQ-84B-KESTREL",
+            "RQ-84B Kestrel",
+        ] {
+            let answer = about(&entries, target, TODAY, 20);
+            assert_eq!(
+                answer.subject.as_ref().map(|(p, _)| p.as_str()),
+                Some("records/reqs/rq-84b-kestrel.md"),
+                "{target}"
+            );
+            assert_eq!(answer.concepts.len(), 2, "{target}");
+        }
+        // A project is reached by its FOLDER — every project file is
+        // project.md, so a stem match can never name one.
+        let answer = about(&entries, "atlas", TODAY, 20);
+        assert_eq!(
+            answer.subject.as_ref().map(|(p, _)| p.as_str()),
+            Some("projects/atlas/project.md")
+        );
+        assert_eq!(answer.concepts.len(), 1);
+    }
+
+    #[test]
+    fn an_entity_nobody_wrote_about_is_empty_and_a_name_nothing_carries_is_an_open_thread() {
+        let entries = corpus();
+
+        // Written up, nothing distilled: a real subject, measured at zero.
+        let quiet = about(&entries, "projects/atlas/project.md", TODAY, 20);
+        assert!(quiet.subject.is_some());
+        assert_eq!(quiet.concepts.len(), 1);
+
+        // A record the base has never touched.
+        let untouched = about(&entries, "knowledge/index.md", TODAY, 20);
+        assert!(untouched.subject.is_some(), "the file exists");
+        assert!(
+            untouched.concepts.is_empty(),
+            "and nothing is anchored to it"
+        );
+
+        // An OPEN THREAD: no note carries the name, and the base is tracking
+        // it anyway. Absent subject, present concepts — the two are separate
+        // answers and neither is an error.
+        let thread = about(&entries, "mpm-410", TODAY, 20);
+        assert!(thread.subject.is_none());
+        assert_eq!(thread.key, "mpm-410");
+        assert_eq!(thread.concepts.len(), 1);
+
+        // And a name that is neither: empty, with no subject.
+        let nothing = about(&entries, "kos-3.2", TODAY, 20);
+        assert!(nothing.subject.is_none());
+        assert!(nothing.concepts.is_empty());
+    }
+
+    fn at<'a>(answer: &'a About, path: &str) -> &'a AboutConcept {
+        answer
+            .concepts
+            .iter()
+            .find(|c| c.path == path)
+            .unwrap_or_else(|| panic!("{path} is missing from {:?}", answer.concepts))
+    }
+
+    #[test]
+    fn a_concept_reports_what_was_recorded_and_says_nothing_about_what_was_not() {
+        let entries = corpus();
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20);
+        let old = at(&answer, "knowledge/risks/thermal-margin.md");
+        assert_eq!(
+            old.description.as_deref(),
+            Some("The 60C case has never been run.")
+        );
+        assert_eq!(old.concept_type.as_deref(), Some("Risk"));
+        assert_eq!(old.lifecycle, "stable", "unset lifecycle reads as stable");
+        assert_eq!(old.trust, "unverified");
+        assert!(old.stale, "2026-08-01 has passed");
+
+        let new = at(&answer, "knowledge/risks/thermal-margin-rev-b.md");
+        assert_eq!(new.lifecycle, "draft");
+        // NOT RECORDED, never zero or empty-string: nobody wrote a
+        // description or a recheck date on this one.
+        assert_eq!(new.description, None);
+        assert_eq!(new.stale_after, None);
+        assert!(!new.stale, "no recheck date is not the same as fresh");
+    }
+
+    #[test]
+    fn the_graph_is_read_backwards_so_a_retired_claim_does_not_look_current() {
+        let entries = corpus();
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20);
+        let old = at(&answer, "knowledge/risks/thermal-margin.md");
+        // The replaced concept's own frontmatter says nothing about being
+        // replaced — the replacement is what knows.
+        assert_eq!(
+            old.superseded_by,
+            vec!["knowledge/risks/thermal-margin-rev-b.md".to_string()]
+        );
+        // Contradiction is symmetric, so the end that did not declare it
+        // still reports the edge.
+        assert_eq!(
+            old.contradicts
+                .iter()
+                .filter_map(|e| e.path.clone())
+                .collect::<Vec<_>>(),
+            vec!["knowledge/risks/thermal-margin-rev-b.md".to_string()]
+        );
+
+        let new = at(&answer, "knowledge/risks/thermal-margin-rev-b.md");
+        assert!(new.superseded_by.is_empty());
+        assert_eq!(
+            new.contradicts
+                .iter()
+                .filter_map(|e| e.path.clone())
+                .collect::<Vec<_>>(),
+            vec!["knowledge/risks/thermal-margin.md".to_string()],
+            "declared once, reported once"
+        );
+    }
+
+    #[test]
+    fn a_relation_naming_nothing_is_reported_as_unresolved_rather_than_dropped() {
+        let mut entries = corpus();
+        let mut orphan = concept_entry("knowledge/risks/loose.md", "Loose end", &["mpm-410"]);
+        orphan
+            .relationships
+            .insert("contradicts".into(), vec!["never-written".to_string()]);
+        entries.push(orphan);
+
+        let answer = about(&entries, "mpm-410", TODAY, 20);
+        let loose = answer
+            .concepts
+            .iter()
+            .find(|c| c.path == "knowledge/risks/loose.md")
+            .expect("the concept is anchored to the thread");
+        assert_eq!(loose.contradicts.len(), 1);
+        assert_eq!(loose.contradicts[0].target, "never-written");
+        assert_eq!(loose.contradicts[0].path, None);
+    }
+
+    #[test]
+    fn a_limit_counts_what_it_cut_instead_of_absorbing_it() {
+        let entries = corpus();
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 1);
+        assert_eq!(answer.concepts.len(), 1);
+        assert_eq!(answer.omitted, 1);
+        // And nothing is omitted when everything fits.
+        assert_eq!(about(&entries, "rq-84b-kestrel", TODAY, 20).omitted, 0);
     }
 
     /// Regenerating the digest is a deliberate act, so it is a test you run by

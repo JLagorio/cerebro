@@ -71,6 +71,42 @@ export function augmentDocPrompt(path: string, title: string): string {
 }
 
 /**
+ * Ask the base what it knows that bears on the record in front of you
+ * (M33a.5).
+ *
+ * The counterpart to `augmentDocPrompt`, and a different question: that one
+ * reads your DRAFT and reports what it is missing, this one asks the base
+ * about the SUBJECT and reports what it holds. It is the invocable half of
+ * the same read the surfaces beside a record already render.
+ *
+ * Naming `knowledge_about` first is load-bearing. Told only to "see what you
+ * know", a model searches the bundle by keyword and returns whichever
+ * concepts share words with the title — which misses everything anchored to
+ * the record under a name the title never uses, and finds concepts that are
+ * about something else entirely. The tool answers by ANCHOR, which is the
+ * question being asked.
+ *
+ * The instruction not to write is equally load-bearing: the user pressed a
+ * button that asks a question, and an answer that arrives as three new
+ * concepts is not the thing they asked for.
+ */
+export function askBasePrompt(path: string, title: string): string {
+  return [
+    `What does the knowledge base know that bears on ${path} ("${title}")?`,
+    '',
+    `Call knowledge_about with target: ${path} FIRST — it answers by anchor, so it finds what is filed under this record rather than what happens to share words with its title. Then follow the threads it names: read the concepts that matter with get_note, and call knowledge_about again for anything they are also about.`,
+    '',
+    'Answer in three short sections:',
+    '',
+    '**Held** — what the base currently believes about this, each with the concept it came from.',
+    '**Unsettled** — anything contradicted, superseded, or past its recheck date. Say which claim is newer.',
+    '**Not covered** — what the record raises that the base has nothing on. This is the section worth reading, so do not pad the other two to reach it.',
+    '',
+    'Do not write or revise anything. This is a question, not an instruction to distil — if the answer is "almost nothing yet", that is the answer, and say so in one line.',
+  ].join('\n');
+}
+
+/**
  * Ask the agent to recheck one concept against what it was built from (M8.8).
  *
  * The instruction to reach a verdict is load-bearing. Told only to "review",

@@ -217,6 +217,7 @@ describe('LibraryPage', () => {
       'get_vault_context',
       'search_notes',
       'get_note',
+      'knowledge_about',
       'list_inbox',
     ]);
   });
