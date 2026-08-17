@@ -31,6 +31,7 @@ preemptively.)
 | `trigger-registry.v1.json` + `.sha256` | The M28 deferral registry's evaluable half: the fourteen R1–R14 entries, each gate key's required evaluation variant, scope, and parent rule, the metric name/unit tables, and the measurable protocols' floors. (R15–R17, registered 2026-08-14 by M31.8, deliberately postdate v1 — see the trigger-registry judgment calls below.) Interpreted by `src-tauri/src/trigger/registry.rs` and `src/lib/trigger/registry.ts` — two interpreters, one artifact. A combination the artifact does not name resolves to nothing, which IS the refusal. R14's `registered_connectors` is the one deliberately empty list: no connector qualifies yet, and a fake registration to satisfy a validator would be worse. |
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
+| `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs` into `write_concept`'s tool description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
 
 **Three of these are Rust-only, and that is not an exemption from the house
 rule.** `freshness`, `coverage-fold` and `lanes` are read by no TypeScript
@@ -61,6 +62,8 @@ cargo test --lib attention::lanes::tests::write_lanes_digest -- --ignored
 cargo test --lib attention::critical::tests::write_critical_digest -- --ignored
 # after an edit to trigger-registry.v1.json
 cargo test --lib trigger::registry::tests::write_trigger_registry_digest -- --ignored
+# after an edit to concept-types.v1.json
+cargo test --lib knowledge::tests::write_concept_types_digest -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in

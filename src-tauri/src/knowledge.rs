@@ -336,6 +336,81 @@ pub fn insert_log_entry(existing: &str, date: &str, kind: &str, title: &str, rel
     text
 }
 
+// --- The concept-type vocabulary (M33a.1) ----------------------------------
+
+/// The words the agent is allowed to type a concept with.
+///
+/// Data rather than a Rust array because `okf.ts` resolves `conceptType`
+/// against the same idea on the read side, and a rule implemented as twin
+/// Rust and TS code is a review-blocking defect (`shared/policy/README.md`).
+///
+/// It ships as one static list rather than per-vault: a vault that declares
+/// its own types can still use them — `conceptType` is free-form by OKF §4.1
+/// and consumers must tolerate unknown values — this is what the agent is
+/// OFFERED when it has nothing else to go on, which was the measured failure.
+const CONCEPT_TYPES_JSON: &str = include_str!("../../shared/policy/concept-types.v1.json");
+const CONCEPT_TYPES_DIGEST: &str = include_str!("../../shared/policy/concept-types.v1.sha256");
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)] // Read by the digest test and by anyone diffing the artifact.
+struct ConceptTypeArtifact {
+    format: u64,
+    artifact_version: u64,
+    rule_version: String,
+    fallback: String,
+    types: Vec<ConceptTypeDef>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConceptTypeDef {
+    id: String,
+    hint: String,
+}
+
+fn concept_types() -> &'static ConceptTypeArtifact {
+    use std::sync::OnceLock;
+    static LOADED: OnceLock<ConceptTypeArtifact> = OnceLock::new();
+    LOADED.get_or_init(|| {
+        let digest = crate::ledger::sha256_hex(CONCEPT_TYPES_JSON.as_bytes());
+        assert_eq!(
+            digest.trim(),
+            CONCEPT_TYPES_DIGEST.trim(),
+            "concept-types.v1.json does not match its digest — regenerate it, \
+             see shared/policy/README.md"
+        );
+        let artifact: ConceptTypeArtifact =
+            serde_json::from_str(CONCEPT_TYPES_JSON).expect("concept-types.v1.json parses");
+        assert_eq!(artifact.format, 1, "unknown concept-types format");
+        assert!(
+            artifact.types.iter().any(|t| t.id == artifact.fallback),
+            "the fallback must be one of the offered types"
+        );
+        artifact
+    })
+}
+
+/// Every type name, in artifact order.
+pub fn concept_type_names() -> Vec<&'static str> {
+    concept_types()
+        .types
+        .iter()
+        .map(|t| t.id.as_str())
+        .collect()
+}
+
+/// The vocabulary rendered for a tool description: `Name — hint`, one per
+/// line, so the model reads what each word is FOR and not just that it exists.
+pub fn concept_type_menu() -> String {
+    concept_types()
+        .types
+        .iter()
+        .map(|t| format!("{} — {}", t.id, t.hint))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -581,5 +656,37 @@ mod tests {
         assert!(guard_verify("knowledge/a.md", &sneaky).is_err());
 
         assert!(guard_verify("knowledge/a.md", &patch(&[])).is_err());
+    }
+
+    #[test]
+    fn the_vocabulary_matches_its_digest_and_names_the_words_the_vault_needed() {
+        // Two processes in two languages asserting the SAME bytes, not each
+        // asserting self-consistency (shared/policy/README.md).
+        let names = concept_type_names();
+        // The measured gap: 3 programs and 13 systems all landed on Reference
+        // because those two words were never in the tool's description.
+        assert!(names.contains(&"Program"));
+        assert!(names.contains(&"System"));
+        // And the fallback must still be offerable, or a concept that is honestly
+        // background has nowhere to go.
+        assert!(names.contains(&"Reference"));
+    }
+
+    /// Regenerating the digest is a deliberate act, so it is a test you run by
+    /// name rather than something the suite does on its own.
+    ///
+    /// `cargo test --lib knowledge::tests::write_concept_types_digest -- --ignored`
+    #[test]
+    #[ignore]
+    fn write_concept_types_digest() {
+        let digest = crate::ledger::sha256_hex(CONCEPT_TYPES_JSON.as_bytes());
+        std::fs::write(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shared/policy/concept-types.v1.sha256"
+            ),
+            format!("{digest}\n"),
+        )
+        .unwrap();
     }
 }
