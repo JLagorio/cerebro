@@ -2,21 +2,28 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
-import type { FleetActorSummary, ReviewCard } from '@/lib/ipc';
+import type { FleetActorSummary, PipelineOverview, ReviewCard } from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
-import { AgentRoster } from './AgentRoster';
+import { AgentRoster, liveState } from './AgentRoster';
 
 /**
- * Who works here (M33b.3).
+ * Who works here (M33b.3), and what each of them is doing (M33b.4).
  *
- * One claim under test: **absent is never zero**. An agent that has never
- * run, a total nobody metered and a queue that could not be read each get a
- * sentence, and none of those sentences is a number.
+ * Two claims under test and nothing else. **Absent is never zero**: an agent
+ * that has never run, a total nobody metered and a queue that could not be
+ * read each get a sentence, and none of those sentences is a number. And
+ * **the state chip never asserts calm it cannot support**: "idle" says three
+ * things at once — nothing running, nothing queued, nothing stopped — so a
+ * failed read of any of the three has to cost it that word.
+ *
+ * The precedence itself is a pure function and is tested as one; the
+ * component specs are about what reaches the screen.
  */
 
 const fleetActorSummaries = vi.fn<() => Promise<FleetActorSummary[]>>();
 const fleetRuns = vi.fn<() => Promise<unknown[]>>();
 const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
+const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -25,6 +32,7 @@ vi.mock('@/lib/ipc', async () => {
     fleetActorSummaries: () => fleetActorSummaries(),
     fleetRuns: () => fleetRuns(),
     reviewQueue: (vault: string) => reviewQueue(vault),
+    pipelineOverview: (vault: string) => pipelineOverview(vault),
   };
 });
 
@@ -51,6 +59,7 @@ function summary(over: Partial<FleetActorSummary> = {}): FleetActorSummary {
     input_tokens: 1_000,
     output_tokens: 200,
     unknown_runs: 0,
+    running_runs: 0,
     last_outcome: 'succeeded',
     last_started_at: '2026-07-28T09:00:00Z',
     ...over,
@@ -83,6 +92,37 @@ function card(over: Partial<ReviewCard> = {}): ReviewCard {
 
 const roster = () => <AgentRoster vaultPath={VAULT} focus={null} onFocus={() => {}} now={NOW} />;
 
+describe('liveState (M33b.4)', () => {
+  const facts = {
+    running: 0,
+    waiting: 0,
+    onDuty: true,
+    paused: false,
+  };
+
+  it('lets a run in flight beat everything else', () => {
+    expect(liveState({ ...facts, running: 1, waiting: 3, paused: true })).toBe('working');
+  });
+
+  it('puts a queued decision above the pause, which does not un-queue it', () => {
+    expect(liveState({ ...facts, waiting: 2, paused: true })).toBe('waiting');
+  });
+
+  it('calls an agent nothing can fire not-activated rather than paused', () => {
+    // A description is not a stopped daemon, and calling it paused would
+    // imply a resume button exists for it.
+    expect(liveState({ ...facts, onDuty: false, paused: true })).toBe('inactive');
+  });
+
+  it('refuses to say idle when a fact the idle claim rests on was not read', () => {
+    expect(liveState({ ...facts, waiting: null })).toBe('unknown');
+    expect(liveState({ ...facts, paused: null })).toBe('unknown');
+    expect(liveState({ ...facts, running: null })).toBe('unknown');
+    // And with all three known and quiet, it is allowed to say it.
+    expect(liveState(facts)).toBe('idle');
+  });
+});
+
 describe('AgentRoster', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -93,6 +133,7 @@ describe('AgentRoster', () => {
     fleetActorSummaries.mockResolvedValue([summary()]);
     fleetRuns.mockResolvedValue([]);
     reviewQueue.mockResolvedValue([]);
+    pipelineOverview.mockResolvedValue({ global_pause: false } as PipelineOverview);
   });
 
   it('lists an agent that has never run, rather than only ones that are busy', async () => {
@@ -112,6 +153,7 @@ describe('AgentRoster', () => {
   it('says a record with no schedule is a description, not a daemon', async () => {
     render(roster());
     await screen.findByTestId('agent-row');
+    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('inactive');
     expect(screen.getByTestId('agent-duty').textContent).toContain('description, not a daemon');
   });
 
@@ -126,6 +168,7 @@ describe('AgentRoster', () => {
     await screen.findByTestId('agent-row');
     expect(screen.getByTestId('agent-last-run').textContent).toBe('3 hours ago');
     expect(screen.getByTestId('agent-duty').textContent).toContain('next ');
+    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('idle');
   });
 
   it('names the unmetered runs a lifetime total could not include', async () => {
@@ -147,6 +190,15 @@ describe('AgentRoster', () => {
     expect(spend.textContent).not.toContain('0 tokens');
   });
 
+  it('reads working off a run still going, not off a recent timestamp', async () => {
+    fleetActorSummaries.mockResolvedValue([summary({ running_runs: 1 })]);
+    render(roster());
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('working'),
+    );
+  });
+
   it('counts what is queued against this agent and says a measured zero out loud', async () => {
     reviewQueue.mockResolvedValue([card(), card({ proposal_id: 'p2' }), card({ actor: 'other' })]);
     render(roster());
@@ -154,6 +206,7 @@ describe('AgentRoster', () => {
     await waitFor(() =>
       expect(screen.getByTestId('agent-waiting').textContent).toBe('2 waiting on you'),
     );
+    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('waiting');
 
     cleanup();
     reviewQueue.mockResolvedValue([]);
@@ -163,7 +216,7 @@ describe('AgentRoster', () => {
     );
   });
 
-  it('says which read failed, and leaves the other one standing', async () => {
+  it('says which read failed, and costs the row its claim to be idle', async () => {
     // "Nothing is waiting" and "we could not tell you what is waiting" are
     // opposite sentences.
     useVaultStore.setState({
@@ -180,7 +233,8 @@ describe('AgentRoster', () => {
       ).toBe(true),
     );
     expect(screen.getByTestId('agent-waiting').textContent).toBe('queue not read');
-    // The other read stands. The row still knows when it last ran.
+    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('unknown');
+    // The other two reads stand. The row still knows when it last ran.
     expect(screen.getByTestId('agent-last-run').textContent).toBe('3 hours ago');
   });
 

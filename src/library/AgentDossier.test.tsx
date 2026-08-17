@@ -66,6 +66,7 @@ function summary(over: Partial<FleetActorSummary> = {}): FleetActorSummary {
     input_tokens: 0,
     output_tokens: 0,
     unknown_runs: 0,
+    running_runs: 0,
     last_outcome: null,
     last_started_at: null,
     ...over,

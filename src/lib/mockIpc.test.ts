@@ -916,6 +916,27 @@ describe('the deferral gates (M28.1)', () => {
     expect(roster[1]).toEqual(await mock.fleetActorSummary('process:scout'));
   });
 
+  it('the roster counts a run still going, which is the whole of "working"', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:scout', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({
+        run_id: 'r2',
+        actor: 'process:scout',
+        started_at: '2026-07-28T11:00:00Z',
+        outcome: 'running',
+        usage_state: 'pending',
+        ended_at: null,
+        input_tokens: 0,
+        output_tokens: 0,
+      }),
+    ]);
+    const [scout] = await mock.fleetActorSummaries();
+    expect(scout.running_runs).toBe(1);
+    // A pending run has not said what it spent, so it is skipped and counted.
+    expect(scout.unknown_runs).toBe(1);
+    expect(scout.input_tokens).toBe(100);
+  });
+
   it('a fleet with nothing attributed is EMPTY, and a missing database refuses', async () => {
     // Measured-at-zero and unreadable, kept apart on this side of the wire
     // exactly as `actor_summaries` keeps them apart on the other.

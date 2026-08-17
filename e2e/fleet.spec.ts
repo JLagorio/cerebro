@@ -206,9 +206,11 @@ test('fleet: the surface lists agents, and says which of them is a description',
 });
 
 test('fleet: an agent says what it has queued waiting on you', async ({ page }) => {
-  // The demo queue holds two of release-scout's proposals awaiting a decision.
+  // The demo queue holds two of release-scout's proposals awaiting a
+  // decision, which is what earns the state rather than a recent timestamp.
   const section = await openFleet(page, [RUN]);
   await expect(section.getByTestId('agent-waiting')).toContainText('2 waiting on you');
+  await expect(section.getByTestId('agent-state')).toHaveAttribute('data-state', 'waiting');
 });
 
 test('fleet: work that no agent record owns is named, not given a face', async ({ page }) => {

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { onAgentEvent } from '@/agent/agentIpc';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
 import { nextFire, parseSchedule } from '@/engine/skills';
@@ -37,10 +38,12 @@ import { useVaultStore } from '@/stores/vaultStore';
  * record behind it, so "who works here" has a complete answer without the
  * surface inventing three colleagues.
  *
- * **Two reads, two failures, and neither becomes a zero.** The run summaries
- * and the proposal queue are separate calls. Either one failing says so and
- * leaves the other standing, because "nothing is waiting" and "we could not
- * tell you what is waiting" are opposite sentences.
+ * **Three reads, three failures, and none of them becomes a zero.** The run
+ * summaries, the proposal queue and the pause are separate calls. Any one of
+ * them failing says so and leaves the other two standing — and the state chip
+ * refuses to say "idle" when a fact it would need is missing, because "nothing
+ * is waiting" and "we could not tell you what is waiting" are opposite
+ * sentences.
  */
 
 /** One read's three states. `loading` is distinct from `unavailable` so a slow
@@ -58,6 +61,53 @@ type Read<T> = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; 
  */
 type RunFacts =
   { kind: 'unavailable' } | { kind: 'never' } | { kind: 'some'; summary: FleetActorSummary };
+
+/**
+ * What an agent is doing right now (M33b.4).
+ *
+ * Derived, never stored, from the run table and the proposal queue. The order
+ * is the argument:
+ *
+ * - **working** wins outright. A run the dispatcher opened and has not
+ *   finalized is the loudest true thing about an agent.
+ * - **waiting on you** outranks the pause, because pausing the background does
+ *   not un-queue a decision somebody still owes.
+ * - **not activated** outranks the pause too. An agent nothing can fire is not
+ *   paused; it was never started, and calling that "paused" would imply a
+ *   resume button exists for it.
+ * - **unknown** is what stands where `idle` would go when a fact the idle
+ *   claim rests on could not be read. Idle asserts that nothing is running,
+ *   nothing is queued and nothing is stopped — three claims, and a surface
+ *   that makes them on a failed read is inventing calm.
+ */
+export type AgentState = 'working' | 'waiting' | 'inactive' | 'paused' | 'unknown' | 'idle';
+
+export function liveState(facts: {
+  /** Rows open right now. `null` = the run summaries could not be read. */
+  running: number | null;
+  /** Proposals of this actor's awaiting a decision. `null` = queue unread. */
+  waiting: number | null;
+  /** Whether anything — a schedule or a trigger — can fire it. */
+  onDuty: boolean;
+  /** The background pause. `null` = it could not be read. */
+  paused: boolean | null;
+}): AgentState {
+  if (facts.running !== null && facts.running > 0) return 'working';
+  if (facts.waiting !== null && facts.waiting > 0) return 'waiting';
+  if (!facts.onDuty) return 'inactive';
+  if (facts.paused === true) return 'paused';
+  if (facts.running === null || facts.waiting === null || facts.paused === null) return 'unknown';
+  return 'idle';
+}
+
+const STATE_TEXT: Record<AgentState, string> = {
+  working: 'working now',
+  waiting: 'waiting on you',
+  inactive: 'not activated',
+  paused: 'paused',
+  unknown: 'state unknown',
+  idle: 'idle',
+};
 
 /** When this agent last did anything. Never an epoch and never a dash: an
  * agent that has never run has no last-run time, and that is a sentence. */
@@ -113,6 +163,54 @@ function dutyText(schedule: string, onDuty: boolean, now: Date): string {
   return `${schedule.trim()} · next ${localStamp(nextFire(parsed, now))}`;
 }
 
+/**
+ * Re-read when a run starts or ends, rather than on a timer (M33b.4).
+ *
+ * The agent stream already announces exactly the transitions this surface
+ * cares about, so there is no interval here — a polling loop beside an event
+ * channel is a second, worse copy of the channel, and it would keep the
+ * runtime database busy on a tab nobody is looking at.
+ *
+ * `Result` is deliberately not in the list: it arrives before `Done` on the
+ * same run and would double every re-read for no new fact. And the deltas are
+ * not either — a token of streamed text is not a change of state.
+ *
+ * What this does NOT cover is named rather than papered over: a run that
+ * another window or a future out-of-process scheduler starts emits nothing
+ * here, so the roster learns about it the next time this tab is opened. That
+ * is the same freshness every other tab under Knowledge has, by the same
+ * deliberate choice — these surfaces speak when they are opened.
+ */
+function useFleetPulse(): number {
+  const [pulse, setPulse] = useState(0);
+  useEffect(
+    () =>
+      onAgentEvent((event) => {
+        if (event.kind === 'Init' || event.kind === 'Done' || event.kind === 'Error') {
+          setPulse((previous) => previous + 1);
+        }
+      }),
+    [],
+  );
+  return pulse;
+}
+
+function Chip({ state }: { state: AgentState }) {
+  // No colour ladder and no badge. Spec §6: this surface can become the
+  // nagging screen M8 exists to prevent, and the way it would get there is by
+  // learning to shout. A state is a word.
+  return (
+    <span
+      data-testid="agent-state"
+      data-state={state}
+      className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em] text-n-600"
+      style={{ border: '1px solid var(--n-200)' }}
+    >
+      {STATE_TEXT[state]}
+    </span>
+  );
+}
+
 export function AgentRoster({
   vaultPath,
   focus,
@@ -128,6 +226,7 @@ export function AgentRoster({
   now?: Date;
 }) {
   const entries = useVaultStore((s) => s.entries);
+  const pulse = useFleetPulse();
 
   // The body is the standing instructions and no row renders them, so it is
   // passed empty: `agentDraft` is reused rather than re-parsing `schedule:`
@@ -143,13 +242,15 @@ export function AgentRoster({
 
   const [summaries, setSummaries] = useState<Read<FleetActorSummary[]>>({ kind: 'loading' });
   const [queue, setQueue] = useState<Read<Map<string, number>>>({ kind: 'loading' });
+  const [paused, setPaused] = useState<Read<boolean>>({ kind: 'loading' });
 
   useEffect(() => {
     let live = true;
     setSummaries({ kind: 'loading' });
     setQueue({ kind: 'loading' });
+    setPaused({ kind: 'loading' });
 
-    // Two reads, fired together and landing independently. A read behind a
+    // Three reads, fired together and landing independently. A read behind a
     // surface goes quiet rather than toasting (the store-layer rule) and the
     // row says what it could not find out.
     void ipc.fleetActorSummaries().then(
@@ -158,9 +259,10 @@ export function AgentRoster({
     );
 
     if (vaultPath === null) {
-      // No vault, no ledger. Unavailable rather than empty: there is no claim
-      // to make about a queue nobody can open.
+      // No vault, no ledger and no pause to read. Unavailable rather than
+      // empty: there is no claim to make about a queue nobody can open.
       setQueue({ kind: 'unavailable' });
+      setPaused({ kind: 'unavailable' });
     } else {
       void ipc.reviewQueue(vaultPath).then(
         (cards) => {
@@ -171,12 +273,18 @@ export function AgentRoster({
         },
         () => live && setQueue({ kind: 'unavailable' }),
       );
+      void ipc.pipelineOverview(vaultPath).then(
+        (overview) => live && setPaused({ kind: 'ready', data: overview.global_pause }),
+        () => live && setPaused({ kind: 'unavailable' }),
+      );
     }
 
     return () => {
       live = false;
     };
-  }, [vaultPath]);
+    // `pulse` is the deliberate re-read: a run started or ended, so what these
+    // three reads would say has changed.
+  }, [vaultPath, pulse]);
 
   const factsFor = (actor: string): RunFacts => {
     if (summaries.kind !== 'ready') return { kind: 'unavailable' };
@@ -215,6 +323,11 @@ export function AgentRoster({
           The proposal queue could not be read, so no row here says what is waiting on you.
         </p>
       )}
+      {paused.kind === 'unavailable' && (
+        <p data-testid="section-unavailable" className="text-xs text-n-500">
+          The background pause could not be read, so no row here says whether work is stopped.
+        </p>
+      )}
 
       {agents.length === 0 && summaries.kind !== 'loading' && (
         <p data-testid="roster-empty" className="text-xs text-n-500">
@@ -227,6 +340,12 @@ export function AgentRoster({
         const facts = factsFor(ref.actor);
         const waiting = waitingFor(ref.actor);
         const onDuty = agentActive(duty);
+        const state = liveState({
+          running: facts.kind === 'some' ? facts.summary.running_runs : null,
+          waiting,
+          onDuty,
+          paused: paused.kind === 'ready' ? paused.data : null,
+        });
         const focused = focus === ref.actor;
         return (
           <button
@@ -234,6 +353,7 @@ export function AgentRoster({
             type="button"
             data-testid="agent-row"
             data-actor={ref.actor}
+            data-state={state}
             aria-pressed={focused}
             // Clicking narrows the history below to this agent's runs — the
             // "one level down" D5 asks for. Clicking again lets go of it,
@@ -248,6 +368,7 @@ export function AgentRoster({
               <span className="min-w-0 flex-1 truncate text-xs font-medium text-n-800">
                 {ref.title}
               </span>
+              <Chip state={state} />
             </span>
             <span data-testid="agent-duty" className="text-2xs text-n-600">
               {dutyText(duty.schedule, onDuty, now)}

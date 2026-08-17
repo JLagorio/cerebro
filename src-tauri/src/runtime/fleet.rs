@@ -121,6 +121,13 @@ pub struct ActorSummary {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub unknown_runs: u64,
+    /// Rows still carrying `outcome = 'running'` (M33b.4). This is the whole
+    /// of what "working" means on the fleet surface: a run the dispatcher
+    /// opened and has not finalized. It is a COUNT rather than a flag because
+    /// the row count is what the table holds, and a surface that wants a
+    /// boolean can ask whether it is above zero — the reverse is lossy the
+    /// day the concurrency ceiling stops being one.
+    pub running_runs: u64,
     /// The most recent run's outcome and start, or `None` for an actor with
     /// no runs at all — which is what a freshly written Agent record has.
     pub last_outcome: Option<String>,
@@ -293,6 +300,7 @@ fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>
          coalesce(sum(CASE WHEN r.usage_state = 'exact' THEN r.input_tokens END), 0), \
          coalesce(sum(CASE WHEN r.usage_state = 'exact' THEN r.output_tokens END), 0), \
          sum(CASE WHEN r.usage_state <> 'exact' THEN 1 ELSE 0 END), \
+         sum(CASE WHEN r.outcome = 'running' THEN 1 ELSE 0 END), \
          (SELECT x.outcome FROM runs x WHERE x.actor = r.actor \
           ORDER BY x.started_at DESC, x.run_id DESC LIMIT 1), \
          (SELECT x.started_at FROM runs x WHERE x.actor = r.actor \
@@ -312,8 +320,9 @@ fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>
                 input_tokens: row.get::<_, i64>(2)? as u64,
                 output_tokens: row.get::<_, i64>(3)? as u64,
                 unknown_runs: row.get::<_, Option<i64>>(4)?.unwrap_or(0) as u64,
-                last_outcome: row.get(5)?,
-                last_started_at: row.get(6)?,
+                running_runs: row.get::<_, Option<i64>>(5)?.unwrap_or(0) as u64,
+                last_outcome: row.get(6)?,
+                last_started_at: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -338,6 +347,7 @@ pub fn actor_summary(conn: &Connection, actor: &str) -> Result<ActorSummary, Str
             input_tokens: 0,
             output_tokens: 0,
             unknown_runs: 0,
+            running_runs: 0,
             last_outcome: None,
             last_started_at: None,
         }))
@@ -372,6 +382,7 @@ mod tests {
         mode: &'a str,
         lane: &'a str,
         usage_state: &'a str,
+        outcome: &'a str,
         input: i64,
         output: i64,
     }
@@ -385,6 +396,7 @@ mod tests {
                 mode: "ambient",
                 lane: "filed",
                 usage_state: "exact",
+                outcome: "succeeded",
                 input: 100,
                 output: 10,
             }
@@ -401,18 +413,23 @@ mod tests {
     fn seed_runs(conn: &Connection, vault: &str, rows: &[Seed<'_>]) {
         for row in rows {
             conn.execute(
+                // A run still going has NO end. Seeding one with an
+                // `ended_at` would make the fixture describe a row the
+                // dispatcher never writes.
                 "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, \
                  ended_at, outcome, usage_state, input_tokens, output_tokens, cache_read, \
                  cache_write, reserved_total_tokens, reserved_output_tokens, \
                  proposals_submitted, applied, rejected, actor) \
-                 VALUES (?1, ?2, 'store', ?3, ?4, ?5, ?5, 'succeeded', ?6, ?7, ?8, 0, 0, 0, 0, \
-                         0, 0, 0, ?9)",
+                 VALUES (?1, ?2, 'store', ?3, ?4, ?5, \
+                         CASE WHEN ?6 = 'running' THEN NULL ELSE ?5 END, \
+                         ?6, ?7, ?8, ?9, 0, 0, 0, 0, 0, 0, 0, ?10)",
                 rusqlite::params![
                     row.run_id,
                     vault,
                     row.mode,
                     row.lane,
                     row.started_at,
+                    row.outcome,
                     row.usage_state,
                     row.input,
                     row.output,
@@ -562,6 +579,7 @@ mod tests {
         let summary = actor_summary(&conn, "process:brand-new").unwrap();
         assert_eq!(summary.run_count, 0);
         assert_eq!(summary.unknown_runs, 0);
+        assert_eq!(summary.running_runs, 0);
         assert_eq!(summary.last_outcome, None);
         assert_eq!(summary.last_started_at, None);
         drop(conn);
@@ -613,6 +631,44 @@ mod tests {
             scout,
             &actor_summary(&conn, "process:scout")?,
             "the fold is the same fold — one aggregation, two entry points"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn a_run_still_going_is_counted_as_working_rather_than_inferred(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // M33b.4. "Working" is not a guess from a recent timestamp — it is
+        // the row the dispatcher opened and has not finalized.
+        let (dir, conn, vault) = fixture("fleet-working");
+        let mut going = Seed::new("r2", Some("process:scout"), "2026-08-09T11:00:00Z");
+        going.outcome = "running";
+        going.usage_state = "pending";
+        going.input = 0;
+        going.output = 0;
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("r1", Some("process:scout"), "2026-08-09T10:00:00Z"),
+                going,
+                Seed::new("r3", Some("process:quiet"), "2026-08-09T09:00:00Z"),
+            ],
+        );
+
+        let roster = actor_summaries(&conn)?;
+        let scout = roster.iter().find(|s| s.actor == "process:scout").unwrap();
+        assert_eq!(scout.running_runs, 1, "one row is open right now");
+        assert_eq!(
+            scout.unknown_runs, 1,
+            "and a pending run has not said what it spent, so it is not summed"
+        );
+        let quiet = roster.iter().find(|s| s.actor == "process:quiet").unwrap();
+        assert_eq!(
+            quiet.running_runs, 0,
+            "an actor with only finished runs is not working"
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);

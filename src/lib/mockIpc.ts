@@ -1402,6 +1402,10 @@ export interface FleetActorSummary {
   /** Runs that happened but never said what they spent. Counted rather than
    * added as zero, so a lifetime total reads as visibly partial. */
   unknown_runs: number;
+  /** Rows still carrying `outcome: 'running'` (M33b.4) — the whole of what
+   * "working" means. A count, not a flag, because the row count is what the
+   * table holds. */
+  running_runs: number;
   last_outcome: string | null;
   last_started_at: string | null;
 }
@@ -1485,6 +1489,7 @@ function summariseActor(actor: string, runs: FleetRun[]): FleetActorSummary {
     input_tokens: metered.reduce((sum, run) => sum + run.input_tokens, 0),
     output_tokens: metered.reduce((sum, run) => sum + run.output_tokens, 0),
     unknown_runs: runs.length - metered.length,
+    running_runs: runs.filter((run) => run.outcome === 'running').length,
     last_outcome: latest?.outcome ?? null,
     last_started_at: latest?.started_at ?? null,
   };
