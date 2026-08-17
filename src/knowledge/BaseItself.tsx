@@ -100,7 +100,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section data-testid="status-section" data-section={id} className="flex flex-col gap-1.5">
+    <section data-testid="base-section" data-section={id} className="flex flex-col gap-1.5">
       <div className="flex items-baseline gap-2">
         <h2 className="text-sm font-semibold text-n-800">{title}</h2>
         {/* §33 made visible. The guarantee that no preference can hide this

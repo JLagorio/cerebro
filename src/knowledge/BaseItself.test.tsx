@@ -205,7 +205,7 @@ describe('What the base knows about itself', () => {
   it('every tab still carries its own data-section', async () => {
     const sections = async (ui: ReactElement) => {
       const { unmount } = render(ui);
-      const found = await screen.findAllByTestId('status-section');
+      const found = await screen.findAllByTestId('base-section');
       const ids = found.map((s) => s.getAttribute('data-section'));
       unmount();
       return ids;
@@ -227,7 +227,7 @@ describe('What the base knows about itself', () => {
   it('renders every lane the feed declares, including the ones holding nothing', async () => {
     render(<WhatsContested vaultPath={VAULT} />);
 
-    const sections = await screen.findAllByTestId('status-section');
+    const sections = await screen.findAllByTestId('base-section');
     const ids = sections.map((s) => s.getAttribute('data-section'));
     expect(ids).toContain('contradiction');
     expect(ids).toContain('staleness');
