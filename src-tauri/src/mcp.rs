@@ -749,7 +749,7 @@ fn base_tools() -> Vec<Value> {
                 "path": { "type": "string", "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md" },
                 "type": { "type": "string", "description": "OKF concept type, e.g. Metric, Playbook, Reference" },
                 "title": { "type": "string" },
-                "description": { "type": "string", "description": "One sentence saying what this concept is. It is the only line shown beside the title in every list, so 'what it is' beats 'why it matters'." },
+                "description": { "type": "string", "description": "One sentence saying what this concept is. It is what appears beside the title wherever concepts are listed, so 'what it is' beats 'why it matters'." },
                 "about": {
                     "type": "array",
                     "description": "The vault entities this concept is knowledge OF, as wikilinks — e.g. [\"[[phoenix-warehouse-rollout]]\", \"[[risk-rollback-unrehearsed]]\"]. Distinct from `sources`: that is where the claim came from, this is what it is about. Anchor every concept you can; an unanchored concept cannot surface anywhere but the bundle.",
@@ -1906,6 +1906,9 @@ fn tool_write_concept(
         return Err(TYPE_DOC_REFUSAL.into());
     }
     let body = arg_str(args, "body").ok_or("write_concept needs a body")?;
+    let description = arg_str(args, "description").ok_or(
+        "write_concept needs a one-sentence description — it is the line shown beside the title wherever concepts are listed",
+    )?;
 
     let mut frontmatter = Map::new();
     frontmatter.insert(
@@ -1915,9 +1918,7 @@ fn tool_write_concept(
     if let Some(title) = arg_str(args, "title") {
         frontmatter.insert("title".into(), json!(title));
     }
-    if let Some(description) = arg_str(args, "description") {
-        frontmatter.insert("description".into(), json!(description));
-    }
+    frontmatter.insert("description".into(), json!(description));
     // `about` anchors the concept to the entities it describes (M8.1) — the
     // join that lets knowledge reach a project page instead of only ever
     // being reachable from inside the bundle.
@@ -2346,6 +2347,7 @@ mod tests {
         let mut args = Map::new();
         args.insert("path".into(), json!("knowledge/systems/scouted.md"));
         args.insert("title".into(), json!("Scouted"));
+        args.insert("description".into(), json!("What the release scout found."));
         args.insert("body".into(), json!("What the scout learned."));
         tool_write_concept(&dir, &args, "process:release-scout").unwrap();
         let written = std::fs::read_to_string(dir.join("knowledge/systems/scouted.md")).unwrap();
@@ -3270,6 +3272,10 @@ mod tests {
         wc.insert("path".into(), json!("knowledge/metrics/onboarding.md"));
         wc.insert("type".into(), json!("Metric"));
         wc.insert("title".into(), json!("Onboarding"));
+        wc.insert(
+            "description".into(),
+            json!("Share of new users who finish onboarding."),
+        );
         wc.insert("body".into(), json!("Completion sits at 62%."));
         assert!(tool_write_concept(&dir, &wc, DEFAULT_ACTOR).is_ok());
     }
@@ -3353,15 +3359,21 @@ mod tests {
         }
     }
 
+    /// The write_concept tool's catalog entry, with (`true`) or without the
+    /// proposal surface on.
+    fn write_concept_tool(with_proposals: bool) -> Value {
+        tool_catalog(with_proposals)
+            .into_iter()
+            .find(|t| t["name"] == "write_concept")
+            .expect("write_concept is in the catalog")
+    }
+
     #[test]
     fn write_concept_requires_a_description() {
         // 0 of 30 concepts in a real distilled vault carried one, so every list
         // row rendered as title + type + Unreviewed and nothing else. Optional
         // meant absent.
-        let tool = tool_catalog(true)
-            .into_iter()
-            .find(|t| t["name"] == "write_concept")
-            .expect("write_concept is served");
+        let tool = write_concept_tool(true);
         let required: Vec<&str> = tool["inputSchema"]["required"]
             .as_array()
             .expect("schema declares required")
@@ -3375,27 +3387,45 @@ mod tests {
     }
 
     #[test]
+    fn write_concept_refuses_a_concept_that_will_not_say_what_it_is() {
+        // The schema declaring `description` required is a promise to the model;
+        // this is the part that keeps it. Measured motivation: 30 concepts in a
+        // real vault, 0 descriptions, so every list row rendered as title + type
+        // and nothing else.
+        let dir = std::env::temp_dir().join("cerebro-write-concept-needs-description");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut args = Map::new();
+        args.insert("path".into(), json!("knowledge/metrics/churn.md"));
+        args.insert("type".into(), json!("Metric"));
+        args.insert("title".into(), json!("Churn"));
+        args.insert("body".into(), json!("Some body."));
+        let err = tool_write_concept(&dir, &args, DEFAULT_ACTOR).unwrap_err();
+        assert!(
+            err.contains("description"),
+            "the refusal must name the missing field, got {err}"
+        );
+    }
+
+    #[test]
     fn write_concept_says_a_narrated_relation_must_also_be_recorded() {
         // The measured failure: 30 concepts, 0 relations, and bodies full of
         // "superseded by" in prose. A field description that only DEFINES the
         // field does not tell a model to look back at what it just wrote.
-        let tool = tool_catalog(true)
-            .into_iter()
-            .find(|t| t["name"] == "write_concept")
-            .expect("write_concept is served");
+        let tool = write_concept_tool(true);
         let text = tool["description"].as_str().unwrap().to_lowercase();
         assert!(
-            text.contains("body") && text.contains("supersedes"),
-            "the tool description must tie body prose back to the relation fields"
+            text.contains("body")
+                && text.contains("supersedes")
+                && text.contains("refines")
+                && text.contains("contradicts"),
+            "the tool description must tie body prose back to all three relation fields"
         );
     }
 
     #[test]
     fn write_concept_is_not_offered_a_verified_field() {
-        let concept = tool_catalog(false)
-            .into_iter()
-            .find(|t| t["name"] == "write_concept")
-            .expect("write_concept is in the catalog");
+        let concept = write_concept_tool(false);
         let properties = &concept["inputSchema"]["properties"];
         assert!(
             properties.get("verified").is_none(),
