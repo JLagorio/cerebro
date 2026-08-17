@@ -5,7 +5,8 @@ import type { PipelineOverview } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
- * The background's controls, as a section of the Status hub (M33.4).
+ * The background's controls, as a section of the Status hub (M33.4) — and,
+ * since M33a.2 folded that hub into Knowledge, as its "Background" tab.
  *
  * This is `PipelinePage`'s body — the meter, the banners, the lane toggles
  * and the held piles — moved rather than rewritten, with every testid
@@ -29,7 +30,8 @@ import { useUiStore } from '@/stores/uiStore';
  * **What DID change is the failure state.** `PipelinePage.tsx:92` caught a
  * failed read and rendered "Nothing to report yet" — the same empty state a
  * genuinely quiet vault gets. A workspace whose runtime database could not be
- * opened now says so, per the hub's `Feed<T>` contract.
+ * opened now says so, per the `Feed<T>` contract in
+ * `knowledge/BaseItself.tsx`.
  *
  * Every action here is a HUMAN UI action, so the store-layer never-throw rule
  * applies: they catch, toast, and reload rather than propagating.

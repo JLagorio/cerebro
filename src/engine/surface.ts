@@ -233,7 +233,10 @@ export function resolveSurface(
       return { title: 'Home', entries: [], presentation: defaultPresentation() };
     case 'knowledge':
       // The bundle has its own read-only surface; it is deliberately not a
-      // collection of records, so nothing else can list or filter it.
+      // collection of records, so nothing else can list or filter it. M33a.2
+      // brought the epistemic tabs under the same kind, and the carve-out
+      // covers them for a second reason: lanes and convergence lines are
+      // derived from the LEDGER and never from the scanned entries.
       return { title: 'Knowledge', entries: [], presentation: defaultPresentation() };
     case 'inbox':
       // InboxPage draws its own queue/reading/organize layout, but the
@@ -256,10 +259,6 @@ export function resolveSurface(
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.
       return { title: 'Changes', entries: [], presentation: defaultPresentation() };
-    case 'status':
-      // Lanes and convergence lines are derived from the ledger and never
-      // from the scanned entries, so the same carve-out applies again.
-      return { title: 'Epistemic status', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     // Neither holds records. Listed rather than defaulted so that the next

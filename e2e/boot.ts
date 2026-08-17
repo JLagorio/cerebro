@@ -80,16 +80,16 @@ export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[
   );
 }
 
-/** Open the Status hub and return the given section's locator (M33.3).
+/**
+ * Open one of the Knowledge tab's sections.
  *
- * Sections are addressed by `data-section`, the attribute `Section` has
- * always rendered — not by a second per-section testid. */
-export async function openStatusSection(page: Page, section: string) {
-  await page.getByRole('button', { name: 'Status' }).click();
-  await expect(page.getByTestId('status-page')).toBeVisible();
-  const located = page.locator(`[data-section="${section}"]`);
-  await expect(located).toBeVisible();
-  return located;
+ * M33a.2 folded the Status hub into Knowledge, so the entry is a nav row
+ * rather than a rail button — but the sections still carry `data-section`,
+ * which is what every assertion downstream addresses.
+ */
+export async function openKnowledgeTab(page: Page, row: string) {
+  await page.getByTestId('rail').getByRole('button', { name: 'Knowledge' }).click();
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: row }).click();
 }
 
 /** Read a file's full text (frontmatter + body) from the mock filesystem. */

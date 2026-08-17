@@ -64,18 +64,7 @@ export interface SidebarProps {
 // mounted beside every surface (App.tsx) and holds Home/Inbox/Docs/Knowledge/
 // History/Library/Settings. The topbar has no way back at all: wordmark, ⌘K,
 // SyncBadge, CreateMenu, Avatar.
-// M33.10: `status` joins them. The hub answers its own question and carries
-// its own section nav; Home's types-and-views list describes the record
-// corpus and says nothing about runs, budgets or queued proposals.
-const SIDEBARLESS = new Set([
-  'settings',
-  'pulse',
-  'inbox',
-  'library',
-  'workspace',
-  'diagram',
-  'status',
-]);
+const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library', 'workspace', 'diagram']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 

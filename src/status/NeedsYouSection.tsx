@@ -7,7 +7,11 @@ import type { ReviewCard, RevertableApplication } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
- * Needs review, as a section of the Status hub (M33.3).
+ * The proposal queue, as a section of the Status hub (M33.3) — and, since
+ * M33a.2 folded that hub into Knowledge, as its "Waiting on you" tab. The
+ * rename is not cosmetic: Knowledge already had a "Needs review" row for
+ * CONCEPTS a human has not verified, and two unrelated queues under one
+ * string is a nav that lies about where a click lands.
  *
  * This is `ReviewPage`'s body, moved rather than rewritten: the card layout,
  * the approve/reject handlers, the reason guard and the revert list are the
@@ -17,9 +21,9 @@ import { useUiStore } from '@/stores/uiStore';
  * **What DID change is the failure state.** `ReviewPage` collapsed a failed
  * read into an empty one — `catch` set the cards to `[]` and the surface said
  * "Nothing is waiting". That told a person with an unreadable ledger that
- * their base had no pending decisions, which is the exact sentence the hub's
- * `Feed<T>` contract exists to prevent. A read that did not come back now
- * says so.
+ * their base had no pending decisions, which is the exact sentence the
+ * `Feed<T>` contract (`knowledge/BaseItself.tsx`) exists to prevent. A read
+ * that did not come back now says so.
  *
  * Every card is still rebuilt from the ledger on each load — nothing here is
  * cached, so this list cannot drift from what the vault actually holds. The
@@ -54,7 +58,8 @@ function riskChip(risk: string) {
   );
 }
 
-/** The section's three states, matching the hub's `Feed<T>` contract. */
+/** The section's three states, matching the `Feed<T>` contract in
+ * `knowledge/BaseItself.tsx`. */
 type Queue = { cards: ReviewCard[]; applications: RevertableApplication[] };
 type State = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: Queue };
 

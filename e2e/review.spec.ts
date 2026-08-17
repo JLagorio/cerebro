@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openStatusSection, seedBeforeBoot } from './boot';
+import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
  * The M24.9 review surface: what the base is holding until a person decides.
@@ -12,8 +12,9 @@ import { boot, openStatusSection, seedBeforeBoot } from './boot';
  * where the server offered one. The DECISIONS themselves are Rust's, proved
  * against the real interpreter in `policy::review` and `policy::evals`.
  *
- * **M33.3 moved the home, not the behaviour.** These cards live in the Status
- * hub's "Needs review" section now; there is no review tab. Every card testid
+ * **M33.3 moved the home, not the behaviour, and M33a.2 moved it again.**
+ * These cards live in Knowledge's "Waiting on you" tab now — there is no
+ * review tab and no Status hub either. Every card testid
  * below is unchanged on purpose — that is what makes this file able to prove
  * the extraction dropped nothing. The spec also stopped hand-rolling its own
  * boot: it used to set two localStorage keys and never pin the clock, which
@@ -51,12 +52,13 @@ const CARD = {
 
 type Card = typeof CARD;
 
-/** Boot into the hub with these cards staged, and hand back the section that
- * holds them. */
+/** Boot into Knowledge's "Waiting on you" tab with these cards staged, and
+ * hand back the section that holds them. */
 async function openNeedsReview(page: Page, fixture: { cards?: Card[]; applications?: unknown[] }) {
   await seedBeforeBoot(page, '__cerebroSeedReview', fixture);
   await boot(page);
-  return openStatusSection(page, 'needs-review');
+  await openKnowledgeTab(page, 'Waiting on you');
+  return page.locator('[data-section="needs-review"]');
 }
 
 test('review: a queued card says what it is, how dangerous it is, and why it waits', async ({

@@ -151,17 +151,26 @@ export interface ResolvedField {
 }
 
 /**
- * Which slice of the knowledge bundle is on screen (M8.1). Knowledge navigates
- * by its own axes — the bundle's sections, the entities concepts are about,
- * and the update log — rather than borrowing Home's Views and Types, which
- * describe a different corpus with a different author.
+ * Where you are inside the Knowledge tab.
+ *
+ * M33a.2 folded the Status hub in here. The first five arms are what the base
+ * HOLDS; the last six are what it knows about ITSELF and what its agents have
+ * done. One destination, because they were always one subject — a bundle that
+ * cannot say what it is unsure of is not a knowledge base, it is a folder.
  */
 export type KnowledgeNav =
   | { tab: 'all' }
   | { tab: 'review' }
   | { tab: 'log' }
   | { tab: 'section'; folder: string }
-  | { tab: 'entity'; key: string };
+  | { tab: 'entity'; key: string }
+  | { tab: 'changed' }
+  | { tab: 'contested' }
+  | { tab: 'waiting' }
+  | { tab: 'background' }
+  // `run` deep-links one run open, the way `entity` deep-links one subject.
+  | { tab: 'runs'; run?: string }
+  | { tab: 'gates' };
 
 /**
  * Which shelf of the library is open (M18).
@@ -172,21 +181,18 @@ export type KnowledgeNav =
  */
 export type LibraryTab = 'skill' | 'agent' | 'template';
 
-/**
- * One addressable section of the Status hub (M33.3).
- *
- * These are the `data-section` values the hub's own `Section` renders, not a
- * parallel set of names — a second vocabulary would need a mapping table, and
- * the mapping table would be the thing that drifted.
- */
-export type StatusSection = 'changed' | 'needs-review' | 'fleet' | 'system' | 'gates';
-
 export type Selection =
   | { kind: 'home' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
   // AI knowledge base: OKF bundle, read-only (M5); `nav` defaults to all (M8.1).
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
+  // M33a.2 — and what the base knows about ITSELF: the epistemic tabs `nav`
+  // now carries were their own `status` kind until this milestone. One kind,
+  // because "what it holds" and "what it is unsure of" were never two
+  // subjects. Deep links that used to be `{kind:'status', section, run}` are
+  // `{kind:'knowledge', nav:{tab, run}}` — one vocabulary, not a mapping
+  // table between two.
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
@@ -210,23 +216,6 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
-  // M27.8 — one coherent home for what the base knows about itself: what
-  // changed, what it cannot see, what it contradicts itself about, what has
-  // gone stale, what is waiting on a decision, and whether the background is
-  // running. A destination rather than banners, because six pieces of chrome
-  // competing for the top of the screen is how "nothing speaks first" dies.
-  //
-  // M33.3 — `section` deep-links one section of the hub, and is the reason
-  // the M24.9 `review` kind is gone: the cards it named are a section here
-  // now, so "what is waiting on a decision" is still a place the back button
-  // returns to, addressed as `{kind:'status', section:'needs-review'}`. The
-  // values are the `data-section` attributes the sections already render —
-  // one vocabulary, not a lookup table between two.
-  // `run` deep-links one run's detail inside the fleet section (M33.7), so a
-  // finished run in the status bar has somewhere to land. Ignored unless the
-  // section is `fleet`, and a run the page cannot find simply does not open —
-  // a device-local log entry may name a run this database never had.
-  | { kind: 'status'; section?: StatusSection; run?: string }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so

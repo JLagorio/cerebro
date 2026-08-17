@@ -158,10 +158,12 @@ describe('the run log (M17.15)', () => {
     fireEvent.click(screen.getByTestId('status-agent'));
 
     fireEvent.click(screen.getByTestId('run-log-link'));
+    // M33a.2 — the fleet is a Knowledge tab now, not a section of a Status
+    // hub. The run still rides on the selection, so a finished run in the
+    // status bar still has somewhere to land.
     expect(useNavStore.getState().selection).toEqual({
-      kind: 'status',
-      section: 'fleet',
-      run: 'durable-abc',
+      kind: 'knowledge',
+      nav: { tab: 'runs', run: 'durable-abc' },
     });
   });
 

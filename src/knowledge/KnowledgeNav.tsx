@@ -20,12 +20,18 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  * its concepts are ABOUT, and the log of what changed. Only the entity axis is
  * new — and it is the one that makes the bundle part of the vault rather than
  * a corpus sitting beside it.
+ *
+ * M33a.2 gave it a second group. What the base HOLDS and what it knows about
+ * ITSELF were two rail buttons describing one subject; they are two groups of
+ * one nav now, and the Status hub's own five-row nav is gone with it.
  */
 
 const sameTab = (a: Nav, b: Nav): boolean => {
   if (a.tab !== b.tab) return false;
   if (a.tab === 'section' && b.tab === 'section') return a.folder === b.folder;
   if (a.tab === 'entity' && b.tab === 'entity') return a.key === b.key;
+  // `runs` deliberately compares equal whichever run is deep-linked: opening
+  // one run does not move you to a different row.
   return true;
 };
 
@@ -133,6 +139,54 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
           })}
         </>
       )}
+
+      {/* M33a.2 — what the base knows about ITSELF, folded in from the Status
+          rail button. Two destinations described one subject: a bundle that
+          cannot say what it is unsure of is not a knowledge base, it is a
+          folder.
+
+          No counts on any of these rows, and none on the Knowledge rail
+          button either. A badge here would be the chrome telling somebody
+          their understanding is broken before they have asked it anything —
+          the rule that kept a review count off Knowledge (M8.1) and a commit
+          count off History (M9.4), now carried by the row that inherited the
+          responsibility. */}
+      <div className={SECTION_LABEL}>What it knows about itself</div>
+      <NavRow
+        icon="activity"
+        label="What changed"
+        nav={{ tab: 'changed' }}
+        active={is({ tab: 'changed' })}
+      />
+      <NavRow
+        icon="git-compare"
+        label="What's contested"
+        nav={{ tab: 'contested' }}
+        active={is({ tab: 'contested' })}
+      />
+      {/* "Waiting on you", not "Needs review". The row three above holds
+          CONCEPTS a human has not verified; this one holds PROPOSALS awaiting
+          approve or reject. Two unrelated queues under one string is a nav
+          that lies about where a click lands. */}
+      <NavRow
+        icon="gavel"
+        label="Waiting on you"
+        nav={{ tab: 'waiting' }}
+        active={is({ tab: 'waiting' })}
+      />
+      <NavRow
+        icon="gauge"
+        label="Background"
+        nav={{ tab: 'background' }}
+        active={is({ tab: 'background' })}
+      />
+      <NavRow icon="bot" label="Agent work" nav={{ tab: 'runs' }} active={is({ tab: 'runs' })} />
+      <NavRow
+        icon="scan-eye"
+        label="Deferral gates"
+        nav={{ tab: 'gates' }}
+        active={is({ tab: 'gates' })}
+      />
     </div>
   );
 }

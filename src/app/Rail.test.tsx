@@ -48,7 +48,7 @@ describe('Rail', () => {
    * assertion: adding or removing a rail button is a decision, and a decision
    * belongs in a diff somebody reads.
    */
-  it('carries exactly the ten destinations the shell has', () => {
+  it('carries exactly the nine destinations the shell has', () => {
     render(<Rail />);
 
     const labels = screen
@@ -58,7 +58,6 @@ describe('Rail', () => {
       .map((label) => label?.replace(/ \(\d+\)$/, ''));
     expect(labels).toEqual([
       'Home',
-      'Status',
       'Inbox',
       'Docs',
       'Workspace',
@@ -68,7 +67,10 @@ describe('Rail', () => {
       'Library',
       'Settings',
     ]);
-    // Both merged surfaces are gone from the rail, not merely renamed.
+    // M33a.2 folded the Status hub into Knowledge. These were rail destinations
+    // once; each merge that removes one leaves its name here, because the failure
+    // mode is a button silently coming back.
+    expect(labels).not.toContain('Status');
     expect(labels).not.toContain('Needs review');
     expect(labels).not.toContain('Background');
   });

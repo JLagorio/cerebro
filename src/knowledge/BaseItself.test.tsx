@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ChangesView,
@@ -11,16 +12,21 @@ import type {
   TriggerRunReport,
   VerificationScope,
 } from '@/lib/ipc';
-import { useVaultStore } from '@/stores/vaultStore';
-import { EpistemicStatusPage } from './EpistemicStatusPage';
+import { Background, DeferralGates, WaitingOnYou, WhatChanged, WhatsContested } from './BaseItself';
 
 /**
- * The Epistemic Status surface (M27.8c).
+ * What the base knows about itself (M27.8c, re-homed under Knowledge in
+ * M33a.2 — these specs were `pages/EpistemicStatusPage.test.tsx`).
  *
- * These specs are about ONE thing: that a section which could not read its
- * feed never renders as a section with nothing in it. Everything else on this
- * page is layout over sentences Rust composed, and asserting the wording here
+ * They are about ONE thing: that a section which could not read its feed
+ * never renders as a section with nothing in it. Everything else on these
+ * tabs is layout over sentences Rust composed, and asserting the wording here
  * would only pin a copy of it.
+ *
+ * What the move changed is the MOUNT. There is no page any more, so each spec
+ * renders the component it was really about, and the two that were about
+ * INDEPENDENCE render two components side by side — which is the honest shape
+ * of that claim now that the tabs never share a screen.
  */
 
 const converge = vi.fn<(vault: string) => Promise<ChangesView>>();
@@ -54,6 +60,8 @@ vi.mock('@/lib/ipc', async () => {
 });
 
 afterEach(cleanup);
+
+const VAULT = '/demo-vault';
 
 const QUIET_CHANGES: ChangesView = {
   schema_version: 'convergence-v1',
@@ -164,10 +172,9 @@ const RUN_REPORT: TriggerRunReport = {
   ],
 };
 
-describe('EpistemicStatusPage', () => {
+describe('What the base knows about itself', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useVaultStore.setState({ vaultPath: '/demo-vault' });
     converge.mockResolvedValue(QUIET_CHANGES);
     attentionLanes.mockResolvedValue(EMPTY_LANES);
     reviewQueue.mockResolvedValue([]);
@@ -179,30 +186,60 @@ describe('EpistemicStatusPage', () => {
     triggerDeclareR7Scope.mockResolvedValue('a'.repeat(64));
   });
 
+  /**
+   * What the hub's section-ORDER assertion became.
+   *
+   * The old page stacked all of these in one scroll column, so there was a
+   * single ordering to pin. There is not one now — each tab is reached on its
+   * own — so what survives is the property the order assertion was really
+   * protecting: every one of these surfaces still carries the `data-section`
+   * that 30 Playwright assertions address it by.
+   */
+  it('every tab still carries its own data-section', async () => {
+    const sections = async (ui: ReactElement) => {
+      const { unmount } = render(ui);
+      const found = await screen.findAllByTestId('status-section');
+      const ids = found.map((s) => s.getAttribute('data-section'));
+      unmount();
+      return ids;
+    };
+
+    expect(await sections(<WhatChanged vaultPath={VAULT} />)).toEqual(['changed']);
+    // The contested tab is the one exception to one-section-per-tab: the lanes
+    // arrive NAMED by Rust and their number varies, so it renders whatever the
+    // feed holds.
+    expect(await sections(<WhatsContested vaultPath={VAULT} />)).toEqual([
+      'contradiction',
+      'staleness',
+    ]);
+    expect(await sections(<WaitingOnYou vaultPath={VAULT} />)).toEqual(['needs-review']);
+    expect(await sections(<Background vaultPath={VAULT} />)).toEqual(['system']);
+    expect(await sections(<DeferralGates vaultPath={VAULT} />)).toEqual(['gates']);
+  });
+
   it('renders every lane the feed declares, including the ones holding nothing', async () => {
-    render(<EpistemicStatusPage />);
-    await waitFor(() => expect(screen.getByTestId('status-page')).toBeTruthy());
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const sections = await screen.findAllByTestId('status-section');
     const ids = sections.map((s) => s.getAttribute('data-section'));
     expect(ids).toContain('contradiction');
     expect(ids).toContain('staleness');
     // Its own words, not a shared "nothing here" — the lane knows what it
-    // means to be empty and this page does not.
+    // means to be empty and this tab does not.
     expect(screen.getByText('Nothing in contradiction.')).toBeTruthy();
   });
 
   it('shows the protected badge only where a preference could not have hidden it', async () => {
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
     const badges = await screen.findAllByTestId('protected-badge');
     expect(badges).toHaveLength(1);
   });
 
-  /** The failure this page exists to prevent: a read that did not come back
+  /** The failure these tabs exist to prevent: a read that did not come back
    * rendering as a base with nothing wrong with it. */
   it('says a feed could not be read instead of rendering its empty state', async () => {
     attentionLanes.mockRejectedValue(new Error('no ledger'));
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const said = await screen.findByTestId('section-unavailable');
     expect(said.textContent).toContain('The attention lanes');
@@ -212,7 +249,16 @@ describe('EpistemicStatusPage', () => {
 
   it('keeps the other sections when one feed refuses', async () => {
     converge.mockRejectedValue(new Error('this vault has no ledger store'));
-    render(<EpistemicStatusPage />);
+    // Both mounted at once, because independence is the claim: the tabs never
+    // share a screen any more, so the only way to prove one feed's refusal
+    // does not travel is to put the two reads in the same tree and watch one
+    // of them still answer.
+    render(
+      <>
+        <WhatChanged vaultPath={VAULT} />
+        <WhatsContested vaultPath={VAULT} />
+      </>,
+    );
 
     await screen.findByTestId('section-unavailable');
     // The lanes are a separate call and a separate answer.
@@ -247,7 +293,7 @@ describe('EpistemicStatusPage', () => {
       ],
       withheld: 3,
     });
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const item = await screen.findByTestId('lane-item');
     expect(item.getAttribute('data-reasons')).toBe('freshness_stale');
@@ -260,7 +306,7 @@ describe('EpistemicStatusPage', () => {
       ...EMPTY_LANES,
       incomplete: ['Parked promotions could not be read, so epistemic debt may be under-reported.'],
     });
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const note = await screen.findByTestId('lanes-incomplete');
     expect(note.textContent).toContain('under-reported');
@@ -282,7 +328,7 @@ describe('EpistemicStatusPage', () => {
         coverage_refs: [],
       }) as unknown as ReviewCard;
     reviewQueue.mockResolvedValue([card('LOW'), card('HIGH'), card('CRITICAL')]);
-    render(<EpistemicStatusPage />);
+    render(<WaitingOnYou vaultPath={VAULT} />);
 
     const cards = await screen.findAllByTestId('review-card');
     expect(cards).toHaveLength(3);
@@ -300,7 +346,7 @@ describe('EpistemicStatusPage', () => {
   // waiting on them.
   it('says the review queue could not be read rather than borrowing the empty state', async () => {
     reviewQueue.mockRejectedValue(new Error('no ledger store for this vault'));
-    render(<EpistemicStatusPage />);
+    render(<WaitingOnYou vaultPath={VAULT} />);
 
     await waitFor(() =>
       expect(
@@ -324,7 +370,7 @@ describe('EpistemicStatusPage', () => {
       ...HEALTH,
       meter: { ...HEALTH.meter, accounting_state: 'unknown' },
     });
-    render(<EpistemicStatusPage />);
+    render(<Background vaultPath={VAULT} />);
 
     const note = await screen.findByTestId('accounting-unknown');
     expect(note.textContent).toContain('is not zero');
@@ -332,7 +378,7 @@ describe('EpistemicStatusPage', () => {
   });
 
   it('holds the background controls rather than a summary and a door', async () => {
-    render(<EpistemicStatusPage />);
+    render(<Background vaultPath={VAULT} />);
 
     await waitFor(() => expect(screen.getByTestId('lane-toggles')).toBeTruthy());
     expect(screen.getByTestId('budget-meter')).toBeTruthy();
@@ -345,7 +391,7 @@ describe('EpistemicStatusPage', () => {
   // gets.
   it('says background health could not be read rather than reporting calm', async () => {
     pipelineOverview.mockRejectedValue(new Error('no runtime database'));
-    render(<EpistemicStatusPage />);
+    render(<Background vaultPath={VAULT} />);
 
     await waitFor(() =>
       expect(
@@ -358,15 +404,25 @@ describe('EpistemicStatusPage', () => {
   });
 
   it('renders nothing about a vault that is not open', async () => {
-    useVaultStore.setState({ vaultPath: null });
-    render(<EpistemicStatusPage />);
+    // Every tab that is ABOUT a vault. `AgentWork` is deliberately absent:
+    // the fleet spans vaults, so it takes none and "no vault is open" is not
+    // a sentence it has to say.
+    render(
+      <>
+        <WhatChanged vaultPath={null} />
+        <WhatsContested vaultPath={null} />
+        <WaitingOnYou vaultPath={null} />
+        <Background vaultPath={null} />
+        <DeferralGates vaultPath={null} />
+      </>,
+    );
 
     await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(6));
     expect(converge).not.toHaveBeenCalled();
   });
 
   it('renders every gate the board declares, and never-evaluated is said, not omitted', async () => {
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
 
     const rows = await screen.findAllByTestId('gate-row');
     expect(rows.map((row) => row.getAttribute('data-gate'))).toEqual(['R8:root', 'R13:root']);
@@ -397,7 +453,7 @@ describe('EpistemicStatusPage', () => {
         ],
       },
     ]);
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
 
     const row = await screen.findByTestId('gate-row');
     expect(row.getAttribute('data-result')).toBe('fired');
@@ -406,7 +462,7 @@ describe('EpistemicStatusPage', () => {
   });
 
   it('evaluate runs once, says what each gate did, and re-reads the board', async () => {
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     await screen.findAllByTestId('gate-row');
     expect(triggerStatus).toHaveBeenCalledTimes(1);
 
@@ -427,7 +483,7 @@ describe('EpistemicStatusPage', () => {
     triggerRun.mockRejectedValue(
       new Error('an R7 verification scope is declared, but this vault has no active ledger writer'),
     );
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     await screen.findAllByTestId('gate-row');
 
     fireEvent.click(screen.getByTestId('gates-evaluate'));
@@ -437,7 +493,7 @@ describe('EpistemicStatusPage', () => {
   });
 
   it('declaring an R7 scope canonicalizes the lists before anything is sent', async () => {
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     expect((await screen.findByTestId('r7-scope-none')).textContent).toContain(
       'No scope is declared',
     );
@@ -456,7 +512,7 @@ describe('EpistemicStatusPage', () => {
 
     await screen.findByTestId('r7-scope-digest');
     expect(triggerDeclareR7Scope).toHaveBeenCalledWith(
-      '/demo-vault',
+      VAULT,
       JSON.stringify({
         subjects: ['aaa', 'bbb'],
         predicate_classes: ['operational_status'],
@@ -473,7 +529,7 @@ describe('EpistemicStatusPage', () => {
     triggerDeclareR7Scope.mockRejectedValue(
       new Error('a verification scope with no subjects verifies nothing'),
     );
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     await screen.findByTestId('r7-scope-none');
 
     fireEvent.click(screen.getByTestId('r7-scope-open'));
@@ -491,7 +547,7 @@ describe('EpistemicStatusPage', () => {
       environment: null,
       geography: null,
     });
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
 
     const declared = await screen.findByTestId('r7-scope-declared');
     expect(declared.textContent).toContain('e0000000000000000000000000000001');

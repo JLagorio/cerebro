@@ -834,7 +834,7 @@ describe('the deferral gates (M28.1)', () => {
   });
 
   it('a missing runtime database refuses every fleet command', async () => {
-    // This is how the hub section reaches `unavailable` instead of `empty`.
+    // This is how the Agent work tab reaches `unavailable` instead of `empty`.
     mock.__seedFleet(null);
     await expect(mock.fleetRunsPage()).rejects.toThrow(/runtime database/);
     await expect(mock.fleetRunDetail('r1')).rejects.toThrow(/runtime database/);

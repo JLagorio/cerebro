@@ -160,9 +160,8 @@ export function RunList() {
                         className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left hover:underline"
                         onClick={() => {
                           navigate({
-                            kind: 'status',
-                            section: 'fleet',
-                            run: entry.durableId,
+                            kind: 'knowledge',
+                            nav: { tab: 'runs', run: entry.durableId },
                           });
                           setOpen(false);
                         }}

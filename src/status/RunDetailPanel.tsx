@@ -172,7 +172,7 @@ export function RunDetailPanel({
           type="button"
           data-testid="run-detail-to-review"
           className="self-start rounded border border-n-300 px-2 py-1 text-2xs text-n-700 hover:bg-n-100"
-          onClick={() => navigate({ kind: 'status', section: 'needs-review' })}
+          onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'waiting' } })}
         >
           {run.proposals_submitted - run.applied - run.rejected} still waiting on a decision
         </button>

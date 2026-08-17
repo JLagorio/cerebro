@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openStatusSection, seedBeforeBoot } from './boot';
+import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
  * The fleet section (M33.5): every run the app has booked, filterable and
@@ -61,7 +61,8 @@ type Detail = { run: Run; cost_components: unknown[] | null; assembly: unknown |
 async function openFleet(page: Page, runs: Run[] | null, details: Record<string, Detail> = {}) {
   await seedBeforeBoot(page, '__cerebroSeedFleet', runs, details);
   await boot(page);
-  return openStatusSection(page, 'fleet');
+  await openKnowledgeTab(page, 'Agent work');
+  return page.locator('[data-section="fleet"]');
 }
 
 test('fleet: runs come back newest first, attributed to whoever ran them', async ({ page }) => {

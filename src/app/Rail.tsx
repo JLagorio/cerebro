@@ -95,12 +95,6 @@ export function Rail() {
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
-  // M24.9: what the base is holding until a person decides. A queued card
-  // outlives the session that made it, so it needs a door and not a toast.
-  // M27.8: what the base knows about itself. Deliberately NOT badged — a
-  // count of contradictions on the rail is the chrome telling you your
-  // understanding is broken before you have asked it anything.
-  const statusActive = selection.kind === 'status';
   const homeActive = HOME_KINDS.has(selection.kind);
   // M15: the badge counts what the page will SHOW. It used to be the unfiltered
   // total while the page opened on a persisted period, so a rail reading
@@ -131,12 +125,6 @@ export function Rail() {
         active={homeActive}
         onClick={() => navigate({ kind: 'home' })}
       />
-      <RailButton
-        icon="scan-eye"
-        label="Status"
-        active={statusActive}
-        onClick={() => navigate({ kind: 'status' })}
-      />
       {inboxEnabled && (
         <RailButton
           icon="inbox"
@@ -152,11 +140,6 @@ export function Rail() {
         active={docsActive}
         onClick={() => navigate({ kind: 'docs' })}
       />
-      {/* M5: the agent's corpus is a peer of Home and Docs, not a section
-          inside them — it has a different author and different rules.
-          M8.1: no review badge. A count here is the chrome nagging you to
-          drain a queue; the same number lives on the "Needs review" row in
-          the Knowledge sidebar, where it describes a destination instead. */}
       {/* M30 — mounted repositories. Its own room rather than a section of
           Docs: Docs means untyped vault notes (`isDocEntry`), and a surface
           that renders .ts files cannot mean that. */}
@@ -166,6 +149,17 @@ export function Rail() {
         active={workspaceActive}
         onClick={() => navigate({ kind: 'workspace' })}
       />
+      {/* M5: the agent's corpus is a peer of Home and Docs, not a section
+          inside them — it has a different author and different rules.
+          M33a.2 folded the Status hub in here, so this one button is now both
+          what the base holds and what it knows about itself — they were always
+          one subject.
+          Still no badge, and now for two reasons rather than one. A review
+          count would be the chrome nagging you to drain a queue (M8.1); the
+          same number lives on the "Needs review" row in the Knowledge sidebar,
+          where it describes a destination instead. A count of contradictions
+          would be worse (M27.8) — the chrome telling you your understanding is
+          broken before you have asked it anything. */}
       <RailButton
         icon="brain"
         label="Knowledge"

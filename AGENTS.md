@@ -31,16 +31,18 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
   `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
   Zustand; `lib/` holds IPC + browser mocks.
-- **The Status hub is one page made of sections** (M33.3–M33.5).
-  `pages/EpistemicStatusPage.tsx` is the shell; each section is its own
-  component in `src/status/` owning its own read and its own failure.
-  `ReviewPage` and `PipelinePage` are gone — "Needs review" and "Background"
-  are sections, not tabs, and the rail is 10 buttons (Home, Status, Inbox,
-  Docs, Workspace, Knowledge, History, Assistant, Library, Settings), asserted
-  by name in `app/Rail.test.tsx`. Sections are addressed by `data-section`,
-  never by a per-section testid, and `Selection.status` carries an optional
-  `section` (plus `run`, for one fleet detail) so a section is a place the
-  back button returns to.
+- **Knowledge is one tab made of sections** (M33.3–M33.5, folded in M33a.2).
+  What the base HOLDS and what it knows about ITSELF were two rail buttons
+  describing one subject; they are two groups of one nav now.
+  `knowledge/KnowledgeNav.tsx` is the nav and `knowledge/BaseItself.tsx`
+  composes the epistemic tabs from the section components in `src/status/`,
+  each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
+  and `EpistemicStatusPage` are all gone, and the rail is 9 buttons (Home,
+  Inbox, Docs, Workspace, Knowledge, History, Assistant, Library, Settings),
+  asserted by name in `app/Rail.test.tsx`. Sections are addressed by
+  `data-section`, never by a per-section testid, and `KnowledgeNav` carries
+  the tab (plus `run`, for one fleet detail) so a section is a place the back
+  button returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
   (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
   `connectors.rs`, `runtime/fleet.rs` (SELECT-only run history — it writes

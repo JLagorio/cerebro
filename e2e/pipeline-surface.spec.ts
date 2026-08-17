@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openStatusSection, seedBeforeBoot } from './boot';
+import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
  * The M25.7 control surface: what the background ran, what it spent, and what
@@ -14,8 +14,9 @@ import { boot, openStatusSection, seedBeforeBoot } from './boot';
  * says so rather than showing a confident zero, and that held work asks its
  * question instead of being guessed at.
  *
- * **M33.4 moved the home, not the behaviour.** These controls are the Status
- * hub's "Background" section now; there is no background tab. Every testid
+ * **M33.4 moved the home, not the behaviour, and M33a.2 moved it again.**
+ * These controls are Knowledge's "Background" tab now — there is no pipeline
+ * tab and no Status hub either. Every testid
  * below is unchanged on purpose — that is what makes this file able to prove
  * the extraction dropped nothing.
  *
@@ -86,12 +87,13 @@ const OVERVIEW = {
 
 type Overview = typeof OVERVIEW;
 
-/** Boot into the hub with this overview staged, and hand back the section
- * that holds the background controls. */
+/** Boot into Knowledge's "Background" tab with this overview staged, and
+ * hand back the section that holds the background controls. */
 async function openSystem(page: Page, fixture: Partial<Overview>) {
   await seedBeforeBoot(page, '__cerebroSeedPipeline', fixture);
   await boot(page);
-  return openStatusSection(page, 'system');
+  await openKnowledgeTab(page, 'Background');
+  return page.locator('[data-section="system"]');
 }
 
 test('background: the meter says today across every vault', async ({ page }) => {

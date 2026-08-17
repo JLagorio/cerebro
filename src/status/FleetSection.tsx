@@ -74,8 +74,10 @@ function Chip({
 
 export function FleetSection() {
   const selection = useNavStore((s) => s.selection);
-  // The run a link asked for, if any (M33.7).
-  const requested = selection.kind === 'status' ? selection.run : undefined;
+  // The run a link asked for, if any (M33.7; re-homed under Knowledge in
+  // M33a.2, where "what has run" is a tab rather than a section of a hub).
+  const requested =
+    selection.kind === 'knowledge' && selection.nav?.tab === 'runs' ? selection.nav.run : undefined;
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [mode, setMode] = useState('');
   const [lane, setLane] = useState('');

@@ -7,6 +7,14 @@ import type { KnowledgeNav, Selection } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { reviewConceptPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
+import {
+  AgentWork,
+  Background,
+  DeferralGates,
+  WaitingOnYou,
+  WhatChanged,
+  WhatsContested,
+} from '@/knowledge/BaseItself';
 import { ConceptBody } from '@/knowledge/ConceptBody';
 import { KnowledgeLog } from '@/knowledge/KnowledgeLog';
 import { KnowledgePanel } from '@/knowledge/KnowledgePanel';
@@ -100,6 +108,37 @@ function ConceptRow({
       </span>
     </button>
   );
+}
+
+/**
+ * The tabs that describe the base ITSELF rather than list its concepts
+ * (M33a.2 — what used to be the Status hub).
+ *
+ * `null` for every tab that has a concept list. The six that do not carry no
+ * heading of their own here: each section already renders its `<h2>` and its
+ * blurb, exactly as it did on the hub, and repeating the same three words in
+ * an `<h1>` above it would be the merge inventing chrome rather than moving a
+ * surface.
+ */
+function baseItself(nav: KnowledgeNav, vaultPath: string | null): React.ReactNode {
+  switch (nav.tab) {
+    case 'changed':
+      return <WhatChanged vaultPath={vaultPath} />;
+    case 'contested':
+      return <WhatsContested vaultPath={vaultPath} />;
+    case 'waiting':
+      return <WaitingOnYou vaultPath={vaultPath} />;
+    case 'background':
+      return <Background vaultPath={vaultPath} />;
+    case 'runs':
+      // No vault: the fleet spans them, and the run a link asked for rides on
+      // the selection, which FleetSection reads itself.
+      return <AgentWork />;
+    case 'gates':
+      return <DeferralGates vaultPath={vaultPath} />;
+    default:
+      return null;
+  }
 }
 
 export function KnowledgePage({
@@ -262,6 +301,25 @@ export function KnowledgePage({
     if (!visibleHere) navigate({ kind: 'knowledge', nav: { tab: 'all' } });
     setSelectedPath(path);
   };
+
+  // M33a.2 — the six tabs that describe the base itself short-circuit for the
+  // same reason `log` does below: there is no concept list to put beside them,
+  // so the three-column layout has nothing to lay out. They sit ABOVE the
+  // empty-bundle guard as well, because what the base knows about itself does
+  // not stop being true when nobody has written a concept yet — a vault with
+  // no bundle still has runs, a budget and a proposal queue.
+  const itself = baseItself(nav, vaultPath);
+  if (itself !== null) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {/* Left-aligned and capped: these are sentences to read, not a
+              dashboard to spread. */}
+          <div className="flex w-full min-w-0 max-w-[860px] flex-col gap-6 px-6 py-4">{itself}</div>
+        </div>
+      </div>
+    );
+  }
 
   if (all.length === 0) {
     return (

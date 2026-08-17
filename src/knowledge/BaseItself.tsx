@@ -9,36 +9,38 @@ import type {
 } from '@/lib/ipc';
 import { FleetSection } from '@/status/FleetSection';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
-import { StatusNav } from '@/status/StatusNav';
 import { SystemSection } from '@/status/SystemSection';
-import { useNavStore } from '@/stores/navStore';
-import { useVaultStore } from '@/stores/vaultStore';
 
 /**
- * Epistemic Status — one coherent home for what this base knows about
- * itself (M27.8c, §35 skeleton).
+ * What the base knows about ITSELF — the Status hub's five sections, moved
+ * here as Knowledge tabs (M33a.2, from `pages/EpistemicStatusPage.tsx`).
  *
- * **Why one page and not six banners.** M25, M26 and M27 each produce
- * something a person needs to see occasionally and nothing that should
- * interrupt them. Shipped separately those become six pieces of chrome
- * competing for the top of the screen, and the M8 rule — nothing speaks
- * first — dies by accretion rather than by decision. A destination they can
- * choose to open is the shape that keeps it.
+ * **Why the scroll column died.** The hub stacked every section in one
+ * column: 5,799px in an 844px viewport, seven screens to reach the last one.
+ * `Deferral gates` alone was 3,225px — 55% of the page — of cards reading
+ * "Never evaluated here." A nav that could only scroll you past four sections
+ * to reach the fifth is not navigation, and the sections were never one
+ * reading. Each is a tab now, and the Knowledge sidebar is the nav.
+ *
+ * **Why it lives under Knowledge.** What the base HOLDS and what it knows
+ * about itself were two rail buttons describing one subject. A bundle that
+ * cannot say what it is unsure of is not a knowledge base, it is a folder.
  *
  * **Nothing here computes an epistemic answer.** Lane names, the sentence
  * under each lane, the reason on every item and every line of what changed
  * arrive composed from Rust, beside the rules that produced them. This file
  * chooses layout and says the empty cases out loud.
  *
- * **Four sections, four independent failures.** The feeds are deliberately
- * separate calls: a vault with no ledger can still show its review queue and
- * its budget, and a section whose read failed says so instead of rendering
- * the empty state. "Nothing is contested" and "we could not tell you whether
- * anything is contested" are opposite sentences.
+ * **Six tabs, six independent failures.** The feeds are deliberately separate
+ * calls, and each tab now reads only its own: a vault with no ledger can
+ * still show its review queue and its budget, and a section whose read failed
+ * says so instead of rendering the empty state. "Nothing is contested" and
+ * "we could not tell you whether anything is contested" are opposite
+ * sentences.
  *
- * **No counts in the rail.** A badge here would be the chrome nagging
- * somebody to drain a queue — the same rule that kept a review count off
- * Knowledge (M8.1) and a commit count off History (M9.4).
+ * **No counts in the rail.** A badge would be the chrome nagging somebody to
+ * drain a queue — the same rule that kept a review count off Knowledge (M8.1)
+ * and a commit count off History (M9.4).
  */
 
 /** One feed's three states. `loading` is distinct from `unavailable` so a
@@ -65,8 +67,8 @@ function useFeed<T>(
       } catch {
         // A read behind a surface goes quiet rather than toasting (the
         // store-layer rule in AGENTS.md), and the section says what it could
-        // not find out. Nothing is retried on a timer: this page speaks when
-        // it is opened and never on its own.
+        // not find out. Nothing is retried on a timer: these tabs speak when
+        // they are opened and never on their own.
         if (live) setFeed({ kind: 'unavailable' });
       }
     })();
@@ -119,7 +121,7 @@ function Section({
 }
 
 /** What a section says when its read did not come back. Never the empty
- * state: a page that renders "no contradictions" over a failed read is
+ * state: a tab that renders "no contradictions" over a failed read is
  * telling somebody something it does not know. */
 function Unavailable({ what }: { what: string }) {
   return (
@@ -559,40 +561,85 @@ function Lanes({ feed }: { feed: Feed<LanesView> }) {
   );
 }
 
-/**
- * Bring the deep-linked section into view (M33.3).
- *
- * `section` on the selection would be decorative without this — the hub is
- * one scrolling column, so arriving at `{kind:'status', section:'needs-review'}`
- * and landing at the top is the same as not carrying the section at all.
- * A section the page does not render is a no-op rather than an error: the
- * link is a request, and a missing target means the answer is just "here is
- * the hub".
- */
-function useScrollToSection(section: string | undefined, ready: boolean): void {
-  useEffect(() => {
-    if (section === undefined || !ready) return;
-    const target = document.querySelector(`[data-section="${section}"]`);
-    target?.scrollIntoView({ block: 'start' });
-  }, [section, ready]);
+/** What moved since the last time anybody looked. */
+export function WhatChanged({ vaultPath }: { vaultPath: string | null }) {
+  const changes = useFeed(vaultPath, ipc.converge);
+  return (
+    <Section id="changed" title="What changed" blurb="Since the last time anybody looked at this.">
+      <Changes feed={changes} />
+    </Section>
+  );
 }
 
-export function EpistemicStatusPage() {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const selection = useNavStore((s) => s.selection);
-  useScrollToSection(
-    selection.kind === 'status' ? selection.section : undefined,
-    vaultPath !== null,
-  );
-  const changes = useFeed(vaultPath, ipc.converge);
+/**
+ * The attention lanes: contradictions, blindness, staleness, epistemic debt.
+ *
+ * The lanes arrive NAMED by Rust and their number varies, so this renders
+ * whatever the feed holds rather than enumerating four ids — a second copy of
+ * a list Rust owns is the copy that drifts.
+ */
+export function WhatsContested({ vaultPath }: { vaultPath: string | null }) {
   const lanes = useFeed(vaultPath, ipc.attentionLanes);
+  return <Lanes feed={lanes} />;
+}
+
+/** The proposal queue — what the base wants to change and is waiting on you
+ * to decide. Named "Waiting on you" rather than "Needs review": Knowledge
+ * already has a Needs review row, for CONCEPTS a human has not verified, and
+ * two unrelated queues under one string is a nav that lies. */
+export function WaitingOnYou({ vaultPath }: { vaultPath: string | null }) {
+  return (
+    <Section
+      id="needs-review"
+      title="Waiting on you"
+      blurb="What the base wants to change and is waiting for you to decide."
+    >
+      {/* M33.3: the cards themselves, not a count and a door. The section
+          owns its own read. */}
+      <NeedsYouSection vaultPath={vaultPath} />
+    </Section>
+  );
+}
+
+/** Whether anything is running, what it has left to spend, what it holds. */
+export function Background({ vaultPath }: { vaultPath: string | null }) {
+  return (
+    <Section
+      id="system"
+      title="Background"
+      blurb="Whether anything is running, what it has left to spend, and what it is holding."
+    >
+      {/* M33.4: the controls themselves, not a two-line summary and a door.
+          The section owns its own read. */}
+      <SystemSection vaultPath={vaultPath} />
+    </Section>
+  );
+}
+
+/** Every run this app has booked, what it was for, and what it cost. */
+export function AgentWork() {
+  return (
+    <Section
+      id="fleet"
+      title="What has run"
+      blurb="Every run this app has booked, what it was for, and what it cost."
+    >
+      {/* M33.5: the fleet spans vaults, so this section takes no vault — a
+          caller that wants one says so in its own filter. */}
+      <FleetSection />
+    </Section>
+  );
+}
+
+/** What stays unbuilt until measured evidence says otherwise. */
+export function DeferralGates({ vaultPath }: { vaultPath: string | null }) {
   const [gatesVersion, setGatesVersion] = useState(0);
   const gates = useFeed(vaultPath, ipc.triggerStatus, gatesVersion);
   const [running, setRunning] = useState(false);
   const [runReport, setRunReport] = useState<TriggerRunReport | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // The one action on this page. It never throws (the store-layer rule):
+  // The one action on this tab. It never throws (the store-layer rule):
   // failure becomes a sentence beside the button, and success re-reads the
   // board so the newest rows are the ones on screen.
   const evaluateNow = () => {
@@ -613,73 +660,19 @@ export function EpistemicStatusPage() {
   };
 
   return (
-    // M33.10: the hub carries its own nav instead of Home's sidebar, which
-    // lists types and views — a description of the RECORD corpus, with
-    // nothing to say about runs, budgets or queued proposals.
-    <div className="flex min-h-0 min-w-0 flex-1" data-testid="status-page">
-      <StatusNav />
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        {/* Left-aligned, not centred. The column was centred while the hub
-            filled the window; beside a 200px nav that leaves a dead gutter
-            between the two and reads as a layout accident. The max-width
-            stays — these are sentences to read, not a dashboard to spread. */}
-        <div className="flex w-full min-w-0 max-w-[860px] flex-col gap-6 px-6 py-4">
-          <Section
-            id="changed"
-            title="What changed"
-            blurb="Since the last time anybody looked at this."
-          >
-            <Changes feed={changes} />
-          </Section>
-
-          <Lanes feed={lanes} />
-
-          <Section
-            id="needs-review"
-            title="Needs review"
-            blurb="What the base wants to change and is waiting for you to decide."
-          >
-            {/* M33.3: the cards themselves, not a count and a door. The section
-              owns its own read — the hub no longer needs a review feed. */}
-            <NeedsYouSection vaultPath={vaultPath} />
-          </Section>
-
-          <Section
-            id="system"
-            title="Background"
-            blurb="Whether anything is running, what it has left to spend, and what it is holding."
-          >
-            {/* M33.4: the controls themselves, not a two-line summary and a
-              door. The section owns its own read. */}
-            <SystemSection vaultPath={vaultPath} />
-          </Section>
-
-          <Section
-            id="fleet"
-            title="What has run"
-            blurb="Every run this app has booked, what it was for, and what it cost."
-          >
-            {/* M33.5: the fleet spans vaults, so this section takes no vault —
-              a caller that wants one says so in its own filter. */}
-            <FleetSection />
-          </Section>
-
-          <Section
-            id="gates"
-            title="Deferral gates"
-            blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
-          >
-            <Gates
-              feed={gates}
-              onEvaluate={evaluateNow}
-              running={running}
-              report={runReport}
-              error={runError}
-            />
-            <R7Scope vaultPath={vaultPath} />
-          </Section>
-        </div>
-      </div>
-    </div>
+    <Section
+      id="gates"
+      title="Deferral gates"
+      blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
+    >
+      <Gates
+        feed={gates}
+        onEvaluate={evaluateNow}
+        running={running}
+        report={runReport}
+        error={runError}
+      />
+      <R7Scope vaultPath={vaultPath} />
+    </Section>
   );
 }

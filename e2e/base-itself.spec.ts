@@ -1,8 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, openKnowledgeTab } from './boot';
 
 /**
- * The Epistemic Status surface (M27.8d, §35 skeleton).
+ * What the base knows about ITSELF — the Knowledge tab's second nav group
+ * (M27.8d as the Epistemic Status hub, folded in here by M33a.2).
+ *
+ * The file was `status.spec.ts` until the hub stopped existing. Every test in
+ * it opens Knowledge now, so the old name was the last thing in the tree
+ * claiming there is a Status destination.
  *
  * FIXED SHAPES, NO ENGINE — the same rule the M25 control-surface specs
  * state. Lane order, reason ranking, the freshness clock and the coverage
@@ -61,8 +66,27 @@ const QUIET_CHANGES = {
   sections: [],
 };
 
+/** The six rows the M33a.2 merge added, in the order the nav renders them. */
+const ITSELF_ROWS = [
+  'What changed',
+  "What's contested",
+  'Waiting on you',
+  'Background',
+  'Agent work',
+  'Deferral gates',
+];
+
+/**
+ * Boot, stage the feeds, and land on one of the tabs.
+ *
+ * The seeds go in before the tab mounts so its first read already has them —
+ * which is why they are staged here rather than inside each test, and why a
+ * test that wants a second tab calls `openKnowledgeTab` again rather than
+ * re-seeding.
+ */
 async function open(
   page: Page,
+  row: string,
   seed: { lanes?: unknown; changes?: unknown | null; review?: unknown } = {},
 ): Promise<void> {
   await boot(page);
@@ -70,8 +94,7 @@ async function open(
     ({ lanes, changes, review }) => {
       window.__cerebroSeedLanes(lanes);
       window.__cerebroSeedChanges(changes);
-      // Seeded before the hub mounts, so its first read already has them
-      // (M33.3 — the needs section reads the queue itself now).
+      // (M33.3 — the needs section reads the queue itself now.)
       if (review !== undefined) window.__cerebroSeedReview(review);
     },
     {
@@ -80,14 +103,13 @@ async function open(
       review: seed.review,
     },
   );
-  await page.getByTestId('rail').getByRole('button', { name: 'Status' }).click();
-  await expect(page.getByTestId('status-page')).toBeVisible();
+  await openKnowledgeTab(page, row);
 }
 
-test('status: every lane is on the page, and an empty one says so in its own words', async ({
+test('base itself: every lane is on the tab, and an empty one says so in its own words', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, "What's contested");
 
   // All four, including the ones holding nothing. A lane that appeared only
   // when it had contents would make "no coverage gaps" and "coverage was
@@ -98,10 +120,10 @@ test('status: every lane is on the page, and an empty one says so in its own wor
   }
 });
 
-test('status: the protected lanes say they are protected, and the tunable ones do not', async ({
+test('base itself: the protected lanes say they are protected, and the tunable ones do not', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, "What's contested");
 
   // §33 on screen rather than in a comment. Two lanes no preference can hide.
   await expect(page.getByTestId('protected-badge')).toHaveCount(2);
@@ -113,10 +135,10 @@ test('status: the protected lanes say they are protected, and the tunable ones d
   ).toHaveCount(0);
 });
 
-test('status: a lane item carries its reason and what the base is standing on', async ({
+test('base itself: a lane item carries its reason and what the base is standing on', async ({
   page,
 }) => {
-  await open(page, {
+  await open(page, "What's contested", {
     lanes: {
       ...LANES,
       lanes: [
@@ -142,33 +164,44 @@ test('status: a lane item carries its reason and what the base is standing on', 
   await expect(page.getByTestId('lane-withheld')).toContainText('4 more');
 });
 
-test('status: a feed that refused says so, and does not borrow the empty state', async ({
+test('base itself: a feed that refused says so, and takes no other tab with it', async ({
   page,
 }) => {
   // The mock refuses exactly as the real command does for a vault with no
-  // ledger store, which is the case this page most has to get right.
-  await open(page, { changes: null });
+  // ledger store, which is the case this surface most has to get right.
+  //
+  // M33a.2 walks the tabs in turn rather than reading one scroll column. The
+  // claim is unchanged and the mechanism is stronger for it: these were four
+  // sections of one page that could have shared a read, and they are four
+  // separate mounts that demonstrably do not.
+  await open(page, 'What changed', { changes: null });
 
   await expect(page.getByTestId('section-unavailable')).toContainText('What changed');
   await expect(page.locator('[data-section="changed"]')).not.toContainText('Nothing has changed');
-  // Every other section still answered. Separate reads, separate answers —
-  // a missing ledger does not take the review queue or the background with
-  // it, and after M33.3/M33.4 those two are BODIES rather than doors, which
-  // makes the independence claim stronger than it was: each merged section
-  // owns its own read and its own failure.
+
+  // Every other tab still answered. Separate reads, separate answers — a
+  // missing ledger does not take the review queue or the background with it,
+  // and after M33.3/M33.4 those two are BODIES rather than doors, which makes
+  // the independence claim stronger than it was: each section owns its own
+  // read and its own failure.
+  await openKnowledgeTab(page, "What's contested");
   await expect(page.locator('[data-section="contradiction"]')).toContainText(
     'Nothing in contradiction.',
   );
+
+  await openKnowledgeTab(page, 'Background');
   await expect(page.locator('[data-section="system"]').getByTestId('budget-meter')).toBeVisible();
+
   // The needs section answered too — with the corpus's cards, since M33.10
   // gave the operational surfaces a corpus of their own.
+  await openKnowledgeTab(page, 'Waiting on you');
   await expect(
     page.locator('[data-section="needs-review"]').getByTestId('review-card'),
   ).not.toHaveCount(0);
 });
 
-test('status: what the backend could not see is named, not dropped', async ({ page }) => {
-  await open(page, {
+test('base itself: what the backend could not see is named, not dropped', async ({ page }) => {
+  await open(page, "What's contested", {
     lanes: {
       ...LANES,
       incomplete: ['Parked promotions could not be read, so epistemic debt may be under-reported.'],
@@ -180,10 +213,10 @@ test('status: what the backend could not see is named, not dropped', async ({ pa
   await expect(page.locator('[data-section="epistemic_debt"]')).toBeVisible();
 });
 
-test('status: what changed is read aloud, and a quiet window says one sentence', async ({
+test('base itself: what changed is read aloud, and a quiet window says one sentence', async ({
   page,
 }) => {
-  await open(page, {
+  await open(page, 'What changed', {
     changes: {
       schema_version: 'convergence-v1',
       window: { from_seq: 4, to_seq: 12 },
@@ -215,25 +248,27 @@ test('status: what changed is read aloud, and a quiet window says one sentence',
   // reducer fact.
   await expect(page.getByTestId('change-line')).toContainText('agent-supplied');
 
-  await open(page);
+  await open(page, 'What changed');
   await expect(page.locator('[data-section="changed"]')).toContainText('Nothing has changed');
 });
 
-test('status: needs-review holds the cards themselves, not a door to them', async ({ page }) => {
+test('base itself: waiting-on-you holds the cards themselves, not a door to them', async ({
+  page,
+}) => {
   // M33.3 INVERTED this assertion. It used to prove the section was a count
   // and a door — "not a second copy of the cards" — because the cards lived
-  // on their own tab. The tab is gone: the hub is where they live, so the
-  // door is what must not exist now. The card behaviours themselves are
-  // proved in `review.spec.ts`, against this same section.
+  // on their own tab. The tab is gone: this is where they live, so the door
+  // is what must not exist now. The card behaviours themselves are proved in
+  // `review.spec.ts`, against this same section.
   // With nothing queued the honest answer is still the empty one. Asked for
   // explicitly since M33.10: the demo corpus seeds a real queue, so "empty"
   // is now a case a spec stages rather than one it inherits.
-  await open(page, { review: { cards: [], applications: [] } });
+  await open(page, 'Waiting on you', { review: { cards: [], applications: [] } });
   const section = page.locator('[data-section="needs-review"]');
   await expect(section).toContainText('Nothing is waiting on a decision.');
 
   // And with a card queued, the card itself is here — no summary, no door.
-  await open(page, {
+  await open(page, 'Waiting on you', {
     review: {
       cards: [
         {
@@ -264,38 +299,47 @@ test('status: needs-review holds the cards themselves, not a door to them', asyn
   await expect(section.getByRole('button', { name: 'Approve' })).toBeVisible();
   await expect(section.getByTestId('review-summary')).toHaveCount(0);
 
-  // M33.4 did the same to the background summary: the controls are a body in
-  // the hub now, so neither of the two doors this page used to hold exists.
+  // M33.4 did the same to the background summary: the controls are the tab's
+  // body now, so neither of the two doors this surface used to hold exists.
+  await openKnowledgeTab(page, 'Background');
   await expect(page.getByTestId('health-summary')).toHaveCount(0);
   await expect(page.locator('[data-section="system"]').getByTestId('lane-toggles')).toBeVisible();
 });
 
-test('status: the hub carries its own nav, not the record sidebar (M33.10)', async ({ page }) => {
-  await open(page);
+test('base itself: the Knowledge nav carries these six rows, not the record sidebar (M33a.2)', async ({
+  page,
+}) => {
+  await open(page, 'What changed');
 
   // Home's sidebar lists types and views — a description of the RECORD
   // corpus, which has nothing to say about runs, budgets or queued
-  // proposals. The hub answers its own question and navigates itself.
+  // proposals. Knowledge answers its own question and navigates itself.
   await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
-  const nav = page.getByTestId('status-nav');
-  await expect(nav).toBeVisible();
-  await expect(nav.getByTestId('status-nav-row')).toHaveCount(5);
+  const nav = page.getByTestId('knowledge-nav-row');
+  // The six the merge added. Asserted by NAME rather than by count: the group
+  // above them grows a row whenever the bundle grows a folder or a subject,
+  // so a total would be a number about the demo corpus, not about this merge.
+  for (const row of ITSELF_ROWS) await expect(nav.filter({ hasText: row })).toHaveCount(1);
 
-  // A nav row takes you to its section, and the selection remembers which —
-  // so a section is a place the back button can return to.
-  await nav.locator('[data-target="fleet"]').click();
+  // A nav row takes you to its tab, and the selection remembers which — so a
+  // tab is a place the back button can return to.
+  await nav.filter({ hasText: 'Agent work' }).click();
   await expect(page.locator('[data-section="fleet"]')).toBeVisible();
-  await expect(nav.locator('[data-target="fleet"]')).toHaveAttribute('data-active', 'true');
+  await expect(nav.filter({ hasText: 'Agent work' })).toHaveAttribute('aria-current', 'page');
 
-  // And no counts: a badge here would be the chrome nagging somebody to
-  // drain a queue, which is the rule that kept one off Knowledge and History.
-  await expect(nav).not.toContainText('3');
+  // And no counts on any of them: a badge here would be the chrome nagging
+  // somebody to drain a queue, which is the rule that kept one off Knowledge
+  // and History. (The rows ABOVE this group may carry one — a destination is
+  // allowed to say how big it is; the chrome is not allowed to count at you.)
+  for (const row of ITSELF_ROWS) {
+    await expect(nav.filter({ hasText: row })).not.toContainText(/\d/);
+  }
 });
 
-test('status: the gate board is the shared artifact, and never-evaluated is said out loud', async ({
+test('base itself: the gate board is the shared artifact, and never-evaluated is said out loud', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, 'Deferral gates');
 
   // The mock derives the board from the SAME registry file the Rust runner
   // reads — 14 entries, 34 declared gates. A count drift here means the
@@ -311,7 +355,9 @@ test('status: the gate board is the shared artifact, and never-evaluated is said
   await expect(page.locator('[data-gate="R8:root"]')).toContainText('owner evidence pack');
 });
 
-test('status: a fired gate is loud, and even then licenses only a dated plan', async ({ page }) => {
+test('base itself: a fired gate is loud, and even then licenses only a dated plan', async ({
+  page,
+}) => {
   await boot(page);
   await page.evaluate(() => {
     window.__cerebroSeedTriggerLatest('R13:root', {
@@ -321,7 +367,7 @@ test('status: a fired gate is loud, and even then licenses only a dated plan', a
       window_end: '2026-08-14T00:00:00+02:00',
     });
   });
-  await page.getByTestId('rail').getByRole('button', { name: 'Status' }).click();
+  await openKnowledgeTab(page, 'Deferral gates');
 
   const row = page.locator('[data-gate="R13:root"]');
   await expect(row).toHaveAttribute('data-result', 'fired');
@@ -329,10 +375,10 @@ test('status: a fired gate is loud, and even then licenses only a dated plan', a
   await expect(page.locator('[data-section="gates"]')).toContainText('R13:root has fired');
 });
 
-test('status: evaluate answers honestly in the browser, where no runtime database exists', async ({
+test('base itself: evaluate answers honestly in the browser, where no runtime database exists', async ({
   page,
 }) => {
-  await open(page);
+  await open(page, 'Deferral gates');
 
   await page.getByTestId('gates-evaluate').click();
   // The mock invents no results — every gate answers not-evaluated with the
@@ -341,8 +387,10 @@ test('status: evaluate answers honestly in the browser, where no runtime databas
   await expect(page.getByTestId('gates-run-skip').first()).toContainText('browser mock');
 });
 
-test('status: declaring an R7 scope walks the real guards and round-trips', async ({ page }) => {
-  await open(page);
+test('base itself: declaring an R7 scope walks the real guards and round-trips', async ({
+  page,
+}) => {
+  await open(page, 'Deferral gates');
   await expect(page.getByTestId('r7-scope-none')).toContainText('No scope is declared');
 
   // An empty declaration meets the validator, and the refusal is a sentence
