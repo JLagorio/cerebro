@@ -112,14 +112,78 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // agent is told, not about what the user is reading.
   await expect(page.getByTestId('detail-panel')).toBeVisible();
 
-  // M17.6b: `@` puts it back, and leaves no text behind — a chip is not a
-  // mention. (`[[` is the mention; the two tokens do different jobs.)
+  // M17.6b: `@` puts it back, and a record row leaves no text behind — a chip
+  // is not a mention. (`[[` mentions a note; `@agent-slug` addresses an agent
+  // and does stay as text, which is the one exception — see the test below.)
   const composer = panel.getByLabel('Message the assistant');
   await composer.fill('what about @');
   await expect(panel.getByTestId('attach-menu')).toBeVisible();
   await panel.getByTestId('attach-menu').getByRole('button').first().click();
   await expect(panel.getByTestId('context-chip')).toHaveCount(2);
   await expect(composer).toHaveValue('what about ');
+});
+
+/**
+ * M33b.6 — you can address an agent by name, and it changes who the turn goes
+ * to and nothing else (D8).
+ *
+ * The routing itself is asserted in useAgentChat.test.tsx, against the run
+ * options. What only the real app can show is the other half: that `@` offers
+ * the agent, that the handle SURVIVES as text where every other row in that
+ * menu consumes it, and that the thread it was typed in stays exactly where it
+ * was.
+ */
+test('agent: a turn can be addressed by name, and the thread stays put', async ({ page }) => {
+  await boot(page);
+
+  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+  const composer = panel.getByLabel('Message the assistant');
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
+
+  // `@` offers the vault's agents, under their own heading. Only after a key
+  // is pressed: nothing volunteers an agent at anybody.
+  //
+  // Typed rather than `fill`ed: the menu is anchored to the CARET, and a
+  // programmatic value set leaves the selection where the harness left it —
+  // which opens the menu or not depending on timing.
+  await composer.click();
+  await composer.pressSequentially('@release');
+  const menu = panel.getByTestId('attach-menu');
+  await expect(menu).toBeVisible();
+  await menu.getByRole('button', { name: /@release-scout/ }).click();
+  // Completed into the message, not taken out of it — the recipient is read
+  // back out of the text at send.
+  await expect(composer).toHaveValue('@release-scout ');
+
+  await composer.fill('@release-scout what is slipping?');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  const asked = panel.getByTestId('chat-message').filter({ hasText: 'what is slipping' });
+  await expect(asked.getByTestId('turn-addressed')).toContainText('To Release scout');
+  // Send returns when the turn ends — the composer's own signal, and the one
+  // that matters here: the hook takes one turn per conversation, so a second
+  // send fired mid-stream is dropped rather than queued.
+  await expect(panel.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 10_000 });
+
+  // D8: an existing thread gained a recipient. It did not become a different
+  // surface — same thread, same anchor, one conversation. The stored anchor is
+  // the assertion that matters: addressing an agent must not file the thread
+  // under the agent instead of under where it happened.
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
+  await expect(panel.getByTestId('chat-message')).toHaveCount(2);
+  const threads = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem('cerebro.conversations') ?? '[]'),
+  );
+  expect(threads).toHaveLength(1);
+  expect(threads[0].place).toEqual({ kind: 'home' });
+  expect(threads[0].placeLabel).toBe('Home');
+
+  // A name nothing answers to is text, and says so rather than failing or
+  // going quiet.
+  await composer.fill('@nobody-here are you there?');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  const missed = panel.getByTestId('chat-message').filter({ hasText: 'are you there' });
+  await expect(missed.getByTestId('turn-addressed')).toContainText('No agent called @nobody-here');
 });
 
 test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({

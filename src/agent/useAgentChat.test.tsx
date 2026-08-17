@@ -28,6 +28,7 @@ vi.mock('./agentIpc', () => ({
 
 import * as agentIpc from './agentIpc';
 import { useAgentChat, type TurnContext } from './useAgentChat';
+import { makeEntry } from '@/engine/testHelpers';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -463,6 +464,241 @@ describe('useAgentChat and a redelivered ToolStart', () => {
       handlers.forEach((h) => h({ run: 8, kind: 'ToolDone', tool_id: 't-1', is_error: true })),
     );
     expect(result.current.messages[1].tools[0]).toMatchObject({ done: true, failed: true });
+  });
+});
+
+/**
+ * M33b.6 — `@agent-slug` routes the turn.
+ *
+ * The capability is entirely a routing one: everything it hands the run —
+ * `actor`, `scope`, `allowedTools`, `connectorNames` — is a field `runAgent`
+ * has taken since M17.13/M18.4, and every one of them can only SUBTRACT.
+ * These tests are about which values arrive, and about the fact that nothing
+ * about the thread moves when one does (D8).
+ */
+describe('useAgentChat addressed by name (M33b.6)', () => {
+  const agentEntry = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { slug: 'release-scout', ...properties } as never,
+    });
+
+  /** Settings says yes to everything; the record is what narrows. */
+  const wideOpen = { shell: true, connectors: true };
+
+  const optionsOfLastRun = () => {
+    const calls = vi.mocked(agentIpc.runAgent).mock.calls;
+    return calls[calls.length - 1][1];
+  };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useUiStore.setState({ runs: [] });
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        agentEntry({ tools: 'safe', scope: ['records/risks'] }),
+        makeEntry({ path: 'work/ship.md', title: 'Ship the beta', type: 'Work item' }),
+      ],
+    });
+  });
+
+  it('routes the turn to the named agent’s identity and scope', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), wideOpen, null));
+    act(() => result.current.send('@release-scout what is slipping?'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    const options = optionsOfLastRun();
+    // M13.4: attribution rides the bearer token, so this is also what the
+    // `runs` row records — an addressed turn is a run the fleet can see.
+    expect(options.actor).toBe('process:release-scout');
+    expect(options.scope).toEqual(['records/risks']);
+  });
+
+  it('carries the agent’s memory into the turn, corrections first', async () => {
+    useVaultStore.setState({
+      entries: [agentEntry({ recent: 'MY OWN NOTES', preferences: 'HUMAN CORRECTION' })],
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), wideOpen, null));
+    act(() => result.current.send('@release-scout status?'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    const { message } = optionsOfLastRun();
+    expect(message).toContain('HUMAN CORRECTION');
+    expect(message).toContain('MY OWN NOTES');
+    // The same assembly the scheduled path uses, so the priority order cannot
+    // drift apart between the two.
+    expect(message.indexOf('HUMAN CORRECTION')).toBeLessThan(message.indexOf('MY OWN NOTES'));
+    // The block LEADS. A recipient's brief arriving after the question would
+    // read as a footnote to it.
+    expect(message.indexOf('Release scout')).toBeLessThan(message.indexOf('status?'));
+    expect(message.endsWith('@release-scout status?')).toBe(true);
+  });
+
+  it('leaves the thread exactly where it was — a recipient is not a place (D8)', async () => {
+    const place = { kind: 'inbox' } as const;
+    const { result } = renderHook(() =>
+      useAgentChat(() => ({ systemPrompt: 'sys', place, conversationId: 'c-7' }), wideOpen, null),
+    );
+    act(() => result.current.send('@release-scout look here'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    // The turn is filed under the conversation and the place it was already
+    // in. Addressing someone is not going somewhere, and this phase must not
+    // grow a second thread list to prove it.
+    const task = useUiStore.getState().runs[0];
+    expect(task.place).toEqual(place);
+    expect(task.conversationId).toBe('c-7');
+    expect(task.owner).toBe('chat');
+  });
+
+  it('an unresolvable @name is text, and says so on the message it was typed in', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), wideOpen, null));
+    act(() => result.current.send('@nobody-here are you there?'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    const options = optionsOfLastRun();
+    // Nothing routed, and nothing was invented on the agent's behalf: the
+    // message reaches the assistant exactly as typed.
+    expect(options.actor).toBeNull();
+    expect(options.scope).toBeNull();
+    expect(options.message).toBe('@nobody-here are you there?');
+    // But the person is not left guessing. Quiet, on the turn, not a toast.
+    expect(result.current.messages[0].addressed).toEqual({
+      handle: 'nobody-here',
+      title: null,
+    });
+  });
+
+  it('marks a routed turn with who it went to', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), wideOpen, null));
+    act(() => result.current.send('@release-scout hi'));
+    expect(result.current.messages[0].addressed).toEqual({
+      handle: 'release-scout',
+      title: 'Release scout',
+    });
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+  });
+
+  it('says nothing at all about a turn that named nobody', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), wideOpen, null));
+    act(() => result.current.send('what is at risk?'));
+    expect(result.current.messages[0].addressed).toBeUndefined();
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+  });
+});
+
+/**
+ * The narrowing contract (M33b.6, task 5).
+ *
+ * Addressing an agent must never be a way to WIDEN a turn. A record is
+ * vault-authored content — the same trust boundary as any `CLAUDE.md` — so it
+ * may subtract from what Settings granted and can never add to it.
+ *
+ * Where each half is enforced, verified in the Rust rather than assumed:
+ *
+ * - `shell` is real and complete. `agent/mod.rs:626 build_args` builds argv
+ *   from `tool_policy(req.shell)`, so a false here means Bash and the CLI's
+ *   file tools are never in `--allowedTools` at all. The value asserted below
+ *   is the whole boundary.
+ * - `allowedTools` is enforced at argv the same way (`narrow()`, an
+ *   intersection, mod.rs:586) — but NOT yet by the bearer grant:
+ *   `lib.rs:1024-1029` passes `None` for the token's tools on every run started
+ *   through `run_agent`, so `ungranted_tool_refusal` (mcp.rs:1278) refuses
+ *   nothing for it. That is M34.1.1's fix, not this phase's, and it is why the
+ *   assertion below is about what the ROUTING hands the run rather than about
+ *   a tool call being refused end to end.
+ */
+describe('useAgentChat cannot be widened by who it is addressed to', () => {
+  const agentEntry = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { slug: 'release-scout', ...properties } as never,
+    });
+
+  const shellOf = async (settings: boolean, declared: string) => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [agentEntry({ tools: declared })],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: settings, connectors: false }, null),
+    );
+    act(() => result.current.send('@release-scout run it'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    return vi.mocked(agentIpc.runAgent).mock.calls[0][1].shell;
+  };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    useUiStore.setState({ runs: [] });
+  });
+
+  it('refuses a record that declares MORE shell than Settings permits', async () => {
+    // The case this test exists for. `tools: shell` in a vault whose owner
+    // never switched shell access on gets nothing — exactly as it does on a
+    // schedule (useJobRunner), and for the same reason: a record cannot grant
+    // itself what Settings denies, and being spoken to does not change that.
+    expect(await shellOf(false, 'shell')).toBe(false);
+  });
+
+  it('still narrows DOWN from a Settings grant the record does not want', async () => {
+    expect(await shellOf(true, 'safe')).toBe(false);
+  });
+
+  it('passes the ceiling through when both agree', async () => {
+    expect(await shellOf(true, 'shell')).toBe(true);
+  });
+
+  it('leaves an unaddressed turn on the Settings ceiling', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: true, connectors: false }, null),
+    );
+    act(() => result.current.send('plain question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].shell).toBe(true);
+  });
+
+  it('intersects the agent’s tool narrowing with the skill’s, never unions them', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [agentEntry({ 'allowed-tools': 'get_note, search_notes' })],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: false, connectors: false }, null),
+    );
+    // A skill invoked while addressing an agent: two vault files each drawing
+    // a boundary, and the answer is the narrower of the two.
+    act(() =>
+      result.current.send('/audit @release-scout', 'AUDIT BODY', ['search_notes', 'create_note']),
+    );
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].allowedTools).toEqual(['search_notes']);
+  });
+
+  it('hands the run the connectors the record named, and no others', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [agentEntry({ connectors: 'atlassian' })],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: false, connectors: true }, null),
+    );
+    act(() => result.current.send('@release-scout fetch it'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    // M18.4's contract, unchanged: a name the vault has not enabled is dropped
+    // in Rust rather than conjured, so this is a request to narrow, not a grant.
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].connectorNames).toEqual(['atlassian']);
   });
 });
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { agentRunPrompt, askBasePrompt, currentStatePrompt, distillPrompt } from './prompts';
+import {
+  addressedAgentPrompt,
+  agentRunPrompt,
+  askBasePrompt,
+  currentStatePrompt,
+  distillPrompt,
+} from './prompts';
 import { ALL_TOOLS } from '@/engine/tools';
 
 /**
@@ -168,6 +174,69 @@ describe('per-trigger instructions (M18.5)', () => {
       do: 'HOW TO.',
     });
     expect(prompt.indexOf('SHOULD I?')).toBeLessThan(prompt.indexOf('HOW TO.'));
+  });
+});
+
+/**
+ * M33b.6 — what a turn addressed to an agent is told.
+ *
+ * The two prompts share the memory and the scope and nothing else, and the
+ * difference is not decoration: the unattended one opens by saying nobody is
+ * watching, which is precisely false here. These assert both halves — that the
+ * shared assembly is genuinely shared, and that the framing did not leak.
+ */
+describe('addressedAgentPrompt', () => {
+  const addressed = (memory = { recent: '', preferences: '' }, scope: string[] | null = null) =>
+    addressedAgentPrompt(
+      'records/agents/scout.md',
+      'Release scout',
+      'process:release-scout',
+      memory,
+      scope,
+    );
+
+  it('names the agent, its record and the identity its writes carry', () => {
+    const prompt = addressed();
+    expect(prompt).toContain('Release scout');
+    expect(prompt).toContain('records/agents/scout.md');
+    expect(prompt).toContain('process:release-scout');
+  });
+
+  it('does not tell an attended turn that nobody is watching', () => {
+    // The single sentence that makes agentRunPrompt wrong for this path.
+    expect(addressed()).not.toContain('Nobody is watching');
+    expect(addressed()).toContain('is waiting');
+  });
+
+  it('points at the standing instructions rather than pasting them in', () => {
+    // The body is a record the turn already knows the path of and holds the
+    // tools to read. Folded in above the question, an agent's charter reads
+    // as something the person had just typed.
+    expect(addressed()).toContain('standing instructions are the body of that record');
+  });
+
+  it('ranks the human’s corrections above the agent’s own notes, like a run does', () => {
+    const prompt = addressed({ recent: 'MY OWN NOTES', preferences: 'HUMAN CORRECTION' });
+    expect(prompt.indexOf('HUMAN CORRECTION')).toBeLessThan(prompt.indexOf('MY OWN NOTES'));
+    expect(prompt).toContain('This outranks your own notes');
+  });
+
+  it('states the scope up front, in the same words the scheduled run gets', () => {
+    expect(addressed(undefined, ['records/risks'])).toContain('records/risks');
+    expect(addressed(undefined, ['records/risks'])).toContain('This is enforced');
+  });
+
+  it('tells the PERSON when the agent is scoped to nothing', () => {
+    // The one clause that differs by caller: a run nobody is watching stops
+    // and writes it in its memory; a turn someone is waiting on says it to them.
+    const prompt = addressed(undefined, []);
+    expect(prompt).toContain('scoped to no folder at all');
+    expect(prompt).toContain('Say that to the person');
+    expect(prompt).not.toContain('Say so in your memory and stop.');
+  });
+
+  it('ends by handing over to what the person actually asked', () => {
+    expect(addressed().trimEnd().endsWith('What they asked:')).toBe(true);
   });
 });
 

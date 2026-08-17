@@ -118,6 +118,20 @@ export interface ChatMessage {
   /** Assistant only: set when the turn failed. */
   error?: string;
   streaming?: boolean;
+  /**
+   * User only: the `@handle` this turn was addressed to (M33b.6).
+   *
+   * Absent on every message that named nobody, which is nearly all of them.
+   * `title` is null when the vault holds no agent by that name — the mention
+   * was never anything but text, the turn went to the assistant, and this is
+   * how the person finds that out. Quiet on purpose: an unresolved mention is
+   * not an error to interrupt someone with, and it is not nothing either.
+   *
+   * On the message rather than on the conversation, because a thread keeps its
+   * place anchor and gains a recipient PER TURN (D8) — addressing an agent once
+   * does not make the whole thread theirs.
+   */
+  addressed?: { handle: string; title: string | null };
 }
 
 /**

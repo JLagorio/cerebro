@@ -83,7 +83,7 @@ export function MessageText({ text, onOpen }: { text: string; onOpen: (target: s
  * to a predictable slice of the transcript with a way to see the rest. */
 const LONG_PROMPT = 400;
 
-function UserMessage({ text }: { text: string }) {
+function UserMessage({ text, addressed }: { text: string; addressed?: ChatMessage['addressed'] }) {
   const [expanded, setExpanded] = useState(false);
   const long = text.length > LONG_PROMPT;
   return (
@@ -98,6 +98,17 @@ function UserMessage({ text }: { text: string }) {
       >
         {text}
       </div>
+      {/* M33b.6 — who this turn went to, said once, under the bubble it
+          belongs to. Only ever drawn when the person typed an `@`: a mention
+          affordance is theirs to invoke, and an app that volunteered agents
+          at someone would be the counting chrome M8 forbids. */}
+      {addressed !== undefined && (
+        <span data-testid="turn-addressed" className="text-2xs text-n-400">
+          {addressed.title === null
+            ? `No agent called @${addressed.handle} — the assistant took this one.`
+            : `To ${addressed.title}`}
+        </span>
+      )}
       {long && (
         <button
           type="button"
@@ -126,7 +137,8 @@ function Message({
   /** Re-send the question this answer belongs to (M15). */
   onRetry?: () => void;
 }) {
-  if (message.role === 'user') return <UserMessage text={message.text} />;
+  if (message.role === 'user')
+    return <UserMessage text={message.text} addressed={message.addressed} />;
   return (
     <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
       {message.tools.length > 0 && (

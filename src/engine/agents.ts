@@ -26,6 +26,16 @@ export { AGENT_TYPE };
 export interface AgentRef {
   /** `process:<slug>` — how this agent's writes are attributed. */
   actor: string;
+  /**
+   * The name it answers to when it is addressed — `@handle` in a chat turn
+   * (M33b.6).
+   *
+   * The SAME string `actor` is built from, so an agent is addressed by exactly
+   * the identity its writes are stamped with. A second naming rule for
+   * addressing would be a twin inventory of the one thing that must not have
+   * two answers: who this is.
+   */
+  handle: string;
   /** Ledger key, stable across renames when the record declares a `slug:`
    * (M17.8). The same identity skills use. */
   id: string;
@@ -136,13 +146,24 @@ export function isAgentEntry(entry: Entry): boolean {
   return libraryKind(entry) === 'agent' && entry.parseError === null;
 }
 
+/**
+ * The name an agent answers to (M13.4's actor slug, named in M33b.6).
+ *
+ * A declared `slug:` fixes it, which is the part that ends up stamped into
+ * provenance: renaming an agent used to silently re-attribute everything it
+ * wrote from then on, so the record of who wrote what split in two at the
+ * rename (M17.8). It is now also what `@handle` resolves against, so a rename
+ * does not change who you are talking to either.
+ */
+export function agentHandle(entry: Entry): string {
+  return declaredSlug(entry) || slugify(entry.title);
+}
+
 export function agentRef(entry: Entry): AgentRef {
+  const handle = agentHandle(entry);
   return {
-    // A declared `slug:` also fixes the ACTOR, which is the part that ends up
-    // stamped into provenance: renaming an agent used to silently re-attribute
-    // everything it wrote from then on, so the record of who wrote what split
-    // in two at the rename (M17.8).
-    actor: `process:${declaredSlug(entry) || slugify(entry.title)}`,
+    actor: `process:${handle}`,
+    handle,
     id: recordIdentity(entry),
     title: entry.title,
     path: entry.path,
@@ -163,4 +184,67 @@ export function listAgents(entries: Entry[]): AgentRef[] {
     .filter(isAgentEntry)
     .sort((a, b) => a.title.localeCompare(b.title))
     .map(agentRef);
+}
+
+// --- Addressing an agent by name (M33b.6) ------------------------------------
+
+/**
+ * `@handle` on a word boundary — the same token the composer's `@` menu
+ * completes, and the same boundary rule it uses, so `josef@example` is an
+ * email address here as well as there.
+ */
+const MENTION = /(?:^|[\s(])@([A-Za-z0-9][A-Za-z0-9_-]*)/;
+
+/**
+ * Who a message is addressed to (M33b.6).
+ *
+ * `agent` is null when the vault holds nobody by that name. That is not an
+ * error and not silence: the `@name` stays in the message as ordinary text —
+ * which is all it ever was — and the handle is carried out so the surface can
+ * say, quietly, that it did not route.
+ */
+export interface Address {
+  /** The handle as typed, slugified — what was looked up. */
+  handle: string;
+  agent: AgentRef | null;
+}
+
+/**
+ * Read the recipient out of a composed message.
+ *
+ * `null` means the message addresses nobody, which is every message that does
+ * not contain an `@` — the common case, and the one that must cost nothing.
+ *
+ * The FIRST mention wins and any later one is left as text. A turn carries one
+ * grant, one scope and one memory, so it has one recipient; quietly merging two
+ * agents' grants is exactly the widening this phase must not become.
+ */
+export function readAddress(text: string, entries: Entry[]): Address | null {
+  const match = text.match(MENTION);
+  if (match === null) return null;
+  const handle = slugify(match[1]);
+  if (handle === '') return null;
+  // Title order, via listAgents, so two records that somehow claim one handle
+  // resolve the same way on every send rather than by scan order.
+  return { handle, agent: listAgents(entries).find((a) => a.handle === handle) ?? null };
+}
+
+/**
+ * Intersect two tool narrowings, either of which may be absent (M33b.6).
+ *
+ * A turn can be narrowed twice — a skill's `allowed-tools:` and, now, the
+ * addressed agent's — and the answer has to be the narrower of the two, never
+ * their union. `null` means "does not narrow", so it yields to the other side;
+ * `[]` means "narrow to nothing", which survives everything. Same direction as
+ * `narrow()` in agent/mod.rs, which applies the result to the granted policy:
+ * every layer here subtracts, and no layer can add.
+ */
+export function narrowTools(
+  a: readonly string[] | null | undefined,
+  b: readonly string[] | null | undefined,
+): string[] | null {
+  if (a == null) return b == null ? null : [...b];
+  if (b == null) return [...a];
+  const wanted = new Set(b.map((t) => t.trim().toLowerCase()));
+  return a.filter((t) => wanted.has(t.trim().toLowerCase()));
 }

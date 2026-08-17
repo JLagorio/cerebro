@@ -212,6 +212,89 @@ export function currentStatePrompt(state: {
   ].join('\n');
 }
 
+/**
+ * The two memory tiers, in priority order (M17.14) — ONE assembly.
+ *
+ * Shared by the unattended run below and the addressed turn (M33b.6), because
+ * the ORDER is the load-bearing part: what a person corrected outranks what the
+ * agent concluded about itself, every time, and presenting them as one blob is
+ * how the second quietly overwrites the first. Two copies of that ordering
+ * would be two chances to get it wrong, and only one of them would have a test.
+ */
+export function agentMemoryLines(memory: { recent: string; preferences: string }): string[] {
+  return [
+    ...(memory.preferences === ''
+      ? []
+      : [
+          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
+          '',
+        ]),
+    memory.recent === ''
+      ? 'This is your first run — you have no working notes yet.'
+      : `Your working notes from previous runs:\n${memory.recent}`,
+  ];
+}
+
+/**
+ * The scope boundary, stated up front (M17.13).
+ *
+ * Also shared, for the same reason: the sentence that says a folder list is
+ * ENFORCED is the difference between an agent planning inside its boundary and
+ * an agent discovering it as a tool error halfway through. `whenEmpty` is the
+ * one clause that differs by caller — a run nobody is watching should stop and
+ * say so in its memory; a turn someone is waiting on should say so to them.
+ */
+export function agentScopeLines(
+  scope: readonly string[] | null | undefined,
+  whenEmpty: string,
+): string[] {
+  if (scope == null) return [];
+  return [
+    scope.length === 0
+      ? `You are scoped to no folder at all: every write to a record will be refused. ${whenEmpty}`
+      : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
+    '',
+  ];
+}
+
+/**
+ * What a chat turn addressed to an agent is told (M33b.6).
+ *
+ * Prefixed to the person's own message, the way useJobRunner prefixes the
+ * CURRENT STATE block and for the same reason: a clause that supersedes the
+ * request has to LEAD it, or it reads as a footnote to it.
+ *
+ * Deliberately not a second `agentRunPrompt`. That prompt's first sentence —
+ * nobody is watching, no chat reply will be read — is the exact opposite of
+ * what is true here, and the rules that follow it are rules for a run with no
+ * one to ask. What the two genuinely share is the memory and the scope, and
+ * they share the assembly rather than a copy of it.
+ *
+ * The standing instructions are NOT folded in. They are the body of a record
+ * the turn is already told the path of and already holds the tools to read, and
+ * the turn a person typed is the request — an agent's charter pasted in above
+ * it would read as something the user had just said.
+ */
+export function addressedAgentPrompt(
+  path: string,
+  title: string,
+  actor: string,
+  memory: { recent: string; preferences: string },
+  scope?: readonly string[] | null,
+): string {
+  return [
+    `This turn is addressed to "${title}", the agent defined at ${path} in this vault. Answer as that agent: your writes are attributed to ${actor}, and your standing instructions are the body of that record — read it before you answer. A person typed this and is waiting, so reply to them as well as writing anything down.`,
+    '',
+    ...agentScopeLines(
+      scope,
+      'Say that to the person rather than trying and reporting the refusal.',
+    ),
+    ...agentMemoryLines(memory),
+    '',
+    'What they asked:',
+  ].join('\n');
+}
+
 export function agentRunPrompt(
   path: string,
   title: string,
@@ -252,32 +335,14 @@ export function agentRunPrompt(
               ]),
           '',
         ]),
-    ...(scope == null
-      ? []
-      : [
-          scope.length === 0
-            ? 'You are scoped to no folder at all: every write to a record will be refused. Say so in your memory and stop.'
-            : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
-          '',
-        ]),
+    ...agentScopeLines(scope, 'Say so in your memory and stop.'),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
     '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
     '',
-    // M17.14 — two tiers, in priority order, and the order is the point. What
-    // a person corrected outranks what the agent concluded about itself, every
-    // time; presenting them as one blob is how the second quietly overwrites
-    // the first.
-    ...(memory.preferences === ''
-      ? []
-      : [
-          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
-          '',
-        ]),
-    memory.recent === ''
-      ? 'This is your first run — you have no working notes yet.'
-      : `Your working notes from previous runs:\n${memory.recent}`,
+    // M17.14 — two tiers, in priority order. See agentMemoryLines.
+    ...agentMemoryLines(memory),
     '',
     `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
     'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',

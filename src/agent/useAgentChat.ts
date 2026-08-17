@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp, stopAgent } from './agentIpc';
 import { newRunId } from './runs';
 import type { AgentEvent, ChatMessage, McpInfo } from './types';
+import { narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
+import { addressedAgentPrompt } from '@/lib/prompts';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -50,13 +52,20 @@ export interface AgentChat {
    * As a FUNCTION it is awaited inside the turn, so the transcript appends and
    * the busy flag rises synchronously on send — an async expansion must not
    * open a window where a second send can interleave. If it rejects, the turn
-   * falls back to sending `text` as typed. */
+   * falls back to sending `text` as typed.
+   *
+   * `text` is also where a RECIPIENT comes from (M33b.6): `@agent-slug` in it
+   * routes the turn to that agent. Read off the typed text rather than passed
+   * as an argument, so every path that sends — the composer, a suggestion, a
+   * retry, a handoff from elsewhere in the app — addresses the same way
+   * without four call sites remembering to. */
   send(
     text: string,
     message?: string | (() => Promise<string>),
     /** Narrow THIS turn's tools — a skill's `allowed-tools:` (M17.8). Per
      * invocation rather than per conversation, because it belongs to the
-     * thing being invoked, not to the thread it was invoked in. */
+     * thing being invoked, not to the thread it was invoked in. Intersected
+     * with the addressed agent's own narrowing, if the turn named one. */
     allowedTools?: string[] | null,
   ): void;
   stop(): void;
@@ -278,11 +287,34 @@ export function useAgentChat(
       // Frozen here, before anything can await: this turn's context is the
       // context the question was asked in.
       const turn = getTurn();
+      // M33b.6 — who this turn is addressed to, read from the text the person
+      // actually composed. Off the store synchronously rather than through a
+      // subscription: the recipient belongs to THIS message, and a chat hook
+      // that re-rendered on every vault scan to keep an agent list current
+      // would pay for that on every keystroke of every conversation.
+      //
+      // D8: this changes who the turn goes to and nothing else. No new
+      // conversation, no per-agent thread list, and the anchor `anchorNow`
+      // stamps is untouched — addressing someone is not going somewhere.
+      const address = readAddress(trimmed, useVaultStore.getState().entries);
+      const recipient = address?.agent ?? null;
       const assistantId = nextId();
       lastPrompt.current = trimmed;
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: 'user', text: trimmed, tools: [] },
+        {
+          id: nextId(),
+          role: 'user',
+          text: trimmed,
+          tools: [],
+          // Carried on the message rather than raised as a toast. A mention
+          // that routed and one that did not are both facts about this turn,
+          // they belong next to the turn, and neither is an interruption —
+          // see ChatMessage.addressed.
+          ...(address === null
+            ? {}
+            : { addressed: { handle: address.handle, title: recipient?.title ?? null } }),
+        },
         { id: assistantId, role: 'assistant', text: '', tools: [], streaming: true },
       ]);
       setStreaming(true);
@@ -316,7 +348,15 @@ export function useAgentChat(
         try {
           const expanded =
             typeof message === 'function' ? await message().catch(() => trimmed) : message?.trim();
-          const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
+          const composed = expanded === undefined || expanded === '' ? trimmed : expanded;
+          // The recipient's block LEADS, like useJobRunner's CURRENT STATE
+          // block and for the same reason. An unresolved mention adds nothing
+          // here: `@nobody` was only ever text, and inventing a preamble about
+          // an agent that does not exist would be the app answering for it.
+          const outgoing =
+            recipient === null
+              ? composed
+              : `${addressedAgentPrompt(recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope)}\n\n${composed}`;
           mcpRef.current ??= await startMcp(vaultPath);
           if (cancelled()) return;
           const { run } = await runAgent(vaultPath, {
@@ -324,14 +364,30 @@ export function useAgentChat(
             systemPrompt: turn.systemPrompt,
             sessionId: sessionRef.current,
             model,
-            shell,
+            // M33b.6 — the addressed agent's grant, and it can only ever
+            // SUBTRACT. `shell` here is the Settings ceiling; a record that
+            // declares `tools: shell` in a vault whose owner never switched
+            // shell on still gets false, exactly as it does on a schedule
+            // (useJobRunner). No record grants itself what Settings denies,
+            // and addressing one must never become the way around that.
+            shell: shell && (recipient?.shell ?? true),
             connectors,
+            connectorNames: recipient?.connectors ?? null,
             // A person typed this turn and is watching it stream — the one
             // kind of run allowed to fall back to their global MCP config
             // when the vault has no connectors.json (PR #5 security review).
             attended: true,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
-            allowedTools: allowedTools ?? null,
+            // Two narrowings can meet on one turn — a skill's `allowed-tools:`
+            // and the addressed agent's — so they intersect. Never union.
+            allowedTools: narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null),
+            // M17.13: enforced in Rust against the bearer the child presents,
+            // so an addressed agent cannot talk its way out of its folders.
+            scope: recipient?.scope ?? null,
+            // M13.4: attribution rides the bearer token, so what this turn
+            // writes is stamped as the agent — and, free, the `runs` row it
+            // books carries the actor the fleet reads.
+            actor: recipient?.actor ?? null,
             mcp: mcpRef.current,
           });
           // Cancelled during the spawn itself: the child exists now, so it has

@@ -97,7 +97,8 @@ describe('ChatInput slash completion (M13.1)', () => {
   });
 
   it('an @ menu is not offered when there is nowhere for a chip to go', () => {
-    // A menu whose choices do nothing is worse than no menu.
+    // A menu whose choices do nothing is worse than no menu. Chip rows need an
+    // `onAttach`; agent rows do not (M33b.6), and this vault holds none.
     render(<Harness />);
     fireEvent.change(box(), { target: { value: '@risk' } });
     expect(screen.queryByTestId('attach-menu')).toBeNull();
@@ -207,5 +208,85 @@ describe('ChatInput @ attachment (M17.6b)', () => {
     expect(onAttach).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'place', label: 'Roadmap' }),
     );
+  });
+});
+
+/**
+ * `@` also ADDRESSES (M33b.6).
+ *
+ * The one row in this menu that completes instead of consuming, and the
+ * exception earns itself: a recipient is not context. `send` reads it back out
+ * of the message text, and leaving `@release-scout` in the prose is what makes
+ * the transcript show who a turn went to.
+ *
+ * An affordance, never a suggestion: these rows exist only once a person has
+ * pressed `@`. Nothing volunteers an agent at anyone.
+ */
+describe('ChatInput @ addressing (M33b.6)', () => {
+  const scout = makeEntry({
+    path: 'records/agents/scout.md',
+    filename: 'scout.md',
+    folder: 'records/agents',
+    title: 'Release scout',
+    type: 'Agent',
+    properties: { slug: 'release-scout' } as never,
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [scout], views: [], collections: [] });
+  });
+
+  it('completes the handle into the message rather than taking it away', () => {
+    const onAttach = vi.fn();
+    render(<Harness onAttach={onAttach} />);
+    fireEvent.change(box(), { target: { value: '@rel' } });
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+
+    expect(box().value).toBe('@release-scout ');
+    // A recipient is not a chip: routing reads the text, and a chip would put
+    // who the turn went to somewhere the transcript never shows.
+    expect(onAttach).not.toHaveBeenCalled();
+  });
+
+  it('finds an agent by its title as well as its handle', () => {
+    render(<Harness onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: 'ask @scout' } });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(box().value).toBe('ask @release-scout ');
+  });
+
+  it('does not offer the same agent twice, as a page and as a recipient', () => {
+    // Addressing already carries everything attaching the record would have —
+    // its brief, its memory, its scope — so the record row would be a
+    // duplicate that does less.
+    render(<Harness onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: '@rel' } });
+    const labels = screen
+      .getByTestId('attach-menu')
+      .querySelectorAll<HTMLElement>('button > span:first-of-type');
+    expect([...labels].map((el) => el.textContent)).toEqual(['@release-scout']);
+  });
+
+  it('is offered even where a chip has nowhere to go', () => {
+    // Unlike the chip rows, an address needs no attachment point — it is only
+    // text in the draft.
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: '@rel' } });
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+  });
+
+  it('closes on completion, so the next Enter sends', () => {
+    // The trailing space is what closes it: the `@` fragment ends at the first
+    // space, so a completed handle is prose. Without that, Enter would keep
+    // re-picking the row instead of sending the message — the same trap the
+    // slash menu had.
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: '@rel' } });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });
