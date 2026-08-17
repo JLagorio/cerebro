@@ -154,12 +154,17 @@ export function Rail() {
           M33a.2 folded the Status hub in here, so this one button is now both
           what the base holds and what it knows about itself — they were always
           one subject.
-          Still no badge, and now for two reasons rather than one. A review
+          Still no badge, and now for three reasons rather than one. A review
           count would be the chrome nagging you to drain a queue (M8.1); the
           same number lives on the "Needs review" row in the Knowledge sidebar,
           where it describes a destination instead. A count of contradictions
           would be worse (M27.8) — the chrome telling you your understanding is
-          broken before you have asked it anything. */}
+          broken before you have asked it anything. And since M33b.3 there is a
+          third tempting number in there, what your agents have queued waiting
+          on you (spec D7) — which is the one this rule was written for. It
+          says itself on the agent's own row, in words, and gets no colour.
+          A destination may say how big it is; nothing counts up at you from
+          the chrome. */}
       <RailButton
         icon="brain"
         label="Knowledge"

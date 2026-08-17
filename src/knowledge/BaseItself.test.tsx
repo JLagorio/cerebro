@@ -12,7 +12,14 @@ import type {
   TriggerRunReport,
   VerificationScope,
 } from '@/lib/ipc';
-import { Background, DeferralGates, WaitingOnYou, WhatChanged, WhatsContested } from './BaseItself';
+import {
+  AgentWork,
+  Background,
+  DeferralGates,
+  WaitingOnYou,
+  WhatChanged,
+  WhatsContested,
+} from './BaseItself';
 
 /**
  * What the base knows about itself (M27.8c, re-homed under Knowledge in
@@ -91,6 +98,8 @@ const EMPTY_LANES: LanesView = {
 
 const HEALTH: PipelineOverview = {
   global_pause: false,
+  ambient_concurrency: 1,
+  ambient_concurrency_max: 4,
   runtime_status: 'ready',
   meter: {
     window_start_utc: '2026-08-12T00:00:00.000Z',
@@ -98,8 +107,6 @@ const HEALTH: PipelineOverview = {
     timezone_id: 'UTC',
     ceiling_state: 'under_budget',
     ceiling_reasons: [],
-  ambient_concurrency: 1,
-  ambient_concurrency_max: 4,
     accounting_state: 'exact',
     runs_started: 0,
     max_daily_runs: 20,
@@ -413,20 +420,24 @@ describe('What the base knows about itself', () => {
   });
 
   it('renders nothing about a vault that is not open', async () => {
-    // Every tab that is ABOUT a vault. `AgentWork` is deliberately absent:
-    // the fleet spans vaults, so it takes none and "no vault is open" is not
-    // a sentence it has to say.
+    // Every tab that is ABOUT a vault — `AgentWork` included since M33b.3,
+    // which is the change that made it one. It used to take no vault at all
+    // ("the fleet spans them"), and that stopped being the whole story when
+    // the tab started listing AGENTS: agents are records in a vault, and the
+    // proposal queue is read against it. That read therefore has nothing to
+    // read here and says so; the run history still spans vaults and stands.
     render(
       <>
         <WhatChanged vaultPath={null} />
         <WhatsContested vaultPath={null} />
         <WaitingOnYou vaultPath={null} />
         <Background vaultPath={null} />
+        <AgentWork vaultPath={null} />
         <DeferralGates vaultPath={null} />
       </>,
     );
 
-    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(6));
+    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(7));
     expect(converge).not.toHaveBeenCalled();
   });
 

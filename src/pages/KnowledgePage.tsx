@@ -141,9 +141,11 @@ function baseItself(nav: KnowledgeNav, vaultPath: string | null): React.ReactNod
     case 'background':
       return <Background vaultPath={vaultPath} />;
     case 'runs':
-      // No vault: the fleet spans them, and the run a link asked for rides on
+      // The vault IS needed now (M33b.3): agents are records in it, and the
+      // proposal queue and the pause are read against it. The run history
+      // below still spans vaults, and the run a link asked for still rides on
       // the selection, which FleetSection reads itself.
-      return <AgentWork />;
+      return <AgentWork vaultPath={vaultPath} />;
     case 'gates':
       return <DeferralGates vaultPath={vaultPath} />;
     default:

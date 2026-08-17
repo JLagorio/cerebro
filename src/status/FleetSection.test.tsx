@@ -167,4 +167,33 @@ describe('FleetSection', () => {
     expect(await screen.findByTestId('section-empty')).toBeTruthy();
     expect(screen.queryByTestId('section-unavailable')).toBeNull();
   });
+
+  // --- Carried from M33.1–.10 ------------------------------------------------
+
+  it('says WHEN a run happened, keeping the exact stamp a hover away', async () => {
+    // These rows said who, what lane, what outcome and what it cost, and
+    // never once said when — so a run from this morning and one from March
+    // read identically, and "newest first" was an ordering nobody could check.
+    fleetRuns.mockResolvedValue([run({ started_at: '2026-07-28T09:00:00Z' })]);
+    render(<FleetSection now={new Date('2026-07-28T12:00:00Z')} />);
+
+    const when = await screen.findByTestId('fleet-when');
+    expect(when.textContent).toBe('3 hours ago');
+    expect(when.getAttribute('title')).toBe('2026-07-28T09:00:00Z');
+  });
+
+  it('narrows to the agent the roster selected, through the same one filter', async () => {
+    // Not a second piece of state meaning "which actor". A list filtered by
+    // one thing while the chip claims another is the defect that avoids.
+    render(<FleetSection focusActor="process:weekly-digest" />);
+
+    await waitFor(() =>
+      expect(fleetRuns).toHaveBeenLastCalledWith(
+        expect.objectContaining({ actor: 'process:weekly-digest' }),
+      ),
+    );
+    expect((screen.getByTestId('fleet-filter-actor') as HTMLSelectElement).value).toBe(
+      'process:weekly-digest',
+    );
+  });
 });

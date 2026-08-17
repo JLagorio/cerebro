@@ -1471,22 +1471,53 @@ export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   return detail;
 }
 
-export async function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
-  if (!fleetAvailable) throw fleetUnavailable();
-  const mine = fleetRuns.filter((run) => run.actor === actor);
-  const metered = mine.filter((run) => run.usage_state === 'exact');
-  const latest = [...mine].sort(
+/** The one fold both summary reads share, mirroring `fleet.rs`'s `summaries`.
+ * Two copies of the sum-only-what-was-metered rule is two places for one to
+ * drift, on this side of the wire as much as on the other. */
+function summariseActor(actor: string, runs: FleetRun[]): FleetActorSummary {
+  const metered = runs.filter((run) => run.usage_state === 'exact');
+  const latest = [...runs].sort(
     (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
   )[0];
   return {
     actor,
-    run_count: mine.length,
+    run_count: runs.length,
     input_tokens: metered.reduce((sum, run) => sum + run.input_tokens, 0),
     output_tokens: metered.reduce((sum, run) => sum + run.output_tokens, 0),
-    unknown_runs: mine.length - metered.length,
+    unknown_runs: runs.length - metered.length,
     last_outcome: latest?.outcome ?? null,
     last_started_at: latest?.started_at ?? null,
   };
+}
+
+export async function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  return summariseActor(
+    actor,
+    fleetRuns.filter((run) => run.actor === actor),
+  );
+}
+
+/**
+ * Every attributed actor, summed (M33b.3).
+ *
+ * `actor: null` is not an actor and gets no row, exactly as the SQL's
+ * `WHERE r.actor IS NOT NULL` decides — the unattributed run stays visible in
+ * `fleetRunsPage`, which is where it belongs. Byte-sorted like the `ORDER BY
+ * r.actor` beside it, so a roster does not reshuffle between reads.
+ */
+export async function fleetActorSummaries(): Promise<FleetActorSummary[]> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const byActor = new Map<string, FleetRun[]>();
+  for (const run of fleetRuns) {
+    if (run.actor === null) continue;
+    const bucket = byActor.get(run.actor);
+    if (bucket === undefined) byActor.set(run.actor, [run]);
+    else bucket.push(run);
+  }
+  return [...byActor.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([actor, runs]) => summariseActor(actor, runs));
 }
 
 /**
@@ -1506,6 +1537,33 @@ export async function ingestItemState(_vault: string, _path: string): Promise<It
 
 export async function setGlobalPause(paused: boolean): Promise<void> {
   pipeline = { ...pipeline, global_pause: paused };
+}
+
+/**
+ * The concurrency ceiling (M33b.2) — with both of Rust's guards, because a
+ * mock that accepted what the backend refuses would let a browser-only test
+ * prove a ceiling no database would ever hold.
+ *
+ * The refusal messages are the Rust ones' sense, not their bytes: what has to
+ * match is that both ends refuse, and that neither clamps. `mockIpc.test.ts`
+ * pins that parity; `settings.rs`'s
+ * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
+ * pins the same rule from the other language.
+ */
+export async function setAmbientConcurrency(ceiling: number): Promise<void> {
+  if (!Number.isInteger(ceiling) || ceiling < AMBIENT_CONCURRENCY_DEFAULT) {
+    throw new Error(
+      `a background concurrency of ${ceiling} is not a ceiling, it is a pause — ` +
+        'use the pause, which says so',
+    );
+  }
+  if (ceiling > AMBIENT_CONCURRENCY_MAX) {
+    throw new Error(
+      `${ceiling} background runs would exceed the ${AMBIENT_CONCURRENCY_MAX} this process ` +
+        'will ever have alive at once',
+    );
+  }
+  pipeline = { ...pipeline, ambient_concurrency: ceiling };
 }
 
 export async function setLaneEnabled(
@@ -1544,33 +1602,6 @@ export async function resolveHeldItems(
 
 export interface TriggerLatest {
   evaluation_id: string;
-/**
- * The concurrency ceiling (M33b.2) — with both of Rust's guards, because a
- * mock that accepted what the backend refuses would let a browser-only test
- * prove a ceiling no database would ever hold.
- *
- * The refusal messages are the Rust ones' sense, not their bytes: what has to
- * match is that both ends refuse, and that neither clamps. `mockIpc.test.ts`
- * pins that parity; `settings.rs`'s
- * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
- * pins the same rule from the other language.
- */
-export async function setAmbientConcurrency(ceiling: number): Promise<void> {
-  if (!Number.isInteger(ceiling) || ceiling < AMBIENT_CONCURRENCY_DEFAULT) {
-    throw new Error(
-      `a background concurrency of ${ceiling} is not a ceiling, it is a pause — ` +
-        'use the pause, which says so',
-    );
-  }
-  if (ceiling > AMBIENT_CONCURRENCY_MAX) {
-    throw new Error(
-      `${ceiling} background runs would exceed the ${AMBIENT_CONCURRENCY_MAX} this process ` +
-        'will ever have alive at once',
-    );
-  }
-  pipeline = { ...pipeline, ambient_concurrency: ceiling };
-}
-
   result: string;
   evaluated_at: string;
   window_end: string | null;

@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { RunDetailPanel } from './RunDetailPanel';
 
 /**
- * The fleet: every run the app has booked, on screen (M33.5).
+ * The run history — one level under the roster (M33.5, re-homed in M33b.3).
  *
  * This replaces `PipelinePage`'s activity log, which was a 50-row table of
  * every vault's runs with no filter, no attribution and no way to open one.
+ *
+ * **It is no longer what the tab is ABOUT.** M33b.3 put `AgentRoster` above
+ * it: a list of runs answers "what happened" and the question a person
+ * arrives with is "who works here". So this is the history behind that
+ * roster, and clicking an agent narrows it to that agent's runs. It stays
+ * complete rather than becoming per-agent — work that no agent record owns
+ * (the internal constructs, an unattributed chat turn) has nowhere else to be
+ * visible, and a history that hid it would be a worse answer than the one it
+ * replaced.
  *
  * **Nothing here is a persona.** The internal constructs appear as run
  * HISTORY under the actor names they already answer to, never as standing
@@ -72,7 +82,18 @@ function Chip({
   );
 }
 
-export function FleetSection() {
+export function FleetSection({
+  focusActor = null,
+  now = new Date(),
+}: {
+  /** The agent the roster above has selected, if any (M33b.3). It drives the
+   * same actor filter a person can set by hand — one filter, one meaning —
+   * so clearing the chip and clearing the selection are the same act. */
+  focusActor?: string | null;
+  /** Injected so a pinned clock governs "3 hours ago", the same `VAULT_TODAY`
+   * discipline the e2e specs follow. */
+  now?: Date;
+} = {}) {
   const selection = useNavStore((s) => s.selection);
   // The run a link asked for, if any (M33.7; re-homed under Knowledge in
   // M33a.2, where "what has run" is a tab rather than a section of a hub).
@@ -83,6 +104,13 @@ export function FleetSection() {
   const [lane, setLane] = useState('');
   const [actor, setActor] = useState('');
   const [open, setOpen] = useState<FleetRunDetail | null>(null);
+
+  // The roster's selection drives the chip rather than shadowing it. A second
+  // piece of state meaning "which actor" is how a list ends up filtered by one
+  // thing while the chip claims another.
+  useEffect(() => {
+    setActor(focusActor ?? '');
+  }, [focusActor]);
 
   // Absent fields rather than nulls: an empty chip is no filter at all.
   const filter = useMemo<FleetFilter>(
@@ -178,6 +206,19 @@ export function FleetSection() {
             <span className="min-w-0 flex-1 truncate text-xs text-n-800">
               {/* NULL is a category, not a blank. */}
               {run.actor ?? 'unattributed'}
+            </span>
+            {/* WHEN. Carried from M33.1–.10: these rows said who, what lane,
+                what outcome and what it cost, and never once said when — so a
+                run from this morning and one from March read identically, and
+                "newest first" was an ordering nobody could verify. The exact
+                stamp stays in the title; the visible text is the one a reader
+                can act on. */}
+            <span
+              data-testid="fleet-when"
+              title={run.started_at}
+              className="whitespace-nowrap text-2xs text-n-500"
+            >
+              {relativeWhen(run.started_at, now)}
             </span>
             <span className="text-2xs text-n-500">{run.lane}</span>
             <span

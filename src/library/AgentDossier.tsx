@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { agentActive, type AgentDraft } from '@/engine/libraryDraft';
 import { nextFire, parseSchedule } from '@/engine/skills';
+// The local-time rationale that used to live beside a private copy of this
+// went with it — see `engine/whenText`.
+import { localStamp } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetActorSummary, FleetRun } from '@/lib/ipc';
 
@@ -36,20 +39,6 @@ type State =
  * has it been doing lately"; the fleet section answers "everything", and
  * filtering it by this actor is one click. */
 const HISTORY = 10;
-
-/**
- * A fire time, in the timezone the schedule is written in.
- *
- * LOCAL, deliberately. `parseSchedule`/`lastFireKey` have always read
- * `daily 09:00` as nine in the morning where the person is, so rendering the
- * next one through `toISOString()` would show a UTC stamp for a local-time
- * rule — "09:00" on the record and "16:00" on the dossier, for the same
- * moment. The formatting mirrors `lastFireKey`'s for the same reason.
- */
-function localStamp(at: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
-}
 
 function Stat({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (

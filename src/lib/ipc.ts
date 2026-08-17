@@ -640,3 +640,20 @@ export function triggerRecordPack(
     ? invokeTauri('trigger_record_pack', { vault, repoRoot, packPath, result })
     : mock.triggerRecordPack(vault, repoRoot, packPath, result);
 }
+
+// --- The fleet roster (M33b.3) ---------------------------------------------
+
+/**
+ * Every actor the run table has attributed anything to, summed.
+ *
+ * Deliberately NOT the list of agents: agents are records in a vault, and the
+ * roster joins the two so it can say which side each row came from — an agent
+ * that has never run, and work that ran under no agent record. Taking no
+ * vault, for the same reason `fleetRuns` takes none.
+ *
+ * An empty array is measured-at-zero. A missing runtime database REFUSES, and
+ * the roster renders that as unavailable rather than as an empty team.
+ */
+export function fleetActorSummaries(): Promise<FleetActorSummary[]> {
+  return inTauri() ? invokeTauri('fleet_actor_summaries') : mock.fleetActorSummaries();
+}

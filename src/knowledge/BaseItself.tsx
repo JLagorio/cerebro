@@ -7,6 +7,7 @@ import type {
   TriggerEntryStatus,
   TriggerRunReport,
 } from '@/lib/ipc';
+import { AgentRoster } from '@/status/AgentRoster';
 import { FleetSection } from '@/status/FleetSection';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
 import { SystemSection } from '@/status/SystemSection';
@@ -653,17 +654,31 @@ export function Background({ vaultPath }: { vaultPath: string | null }) {
   );
 }
 
-/** Every run this app has booked, what it was for, and what it cost. */
-export function AgentWork() {
+/**
+ * Who works here, and what they have done (M33b.3).
+ *
+ * The roster leads and the run history follows. It was the other way around
+ * until M33b.3 — the tab listed runs, which answers "what happened" when the
+ * question a person arrives with is "who works here" (spec D5). Selecting an
+ * agent narrows the history to that agent's runs; the selection lives here
+ * rather than inside either child, because it is the one thing they share.
+ */
+export function AgentWork({ vaultPath }: { vaultPath: string | null }) {
+  const [focus, setFocus] = useState<string | null>(null);
   return (
     <Section
       id="fleet"
-      title="What has run"
-      blurb="Every run this app has booked, what it was for, and what it cost."
+      title="Agents"
+      blurb="Who works in this vault, what they are on, and what they have run."
     >
-      {/* M33.5: the fleet spans vaults, so this section takes no vault — a
-          caller that wants one says so in its own filter. */}
-      <FleetSection />
+      {/* The roster is the vault's — agents are records — while the history
+          spans vaults, because one CLI subscription runs them all and an
+          agent's actor is the same string wherever it ran. */}
+      <AgentRoster vaultPath={vaultPath} focus={focus} onFocus={setFocus} />
+      <h3 className="pt-1 text-xs font-semibold text-n-700">
+        {focus === null ? 'Every run booked here' : `Runs by ${focus}`}
+      </h3>
+      <FleetSection focusActor={focus} />
     </Section>
   );
 }

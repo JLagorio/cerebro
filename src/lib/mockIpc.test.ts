@@ -895,4 +895,34 @@ describe('the deferral gates (M28.1)', () => {
     expect(fresh.run_count).toBe(0);
     expect(fresh.last_outcome).toBeNull();
   });
+
+  // --- Roster parity (M33b.3) ------------------------------------------------
+
+  it('the roster returns one row per ATTRIBUTED actor, byte-sorted', async () => {
+    // `WHERE r.actor IS NOT NULL GROUP BY r.actor ORDER BY r.actor` on the
+    // other side. An unattributed run belongs to no actor and gets no row —
+    // it stays visible in the run history, which is where it belongs.
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:scout', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({ run_id: 'r2', actor: 'agent:m26-ingest', started_at: '2026-07-28T11:00:00Z' }),
+      fleetRun({ run_id: 'r3', actor: 'process:scout', started_at: '2026-07-28T12:00:00Z' }),
+      fleetRun({ run_id: 'r4', actor: null, started_at: '2026-07-28T13:00:00Z' }),
+    ]);
+    const roster = await mock.fleetActorSummaries();
+    expect(roster.map((s) => s.actor)).toEqual(['agent:m26-ingest', 'process:scout']);
+    expect(roster[1].run_count).toBe(2);
+    // The same fold, reached two ways. A roster row that disagreed with the
+    // dossier beside it would be two implementations of one number.
+    expect(roster[1]).toEqual(await mock.fleetActorSummary('process:scout'));
+  });
+
+  it('a fleet with nothing attributed is EMPTY, and a missing database refuses', async () => {
+    // Measured-at-zero and unreadable, kept apart on this side of the wire
+    // exactly as `actor_summaries` keeps them apart on the other.
+    mock.__seedFleet([fleetRun({ run_id: 'r1', actor: null })]);
+    expect(await mock.fleetActorSummaries()).toEqual([]);
+    mock.__seedFleet(null);
+    await expect(mock.fleetActorSummaries()).rejects.toThrow(/runtime database/);
+    mock.__seedFleet([]);
+  });
 });

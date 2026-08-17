@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
- * The fleet section (M33.5): every run the app has booked, filterable and
- * inspectable.
+ * The fleet section: who works here (M33b.3) and the run history behind them
+ * (M33.5), filterable and inspectable.
  *
  * FIXED SHAPES, NO ENGINE — the same rule the other operational specs state.
  * Ordering, filtering and the 200-row clamp are proved against the real SQL
@@ -168,7 +168,13 @@ test('fleet: recorded components render, and an estimate is marked as one', asyn
 // run both seeds against one page.
 test('fleet: an unreadable run history says so', async ({ page }) => {
   const section = await openFleet(page, null);
-  await expect(section.getByTestId('section-unavailable')).toContainText('run history');
+  // TWO notes, not one, and that is the point: the roster and the history
+  // read the fleet separately, so each says what it could not find out. The
+  // roster keeps the team on screen — who works here came off the vault, not
+  // off the read that failed.
+  await expect(section.getByTestId('section-unavailable')).toHaveCount(2);
+  await expect(section.getByTestId('agent-row')).toHaveCount(1);
+  await expect(section.getByTestId('agent-last-run')).toContainText('not read');
   await expect(section.getByTestId('section-empty')).toHaveCount(0);
 });
 
@@ -176,4 +182,66 @@ test('fleet: a genuinely quiet fleet says nothing has run', async ({ page }) => 
   const section = await openFleet(page, []);
   await expect(section.getByTestId('section-empty')).toContainText('Nothing has run');
   await expect(section.getByTestId('section-unavailable')).toHaveCount(0);
+  // And the agent is still on screen, because it exists whether or not it has
+  // ever run (D6).
+  await expect(section.getByTestId('agent-row')).toHaveCount(1);
+  await expect(section.getByTestId('agent-last-run')).toContainText('has never run');
+  await expect(section.getByTestId('agent-spend')).toContainText('no runs yet');
+});
+
+// --- Who works here (M33b.3 / M33b.4) ---------------------------------------
+
+test('fleet: the surface lists agents, and says which of them is a description', async ({
+  page,
+}) => {
+  // demo-vault ships `release-scout` with its `schedule:` deliberately off,
+  // which is exactly D6's case: activation is a human act, and an Agent
+  // record without a schedule is a description rather than a daemon.
+  const section = await openFleet(page, [RUN]);
+  const row = section.getByTestId('agent-row');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute('data-actor', 'process:release-scout');
+  await expect(row).toContainText('Release scout');
+  await expect(section.getByTestId('agent-duty')).toContainText('description, not a daemon');
+});
+
+test('fleet: an agent says what it has queued waiting on you', async ({ page }) => {
+  // The demo queue holds two of release-scout's proposals awaiting a decision.
+  const section = await openFleet(page, [RUN]);
+  await expect(section.getByTestId('agent-waiting')).toContainText('2 waiting on you');
+});
+
+test('fleet: work that no agent record owns is named, not given a face', async ({ page }) => {
+  // The internal constructs run work and are not standing agents. They stay
+  // visible in the history and get no roster row.
+  const section = await openFleet(page, [RUN, LOST]);
+  await expect(section.getByTestId('roster-unowned')).toContainText('agent:m26-ingest');
+  await expect(section.getByTestId('agent-row')).toHaveCount(1);
+});
+
+test('fleet: clicking an agent narrows the history to its runs', async ({ page }) => {
+  const scoutRun = { ...RUN, run_id: 'run-scout', actor: 'process:release-scout' };
+  const section = await openFleet(page, [scoutRun, LOST]);
+  await expect(section.getByTestId('fleet-row')).toHaveCount(2);
+
+  await section.getByTestId('agent-row').click();
+  await expect(section.getByTestId('fleet-row')).toHaveCount(1);
+  await expect(section.getByTestId('fleet-row')).toHaveAttribute('data-run', 'run-scout');
+  // The chip and the selection are one filter, so the chip says so too.
+  await expect(section.getByTestId('fleet-filter-actor')).toHaveValue('process:release-scout');
+
+  // And clicking again lets go of it: a filter you cannot clear is a trap.
+  await section.getByTestId('agent-row').click();
+  await expect(section.getByTestId('fleet-row')).toHaveCount(2);
+});
+
+test('fleet: a run row says when it happened', async ({ page }) => {
+  // Carried from M33.1–.10. The rows named who, what lane, what outcome and
+  // what it cost, and never once said WHEN — so "newest first" was an
+  // ordering nobody could verify. The clock is pinned to VAULT_TODAY and the
+  // fixture sits an hour before it.
+  const section = await openFleet(page, [RUN]);
+  const when = section.getByTestId('fleet-when');
+  await expect(when).toContainText('hour');
+  await expect(when).toHaveAttribute('title', RUN.started_at);
 });

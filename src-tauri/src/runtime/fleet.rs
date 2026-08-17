@@ -267,54 +267,97 @@ pub fn run_detail(conn: &Connection, run_id: &str) -> Result<RunDetail, String> 
     })
 }
 
+/// The one aggregation both summary reads are folds of.
+///
+/// `Some(actor)` narrows to one; `None` groups every ATTRIBUTED actor the
+/// table holds. Written once rather than twice on purpose: the rules about
+/// what may be summed — exact-usage rows only, unmetered rows counted instead
+/// of added as zero — are the honesty of the number, and two copies of them
+/// is two places for one to drift.
+///
+/// The last outcome and start arrive by correlated subquery rather than by
+/// SQLite's bare-column-beside-max() behaviour, because the ordering here is
+/// `started_at DESC, run_id DESC` — two runs that started in the same second
+/// must resolve the same way they do in `runs()`, and `max()` alone cannot
+/// break that tie.
+fn summaries(conn: &Connection, actor: Option<&str>) -> Result<Vec<ActorSummary>, String> {
+    // An unattributed run belongs to no actor, so it is not a row of this
+    // read. It is still a row of `runs()`, which is where it stays visible.
+    let where_clause = if actor.is_some() {
+        "WHERE r.actor = ?1"
+    } else {
+        "WHERE r.actor IS NOT NULL"
+    };
+    let sql = format!(
+        "SELECT r.actor, count(*), \
+         coalesce(sum(CASE WHEN r.usage_state = 'exact' THEN r.input_tokens END), 0), \
+         coalesce(sum(CASE WHEN r.usage_state = 'exact' THEN r.output_tokens END), 0), \
+         sum(CASE WHEN r.usage_state <> 'exact' THEN 1 ELSE 0 END), \
+         (SELECT x.outcome FROM runs x WHERE x.actor = r.actor \
+          ORDER BY x.started_at DESC, x.run_id DESC LIMIT 1), \
+         (SELECT x.started_at FROM runs x WHERE x.actor = r.actor \
+          ORDER BY x.started_at DESC, x.run_id DESC LIMIT 1) \
+         FROM runs r {where_clause} GROUP BY r.actor ORDER BY r.actor"
+    );
+    let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let bound: Vec<&dyn rusqlite::ToSql> = match actor.as_ref() {
+        Some(actor) => vec![actor],
+        None => Vec::new(),
+    };
+    let rows = statement
+        .query_map(bound.as_slice(), |row| {
+            Ok(ActorSummary {
+                actor: row.get(0)?,
+                run_count: row.get::<_, i64>(1)? as u64,
+                input_tokens: row.get::<_, i64>(2)? as u64,
+                output_tokens: row.get::<_, i64>(3)? as u64,
+                unknown_runs: row.get::<_, Option<i64>>(4)?.unwrap_or(0) as u64,
+                last_outcome: row.get(5)?,
+                last_started_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 /// Everything one actor's rows add up to.
 ///
 /// An actor with no runs is not an error — a freshly written Agent record
 /// has none, and "no runs yet" is the answer its dossier should show — so
 /// this returns a zeroed summary with `last_outcome: None` rather than
-/// refusing.
+/// refusing. The zeros are measured-at-zero (this actor has no rows); the
+/// `None`s are not-recorded (nothing ever stamped a last outcome). They are
+/// different claims and the caller renders them differently.
 pub fn actor_summary(conn: &Connection, actor: &str) -> Result<ActorSummary, String> {
-    let (run_count, input_tokens, output_tokens, unknown_runs) = conn
-        .query_row(
-            "SELECT count(*), \
-             coalesce(sum(CASE WHEN usage_state = 'exact' THEN input_tokens END), 0), \
-             coalesce(sum(CASE WHEN usage_state = 'exact' THEN output_tokens END), 0), \
-             sum(CASE WHEN usage_state <> 'exact' THEN 1 ELSE 0 END) \
-             FROM runs WHERE actor = ?1",
-            [actor],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                ))
-            },
-        )
-        .map_err(|e| e.to_string())?;
+    Ok(summaries(conn, Some(actor))?
+        .pop()
+        .unwrap_or_else(|| ActorSummary {
+            actor: actor.to_string(),
+            run_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            unknown_runs: 0,
+            last_outcome: None,
+            last_started_at: None,
+        }))
+}
 
-    let last = conn
-        .query_row(
-            "SELECT outcome, started_at FROM runs WHERE actor = ?1 \
-             ORDER BY started_at DESC, run_id DESC LIMIT 1",
-            [actor],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other.to_string()),
-        })?;
-
-    Ok(ActorSummary {
-        actor: actor.to_string(),
-        run_count: run_count as u64,
-        input_tokens: input_tokens as u64,
-        output_tokens: output_tokens as u64,
-        unknown_runs: unknown_runs as u64,
-        last_outcome: last.as_ref().map(|(outcome, _)| outcome.clone()),
-        last_started_at: last.map(|(_, started)| started),
-    })
+/// Every actor the run table has ever attributed anything to, summed
+/// (M33b.3).
+///
+/// The fleet surface lists AGENTS, which are records in a vault — so this is
+/// deliberately not that list. It answers the other half: what the runs know
+/// about who ran. An agent record with no row here has never run, and an
+/// actor here with no record is work the vault does not own a persona for
+/// (the internal constructs, a renamed agent's old slug). The surface joins
+/// the two and says which is which; collapsing either side into the other
+/// here would decide that question in the wrong place.
+///
+/// An empty result is measured-at-zero — nothing attributed has ever run. A
+/// missing database is an error, and the caller renders it as unavailable.
+pub fn actor_summaries(conn: &Connection) -> Result<Vec<ActorSummary>, String> {
+    summaries(conn, None)
 }
 
 #[cfg(test)]
@@ -523,5 +566,74 @@ mod tests {
         assert_eq!(summary.last_started_at, None);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_attributed_actor_comes_back_once_with_the_same_arithmetic(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // M33b.3: the fleet asks about the whole table at once, and the
+        // per-actor numbers must be the ones its dossier already shows —
+        // same sums, same skips, same tie-break.
+        let (dir, conn, vault) = fixture("fleet-roster");
+        let mut lost = Seed::new("r2", Some("process:scout"), "2026-08-09T11:00:00Z");
+        lost.usage_state = "unknown";
+        lost.input = 0;
+        lost.output = 0;
+        seed_runs(
+            &conn,
+            &vault,
+            &[
+                Seed::new("r1", Some("process:scout"), "2026-08-09T10:00:00Z"),
+                lost,
+                Seed::new("r3", Some("agent:m26-ingest"), "2026-08-09T12:00:00Z"),
+                // Unattributed: a row of `runs()`, never a row of the roster.
+                Seed::new("r4", None, "2026-08-09T13:00:00Z"),
+            ],
+        );
+
+        let roster = actor_summaries(&conn)?;
+        assert_eq!(
+            roster.iter().map(|s| s.actor.as_str()).collect::<Vec<_>>(),
+            vec!["agent:m26-ingest", "process:scout"],
+            "one row per attributed actor, byte-sorted, and NULL is not an actor"
+        );
+        let scout = &roster[1];
+        assert_eq!(scout.run_count, 2, "both runs happened");
+        assert_eq!(scout.input_tokens, 100, "only the metered one is summed");
+        assert_eq!(
+            scout.unknown_runs, 1,
+            "and the unmetered one is COUNTED, so the total reads as partial"
+        );
+        assert_eq!(
+            scout.last_started_at.as_deref(),
+            Some("2026-08-09T11:00:00Z"),
+            "the newest of THIS actor's runs, not the newest in the table"
+        );
+        assert_eq!(
+            scout,
+            &actor_summary(&conn, "process:scout")?,
+            "the fold is the same fold — one aggregation, two entry points"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn a_table_with_no_attributed_runs_is_empty_rather_than_refused(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Measured at zero: nothing attributed has run here. A REFUSAL is
+        // what a missing database gets, and the surface renders the two
+        // differently.
+        let (dir, conn, vault) = fixture("fleet-nobody");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new("r1", None, "2026-08-09T10:00:00Z")],
+        );
+        assert!(actor_summaries(&conn)?.is_empty());
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
     }
 }
