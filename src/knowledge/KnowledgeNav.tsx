@@ -1,7 +1,13 @@
 import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
-import { listConcepts, listSections, listSubjects, needsReview } from '@/engine/okf';
+import {
+  defaultKnowledgeNav,
+  listConcepts,
+  listSections,
+  listSubjects,
+  needsReview,
+} from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { KnowledgeNav as Nav } from '@/engine/types';
 import { todayIso } from '@/lib/templates';
@@ -16,14 +22,20 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  * a second nav column inside its own canvas to have anywhere to put its real
  * navigation. This is that navigation, in the place navigation goes.
  *
- * Its axes are the bundle's own: the sections it is filed under, the entities
- * its concepts are ABOUT, and the log of what changed. Only the entity axis is
- * new — and it is the one that makes the bundle part of the vault rather than
- * a corpus sitting beside it.
+ * Its axes are the bundle's own: the entities its concepts are ABOUT, the
+ * folders they are filed under, and the log of what changed. Only the entity
+ * axis is new — and it is the one that makes the bundle part of the vault
+ * rather than a corpus sitting beside it.
  *
  * M33a.2 gave it a second group. What the base HOLDS and what it knows about
  * ITSELF were two rail buttons describing one subject; they are two groups of
  * one nav now, and the Status hub's own five-row nav is gone with it.
+ *
+ * M33a.3 put threads first and demoted folders below the flat list. `SECTIONS`
+ * and `ABOUT` were two complete partitions of the same concepts, and the one
+ * that leads was the one nobody navigates by: which directory a file sits in
+ * is a fact about the writer, while what a thread is ABOUT is the question the
+ * reader arrived with.
  */
 
 const sameTab = (a: Nav, b: Nav): boolean => {
@@ -69,7 +81,7 @@ function NavRow({
   );
 }
 
-export function KnowledgeNav({ nav }: { nav: Nav }) {
+export function KnowledgeNav({ nav }: { nav?: Nav }) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const today = todayIso();
@@ -79,10 +91,40 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
   const subjects = useMemo(() => listSubjects(concepts, entries), [concepts, entries]);
   const reviewCount = useMemo(() => concepts.filter(needsReview).length, [concepts]);
 
-  const is = (candidate: Nav) => sameTab(nav, candidate);
+  // The same default KnowledgePage lands on when the selection carries no nav
+  // (M33a.3), resolved from the same function — a highlighted row that names a
+  // different view than the one on screen is worse than no highlight at all.
+  const here = nav ?? defaultKnowledgeNav(subjects);
+  const is = (candidate: Nav) => sameTab(here, candidate);
 
   return (
     <div className="flex-1 overflow-y-auto px-2 pb-4">
+      {subjects.length > 0 && (
+        <>
+          <div className={SECTION_LABEL}>Threads</div>
+          {subjects.map((subject) => {
+            // A dangling anchor is an OPEN THREAD (M33a.3 / D7): the base is
+            // tracking something the workspace has not named yet, and the
+            // `+ Create page` button on the thread is how a human names it.
+            // It gets an ordinary row in ordinary colours — a broken-link
+            // glyph greyed to --n-300 said the row was damaged, when what is
+            // absent is a page nobody has written.
+            const style = typeStyle(subject.entry?.type ?? null, schema);
+            return (
+              <NavRow
+                key={subject.key}
+                icon={subject.entry === null ? 'circle-dashed' : style.icon}
+                color={subject.entry === null ? 'var(--n-500)' : style.color}
+                label={subject.label}
+                count={subject.concepts.length}
+                nav={{ tab: 'entity', key: subject.key }}
+                active={is({ tab: 'entity', key: subject.key })}
+              />
+            );
+          })}
+        </>
+      )}
+
       <NavRow
         icon="brain"
         label="All concepts"
@@ -103,7 +145,7 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
 
       {sections.length > 0 && (
         <>
-          <div className={SECTION_LABEL}>Sections</div>
+          <div className={SECTION_LABEL}>Folders</div>
           {sections.map((section) => (
             <NavRow
               key={section.folder}
@@ -114,29 +156,6 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
               active={is({ tab: 'section', folder: section.folder })}
             />
           ))}
-        </>
-      )}
-
-      {subjects.length > 0 && (
-        <>
-          <div className={SECTION_LABEL}>About</div>
-          {subjects.map((subject) => {
-            // A dangling anchor keeps its place in the list — it names an
-            // entity that does not exist yet, which is worth seeing, not
-            // hiding (OKF §6.1).
-            const style = typeStyle(subject.entry?.type ?? null, schema);
-            return (
-              <NavRow
-                key={subject.key}
-                icon={subject.entry === null ? 'link-2-off' : style.icon}
-                color={subject.entry === null ? 'var(--n-300)' : style.color}
-                label={subject.label}
-                count={subject.concepts.length}
-                nav={{ tab: 'entity', key: subject.key }}
-                active={is({ tab: 'entity', key: subject.key })}
-              />
-            );
-          })}
         </>
       )}
 
@@ -164,10 +183,12 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
         nav={{ tab: 'contested' }}
         active={is({ tab: 'contested' })}
       />
-      {/* "Waiting on you", not "Needs review". The row three above holds
+      {/* "Waiting on you", not "Needs review". The `Needs review` row holds
           CONCEPTS a human has not verified; this one holds PROPOSALS awaiting
           approve or reject. Two unrelated queues under one string is a nav
-          that lies about where a click lands. */}
+          that lies about where a click lands. (Named rather than pointed at:
+          the two rows have moved apart twice now, and a comment that counts
+          rows is a comment the next reorder falsifies.) */}
       <NavRow
         icon="gavel"
         label="Waiting on you"

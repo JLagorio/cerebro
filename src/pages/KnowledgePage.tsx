@@ -2,8 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { listConcepts, listSubjects, needsReview, verifyPatch, type Concept } from '@/engine/okf';
+import {
+  defaultKnowledgeNav,
+  listConcepts,
+  listSubjects,
+  needsReview,
+  verifyPatch,
+  type Concept,
+} from '@/engine/okf';
 import type { KnowledgeNav, Selection } from '@/engine/types';
+import { NewRecordDialog } from '@/app/CreateMenu';
 import { useOpenPath } from '@/app/useOpenPath';
 import { reviewConceptPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
@@ -158,6 +166,9 @@ export function KnowledgePage({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [body, setBody] = useState<string>('');
   const [verifying, setVerifying] = useState(false);
+  // The D1 boundary, as UI state: the agent never creates a workspace record,
+  // so this flag can only be raised by a click. See the header button.
+  const [promoting, setPromoting] = useState(false);
   // Loaded once for the page rather than once per concept: the axes are a
   // fold of the whole ledger either way, and asking again on every selection
   // would re-read it to answer about one row.
@@ -199,12 +210,17 @@ export function KnowledgePage({
     if (linkedPath !== null) setSelectedPath(linkedPath);
   }, [linkedPath]);
 
-  // Memoized so downstream useMemos key on the nav VALUE — `?? {tab:'all'}`
-  // inline would mint a fresh object every render and defeat them.
-  const nav: KnowledgeNav = useMemo(() => selection.nav ?? { tab: 'all' }, [selection.nav]);
   const today = todayIso();
   const all = useMemo(() => listConcepts(entries, today), [entries, today]);
   const subjects = useMemo(() => listSubjects(all, entries), [all, entries]);
+  // Memoized so downstream useMemos key on the nav VALUE — an inline
+  // `?? defaultKnowledgeNav(subjects)` would mint a fresh object every render
+  // and defeat them. `subjects` is itself memoized, so the default is stable
+  // until the bundle actually changes.
+  const nav: KnowledgeNav = useMemo(
+    () => selection.nav ?? defaultKnowledgeNav(subjects),
+    [selection.nav, subjects],
+  );
 
   const subject = nav.tab === 'entity' ? (subjects.find((s) => s.key === nav.key) ?? null) : null;
   const concepts = useMemo(() => {
@@ -375,6 +391,29 @@ export function KnowledgePage({
           >
             Open {subject.label}
           </Button>
+        )}
+        {/* And where there is nothing to open, the offer to write it (D7/D1).
+            This is the ONE place a knowledge thread becomes a workspace
+            record, and it happens because a human clicked: the agent is
+            sovereign inside `knowledge/` and nowhere else, so a thread it has
+            been tracking for weeks stays a thread until somebody says
+            otherwise. The dialog is the New menu's own — same types, same
+            `createTarget` — pre-filled with the thread's name and editable,
+            and creating navigates to the new page. */}
+        {subject !== null && subject.entry === null && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              testId="promote-thread"
+              onClick={() => setPromoting(true)}
+            >
+              + Create page
+            </Button>
+            {promoting && (
+              <NewRecordDialog defaultTitle={subject.target} onClose={() => setPromoting(false)} />
+            )}
+          </>
         )}
         <span className="flex-1" />
         {/* The only way to Verify or ask for a recheck once the provenance

@@ -184,7 +184,9 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
 export type Selection =
   | { kind: 'home' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
-  // AI knowledge base: OKF bundle, read-only (M5); `nav` defaults to all (M8.1).
+  // AI knowledge base: OKF bundle, read-only (M5). An absent `nav` means "no
+  // view was asked for", which `defaultKnowledgeNav` answers with the heaviest
+  // thread (M33a.3) — it was a plain `all` from M8.1 until then.
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
   // M33a.2 — and what the base knows about ITSELF: the epistemic tabs `nav`

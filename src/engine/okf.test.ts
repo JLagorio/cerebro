@@ -4,6 +4,7 @@ import {
   conceptEdges,
   conceptsAbout,
   conceptsFrom,
+  defaultKnowledgeNav,
   footnoteRefs,
   nearDuplicates,
   isConcept,
@@ -458,6 +459,49 @@ describe('subjects', () => {
     expect(subject.label).toBe('not-written-yet');
   });
 
+  it('names a thread the way its own source names it (M33a.3 / D8)', () => {
+    // The anchor resolves INTO the bundle. `Entry.title` is the body H1 else
+    // the humanized stem, and frontmatter `title:` is ignored for entries by
+    // design — so this concept's entry is called `Rq 84b kestrel` while the
+    // agent that wrote it called it `RQ-84B KESTREL program`. The nav showed
+    // the humanized stem, a name nothing in the vault had ever written.
+    const program = makeEntry({
+      path: 'knowledge/programs/rq-84b-kestrel.md',
+      filename: 'rq-84b-kestrel.md',
+      folder: 'knowledge/programs',
+      type: 'Reference',
+      title: 'Rq 84b kestrel',
+      properties: { title: 'RQ-84B KESTREL program' },
+    });
+    const entries = [program, about('knowledge/risks/thermal.md', ['rq-84b-kestrel'])];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects.map((s) => s.label)).toEqual(['RQ-84B KESTREL program']);
+  });
+
+  it('still falls back to the entry title for an anchor outside the bundle', () => {
+    const entries = [project, about('knowledge/a.md', ['phoenix'])];
+    const [subject] = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subject.label).toBe('Phoenix warehouse rollout');
+  });
+
+  it('sorts threads by weight, breaking ties on the label (M33a.3 / D8)', () => {
+    // Alphabetical put the one real thread under a singleton whose label
+    // happened to sort earlier — the failure the design doc measured, with
+    // nineteen singletons instead of two.
+    const entries = [
+      project,
+      about('knowledge/alpha.md', ['aardvark']),
+      about('knowledge/beta.md', ['barnacle']),
+      ...Array.from({ length: 13 }, (_, i) => about(`knowledge/p${i}.md`, ['phoenix'])),
+    ];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects.map((s) => [s.label, s.concepts.length])).toEqual([
+      ['Phoenix warehouse rollout', 13],
+      ['aardvark', 1],
+      ['barnacle', 1],
+    ]);
+  });
+
   it('answers what a project page asks: concepts anchored to this path', () => {
     const entries = [
       project,
@@ -470,6 +514,43 @@ describe('subjects', () => {
       entries,
     );
     expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+  });
+});
+
+describe('where the Knowledge tab opens (M33a.3)', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    folder: 'projects/phoenix',
+    title: 'Phoenix warehouse rollout',
+    type: 'Project',
+  });
+  const about = (path: string, targets: string[]) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      type: 'Reference',
+      relationships: { about: targets },
+    });
+
+  it('lands on the heaviest thread', () => {
+    const entries = [
+      project,
+      about('knowledge/a.md', ['aardvark']),
+      about('knowledge/b.md', ['phoenix']),
+      about('knowledge/c.md', ['phoenix']),
+    ];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(defaultKnowledgeNav(subjects)).toEqual({
+      tab: 'entity',
+      key: 'projects/phoenix/project.md',
+    });
+  });
+
+  it('falls back to the flat list when the bundle anchors nothing', () => {
+    // Every vault with no bundle at all, too — and a list is the honest
+    // answer to "which thread" when there are none.
+    expect(defaultKnowledgeNav([])).toEqual({ tab: 'all' });
   });
 });
 

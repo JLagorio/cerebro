@@ -126,16 +126,20 @@ function AboutBlock({
           const entry = resolveTarget(target, entries);
           const style = typeStyle(entry?.type ?? null, schema);
           if (entry === null) {
-            // An anchor naming an entity that does not exist yet is legitimate
-            // (OKF §6.1) — shown greyed rather than dropped, because a claim
-            // about something absent is exactly what a reviewer should notice.
+            // An anchor naming an entity that does not exist yet is an OPEN
+            // THREAD, not a broken link (OKF §6.1, M33a.3 / D7): the base is
+            // tracking something the workspace has not written up, and the
+            // Knowledge tab offers `+ Create page` as the way to write it.
+            // So it reads as ordinary text that happens not to be clickable —
+            // the same treatment an unfollowable source gets above — rather
+            // than a greyed-out broken-link glyph reporting damage.
             return (
               <span
                 key={target}
                 data-testid="about-entity"
-                className="flex items-center gap-1.5 text-xs text-n-400"
+                className="flex items-center gap-1.5 text-xs text-n-700"
               >
-                <Icon name="link-2-off" size={12} color="var(--n-300)" />
+                <Icon name="circle-dashed" size={12} color="var(--n-500)" />
                 <span className="truncate">{target}</span>
               </span>
             );

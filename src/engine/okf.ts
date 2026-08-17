@@ -1,5 +1,5 @@
 import { addDays } from './dates';
-import type { Entry } from './types';
+import type { Entry, KnowledgeNav } from './types';
 import { resolveTarget } from './wikilink';
 
 /**
@@ -374,6 +374,7 @@ export interface Subject {
   /** The vault entry it points at, or null — a dangling anchor is legitimate
    * (OKF §6.1), it may just be an entity nobody has created yet. */
   entry: Entry | null;
+  /** What the thread's own source calls it — see `listSubjects` on casing. */
   label: string;
   concepts: Concept[];
 }
@@ -385,6 +386,16 @@ export interface Subject {
  * omission.
  */
 export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
+  // M33a.3 / D8 — a thread keeps the casing its source gave it.
+  //
+  // `Entry.title` is the body H1 falling back to the humanized filename stem;
+  // frontmatter `title:` is ignored for entries, app-wide and on purpose. The
+  // CONCEPT model does read it (`toConcept`). So an anchor pointing into the
+  // bundle — `about: "[[rq-84b-kestrel]]"` naming a concept file with no H1
+  // and `title: RQ-84B KESTREL program` in its frontmatter — rendered as
+  // `Rq 84b kestrel`, a name nothing in the vault had ever written down.
+  // Where the anchor resolves to a concept, that concept's own title wins.
+  const byPath = new Map(concepts.map((c) => [c.entry.path, c]));
   const subjects = new Map<string, Subject>();
   for (const concept of concepts) {
     for (const target of concept.about) {
@@ -392,11 +403,14 @@ export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
       const key = entry?.path ?? target.toLowerCase();
       const existing = subjects.get(key);
       if (existing === undefined) {
+        // A dangling target keeps its raw text: nobody has named this thing
+        // yet, so what the agent typed IS its source casing.
+        const named = entry === null ? undefined : byPath.get(entry.path)?.title;
         subjects.set(key, {
           key,
           target,
           entry,
-          label: entry?.title ?? target,
+          label: named ?? entry?.title ?? target,
           concepts: [concept],
         });
       } else {
@@ -404,7 +418,31 @@ export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
       }
     }
   }
-  return [...subjects.values()].sort((a, b) => a.label.localeCompare(b.label));
+  // Heaviest thread first (D8), label breaking ties so the order is stable.
+  // Alphabetical sorted by the one property of a thread nobody navigates by:
+  // in a working vault it buried the two subjects carrying 13 and 8 concepts
+  // among nineteen singletons, which is a sort answering a question nobody
+  // asked.
+  return [...subjects.values()].sort(
+    (a, b) => b.concepts.length - a.concepts.length || a.label.localeCompare(b.label),
+  );
+}
+
+/**
+ * Where the Knowledge tab opens when nothing has said otherwise (M33a.3).
+ *
+ * The heaviest thread, not the flat list. `all` is the search fallback — a tab
+ * that opens on every concept the base holds, undifferentiated, makes the
+ * reader redo the grouping the base already did. A vault whose bundle anchors
+ * nothing has no thread to open, and falls back to the list.
+ *
+ * One function because two callers need the same answer: the page renders it
+ * and the nav highlights it, and a default computed twice is a default that
+ * eventually disagrees with itself.
+ */
+export function defaultKnowledgeNav(subjects: Subject[]): KnowledgeNav {
+  const heaviest = subjects[0];
+  return heaviest === undefined ? { tab: 'all' } : { tab: 'entity', key: heaviest.key };
 }
 
 /** Concepts anchored to a vault path — what a project page asks for. */

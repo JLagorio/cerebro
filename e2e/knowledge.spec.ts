@@ -11,6 +11,9 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
     .getByRole('button', { name: /^Knowledge/ })
     .click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
+  // M33a.3 — the tab opens on the heaviest THREAD now, not the flat list, so
+  // a spec about the whole bundle has to ask for the whole bundle.
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
   // Counts come from the seed and change whenever it does. Assert the
   // relationships instead: the review queue is a proper subset of the bundle.
   const all = await page.getByTestId('concept-row').count();
@@ -63,6 +66,9 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
     .getByTestId('rail')
     .getByRole('button', { name: /^Knowledge/ })
     .click();
+  // The flat list, because the two concepts this walks between sit in
+  // different threads (M33a.3 moved the default off `all`).
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
 
   // The agent revised a previously verified concept: the projection renders
   // the review notice instead of silently reverting to "Nobody yet".
@@ -103,9 +109,19 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
 
   const nav = page.getByTestId('knowledge-nav-row');
+
+  // -- Threads lead, and the tab opens on the heaviest one (M33a.3) -------
+  // Not a fixed name: the demo bundle anchors three concepts to the offline
+  // sync work and two to Phoenix, so the winner is a fact about the seed. What
+  // is under test is that a THREAD is where you land, not the flat list.
+  const landed = nav.filter({ hasText: 'Offline sync hardening' });
+  await expect(landed).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('knowledge-heading')).toHaveText('Offline sync hardening');
+
+  await nav.filter({ hasText: 'All concepts' }).click();
   const total = await page.getByTestId('concept-row').count();
 
-  // -- Sections: the folders knowledge/index.md has always declared -------
+  // -- Folders: the directories knowledge/index.md has always declared ----
   await nav.filter({ hasText: 'Metrics' }).click();
   await expect(page.getByTestId('knowledge-heading')).toHaveText('Metrics');
   const inMetrics = await page.getByTestId('concept-row').count();

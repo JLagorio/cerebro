@@ -126,13 +126,27 @@ export function CreateMenu() {
   );
 }
 
-function NewRecordDialog({ onClose }: { onClose: () => void }) {
+/**
+ * Exported since M33a.3 so the Knowledge tab can raise the SAME dialog rather
+ * than grow a second one: promoting a knowledge thread into a workspace page
+ * is an ordinary record creation that happens to start with a name already in
+ * hand, and a parallel dialog would be a second answer to "where do records
+ * land" waiting to drift from `createTarget`.
+ */
+export function NewRecordDialog({
+  defaultTitle = '',
+  onClose,
+}: {
+  /** Pre-filled title, editable — a suggestion, not a decision. */
+  defaultTitle?: string;
+  onClose: () => void;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const createItem = useVaultStore((s) => s.createItem);
   const schema = useSchema();
   const openPath = useOpenPath();
   const types = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(defaultTitle);
   const [typeName, setTypeName] = useState(types[0] ?? '');
   // Fix (fix round M1): a double-click while the write was pending created
   // the record twice.

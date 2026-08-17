@@ -256,8 +256,11 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           <Icon name="panel-left-close" size={15} />
         </button>
       </div>
+      {/* `nav` passed through undefined: which view a nav-less selection lands
+          on is the nav's own answer now (M33a.3 — the heaviest thread), and
+          defaulting it here would make the sidebar a second opinion. */}
       {knowledgeMode && selection.kind === 'knowledge' ? (
-        <KnowledgeNav nav={selection.nav ?? { tab: 'all' }} />
+        <KnowledgeNav nav={selection.nav} />
       ) : docsMode ? (
         <div className="flex-1 overflow-y-auto px-2 pb-4">
           <div className={SECTION_LABEL}>Files</div>

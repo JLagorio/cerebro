@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { todayIso } from '@/lib/templates';
@@ -62,6 +62,38 @@ describe('KnowledgePage and a replaced concept (M15)', () => {
   it('says nothing of the sort on the concept that replaced it', () => {
     render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' }, path: NEW }} />);
     expect(screen.queryByTestId('superseded-banner')).toBeNull();
+  });
+});
+
+describe('KnowledgePage threads (M33a.3)', () => {
+  const anchored = (path: string, target: string): Entry =>
+    concept({ path, title: path, relationships: { about: [target] } });
+
+  it('opens on the heaviest thread when the selection names no view', () => {
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        anchored('knowledge/a.md', 'mpm-410'),
+        anchored('knowledge/b.md', 'mpm-410'),
+        anchored('knowledge/c.md', 'kos-3.2'),
+      ],
+    });
+    render(<KnowledgePage selection={{ kind: 'knowledge' }} />);
+    expect(screen.getByTestId('knowledge-heading').textContent).toContain('mpm-410');
+  });
+
+  it('offers + Create page on a dangling thread, pre-filled with its name (D1/D7)', () => {
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [anchored('knowledge/a.md', 'mpm-410')],
+    });
+    render(<KnowledgePage selection={{ kind: 'knowledge' }} />);
+    // Not `Open …`: there is nothing to open, and the offer is to write it.
+    expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
+    fireEvent.click(screen.getByTestId('promote-thread'));
+    // The New menu's own dialog, carrying the thread's name — a suggestion the
+    // human can edit, which is the whole of D1: the agent never gets here.
+    expect(screen.getByDisplayValue('mpm-410')).not.toBeNull();
   });
 });
 
