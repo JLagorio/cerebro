@@ -749,7 +749,7 @@ fn base_tools() -> Vec<Value> {
                 "path": { "type": "string", "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md" },
                 "type": { "type": "string", "description": "OKF concept type, e.g. Metric, Playbook, Reference" },
                 "title": { "type": "string" },
-                "description": { "type": "string", "description": "One sentence" },
+                "description": { "type": "string", "description": "One sentence saying what this concept is. It is the only line shown beside the title in every list, so 'what it is' beats 'why it matters'." },
                 "about": {
                     "type": "array",
                     "description": "The vault entities this concept is knowledge OF, as wikilinks — e.g. [\"[[phoenix-warehouse-rollout]]\", \"[[risk-rollback-unrehearsed]]\"]. Distinct from `sources`: that is where the claim came from, this is what it is about. Anchor every concept you can; an unanchored concept cannot surface anywhere but the bundle.",
@@ -779,7 +779,7 @@ fn base_tools() -> Vec<Value> {
                 },
                 "lifecycle": { "type": "string", "description": "draft | stable | deprecated. Use deprecated when a concept is no longer true and nothing replaces it — a wrong concept left stable is worse than one that is gone." },
                 "stale_after": { "type": "string", "description": "YYYY-MM-DD after which this should be rechecked" }
-            }), &["path", "type", "title", "body"])
+            }), &["path", "type", "title", "description", "body"])
         }),
         json!({
             "name": "cache_source",
@@ -3351,6 +3351,27 @@ mod tests {
                 "the agent has no delete capability; `{name}` would be the first"
             );
         }
+    }
+
+    #[test]
+    fn write_concept_requires_a_description() {
+        // 0 of 30 concepts in a real distilled vault carried one, so every list
+        // row rendered as title + type + Unreviewed and nothing else. Optional
+        // meant absent.
+        let tool = tool_catalog(true)
+            .into_iter()
+            .find(|t| t["name"] == "write_concept")
+            .expect("write_concept is served");
+        let required: Vec<&str> = tool["inputSchema"]["required"]
+            .as_array()
+            .expect("schema declares required")
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert!(
+            required.contains(&"description"),
+            "description must be required, got {required:?}"
+        );
     }
 
     #[test]
