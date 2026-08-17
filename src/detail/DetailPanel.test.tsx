@@ -351,6 +351,36 @@ describe('DetailPanel', () => {
     expect(screen.getByTestId('related-knowledge')).toBeTruthy();
     expect(screen.queryByTestId('entity-dossier')).toBeNull();
   });
+
+  // M33a.6 — the gate above decides WHICH surface answers, and for a while it
+  // also decided whether you could ask anything at all: `Ask the base` shipped
+  // on the related list only, so the records the base knew most about were
+  // exactly the ones with no way to question it. Asserted on both arms of the
+  // gate, because that is what let the two drift apart.
+  it('offers Ask the base on whichever knowledge surface the gate picked', async () => {
+    const user = userEvent.setup();
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
+
+    cleanup();
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'knowledge/systems/first-run.md',
+          title: 'First-run flow',
+          relationships: { about: ['fld-1'] },
+        }),
+      ],
+    });
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('entity-dossier')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
+    // Still distinct from the write-side act it used to sit alone beside.
+    expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
+  });
 });
 
 // spliceTitle (string splice) was replaced by spliceTitleIntoBlocks in Task

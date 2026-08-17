@@ -9,7 +9,7 @@ import { FacetLines } from '@/knowledge/FacetChips';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import type { BeliefChips } from '@/lib/ipc';
-import { distillPrompt } from '@/lib/prompts';
+import { askBasePrompt, distillPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -26,7 +26,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * would be the confident-and-wrong kind, which is how people stop trusting a
  * system like this.
  *
- * Still passive. It sits under the page and waits to be scrolled to; the only
+ * Still passive. It sits under the page and waits to be scrolled to; every
  * active thing on it is a button, pressed by a person.
  */
 
@@ -160,6 +160,13 @@ export function EntityDossier({
     askAgent(distillPrompt(entry.path, entry.title), entry.path);
   };
 
+  // The same question the list below already answers, handed to the assistant
+  // so it can follow the threads this section only names (M33a.5) — it calls
+  // `knowledge_about`, which resolves by anchor rather than by keyword.
+  const askBase = () => {
+    askAgent(askBasePrompt(entry.path, entry.title), entry.path);
+  };
+
   const since = relativeDay(dossier.firstLearned, today);
   const latest = relativeDay(dossier.lastLearned, today);
 
@@ -261,7 +268,19 @@ export function EntityDossier({
         </>
       )}
 
-      <div className="mt-3">
+      {/* M33a.6 — both questions, on the surface that had neither of them.
+          `DetailPanel` renders this instead of `RelatedKnowledge` exactly when
+          the base holds concepts about the record, so the records it knows
+          MOST about were the ones with no way to ask it anything: they got
+          "read this page into the base" and not "what do you know that bears
+          on it". Two different acts — one writes, one only reads.
+
+          Still passive, and deliberately still last on the section. Nothing
+          here speaks first (M8.1); a person scrolls to it and presses. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
+          Ask the base
+        </Button>
         <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
           Learn from this page
         </Button>

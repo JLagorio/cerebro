@@ -92,3 +92,53 @@ describe('asking the base from the work', () => {
     expect(useUiStore.getState().agentPendingPrompt?.text).toContain('knowledge_about');
   });
 });
+
+/**
+ * M33a.6 — what the base no longer believes must not read as what it knows.
+ *
+ * `relatedConcepts` scores by anchor overlap, which measures relevance and
+ * says nothing about whether a claim still stands. So a retired concept could
+ * out-score a live one and lead the list, rendered identically.
+ */
+describe('a retired concept in the workspace', () => {
+  const REPLACED = entry('knowledge/risks/thermal-old.md', 'Thermal margin (2026 estimate)', {
+    type: 'Risk',
+    properties: { description: 'Superseded by the measured run.' },
+    relationships: { about: ['rq-84b'] },
+  });
+  const REPLACEMENT = entry('knowledge/risks/thermal-new.md', 'Thermal margin, measured', {
+    type: 'Risk',
+    relationships: { about: ['rq-84b'], supersedes: ['thermal-old'] },
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [RECORD, REPLACED, REPLACEMENT] });
+  });
+
+  it('says the word, not just the strikethrough', () => {
+    render(<RelatedKnowledge entry={RECORD} />);
+    const tag = screen.getByTestId('related-replaced');
+    expect(tag.textContent).toBe('Replaced');
+    // The row it belongs to is the retired one, not its replacement.
+    const row = tag.closest('[data-testid="related-concept"]');
+    expect(row?.getAttribute('data-path')).toBe('knowledge/risks/thermal-old.md');
+  });
+
+  it('sorts below everything still standing', () => {
+    render(<RelatedKnowledge entry={RECORD} />);
+    const paths = screen
+      .getAllByTestId('related-concept')
+      .map((el) => el.getAttribute('data-path'));
+    expect(paths[paths.length - 1]).toBe('knowledge/risks/thermal-old.md');
+  });
+
+  it('drops the description of a claim nothing believes', () => {
+    // A retired row says one thing — that it is no longer believed. Selling
+    // it with its own summary is the confident-and-wrong shape.
+    render(<RelatedKnowledge entry={RECORD} />);
+    const row = screen
+      .getAllByTestId('related-concept')
+      .find((el) => el.getAttribute('data-path') === 'knowledge/risks/thermal-old.md');
+    expect(row?.textContent).not.toContain('Superseded by the measured run.');
+  });
+});

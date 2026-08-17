@@ -128,9 +128,11 @@ change in the milestone and outranks D3.
 open pending evidence; the vault in §2 is the evidence. Recorded as a decision
 so it is not a leak. R1–R3 and R6–R14 are untouched.
 
-**D6 — Deferral gates collapse to one line.** `24 capabilities held back, none
+**D6 — Deferral gates collapse to one line.** `N capabilities held back, none
 fired`, expandable. 3,225px → ~40px. Reversible in either direction once it
-has been lived with.
+has been lived with. The count is READ OFF the shipped registry, never written
+here — this document claimed 24 while the registry declares 14 capabilities
+across 34 gates, and a number in prose is a number that goes stale.
 
 **D7 — A dangling anchor reads as an open thread**, with `+ Create page` as
 the user act in D1. Never a grey broken-link icon.
@@ -139,6 +141,23 @@ the user act in D1. Never a grey broken-link icon.
 casing of their target (`RQ-84B KESTREL`, not `Rq 84b kestrel`).
 
 **D9 — No rail badge.** Unchanged from M8.1.
+
+**D11 — When the base is allowed to speak.** M33a.6's condition, settled
+rather than left to each surface:
+
+- **Only where the work already is.** The base surfaces beside the record it
+  is about — `RelatedKnowledge` or `EntityDossier`, below the fold. Never a
+  rail badge, a toast, a modal, or an unrequested assistant turn.
+- **Only when reached.** A person scrolls to it, or presses a button. Nothing
+  opens the assistant on render.
+- **It may say what it does not believe.** The one thing the base is obliged
+  to volunteer is retraction: a concept the bundle has superseded reads as
+  replaced and sorts below everything still standing. Suppressing that would
+  be the surface being quiet at the reader's expense, which is a different
+  failure from being loud.
+
+A count that describes a destination is not speaking (M8.1); a count that
+changes to get attention is.
 
 **D10 — `unreviewed` is not a queue** while it is 29/29. It renders as
 provenance; nothing sorts or filters by it as attention.
@@ -194,9 +213,20 @@ Ask the base a question from the work — *"what do you know that bears on
 this?"* — and expose the same read as a tool an agent workflow can call.
 
 **M33a.6 — Enriching.**
-Surface relevant findings into the workspace. Bound by M8's tone rule; this is
-the phase most able to violate it and does not ship without deciding when it
-is allowed to speak.
+Surface relevant findings into the workspace, under D11. Smaller than scoped,
+because `EntityDossier` (M8.9) had already built most of it — `unsettled`,
+`retired` and `readFrom` were already beside the record. What was actually
+missing were two gaps the earlier phases exposed:
+
+1. **`Ask the base` was absent on the records the base knows MOST about.**
+   `DetailPanel` gates between the dossier and the related list, and M33a.5
+   put the button on the list only — so a record with concepts anchored to it
+   got "read this page into the base" and no way to question it. Now on both
+   arms, asserted across the gate.
+2. **The related list rendered a retired concept as a current one.** It scores
+   by anchor overlap, which measures relevance and says nothing about belief,
+   so a superseded claim could out-score a live one and lead. Now marked
+   `Replaced`, description suppressed, sorted last — the D11 obligation.
 
 ---
 

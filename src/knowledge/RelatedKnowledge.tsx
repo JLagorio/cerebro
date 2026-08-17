@@ -59,8 +59,23 @@ export function RelatedKnowledge({
     [entry, entries, today],
   );
 
-  const shown = related.slice(0, limit);
-  const rest = related.length - shown.length;
+  // M33a.6 — a replaced concept sorts BELOW everything still standing.
+  //
+  // `relatedConcepts` scores by how many anchors match, which says how
+  // relevant a concept is and nothing at all about whether the bundle still
+  // believes it. So the workspace could lead with a claim the base retired,
+  // rendered identically to a live one. That is the confident-and-wrong shape
+  // M15 killed on the reading pane and the dossier has never had; this is the
+  // last surface that still had it.
+  const ordered = useMemo(
+    () => [
+      ...related.filter((c) => c.supersededBy === null),
+      ...related.filter((c) => c.supersededBy !== null),
+    ],
+    [related],
+  );
+  const shown = ordered.slice(0, limit);
+  const rest = ordered.length - shown.length;
 
   const ask = () => {
     if (askPrompt === undefined) return;
@@ -114,15 +129,37 @@ export function RelatedKnowledge({
                 className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-n-800">
+                  <span
+                    className={`block truncate text-sm font-medium ${
+                      concept.supersededBy !== null ? 'text-n-400 line-through' : 'text-n-800'
+                    }`}
+                  >
                     {concept.title}
                   </span>
-                  {concept.description !== null && variant === 'section' && (
-                    <span className="block truncate text-xs text-n-500">{concept.description}</span>
-                  )}
+                  {concept.description !== null &&
+                    concept.supersededBy === null &&
+                    variant === 'section' && (
+                      <span className="block truncate text-xs text-n-500">
+                        {concept.description}
+                      </span>
+                    )}
                 </span>
-                <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
-                {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
+                {/* A strikethrough alone is a legend nobody has (M15): deleted,
+                    deprecated, done and filtered-out all look like this. The
+                    word is what makes it readable. */}
+                {concept.supersededBy !== null ? (
+                  <span
+                    data-testid="related-replaced"
+                    className="flex-none rounded-sm bg-n-100 px-1 text-2xs text-n-500"
+                  >
+                    Replaced
+                  </span>
+                ) : (
+                  <>
+                    <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+                    {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
+                  </>
+                )}
               </button>
             </li>
           ))}
