@@ -2,7 +2,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
+import { readNote } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
+import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { KnowledgePage } from './KnowledgePage';
@@ -94,6 +96,94 @@ describe('KnowledgePage threads (M33a.3)', () => {
     // The New menu's own dialog, carrying the thread's name — a suggestion the
     // human can edit, which is the whole of D1: the agent never gets here.
     expect(screen.getByDisplayValue('mpm-410')).not.toBeNull();
+  });
+});
+
+describe('KnowledgePage thread view (M33a.4)', () => {
+  const anchored = (path: string, title: string): Entry =>
+    concept({ path, title, relationships: { about: ['mpm-410'] } });
+
+  beforeEach(() => {
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [anchored('knowledge/a.md', 'Alpha'), anchored('knowledge/b.md', 'Beta')],
+    });
+  });
+
+  it('opens a thread as a thread, not as whichever concept sorted first', () => {
+    render(<KnowledgePage selection={{ kind: 'knowledge' }} />);
+    expect(screen.getByTestId('thread-view')).not.toBeNull();
+    // Nothing is selected, so there is no single concept to attest to.
+    expect(screen.queryByTestId('knowledge-panel')).toBeNull();
+  });
+
+  it('shows the concept once one is asked for, and the overview row leads back', () => {
+    render(<KnowledgePage selection={{ kind: 'knowledge' }} />);
+    fireEvent.click(screen.getAllByTestId('concept-row')[0]);
+    expect(screen.queryByTestId('thread-view')).toBeNull();
+    expect(screen.getByTestId('knowledge-panel')).not.toBeNull();
+
+    // Without this row, reading one concept is a one-way door out of the only
+    // view that reads the subject as a subject.
+    fireEvent.click(screen.getByTestId('thread-overview-row'));
+    expect(screen.getByTestId('thread-view')).not.toBeNull();
+  });
+
+  it('leaves every other view opening on the head of its list', () => {
+    render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' } }} />);
+    expect(screen.queryByTestId('thread-view')).toBeNull();
+    expect(screen.queryByTestId('thread-overview-row')).toBeNull();
+    expect(screen.getByTestId('knowledge-panel')).not.toBeNull();
+  });
+});
+
+describe('KnowledgePage wikilinks (M33a.4)', () => {
+  const RECORD = 'notes/field-report.md';
+
+  beforeEach(() => {
+    useUiStore.setState({ toasts: [] });
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        concept({ path: OLD, title: 'The offline window' }),
+        concept({ path: NEW, title: 'The offline window, revised' }),
+        // An ordinary untyped note: a vault entry that is not a concept.
+        {
+          ...concept({ path: RECORD, title: 'Field report' }),
+          type: null,
+          folder: 'notes',
+        },
+      ],
+    });
+  });
+
+  const follow = async (body: string) => {
+    vi.mocked(readNote).mockResolvedValue(body);
+    render(<KnowledgePage selection={{ kind: 'knowledge', nav: { tab: 'all' }, path: OLD }} />);
+    const link = await screen.findByTestId('concept-wikilink');
+    fireEvent.click(link);
+  };
+
+  it('follows a link to another concept into this reading pane', async () => {
+    await follow('See [[offline-window-v2]].\n');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toContain(
+      'The offline window, revised',
+    );
+  });
+
+  it('follows a link to a vault record out to where that record lives', async () => {
+    await follow('See [[field-report]].\n');
+    // The bundle does not hold your notes, so this one leaves the tab.
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: RECORD });
+  });
+
+  it('says a dangling link names nothing yet, and does not call it broken', async () => {
+    await follow('See [[mpm-410]].\n');
+    // A dangling link is legitimate (OKF §6.1) and, per D7, an open thread —
+    // the base is tracking something nobody has written up.
+    const [toast] = useUiStore.getState().toasts;
+    expect(toast.message).toBe('Nothing in the vault is named "mpm-410" yet');
+    expect(toast.message).not.toContain('broken');
   });
 });
 

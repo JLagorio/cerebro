@@ -118,6 +118,20 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   await expect(landed).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('knowledge-heading')).toHaveText('Offline sync hardening');
 
+  // -- And it reads the thread, not the first concept in it (M33a.4) ------
+  // What the base believes about a subject is the whole thread; opening
+  // whichever concept sorted first answered a question nobody asked.
+  const thread = page.getByTestId('thread-view');
+  await expect(thread).toBeVisible();
+  await expect(page.getByTestId('knowledge-panel')).toHaveCount(0);
+  // Contested leads, and it names what replaced what. The pilot's week-long
+  // window lost to the 72-hour decision, and the seed says so in a field.
+  await expect(page.locator('[data-section="thread-contested"]')).toContainText(
+    'replaced by The offline guarantee',
+  );
+  await expect(page.locator('[data-section="thread-stale"]')).toContainText('Sync error rate');
+  await expect(page.locator('[data-section="thread-sources"]')).toContainText('cited by');
+
   await nav.filter({ hasText: 'All concepts' }).click();
   const total = await page.getByTestId('concept-row').count();
 
@@ -144,10 +158,15 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   expect(aboutPaths).toContain('knowledge/systems/offline-guarantee.md');
 
   // The anchor is followable in both directions: the panel gets you from a
-  // concept back to the entity it is about.
+  // concept back to the entity it is about. Opened by name, because a thread
+  // no longer auto-selects one (M33a.4) — and the way back to the whole thread
+  // is the row above the list.
+  await page.getByTestId('concept-row').first().click();
   await expect(
     page.getByTestId('knowledge-panel').getByTestId('about-entity').first(),
   ).toBeVisible();
+  await page.getByTestId('thread-overview-row').click();
+  await expect(page.getByTestId('thread-view')).toBeVisible();
 
   // -- The log: what the agent has actually done -------------------------
   await nav.filter({ hasText: 'Update log' }).click();

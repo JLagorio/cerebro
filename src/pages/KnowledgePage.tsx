@@ -11,6 +11,7 @@ import {
   type Concept,
 } from '@/engine/okf';
 import type { KnowledgeNav, Selection } from '@/engine/types';
+import { resolveTarget } from '@/engine/wikilink';
 import { NewRecordDialog } from '@/app/CreateMenu';
 import { useOpenPath } from '@/app/useOpenPath';
 import { reviewConceptPrompt } from '@/lib/prompts';
@@ -27,6 +28,7 @@ import { ConceptBody } from '@/knowledge/ConceptBody';
 import { KnowledgeLog } from '@/knowledge/KnowledgeLog';
 import { KnowledgePanel } from '@/knowledge/KnowledgePanel';
 import { ReviewChip } from '@/knowledge/ReviewChip';
+import { ThreadView } from '@/knowledge/ThreadView';
 import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import { readNote, verifyConcept } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -236,8 +238,21 @@ export function KnowledgePage({
     }
   }, [all, nav, subject]);
 
-  const selected = concepts.find((c) => c.entry.path === selectedPath) ?? concepts[0] ?? null;
+  /**
+   * A thread does not auto-select (M33a.4).
+   *
+   * Every other view here is a LIST of concepts and opening the head of it is
+   * a reasonable guess. A thread is one subject, and the answer to "what does
+   * the base believe about this" is the whole thread — so landing on whichever
+   * concept sorted first would answer a question nobody asked and hide the
+   * four that matter more. The other tabs keep the guess.
+   */
+  const selected =
+    concepts.find((c) => c.entry.path === selectedPath) ??
+    (nav.tab === 'entity' ? null : (concepts[0] ?? null));
   const selectedConceptPath = selected?.entry.path ?? null;
+  /** The thread reads as one thing until a concept is asked for by name. */
+  const showThread = nav.tab === 'entity' && subject !== null && selected === null;
 
   // A replaced concept carries no back-pointer of its own (M8.7: the
   // replacement is what holds `supersedes`), so the title of what replaced it
@@ -316,6 +331,27 @@ export function KnowledgePage({
     const visibleHere = nav.tab !== 'log' && concepts.some((c) => c.entry.path === path);
     if (!visibleHere) navigate({ kind: 'knowledge', nav: { tab: 'all' } });
     setSelectedPath(path);
+  };
+
+  /**
+   * A `[[wikilink]]` in a concept body, followed (M33a.4).
+   *
+   * Resolution happens here rather than in the renderer because it needs the
+   * whole vault — and because only the page knows what to DO with a hit: a
+   * concept opens in this reading pane, anything else is the user's own
+   * record and opens wherever that record lives.
+   */
+  const openWikilink = (target: string) => {
+    const entry = resolveTarget(target, entries);
+    if (entry === null) {
+      // A dangling link is legitimate (OKF §6.1) and, per D7, an open thread:
+      // the base is tracking something the workspace has not written up. It is
+      // reported as an absence, never as damage.
+      toast(`Nothing in the vault is named "${target}" yet`);
+      return;
+    }
+    if (all.some((c) => c.entry.path === entry.path)) openConcept(entry.path);
+    else openPath(entry.path);
   };
 
   // M33a.2 — the six tabs that describe the base itself short-circuit for the
@@ -436,7 +472,7 @@ export function KnowledgePage({
         )}
       </header>
 
-      {selected === null ? (
+      {selected === null && !showThread ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
             icon={nav.tab === 'review' ? 'shield-check' : 'brain'}
@@ -469,11 +505,32 @@ export function KnowledgePage({
               narrow ? 'w-[220px]' : 'w-[280px]',
             ].join(' ')}
           >
+            {/* The way back to the whole thread once a concept has been
+                opened. It leads the column because the thread is what the tab
+                landed on — without it, reading one concept is a one-way door
+                out of the only view that reads the subject as a subject. */}
+            {nav.tab === 'entity' && subject !== null && (
+              <button
+                type="button"
+                data-testid="thread-overview-row"
+                aria-selected={selected === null}
+                onClick={() => setSelectedPath(null)}
+                className={[
+                  'flex items-center gap-1.5 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left text-sm',
+                  selected === null
+                    ? 'bg-cortex-50 font-semibold text-n-900'
+                    : 'bg-transparent font-medium text-n-800 hover:bg-n-25',
+                ].join(' ')}
+              >
+                <Icon name="layers" size={13} color="var(--n-500)" />
+                Thread overview
+              </button>
+            )}
             {concepts.map((c) => (
               <ConceptRow
                 key={c.entry.path}
                 concept={c}
-                active={c.entry.path === selected.entry.path}
+                active={c.entry.path === selected?.entry.path}
                 onClick={() => setSelectedPath(c.entry.path)}
               />
             ))}
@@ -481,45 +538,64 @@ export function KnowledgePage({
 
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div className="mx-auto w-full max-w-[760px] px-6">
-              {/* M15: the reading pane gave no sign at all that the bundle no
-                  longer believes this — a retired claim read as current. */}
-              {selected.supersededBy !== null && (
-                <div
-                  data-testid="superseded-banner"
-                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
-                >
-                  <Icon name="archive" size={12} />
-                  <span>No longer believed. Replaced by</span>
-                  <button
-                    type="button"
-                    data-path={selected.supersededBy}
-                    onClick={() => openConcept(replacedBy)}
-                    className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
-                  >
-                    {replacement?.title ?? 'a newer concept'}
-                  </button>
-                </div>
+              {selected === null ? (
+                // The thread, read as one thing. `subject` is non-null
+                // whenever `selected` is not — see `showThread`.
+                subject !== null && (
+                  <ThreadView
+                    subject={subject}
+                    concepts={all}
+                    entries={entries}
+                    today={today}
+                    onOpenConcept={setSelectedPath}
+                  />
+                )
+              ) : (
+                <>
+                  {/* M15: the reading pane gave no sign at all that the bundle
+                      no longer believes this — a retired claim read as
+                      current. */}
+                  {selected.supersededBy !== null && (
+                    <div
+                      data-testid="superseded-banner"
+                      className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
+                    >
+                      <Icon name="archive" size={12} />
+                      <span>No longer believed. Replaced by</span>
+                      <button
+                        type="button"
+                        data-path={selected.supersededBy}
+                        onClick={() => openConcept(replacedBy)}
+                        className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
+                      >
+                        {replacement?.title ?? 'a newer concept'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
+                    <span className="[font-family:var(--font-mono)]">{selected.id}</span>
+                  </div>
+                  {/* h2: the concept is a section of the Knowledge page, not
+                      the page itself. Size is unchanged — the level is the
+                      fix. */}
+                  <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
+                    {selected.title}
+                  </h2>
+                  {selected.description !== null && (
+                    <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
+                      {selected.description}
+                    </p>
+                  )}
+                  <ConceptBody
+                    key={selected.entry.path}
+                    markdown={body}
+                    sources={selected.sources}
+                    fromPath={selected.entry.path}
+                    onOpenConcept={openConcept}
+                    onOpenWikilink={openWikilink}
+                  />
+                </>
               )}
-              <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
-                <span className="[font-family:var(--font-mono)]">{selected.id}</span>
-              </div>
-              {/* h2: the concept is a section of the Knowledge page, not the
-                  page itself. Size is unchanged — the level is the fix. */}
-              <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
-                {selected.title}
-              </h2>
-              {selected.description !== null && (
-                <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
-                  {selected.description}
-                </p>
-              )}
-              <ConceptBody
-                key={selected.entry.path}
-                markdown={body}
-                sources={selected.sources}
-                fromPath={selected.entry.path}
-                onOpenConcept={openConcept}
-              />
             </div>
           </div>
 
@@ -534,7 +610,9 @@ export function KnowledgePage({
               className="absolute inset-0 z-10 cursor-default border-0 bg-transparent"
             />
           )}
-          {(!narrow || provenanceOpen) && (
+          {/* No concept, no provenance ledger: the thread view is a read of
+              many concepts and there is no single one to attest to. */}
+          {(!narrow || provenanceOpen) && selected !== null && (
             <KnowledgePanel
               concept={selected}
               today={today}
