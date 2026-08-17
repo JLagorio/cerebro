@@ -40,11 +40,21 @@
 //! traded an accidental error for a clean decision; it never protected any
 //! accounting.
 //!
-//! **2. Crash recovery — unchanged, because it never lived in this table.**
-//! [`recover_expired_leases`] sweeps `runs` by `lease_expires_at`. It has
-//! never read `ambient_dispatch`, and N rows change nothing about it: each
-//! abandoned run is finalized on its own row, `abandoned_usage_unknown`, its
-//! items requeued, its day marked unknown.
+//! **2. Crash recovery — unchanged in mechanism, and WIRED for the first time
+//! here.** [`recover_expired_leases`] sweeps `runs` by `lease_expires_at`. It
+//! has never read `ambient_dispatch`, and N rows change nothing about it:
+//! each abandoned run is finalized on its own row, `abandoned_usage_unknown`,
+//! its items requeued, its day marked unknown.
+//!
+//! The honest part: **that sweep had no production caller until M33b.1**, and
+//! the singleton primary key had been standing in for it by accident — after
+//! a crash the stale row made every later claim fail its key and roll back,
+//! which stopped ambient dispatch loudly and forever. Retiring the singleton
+//! without wiring the sweep would have converted that loud wedge into a
+//! silent loss of work. So `ingest::ambient`'s tick now calls it, ahead of
+//! the pause, and `ambient::sweep_abandoned` carries the argument for that
+//! position. The invariant below is therefore a claim about code that runs,
+//! not about a function nobody calls.
 //!
 //! **3. Accounting — unchanged, and it never lived here either.** Spend is a
 //! `runs` row plus a `budget_days` reservation, one pair per run. N
@@ -625,6 +635,19 @@ fn finalize_inner(
 /// is either still `pending` (the claim never committed) or owned by exactly
 /// one run whose lease will expire and free it. It never assumes the run cost
 /// nothing.
+///
+/// **One production caller, and it is load-bearing**: `ingest::ambient`'s
+/// supervisor tick, ahead of the pause (see `sweep_abandoned` for why it sits
+/// there). Until M33b.1 this function had NO caller at all and the
+/// `ambient_dispatch` singleton primary key was accidentally covering for it,
+/// by turning every claim after a crash into a rolled-back error. Retiring
+/// the singleton without wiring this would have replaced a loud wedge with a
+/// silent loss: runs `running` forever, their items `claimed` and never
+/// re-offered, their reservations debited against a day that never learns its
+/// spend was unknown.
+///
+/// It reads `runs`, never `ambient_dispatch` — a lease row is a claim-time
+/// mutex, and the run row is the thing with accounting on it.
 pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<usize, String> {
     let expired: Vec<String> = {
         let mut statement = conn
