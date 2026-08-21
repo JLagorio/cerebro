@@ -246,7 +246,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     if (!listing.system && listing.docPath !== null) {
       items.push({
         icon: 'trash-2',
-        label: 'Delete type',
+        label: 'Delete database',
         danger: true,
         onSelect: () => setTypeDialog({ mode: 'delete', listing }),
       });
@@ -437,7 +437,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           menuFor={nodeMenuItems}
           onAdd={(node) => onNewView(node.id)}
         />
-        {/* M3: collapsible Types section — the databases themselves. */}
+        {/* M3's collapsible Types section, wearing what it always was
+            (M39.2): the databases. The `type:` key, the metamodel, and every
+            internal identifier keep the old word — labels spend, kinds stay,
+            same rule as M37.2. */}
         <div className="flex items-center justify-between pr-1">
           <button
             type="button"
@@ -446,7 +449,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-n-700`}
           >
             <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-            Types
+            Databases
           </button>
           <span className="inline-flex">
             {/* M12.6: the schema doctor — adopt an existing vault's freeform
@@ -461,7 +464,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             </button>
             <button
               type="button"
-              aria-label="New type"
+              aria-label="New database"
               onClick={() => setTypeDialog({ mode: 'new' })}
               className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
             >

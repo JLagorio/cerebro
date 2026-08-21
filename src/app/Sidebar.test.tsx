@@ -461,17 +461,20 @@ describe('Sidebar', () => {
       expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Recipe' });
     });
 
+    // M39.2: the section wears the word it always meant — Databases. The
+    // internal vocabulary (`type:`, TypeListing, the `type` kind, this very
+    // testid) deliberately keeps the old word: labels spend, kinds stay.
     it('collapses via the section header', () => {
       render(<Sidebar onNewView={vi.fn()} />);
-      fireEvent.click(screen.getByRole('button', { name: 'Types' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Databases' }));
       expect(screen.queryAllByTestId('sidebar-type')).toEqual([]);
       expect(useUiStore.getState().typesOpen).toBe(false);
     });
 
-    it('the + button opens the Create-type dialog', () => {
+    it('the + button opens the New-database dialog', () => {
       render(<Sidebar onNewView={vi.fn()} />);
-      fireEvent.click(screen.getByRole('button', { name: 'New type' }));
-      expect(screen.getByText('Create new type')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'New database' }));
+      expect(screen.getByText('New database')).toBeTruthy();
     });
 
     it('right-click on a custom type offers rename and delete', () => {
@@ -480,7 +483,7 @@ describe('Sidebar', () => {
       fireEvent.contextMenu(screen.getByText('Recipe'));
       expect(screen.getByText('Change display name…')).toBeTruthy();
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
-      expect(screen.getByText('Delete type')).toBeTruthy();
+      expect(screen.getByText('Delete database')).toBeTruthy();
     });
 
     it('right-click on the metamodel only offers customize (locked)', () => {
@@ -490,7 +493,7 @@ describe('Sidebar', () => {
       fireEvent.contextMenu(screen.getByText('Type'));
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
       expect(screen.queryByText('Change display name…')).toBeNull();
-      expect(screen.queryByText('Delete type')).toBeNull();
+      expect(screen.queryByText('Delete database')).toBeNull();
     });
   });
 
