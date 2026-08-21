@@ -287,7 +287,6 @@ describe('external references', () => {
   });
 });
 
-
 describe('sourceFreshness (M34.5.2)', () => {
   const TODAY = '2026-08-21';
   const cached = (properties: Record<string, unknown>) =>
@@ -302,7 +301,10 @@ describe('sourceFreshness (M34.5.2)', () => {
 
   it('past its refresh date is stale, and says since when', () => {
     expect(
-      sourceFreshness(cached({ stale_after: '2026-08-01', fetched_at: '2026-07-20T10:00:00Z' }), TODAY),
+      sourceFreshness(
+        cached({ stale_after: '2026-08-01', fetched_at: '2026-07-20T10:00:00Z' }),
+        TODAY,
+      ),
     ).toEqual({ state: 'stale', staleAfter: '2026-08-01', fetchedAt: '2026-07-20T10:00:00Z' });
     // The boundary matches the refresh lane: due ON the date, not after it.
     expect(sourceFreshness(cached({ stale_after: TODAY }), TODAY)?.state).toBe('stale');
@@ -310,7 +312,10 @@ describe('sourceFreshness (M34.5.2)', () => {
 
   it('a future refresh date is fresh until then', () => {
     expect(
-      sourceFreshness(cached({ stale_after: '2026-09-01', fetched_at: '2026-08-20T10:00:00Z' }), TODAY),
+      sourceFreshness(
+        cached({ stale_after: '2026-09-01', fetched_at: '2026-08-20T10:00:00Z' }),
+        TODAY,
+      ),
     ).toEqual({ state: 'fresh', staleAfter: '2026-09-01', fetchedAt: '2026-08-20T10:00:00Z' });
   });
 

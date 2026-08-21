@@ -453,7 +453,9 @@ describe('jobQueue', () => {
       now,
       events: [{ kind: 'changed', path: copy.path, entry: copy, before: copy, fields: [] }],
     });
-    expect(jobs.map((j) => [j.kind, j.path])).toEqual([['agent', 'records/agents/source-watcher.md']]);
+    expect(jobs.map((j) => [j.kind, j.path])).toEqual([
+      ['agent', 'records/agents/source-watcher.md'],
+    ]);
     // The fire key names the event, so THIS refresh wakes the agent once and
     // the next refresh — a new modifiedAt — is a genuinely new fire.
     expect(jobs[0].runKey).toBe('event:changed:sources/issues/phx-421.md@2026-07-31T10:00:00Z');

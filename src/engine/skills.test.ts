@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { fireKeyDate, lastFireKey, listSkills, matchSkillInvocation, skillIndex, skillPrompt } from './skills';
+import {
+  fireKeyDate,
+  lastFireKey,
+  listSkills,
+  matchSkillInvocation,
+  skillIndex,
+  skillPrompt,
+} from './skills';
 import { makeEntry } from './testHelpers';
 
 const skill = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>

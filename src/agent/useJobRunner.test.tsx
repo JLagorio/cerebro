@@ -440,7 +440,9 @@ describe('useJobRunner shell gating', () => {
     await startJob();
 
     const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
-    expect(options.systemPrompt).toContain('Your standing instructions, from records/agents/scout.md');
+    expect(options.systemPrompt).toContain(
+      'Your standing instructions, from records/agents/scout.md',
+    );
     expect(options.systemPrompt).toContain('playbook');
     expect(options.message).not.toContain('playbook');
   });

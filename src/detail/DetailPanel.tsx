@@ -60,7 +60,9 @@ function SourceFreshnessLine({ entry }: { entry: Entry }) {
   const fetched =
     // NOT RECORDED, said out loud — never an epoch, never omitted into
     // looking fine.
-    freshness.fetchedAt === null ? 'fetch not recorded' : `fetched ${freshness.fetchedAt.slice(0, 10)}`;
+    freshness.fetchedAt === null
+      ? 'fetch not recorded'
+      : `fetched ${freshness.fetchedAt.slice(0, 10)}`;
   return (
     <div
       data-testid="detail-source-freshness"

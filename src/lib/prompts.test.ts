@@ -18,12 +18,10 @@ import { ALL_TOOLS } from '@/engine/tools';
  * to the standing ones instead of replacing them.
  */
 const base = () =>
-  agentRunPrompt(
-    'records/agents/scout.md',
-    'Release scout',
-    'process:release-scout',
-    { recent: '', preferences: '' },
-  );
+  agentRunPrompt('records/agents/scout.md', 'Release scout', 'process:release-scout', {
+    recent: '',
+    preferences: '',
+  });
 
 describe('agentRunPrompt', () => {
   it('says nobody is watching, so nothing lands in a chat reply', () => {
@@ -51,15 +49,9 @@ describe('agentRunPrompt', () => {
   it('states the READ boundary too, and says searches count what they withhold (M36.4)', () => {
     // The enforcement is M34.4's; this is the agent being told, so it plans
     // around the boundary instead of discovering it as refused reads.
-    const prompt = agentRunPrompt(
-      'p',
-      't',
-      'a',
-      { recent: '', preferences: '' },
-      null,
-      null,
-      ['records/risks'],
-    );
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, null, [
+      'records/risks',
+    ]);
     expect(prompt).toContain('read notes only inside: records/risks');
     expect(prompt).toContain('withheld');
     // And absent stays silent: an unrestricted reader gets no boundary talk.
@@ -75,22 +67,26 @@ describe('agentRunPrompt', () => {
   it('gives the model gate an explicit permission to do nothing', () => {
     // Without it, a model asked "is this important?" finds a way to say yes —
     // the whole point of the gate is that most wakings end here.
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
-      subject: 'records/risks/r.md',
-      because: 'status becomes at-risk',
-      ask: 'Does this threaten the release?',
-    });
+    const prompt = agentRunPrompt(
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      {
+        subject: 'records/risks/r.md',
+        because: 'status becomes at-risk',
+        ask: 'Does this threaten the release?',
+      },
+    );
     expect(prompt).toContain('Does this threaten the release?');
     expect(prompt).toContain('write nothing and stop');
   });
 
   it('ranks the human’s corrections above the agent’s own notes', () => {
-    const prompt = agentRunPrompt(
-      'p',
-      't',
-      'a',
-      { recent: 'MY OWN NOTES', preferences: 'HUMAN CORRECTION' },
-    );
+    const prompt = agentRunPrompt('p', 't', 'a', {
+      recent: 'MY OWN NOTES',
+      preferences: 'HUMAN CORRECTION',
+    });
     expect(prompt.indexOf('HUMAN CORRECTION')).toBeLessThan(prompt.indexOf('MY OWN NOTES'));
     expect(prompt).toContain('This outranks your own notes');
   });
@@ -177,22 +173,34 @@ describe('per-trigger instructions (M18.5)', () => {
   });
 
   it('changes nothing for a trigger that declares none', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
-      subject: 'records/risks/r.md',
-      because: 'status becomes at-risk',
-    });
+    const prompt = agentRunPrompt(
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      {
+        subject: 'records/risks/r.md',
+        because: 'status becomes at-risk',
+      },
+    );
     expect(prompt).not.toContain('on top of your standing instructions');
   });
 
   it('keeps the gate ahead of the instruction, so a "no" run never reads it', () => {
     // Order is the design: decide whether to act, then how. Reversed, the
     // model has already planned the work before being asked to skip it.
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
-      subject: 's',
-      because: 'b',
-      ask: 'SHOULD I?',
-      do: 'HOW TO.',
-    });
+    const prompt = agentRunPrompt(
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      {
+        subject: 's',
+        because: 'b',
+        ask: 'SHOULD I?',
+        do: 'HOW TO.',
+      },
+    );
     expect(prompt.indexOf('SHOULD I?')).toBeLessThan(prompt.indexOf('HOW TO.'));
   });
 });

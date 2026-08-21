@@ -363,38 +363,38 @@ export function useAgentChat(
           // contract break — startedOrThrow turns it into a visible error.
           const { run } = startedOrThrow(
             await runAgent(vaultPath, {
-            message: outgoing,
-            systemPrompt: turn.systemPrompt,
-            sessionId: sessionRef.current,
-            model,
-            // M33b.6 — the addressed agent's grant, and it can only ever
-            // SUBTRACT. `shell` here is the Settings ceiling; a record that
-            // declares `tools: shell` in a vault whose owner never switched
-            // shell on still gets false, exactly as it does on a schedule
-            // (useJobRunner). No record grants itself what Settings denies,
-            // and addressing one must never become the way around that.
-            shell: shell && (recipient?.shell ?? true),
-            connectors,
-            connectorNames: recipient?.connectors ?? null,
-            // A person typed this turn and is watching it stream — the one
-            // kind of run allowed to fall back to their global MCP config
-            // when the vault has no connectors.json (PR #5 security review).
-            attended: true,
-            approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
-            // Two narrowings can meet on one turn — a skill's `allowed-tools:`
-            // and the addressed agent's — so they intersect. Never union.
-            allowedTools: narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null),
-            // M17.13: enforced in Rust against the bearer the child presents,
-            // so an addressed agent cannot talk its way out of its folders.
-            scope: recipient?.scope ?? null,
-            // M34.4: and the read axis, the same way — an addressed agent
-            // reads what its record says it reads, not what the panel can.
-            readScope: recipient?.readScope ?? null,
-            // M13.4: attribution rides the bearer token, so what this turn
-            // writes is stamped as the agent — and, free, the `runs` row it
-            // books carries the actor the fleet reads.
-            actor: recipient?.actor ?? null,
-            mcp: mcpRef.current,
+              message: outgoing,
+              systemPrompt: turn.systemPrompt,
+              sessionId: sessionRef.current,
+              model,
+              // M33b.6 — the addressed agent's grant, and it can only ever
+              // SUBTRACT. `shell` here is the Settings ceiling; a record that
+              // declares `tools: shell` in a vault whose owner never switched
+              // shell on still gets false, exactly as it does on a schedule
+              // (useJobRunner). No record grants itself what Settings denies,
+              // and addressing one must never become the way around that.
+              shell: shell && (recipient?.shell ?? true),
+              connectors,
+              connectorNames: recipient?.connectors ?? null,
+              // A person typed this turn and is watching it stream — the one
+              // kind of run allowed to fall back to their global MCP config
+              // when the vault has no connectors.json (PR #5 security review).
+              attended: true,
+              approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
+              // Two narrowings can meet on one turn — a skill's `allowed-tools:`
+              // and the addressed agent's — so they intersect. Never union.
+              allowedTools: narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null),
+              // M17.13: enforced in Rust against the bearer the child presents,
+              // so an addressed agent cannot talk its way out of its folders.
+              scope: recipient?.scope ?? null,
+              // M34.4: and the read axis, the same way — an addressed agent
+              // reads what its record says it reads, not what the panel can.
+              readScope: recipient?.readScope ?? null,
+              // M13.4: attribution rides the bearer token, so what this turn
+              // writes is stamped as the agent — and, free, the `runs` row it
+              // books carries the actor the fleet reads.
+              actor: recipient?.actor ?? null,
+              mcp: mcpRef.current,
             }),
           );
           // Cancelled during the spawn itself: the child exists now, so it has
