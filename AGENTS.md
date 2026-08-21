@@ -40,16 +40,17 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   and `EpistemicStatusPage` are all gone. **The shell is ONE nav column**
   (M37.3 flattened the icon rail and the per-surface sidebar into
   `app/Sidebar.tsx`): vault header, search, nine destinations (Home, Inbox,
-  Docs, Work, Base, History, Assistant, Library, Settings — M37.2 spent the
-  locked names: Base was Knowledge, Work was Workspace; the selection KINDS
-  stay `knowledge`/`workspace`, labels only), Collections + Types inline, and
-  the Docs tree / Base rows nested under their destination row while that
-  surface is current. The nine names are asserted in `app/Sidebar.test.tsx`;
-  specs scope destination clicks to `nav-surfaces` (nested tree rows share
-  accessible names with destinations). Sections are addressed by
-  `data-section`, never by a per-section testid, and `KnowledgeNav` carries
-  the tab (plus `run`, for one fleet detail) so a section is a place the back
-  button returns to.
+  Work, Studio, Base, History, Assistant, Library, Settings — M37.2 spent
+  the locked names Base/Work, M38.3 retired Docs for the standing **Pages**
+  tree, M40 added Studio; the selection KINDS stay `knowledge`/`workspace`,
+  labels only), then the Pages tree, Collections, and the **Databases**
+  section (M39 — the label; `type:` and every internal identifier keep the
+  old word), with Base's rows nested under its destination while current.
+  The nine names are asserted in `app/Sidebar.test.tsx`; specs scope
+  destination clicks to `nav-surfaces` (nested tree rows share accessible
+  names with destinations). Sections are addressed by `data-section`, never
+  by a per-section testid, and `KnowledgeNav` carries the tab (plus `run`,
+  for one fleet detail) so a section is a place the back button returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
   (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
   `connectors.rs`, `runtime/fleet.rs` (SELECT-only run history — it writes
