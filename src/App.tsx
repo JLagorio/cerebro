@@ -22,6 +22,7 @@ import { KnowledgePage } from '@/pages/KnowledgePage';
 import { PulsePage } from '@/pages/PulsePage';
 import { LibraryPage } from '@/library/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { StudioPage } from '@/pages/StudioPage';
 import { TypePage } from '@/pages/TypePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
 import { Topbar } from '@/app/Topbar';
@@ -124,6 +125,10 @@ function CanvasOutlet() {
     // index. Takes the selection so the open file survives Back.
     case 'workspace':
       return <WorkspacePage selection={selection} />;
+    // M40 — the prototype surface. Takes the selection so the open
+    // prototype survives Back.
+    case 'studio':
+      return <StudioPage selection={selection} />;
     case 'settings':
       return <SettingsPage />;
   }

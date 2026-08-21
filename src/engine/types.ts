@@ -227,6 +227,10 @@ export type Selection =
   // component state so "the README of cerebro" is a place Back returns to, the
   // same contract `list.view` and `library.tab` already follow.
   | { kind: 'workspace'; root?: string; path?: string }
+  // M40 — the prototype surface, the third locked name (Base/Work/Studio).
+  // `project` is the open prototype's folder slug: a SUBJECT the back button
+  // returns to. The previewed page within it is a lens and stays local.
+  | { kind: 'studio'; project?: string }
   | { kind: 'settings' };
 
 /**

@@ -355,6 +355,14 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             active={selection.kind === 'workspace'}
             onClick={() => navigate({ kind: 'workspace' })}
           />
+          {/* M40 — the third locked name. A making surface, so it sits with
+              Work rather than below the fold with the chrome. */}
+          <SurfaceRow
+            icon="pencil-ruler"
+            label="Studio"
+            active={selection.kind === 'studio'}
+            onClick={() => navigate({ kind: 'studio' })}
+          />
           {/* M5: the agent's corpus is a peer of Home and Docs — different
               author, different rules. M33a.2 folded the Status hub in, so this
               one destination is both what the base holds and what it knows

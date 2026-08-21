@@ -48,9 +48,7 @@ export function studioProjects(entries: Entry[]): StudioProject[] {
     .map(([slug, pages]) => {
       const folder = `${STUDIO_DIR}/${slug}`;
       const main = pages.find((p) => p.path === `${folder}/index.md`) ?? null;
-      const rest = pages
-        .filter((p) => p !== main)
-        .sort((a, b) => a.title.localeCompare(b.title));
+      const rest = pages.filter((p) => p !== main).sort((a, b) => a.title.localeCompare(b.title));
       return {
         slug,
         folder,

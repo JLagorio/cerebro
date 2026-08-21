@@ -270,6 +270,10 @@ export function resolveSurface(
     // surface deliberately lacks.
     case 'workspace':
       return { title: 'Workspace', entries: [], presentation: defaultPresentation() };
+    // M40 — Studio draws its own layout: a prototype is a folder of pages,
+    // not a query over records.
+    case 'studio':
+      return { title: 'Studio', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

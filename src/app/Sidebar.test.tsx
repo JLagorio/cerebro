@@ -106,13 +106,16 @@ describe('Sidebar', () => {
       return labels;
     };
 
-    it('carries exactly the eight destinations the shell has', () => {
+    it('carries exactly the nine destinations the shell has', () => {
       render(<Sidebar onNewView={vi.fn()} />);
       const labels = surfaceLabels();
+      // Studio is M40's — the third locked name, seated with Work because it
+      // is a making surface.
       expect(labels).toEqual([
         'Home',
         'Inbox',
         'Work',
+        'Studio',
         'Base',
         'History',
         'Assistant',
@@ -148,7 +151,7 @@ describe('Sidebar', () => {
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
         render(<Sidebar onNewView={vi.fn()} />);
-        expect(surfaceLabels()).toHaveLength(8);
+        expect(surfaceLabels()).toHaveLength(9);
         cleanup();
       }
     });

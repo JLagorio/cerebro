@@ -74,6 +74,12 @@ export function placeOf(selection: Selection): Place {
       return { kind: 'diagram', path: selection.path };
     case 'collection':
       return { kind: 'collection', folder: selection.folder };
+    // A prototype is a subject the way a Collection is — the thread about
+    // building it should anchor to IT, not to the Studio lobby (M40.3).
+    case 'studio':
+      return selection.project === undefined
+        ? { kind: 'studio' }
+        : { kind: 'studio', project: selection.project };
     default:
       return { kind: selection.kind };
   }
@@ -102,6 +108,9 @@ export function placeKey(place: Place): string {
       return `list:${place.collection ?? ''}/${place.id}`;
     case 'type':
       return `type:${place.name}`;
+    case 'studio':
+      // A folder slug cannot contain `:`, so the two shapes cannot collide.
+      return place.project === undefined ? 'studio' : `studio:${place.project}`;
     case 'knowledge': {
       const nav = place.nav;
       if (nav?.tab === 'section') return `knowledge:section:${nav.folder}`;
@@ -157,6 +166,8 @@ export function placeLabel(
     // unchanged: the open file is a lens, exactly like the open record.
     case 'workspace':
       return 'Workspace';
+    case 'studio':
+      return place.project === undefined ? 'Studio' : `Studio / ${stem(place.project)}`;
     case 'settings':
       return 'Settings';
     case 'knowledge': {
@@ -222,6 +233,8 @@ export function isPlace(raw: unknown): raw is Place {
       return typeof p.path === 'string';
     case 'collection':
       return typeof p.folder === 'string';
+    case 'studio':
+      return p.project === undefined || typeof p.project === 'string';
     case 'list':
       return (
         typeof p.id === 'string' && (p.collection === null || typeof p.collection === 'string')
