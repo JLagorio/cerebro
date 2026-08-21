@@ -42,6 +42,7 @@ pub mod fleet;
 pub mod governance;
 pub mod health;
 pub mod import;
+pub mod job_ledger;
 pub mod normalize;
 pub mod operational;
 pub mod parked;
@@ -87,8 +88,9 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// nullable and never backfilled, at 13. M33b.1 rebuilds `ambient_dispatch`
 /// keyed by `run_id` at 14, retiring the singleton column. M34.3 adds
 /// `runs.parent_run_id`, nullable — NULL is a root, and every run before
-/// this was one — at 15.
-pub const USER_VERSION: i64 = 15;
+/// this was one — at 15. M34.2 adds `job_ledger` — the renderer's three
+/// scheduling ledgers, durably — at 16.
+pub const USER_VERSION: i64 = 16;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -251,7 +253,22 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V15,
         validate: validate_v15,
     },
+    Migration {
+        to: 16,
+        sql: schema::SCHEMA_V16,
+        validate: validate_v16,
+    },
 ];
+
+/// v16's promise is one table with its claim-bearing primary key. The CHECK
+/// vocabulary is asserted by job_ledger's own tests; here it is enough that
+/// the table prepares and the PK arbitrates (an INSERT OR IGNORE of a
+/// duplicate key changing nothing).
+fn validate_v16(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT vault_id, ledger, key, run_key, recorded_at FROM job_ledger")
+        .map_err(|e| format!("validating job_ledger: {e}"))?;
+    Ok(())
+}
 
 /// What `user_version = 14` promises (M33b.1) — and, unusually, one thing it
 /// promises is ABSENT.

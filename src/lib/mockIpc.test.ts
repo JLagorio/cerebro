@@ -1063,3 +1063,56 @@ describe('a paused agent cannot be run (M33b.5)', () => {
     await stopAllAgents();
   });
 });
+
+describe('the job ledgers (M34.2.2) — parity with runtime/job_ledger.rs', () => {
+  it('the first claim is fresh and the second identical one is not', async () => {
+    expect(await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-20')).toBe(
+      true,
+    );
+    // The two-window double-run, refused in the store rather than by a
+    // renderer promise to be quick.
+    expect(await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-20')).toBe(
+      false,
+    );
+    // A new fire is a new job.
+    expect(await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-21')).toBe(
+      true,
+    );
+  });
+
+  it('two vaults never share a ledger row', async () => {
+    // Fire keys are calendar values: the same relative path in another vault
+    // reading as already-run is the PR #5 bug the table must not reintroduce.
+    await mock.jobLedgerClaim('/vault-iso-a', 'skillRuns', 'skills/daily.md', '2026-08-20');
+    expect(
+      await mock.jobLedgerClaim('/vault-iso-b', 'skillRuns', 'skills/daily.md', '2026-08-20'),
+    ).toBe(true);
+  });
+
+  it('a stamp always overwrites because a cooldown clock must move', async () => {
+    await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T10:00:00Z');
+    await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T11:00:00Z');
+    expect((await mock.jobLedgerRead('/vault-stamp')).triggerRuns['agent:risks']).toBe(
+      '2026-08-20T11:00:00Z',
+    );
+  });
+
+  it('an unknown ledger name is refused the way the schema CHECK refuses it', async () => {
+    await expect(mock.jobLedgerClaim('/vault-vocab', 'regrets', 'k', 'v')).rejects.toThrow(/CHECK/);
+  });
+
+  it('import lands only what the store does not hold and skips malformed remnants', async () => {
+    await mock.jobLedgerClaim('/vault-import', 'skillRuns', 'agent:risks', '2026-08-20');
+    const landed = await mock.jobLedgerImport('/vault-import', [
+      // Already answered — the stale localStorage copy must not win.
+      { ledger: 'skillRuns', key: 'agent:risks', runKey: '2026-08-01' },
+      { ledger: 'attempts', key: 'records/a.md', runKey: '2026-08-19T00:00:00.000Z' },
+      // Malformed remnants are skipped, not fatal.
+      { ledger: 'attempts', key: '', runKey: 'x' },
+    ]);
+    expect(landed).toBe(1);
+    const read = await mock.jobLedgerRead('/vault-import');
+    expect(read.skillRuns['agent:risks']).toBe('2026-08-20');
+    expect(read.attempts['records/a.md']).toBe('2026-08-19T00:00:00.000Z');
+  });
+});

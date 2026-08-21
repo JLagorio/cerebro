@@ -1526,6 +1526,90 @@ export async function fleetActorSummaries(): Promise<FleetActorSummary[]> {
     .map(([actor, runs]) => summariseActor(actor, runs));
 }
 
+// --- Job ledgers (M34.2.2) — parity with runtime/job_ledger.rs -------------
+
+/** One vault's three scheduling ledgers, as the hydration read returns them. */
+export interface JobLedgers {
+  attempts: Record<string, string>;
+  skillRuns: Record<string, string>;
+  triggerRuns: Record<string, string>;
+}
+
+/** The schema's CHECK vocabulary, mirrored: a fourth name is a migration. */
+const JOB_LEDGER_NAMES = ['attempts', 'skillRuns', 'triggerRuns'] as const;
+
+/** vault → ledger → key → run_key. In-memory like the rest of the mock: the
+ * browser's persistence is uiStore's localStorage mirror, re-offered through
+ * the import path each session. */
+const jobLedgers = new Map<string, Map<string, Map<string, string>>>();
+
+function jobLedgerFor(vault: string, ledger: string): Map<string, string> {
+  if (!(JOB_LEDGER_NAMES as readonly string[]).includes(ledger)) {
+    // The schema refuses this with a CHECK; a mock that stored it would let
+    // a browser test invent a fourth ledger no database admits.
+    throw new Error(`job_ledger: CHECK failed — unknown ledger ${ledger}`);
+  }
+  let ledgers = jobLedgers.get(vault);
+  if (ledgers === undefined) {
+    ledgers = new Map();
+    jobLedgers.set(vault, ledgers);
+  }
+  let map = ledgers.get(ledger);
+  if (map === undefined) {
+    map = new Map();
+    ledgers.set(ledger, map);
+  }
+  return map;
+}
+
+export async function jobLedgerRead(vault: string): Promise<JobLedgers> {
+  const out: JobLedgers = { attempts: {}, skillRuns: {}, triggerRuns: {} };
+  for (const name of JOB_LEDGER_NAMES) {
+    for (const [key, runKey] of jobLedgerFor(vault, name)) out[name][key] = runKey;
+  }
+  return out;
+}
+
+export async function jobLedgerClaim(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  const map = jobLedgerFor(vault, ledger);
+  // The same conditional write as the Rust upsert: false iff this exact fire
+  // was already answered — the two-window double-run, refused in the store.
+  if (map.get(key) === runKey) return false;
+  map.set(key, runKey);
+  return true;
+}
+
+export async function jobLedgerStamp(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<void> {
+  jobLedgerFor(vault, ledger).set(key, runKey);
+}
+
+export async function jobLedgerImport(
+  vault: string,
+  entries: readonly { ledger: string; key: string; runKey: string }[],
+): Promise<number> {
+  let landed = 0;
+  for (const { ledger, key, runKey } of entries) {
+    // Malformed remnants are skipped, not fatal — dying on one would re-run
+    // the whole import forever. Same rule as the Rust side.
+    if (key === '' || runKey === '') continue;
+    const map = jobLedgerFor(vault, ledger);
+    if (map.has(key)) continue;
+    map.set(key, runKey);
+    landed += 1;
+  }
+  return landed;
+}
+
 /**
  * Where the scheduler holds one item (M26.4j).
  *

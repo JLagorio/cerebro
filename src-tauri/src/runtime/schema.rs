@@ -1191,3 +1191,23 @@ pub const SCHEMA_V15: &str = "
     ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
     CREATE INDEX runs_by_parent ON runs (parent_run_id);
 ";
+
+/// M34.2 — the job runner's three ledgers move out of localStorage.
+///
+/// One row per (vault, ledger, key): `attempts` and `skillRuns` remember the
+/// last run_key answered (a note version, a fire key) and are written through
+/// a CLAIM — conditional on the stored key differing — so two windows deriving
+/// the same due job race for one insert and the loser spawns nothing.
+/// `triggerRuns` is a cooldown clock, last-write-wins. The table is the
+/// duplicate-spend guard the renderer's localStorage never was: a webview data
+/// wipe used to re-fire every schedule ever answered.
+pub const SCHEMA_V16: &str = "
+    CREATE TABLE job_ledger (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        ledger TEXT NOT NULL CHECK (ledger IN ('attempts', 'skillRuns', 'triggerRuns')),
+        key TEXT NOT NULL CHECK (length(key) > 0),
+        run_key TEXT NOT NULL CHECK (length(run_key) > 0),
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, ledger, key)
+    );
+";

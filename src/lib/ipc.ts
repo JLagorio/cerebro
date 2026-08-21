@@ -499,6 +499,55 @@ export function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
   return inTauri() ? invokeTauri('fleet_actor_summary', { actor }) : mock.fleetActorSummary(actor);
 }
 
+// --- Job ledgers (M34.2.2) --------------------------------------------------
+
+import type { JobLedgers } from './mockIpc';
+
+export type { JobLedgers };
+
+/**
+ * One vault's three scheduling ledgers. REFUSES without a runtime database —
+ * an empty ledger reads as "nothing ever ran", which would re-fire every
+ * schedule, so the runner must treat this error as "do not run yet".
+ */
+export function jobLedgerRead(vault: string): Promise<JobLedgers> {
+  return inTauri() ? invokeTauri('job_ledger_read', { vault }) : mock.jobLedgerRead(vault);
+}
+
+/** Record a run key and learn whether the record was FRESH — false means this
+ * exact fire was already answered (another window, an earlier session) and
+ * the caller must not spawn. The two-window arbitration lives in the store,
+ * not in a renderer promise to be quick. */
+export function jobLedgerClaim(
+  vault: string,
+  ledger: 'attempts' | 'skillRuns',
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('job_ledger_claim', { vault, ledger, key, runKey })
+    : mock.jobLedgerClaim(vault, ledger, key, runKey);
+}
+
+/** Overwrite the trigger cooldown clock. No verdict — a clock is not a claim. */
+export function jobLedgerStamp(vault: string, key: string, runKey: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('job_ledger_stamp', { vault, ledger: 'triggerRuns', key, runKey })
+    : mock.jobLedgerStamp(vault, 'triggerRuns', key, runKey);
+}
+
+/** One-time import from the localStorage era. Keys the store already holds
+ * are kept — it has been the arbiter since it existed. Returns how many
+ * landed. */
+export function jobLedgerImport(
+  vault: string,
+  entries: readonly { ledger: string; key: string; runKey: string }[],
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('job_ledger_import', { vault, entries })
+    : mock.jobLedgerImport(vault, entries);
+}
+
 /**
  * Where the ingest scheduler holds one item (M26.4j).
  *

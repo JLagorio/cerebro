@@ -283,6 +283,92 @@ fn fleet_actor_summaries(
     runtime::fleet::actor_summaries(&conn)
 }
 
+/// The three job ledgers, hydrated per vault (M34.2.2).
+#[derive(serde::Serialize, Default)]
+struct JobLedgers {
+    attempts: std::collections::HashMap<String, String>,
+    #[serde(rename = "skillRuns")]
+    skill_runs: std::collections::HashMap<String, String>,
+    #[serde(rename = "triggerRuns")]
+    trigger_runs: std::collections::HashMap<String, String>,
+}
+
+/// One localStorage-era entry offered for import (M34.2.3).
+#[derive(serde::Deserialize)]
+struct LedgerImportEntry {
+    ledger: String,
+    key: String,
+    #[serde(rename = "runKey")]
+    run_key: String,
+}
+
+fn job_ledger_scope(app: &tauri::AppHandle, vault: &str) -> Result<(rusqlite::Connection, String), String> {
+    let conn = runtime::open_existing(&config_dir(app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(vault))?;
+    Ok((conn, vault_id))
+}
+
+/// Everything the ledgers remember about one vault. REFUSES without a
+/// runtime database: an empty ledger means "nothing ever ran", which would
+/// re-fire every schedule — the runner treats this error as "do not run".
+#[tauri::command(async)]
+fn job_ledger_read(app: tauri::AppHandle, vault: String) -> Result<JobLedgers, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    let mut out = JobLedgers::default();
+    for (ledger, key, run_key) in runtime::job_ledger::read_all(&conn, &vault_id)? {
+        match ledger.as_str() {
+            "attempts" => out.attempts.insert(key, run_key),
+            "skillRuns" => out.skill_runs.insert(key, run_key),
+            _ => out.trigger_runs.insert(key, run_key),
+        };
+    }
+    Ok(out)
+}
+
+/// Record a run key, answering whether the record was FRESH — false means
+/// another window or an earlier session already answered this exact fire,
+/// and the caller must not spawn.
+#[tauri::command(async)]
+fn job_ledger_claim(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<bool, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::claim(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// Overwrite a cooldown stamp. No verdict — a clock is not a claim.
+#[tauri::command(async)]
+fn job_ledger_stamp(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<(), String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::stamp(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// One-time import from the localStorage era. Keys the database already
+/// holds are kept — it has been the arbiter since it existed.
+#[tauri::command(async)]
+fn job_ledger_import(
+    app: tauri::AppHandle,
+    vault: String,
+    entries: Vec<LedgerImportEntry>,
+) -> Result<usize, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    let rows: Vec<(String, String, String)> = entries
+        .into_iter()
+        .map(|e| (e.ledger, e.key, e.run_key))
+        .collect();
+    runtime::job_ledger::import(&conn, &vault_id, &rows)
+}
+
 /// The subscription-wide pause. Persisted, so it survives a restart — a
 /// pause that forgot itself overnight would be the least trustworthy control
 /// in the app.
@@ -1306,6 +1392,10 @@ pub fn run() {
             fleet_run_detail,
             fleet_actor_summary,
             fleet_actor_summaries,
+            job_ledger_read,
+            job_ledger_claim,
+            job_ledger_stamp,
+            job_ledger_import,
             set_global_pause,
             set_agent_paused,
             paused_agents,
