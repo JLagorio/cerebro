@@ -299,11 +299,19 @@ function AgentDetail({ actor }: { actor: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[860px] px-6 py-5">
-        <div className="flex items-center gap-2">
-          <Icon name="bot" size={18} color="var(--n-600)" />
-          <h2 className="m-0 min-w-0 flex-1 truncate text-xl font-semibold text-n-900">
-            {entry.title}
-          </h2>
+        {/* The mock's agent-page header (M42.4): a violet tile — synapse is
+            the AI color and an agent page is an AI surface — then the name
+            with its one-line brief under it, controls to the right. */}
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-lg bg-synapse-50 text-synapse-500">
+            <Icon name="bot" size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="m-0 min-w-0 truncate text-xl font-semibold text-n-900">{entry.title}</h2>
+            {draft.description !== '' && (
+              <p className="m-0 mt-0.5 text-sm text-n-600">{draft.description}</p>
+            )}
+          </div>
           {paused && (
             <span
               data-testid="agent-paused-chip"
@@ -331,9 +339,6 @@ function AgentDetail({ actor }: { actor: string }) {
             Edit
           </Button>
         </div>
-        {draft.description !== '' && (
-          <p className="m-0 mt-1 text-sm text-n-600">{draft.description}</p>
-        )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 @[700px]/canvas:grid-cols-[1fr_320px]">
           <div>

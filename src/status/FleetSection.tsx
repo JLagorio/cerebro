@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Select } from '@/components/ui/Select';
 import { relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
@@ -48,7 +49,8 @@ type State = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; ru
 
 /** A select that reads as a filter chip. `''` is "any", which is the absence
  * of a filter rather than a value — `Filter`'s fields are optional in Rust
- * for the same reason. */
+ * for the same reason. The DS `Select`, not a raw `<select>` (M42.4): raw
+ * controls are what made this surface look like a settings form. */
 function Chip({
   id,
   label,
@@ -65,19 +67,16 @@ function Chip({
   return (
     <label className="flex items-center gap-1 text-2xs text-n-500">
       {label}
-      <select
-        data-testid={`fleet-filter-${id}`}
-        className="rounded border border-n-300 bg-n-0 px-1 py-0.5 text-2xs text-n-800"
+      <Select
+        testId={`fleet-filter-${id}`}
+        size="sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">any</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+        options={[
+          { value: '', label: 'any' },
+          ...options.map((option) => ({ value: option, label: option })),
+        ]}
+      />
     </label>
   );
 }
@@ -200,7 +199,9 @@ export function FleetSection({
             data-testid="fleet-row"
             data-run={run.run_id}
             data-outcome={run.outcome}
-            className="flex w-full items-center gap-2 rounded border border-n-200 px-2.5 py-1.5 text-left hover:bg-n-50"
+            // A table row, not a card (M42.4): hairline below, wash on hover,
+            // and the border box gone with it.
+            className="flex w-full items-center gap-2 rounded-md border-0 border-b border-n-100 px-2.5 py-1.5 text-left last:border-b-0 hover:bg-n-50"
             onClick={() => void openRun(run.run_id)}
           >
             <span className="min-w-0 flex-1 truncate text-xs text-n-800">
@@ -221,8 +222,10 @@ export function FleetSection({
               {relativeWhen(run.started_at, now)}
             </span>
             <span className="text-2xs text-n-500">{run.lane}</span>
+            {/* Sentence case: the DS reserves capitals for eyebrows, and an
+                outcome is a fact, not a headline (M42.4). */}
             <span
-              className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em]"
+              className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
               style={{ border: '1px solid var(--n-200)' }}
               data-testid="fleet-outcome"
             >
