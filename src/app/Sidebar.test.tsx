@@ -106,14 +106,16 @@ describe('Sidebar', () => {
       return labels;
     };
 
-    it('carries exactly the nine destinations the shell has', () => {
+    it('carries exactly the ten destinations the shell has', () => {
       render(<Sidebar onNewView={vi.fn()} />);
       const labels = surfaceLabels();
-      // Studio is M40's — the third locked name, seated with Work because it
-      // is a making surface.
+      // Studio is M40's (the third locked name, seated with Work); Agents is
+      // M41's — the platform's front door, this high because D2 says agent
+      // platform first.
       expect(labels).toEqual([
         'Home',
         'Inbox',
+        'Agents',
         'Work',
         'Studio',
         'Base',
@@ -151,7 +153,7 @@ describe('Sidebar', () => {
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
         render(<Sidebar onNewView={vi.fn()} />);
-        expect(surfaceLabels()).toHaveLength(9);
+        expect(surfaceLabels()).toHaveLength(10);
         cleanup();
       }
     });

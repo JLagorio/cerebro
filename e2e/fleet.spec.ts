@@ -36,6 +36,9 @@ const RUN = {
   proposals_submitted: 2,
   applied: 1,
   rejected: 1,
+  // M41: the wire carries hop lineage now; a fixture without the field
+  // would seed rows the real backend can no longer produce.
+  parent_run_id: null as string | null,
 };
 
 /** A run whose usage was lost. Its token columns are zero and that is NOT a

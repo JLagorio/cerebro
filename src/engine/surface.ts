@@ -274,6 +274,10 @@ export function resolveSurface(
     // not a query over records.
     case 'studio':
       return { title: 'Studio', entries: [], presentation: defaultPresentation() };
+    // M41 — the agents' front door draws its own layout too: a roster and a
+    // run feed, not a query over records.
+    case 'agents':
+      return { title: 'Agents', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

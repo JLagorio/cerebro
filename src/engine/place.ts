@@ -80,6 +80,12 @@ export function placeOf(selection: Selection): Place {
       return selection.project === undefined
         ? { kind: 'studio' }
         : { kind: 'studio', project: selection.project };
+    // An agent is a subject too (M41): a thread about the release scout
+    // anchors to the scout, not to the roster it was clicked in.
+    case 'agents':
+      return selection.actor === undefined
+        ? { kind: 'agents' }
+        : { kind: 'agents', actor: selection.actor };
     default:
       return { kind: selection.kind };
   }
@@ -111,6 +117,8 @@ export function placeKey(place: Place): string {
     case 'studio':
       // A folder slug cannot contain `:`, so the two shapes cannot collide.
       return place.project === undefined ? 'studio' : `studio:${place.project}`;
+    case 'agents':
+      return place.actor === undefined ? 'agents' : `agents:${place.actor}`;
     case 'knowledge': {
       const nav = place.nav;
       if (nav?.tab === 'section') return `knowledge:section:${nav.folder}`;
@@ -168,6 +176,12 @@ export function placeLabel(
       return 'Workspace';
     case 'studio':
       return place.project === undefined ? 'Studio' : `Studio / ${stem(place.project)}`;
+    case 'agents':
+      // The label strips the `process:` prefix — it is provenance plumbing,
+      // and the label is the part a person reads.
+      return place.actor === undefined
+        ? 'Agents'
+        : `Agents / ${place.actor.replace(/^process:/, '')}`;
     case 'settings':
       return 'Settings';
     case 'knowledge': {
@@ -235,6 +249,8 @@ export function isPlace(raw: unknown): raw is Place {
       return typeof p.folder === 'string';
     case 'studio':
       return p.project === undefined || typeof p.project === 'string';
+    case 'agents':
+      return p.actor === undefined || typeof p.actor === 'string';
     case 'list':
       return (
         typeof p.id === 'string' && (p.collection === null || typeof p.collection === 'string')

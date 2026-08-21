@@ -11,6 +11,7 @@ import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog'
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { AgentsPage } from '@/pages/AgentsPage';
 import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
@@ -129,6 +130,10 @@ function CanvasOutlet() {
     // prototype survives Back.
     case 'studio':
       return <StudioPage selection={selection} />;
+    // M41 — the agents' front door. Same contract: the open agent survives
+    // Back.
+    case 'agents':
+      return <AgentsPage selection={selection} />;
     case 'settings':
       return <SettingsPage />;
   }

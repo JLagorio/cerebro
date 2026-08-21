@@ -231,6 +231,11 @@ export type Selection =
   // `project` is the open prototype's folder slug: a SUBJECT the back button
   // returns to. The previewed page within it is a lens and stays local.
   | { kind: 'studio'; project?: string }
+  // M41 — the agents' front door. `actor` is the ACTOR string
+  // (`process:<slug>`, or an internal construct's name), not the record
+  // path: constructs have pages too, and the actor is the one identity a
+  // run, a write, and an @-mention already share.
+  | { kind: 'agents'; actor?: string }
   | { kind: 'settings' };
 
 /**

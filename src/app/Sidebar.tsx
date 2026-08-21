@@ -344,6 +344,17 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               onClick={() => navigate({ kind: 'inbox' })}
             />
           )}
+          {/* M41 — the agents' front door, this high on purpose: D2 says
+              agent platform FIRST, and until this row the platform's
+              subjects had config in Library, runs under Base, and no house.
+              No badge — the waiting-on-you count says itself on the agent's
+              own row, in words (the M8.1 rule, still standing). */}
+          <SurfaceRow
+            icon="bot"
+            label="Agents"
+            active={selection.kind === 'agents'}
+            onClick={() => navigate({ kind: 'agents' })}
+          />
           {/* M30 — mounted repositories. Its own room rather than a section
               of the pages: pages are vault notes, and a surface that renders
               .ts files cannot mean that. The label is the locked name
