@@ -92,8 +92,10 @@ function SurfaceRow({
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       {count !== undefined && count > 0 && (
         <span
+          // DS: "numbers are quiet facts" — a count, not a filled pill
+          // shouting from the chrome (M42.1). Same testid, same text.
           data-testid="nav-badge"
-          className="ml-auto min-w-[15px] rounded-full bg-cortex-500 px-1 text-center text-2xs font-semibold leading-[15px] text-n-0 tabular-nums"
+          className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-500 tabular-nums"
         >
           {count > 99 ? '99+' : count}
         </span>
@@ -258,7 +260,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   // stays where the sidebar was instead of moving to a different chrome.
   if (collapsed) {
     return (
-      <div className="flex w-8 flex-none items-start justify-center border-r border-n-200 bg-n-0 pt-3.5">
+      <div className="flex w-8 flex-none items-start justify-center border-r border-n-200 bg-surface-sunken pt-3.5">
         <button
           type="button"
           aria-label="Show sidebar"
@@ -286,7 +288,9 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
       // M15: SHRINKABLE — `flex-none` here is what made the canvas absorb every
       // pixel of a narrow window. It gives ground down to SIDEBAR_WIDTH_MIN
       // before the canvas gives up anything, which is the whole layout contract.
-      className="relative flex flex-col overflow-hidden border-r border-n-200 bg-n-0"
+      // DS: the sidebar is a SUNKEN surface — the canvas is the white thing
+      // (M42.1). One token, so dark theme remaps it by role.
+      className="relative flex flex-col overflow-hidden border-r border-n-200 bg-surface-sunken"
       style={{ width: narrow ? SIDEBAR_WIDTH_MIN : width, minWidth: SIDEBAR_WIDTH_MIN }}
     >
       {/* Withdrawn while narrow: the sidebar is already pinned at its minimum,
