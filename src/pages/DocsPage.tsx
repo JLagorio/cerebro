@@ -18,7 +18,7 @@ function formatDay(iso: string): string {
 }
 
 /**
- * All-docs rail surface (M2 Task 11): recents to pick up where you left
+ * All-docs surface (M2 Task 11): recents to pick up where you left
  * off. The full folder tree lives in the docs-mode Sidebar (Task 14).
  */
 export function DocsPage() {

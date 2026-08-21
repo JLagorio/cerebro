@@ -347,11 +347,11 @@ test('the diagram page is a pan/zoom canvas with a floating code overlay', async
   await expect(result).toContainText('Diagram');
   await result.click();
 
-  // -- Canvas up, sidebar gone (SIDEBARLESS) -----------------------------
+  // -- Canvas up, nav still standing (M37.3 retired the SIDEBARLESS set) --
   await expect(page.getByTestId('diagram-page')).toBeVisible();
   const viewport = page.getByTestId('canvas-viewport');
   await expect(viewport).toBeVisible();
-  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  await expect(page.getByTestId('sidebar')).toBeVisible();
   const host = page.getByTestId('structural-host');
   await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
 

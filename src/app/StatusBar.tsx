@@ -20,7 +20,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * is a readout you can only look at.
  *
  * M15: every segment is now also the ONLY door to where it goes. Duplicates of
- * destinations the rail already owns (History, Settings) were removed, and so
+ * destinations the nav already owns (History, Settings) were removed, and so
  * was "Commit", which navigated instead of committing.
  */
 
@@ -198,7 +198,7 @@ export function StatusBar() {
               onClick={() => void sync()}
             />
           )}
-          {/* M15: the duplicate "History" segment is gone — the rail owns that
+          {/* M15: the duplicate "History" segment is gone — the nav owns that
               destination, and two chromes offering the same door under
               different chrome means neither reads as authoritative. */}
         </>
@@ -225,7 +225,7 @@ export function StatusBar() {
           made it a LIST — a light with no switch behind it could not say what
           was running, what it was about, or how to get back to it. */}
       <RunList />
-      {/* M15: no "Settings" segment either. The rail owns it, and the vault
+      {/* M15: no "Settings" segment either. The nav owns it, and the vault
           name and "No remote" segments here are already settings shortcuts
           that say what they will configure. */}
     </footer>

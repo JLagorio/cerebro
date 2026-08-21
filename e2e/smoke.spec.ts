@@ -159,8 +159,8 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .poll(() => readMockFile(page, viewPath), { timeout: 5_000 })
     .toContain('type: board');
 
-  // -- Docs: new folder, new page inside it (the docs sidebar's tree) -----
-  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
+  // -- Docs: new folder, new page inside it (the tree under the Docs row) --
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Notes');
   await page.getByRole('button', { name: 'Create' }).click();
@@ -196,7 +196,7 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .poll(() => readMockFile(page, docPath), { timeout: 5_000 })
     .toContain('Written by the smoke test.');
 
-  // -- Navigate away and back through the Docs rail (disk round trip) -----
+  // -- Navigate away and back through the nav (disk round trip) -----------
   await page.getByRole('button', { name: 'Home' }).click();
   await page.getByRole('button', { name: 'Docs' }).click();
   const recent = page.getByTestId('recent-doc').filter({ hasText: 'Smoke Notes' }).first();

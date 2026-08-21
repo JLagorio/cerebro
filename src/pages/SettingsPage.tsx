@@ -72,7 +72,7 @@ export function SettingsPage() {
   const entries = useVaultStore((s) => s.entries);
 
   // The one place the outstanding count is shown at all. It belongs in
-  // Settings and nowhere else: a number on the Rail that ticks up is the
+  // Settings and nowhere else: a number in the nav chrome that ticks up is the
   // "you have 47 unread" pattern the knowledge surfaces are barred from.
   const skillRuns = useUiStore((s) => s.skillRuns);
   const pending = useMemo(

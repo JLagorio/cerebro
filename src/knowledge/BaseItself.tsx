@@ -41,7 +41,7 @@ import { SystemSection } from '@/status/SystemSection';
  * "we could not tell you whether anything is contested" are opposite
  * sentences.
  *
- * **No counts in the rail.** A badge would be the chrome nagging somebody to
+ * **No counts in the nav chrome.** A badge would be the chrome nagging somebody to
  * drain a queue — the same rule that kept a review count off Knowledge (M8.1)
  * and a commit count off History (M9.4).
  */

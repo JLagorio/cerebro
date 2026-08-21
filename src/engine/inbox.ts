@@ -102,7 +102,7 @@ export function inboxCounts(entries: Entry[], now: Date = new Date()): Record<In
   };
 }
 
-/** Total Inbox size — the Rail badge. */
+/** Total Inbox size — the nav badge. */
 export function inboxCount(entries: Entry[]): number {
   return entries.filter(inInbox).length;
 }

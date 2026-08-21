@@ -174,7 +174,7 @@ interface UiState {
    */
   nodeMenu: { x: number; y: number; id: string } | null;
   setNodeMenu(v: { x: number; y: number; id: string } | null): void;
-  /** Inbox workflow (M4). Off = every note reads as organized and the Rail
+  /** Inbox workflow (M4). Off = every note reads as organized and the nav
    * hides the Inbox — for people who file at capture time. Persisted. */
   inboxEnabled: boolean;
   setInboxEnabled(v: boolean): void;

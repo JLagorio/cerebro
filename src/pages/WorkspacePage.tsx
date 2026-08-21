@@ -43,9 +43,9 @@ function ToggleRow({
  * reading surface split into as many panes as you ask for. Nothing on this
  * surface writes to a mounted folder.
  *
- * The vault sidebar is suppressed here (see `SIDEBARLESS` in Sidebar.tsx) —
- * this surface brings its own tree, and Collections + Types say nothing about
- * a mounted repository.
+ * The nav column stays (M37.3 retired the SIDEBARLESS set) and this surface
+ * brings its own tree beside it; collapsing the nav is the way to give a
+ * wide repo the width back.
  */
 export function WorkspacePage({ selection }: { selection: Selection }) {
   const roots = useRootsStore((s) => s.roots);

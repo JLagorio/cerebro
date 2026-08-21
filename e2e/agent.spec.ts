@@ -12,7 +12,7 @@ import { boot, seedBeforeBoot } from './boot';
 test('agent: the panel streams a reply and shows what it did', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
 
@@ -40,7 +40,7 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
 test('agent: walking away keeps the thread, and moves the context with you', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('What is at risk right now?');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -50,7 +50,7 @@ test('agent: walking away keeps the thread, and moves the context with you', asy
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
 
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
@@ -80,7 +80,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // SHELL_TWO_PANEL_MIN); below that the record wins and the assistant parks.
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
 
   // Where you are is context, and it says so rather than being folded
@@ -136,7 +136,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
 test('agent: a turn can be addressed by name, and the thread stays put', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   const composer = panel.getByLabel('Message the assistant');
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
@@ -194,10 +194,10 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   // M8.1: the three-mode dropdown is gone from the panel. It asked the user to
   // declare a policy before knowing what they were going to ask for; what the
   // agent may change now follows from which folder it is writing to.
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
   const shell = page.getByRole('switch', { name: 'Shell access' });
   // Off by default — shell access is chosen, never inherited.
   await expect(shell).not.toBeChecked();
@@ -209,7 +209,7 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   await expect(shell).toBeChecked();
 
   await page.reload();
-  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Shell access' })).toBeChecked();
 });
 
@@ -224,7 +224,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   // since the dev server started (`?t=<hmr>`). Two module instances, two
   // listener sets, and the emit reached nobody — so the test passed on a cold
   // server and failed on a warm one.
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('Help me clear the Inbox');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -262,7 +262,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
 test('agent: organizing AI-written work records who signed off', async ({ page }) => {
   await boot(page);
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
@@ -295,13 +295,14 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
   await expect(types.filter({ hasText: 'Skill' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Agent' })).toHaveCount(0);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await expect(page.getByTestId('library-page')).toBeVisible();
 
   // Collections and Types describe the vault; the library holds the machinery
-  // that acts on it. Beside each other, the tree implied a skill lives in a
-  // Collection and left a type row highlighted while you edited a trigger.
-  await expect(types.first()).toHaveCount(0);
+  // that acts on it. M37.3's one nav column keeps both on screen — what still
+  // matters is that no type row claims the Library page: nothing is active.
+  await expect(types.first()).toBeVisible();
+  await expect(page.locator('[data-testid="sidebar-type"][aria-current="page"]')).toHaveCount(0);
 
   const cards = page.getByTestId('library-card');
   await expect(cards.filter({ hasText: 'Weekly review' })).toBeVisible();
@@ -319,7 +320,7 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
 
 test('library: an agent is built from pickers, not from remembered strings', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -409,7 +410,7 @@ test('library: an agent record carries its own run history (M33.6)', async ({ pa
     {},
   );
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -430,7 +431,7 @@ test('library: an agent with no runs says so, rather than showing a table of zer
 }) => {
   await seedBeforeBoot(page, '__cerebroSeedFleet', [], {});
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -444,7 +445,7 @@ test('library: a schedule is built, never typed as a grammar', async ({ page }) 
   // An unparseable `schedule:` is not an error — it is silently not a
   // schedule, so the agent never runs and nothing anywhere would say why.
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -471,7 +472,7 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
   // M17.16 built the rewrite surface and bound it to Cmd-K, and nothing on
   // screen said so — selecting text looked exactly as it had before the
   // assistant existed.
-  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
   await page.getByRole('button', { name: 'New page', exact: true }).first().click();
   await page.getByPlaceholder('Page name').fill('Selection test');
   await page.getByRole('button', { name: 'Create' }).click();

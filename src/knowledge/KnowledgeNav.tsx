@@ -98,7 +98,10 @@ export function KnowledgeNav({ nav }: { nav?: Nav }) {
   const is = (candidate: Nav) => sameTab(here, candidate);
 
   return (
-    <div className="flex-1 overflow-y-auto px-2 pb-4">
+    // M37.3: nested under the Base row of the one nav column, which owns the
+    // scrolling — this container stopped being the scroll owner it was as a
+    // full sidebar mode.
+    <div className="pb-1">
       {subjects.length > 0 && (
         <>
           <div className={SECTION_LABEL}>Threads</div>
@@ -132,7 +135,7 @@ export function KnowledgeNav({ nav }: { nav?: Nav }) {
         nav={{ tab: 'all' }}
         active={is({ tab: 'all' })}
       />
-      {/* The count lives on the row, not on the Rail: a destination may say
+      {/* The count lives on the row, not in the chrome: a destination may say
           how big it is, but nothing gets to count up at you from the chrome. */}
       <NavRow
         icon="shield-check"
@@ -164,8 +167,8 @@ export function KnowledgeNav({ nav }: { nav?: Nav }) {
           cannot say what it is unsure of is not a knowledge base, it is a
           folder.
 
-          No counts on any of these rows, and none on the Knowledge rail
-          button either. A badge here would be the chrome telling somebody
+          No counts on any of these rows, and none on the Base
+          destination row either. A badge here would be the chrome telling somebody
           their understanding is broken before they have asked it anything —
           the rule that kept a review count off Knowledge (M8.1) and a commit
           count off History (M9.4), now carried by the row that inherited the

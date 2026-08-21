@@ -153,7 +153,7 @@ export function QuickOpen() {
         sel: { kind: 'pulse' },
       },
       // M18: the library had no destination here at all — reachable only by
-      // finding the rail button, which is the exact problem the library was
+      // finding its nav row, which is the exact problem the library was
       // built to fix one level down. Its shelves are aliases rather than three
       // rows, because "skills" and "agents" are what people type.
       {

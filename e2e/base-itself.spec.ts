@@ -311,10 +311,10 @@ test('base itself: the Knowledge nav carries these six rows, not the record side
 }) => {
   await open(page, 'What changed');
 
-  // Home's sidebar lists types and views — a description of the RECORD
-  // corpus, which has nothing to say about runs, budgets or queued
-  // proposals. Knowledge answers its own question and navigates itself.
-  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  // The record corpus's Types have nothing to say about runs, budgets or
+  // queued proposals — Knowledge answers its own question through its OWN
+  // rows, nested under Base in the one nav column (M37.3), while Types stand
+  // apart as their own section.
   const nav = page.getByTestId('knowledge-nav-row');
   // The six the merge added. Asserted by NAME rather than by count: the group
   // above them grows a row whenever the bundle grows a folder or a subject,

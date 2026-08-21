@@ -83,12 +83,13 @@ export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[
 /**
  * Open one of the Knowledge tab's sections.
  *
- * M33a.2 folded the Status hub into Knowledge, so the entry is a nav row
- * rather than a rail button — but the sections still carry `data-section`,
- * which is what every assertion downstream addresses.
+ * M33a.2 folded the Status hub into Knowledge, and M37.3 flattened the rail
+ * into the one nav column — the entry is the Base destination row, then a
+ * knowledge nav row. The sections still carry `data-section`, which is what
+ * every assertion downstream addresses.
  */
 export async function openKnowledgeTab(page: Page, row: string) {
-  await page.getByTestId('rail').getByRole('button', { name: 'Base' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Base' }).click();
   await page.getByTestId('knowledge-nav-row').filter({ hasText: row }).click();
 }
 

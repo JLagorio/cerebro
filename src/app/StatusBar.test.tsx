@@ -58,9 +58,9 @@ describe('StatusBar', () => {
     expect(screen.queryByTestId('status-commit')).toBeNull();
   });
 
-  // M15: the rail already owns both destinations; two chromes offering the
+  // M15: the nav already owns both destinations; two chromes offering the
   // same door under different labels means neither reads as authoritative.
-  it('drops the History and Settings segments the rail already owns', async () => {
+  it('drops the History and Settings segments the nav already owns', async () => {
     render(<StatusBar />);
     await screen.findByText('1 Changes');
     expect(screen.queryByTestId('status-history')).toBeNull();

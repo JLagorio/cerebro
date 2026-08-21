@@ -35,9 +35,9 @@ describe('PulsePage', () => {
 
   const card = async () => (await screen.findAllByTestId('pulse-commit'))[0];
 
-  // M15: the rail button says History and the status bar said History; a page
+  // M15: the nav row says History and the status bar said History; a page
   // titled "Pulse" was a third name for the same destination.
-  it('is titled History, in line with the rail that opens it', async () => {
+  it('is titled History, in line with the nav row that opens it', async () => {
     render(<PulsePage />);
     expect(await screen.findByRole('heading', { name: 'History', level: 1 })).toBeTruthy();
   });

@@ -6,7 +6,7 @@ const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
 test('knowledge: browse the bundle, read provenance, and verify a concept', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: /^Base/ }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
   // M33a.3 — the tab opens on the heaviest THREAD now, not the flat list, so
   // a spec about the whole bundle has to ask for the whole bundle.
@@ -59,7 +59,7 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Base/ }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
   // The flat list, because the two concepts this walks between sit in
   // different threads (M33a.3 moved the default off `all`).
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
@@ -91,15 +91,15 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
 
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Base/ }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
 
-  // The sidebar stops being Home's. Collections and Types describe a corpus
-  // with a different author; standing on Knowledge they have no business here.
-  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
-  await expect(page.getByTestId('collection-node-collection')).toHaveCount(0);
-  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
+  // M37.3: the one nav column keeps the item world inline — what makes the
+  // bundle's axes ITS OWN is that they nest under the Base row rather than
+  // borrowing Collections or Types, which stay put as their own sections.
+  await expect(page.getByTestId('sidebar-type').first()).toBeVisible();
 
   const nav = page.getByTestId('knowledge-nav-row');
+  await expect(nav.first()).toBeVisible();
 
   // -- Threads lead, and the tab opens on the heaviest one (M33a.3) -------
   // Not a fixed name: the demo bundle anchors three concepts to the offline
@@ -171,14 +171,14 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   await expect(page.getByTestId('concept-body')).toContainText('Go-live night');
 });
 
-test('knowledge: the Rail carries no review badge', async ({ page }) => {
+test('knowledge: the Base row carries no review badge', async ({ page }) => {
   await boot(page);
 
   // A count in the chrome is the app nagging you to drain a queue. The same
   // number lives on the "Needs review" row, where it describes a destination.
-  const knowledge = page.getByTestId('rail').getByRole('button', { name: /^Base/ });
+  const knowledge = page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ });
   await expect(knowledge).toHaveAttribute('aria-label', 'Base');
-  await expect(knowledge.getByTestId('rail-badge')).toHaveCount(0);
+  await expect(knowledge.getByTestId('nav-badge')).toHaveCount(0);
 
   await knowledge.click();
   await expect(
@@ -195,9 +195,9 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   await expect(types.filter({ hasText: 'Metric' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Playbook' })).toHaveCount(0);
 
-  // Not in Docs: the bundle is not yours to edit. Rail-scoped because the
+  // Not in Docs: the bundle is not yours to edit. Nav-row-scoped because the
   // demo vault also has folders whose names collide with the nav items.
-  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
   await expect(page.getByTestId('recent-doc').first()).toBeVisible();
   const docPaths = await page
     .getByTestId('recent-doc')
@@ -206,7 +206,7 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
 
   // Not in the Inbox either, despite carrying no `_organized` flag.
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
   // Asserted on PATHS, not row text: a capture in the demo vault is itself
@@ -314,7 +314,7 @@ test('knowledge: the three axes render per facet, and review is not one of them'
   await boot(page);
   await page.evaluate((rows) => window.__cerebroSeedChips(rows), AXES);
 
-  await page.getByTestId('rail').getByRole('button', { name: /^Base/ }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
   const panel = page.getByTestId('knowledge-panel');
@@ -351,7 +351,7 @@ test('knowledge: a vault with no ledger shows no axes rather than empty ones', a
   // nobody folded would be inventing an answer, and an empty chip row would
   // read as "we looked and found nothing".
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Base/ }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
   const panel = page.getByTestId('knowledge-panel');
