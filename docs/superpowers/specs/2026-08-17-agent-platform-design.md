@@ -222,26 +222,28 @@ sides; nothing currently relies on `[]` meaning "unrestricted."
   an edit. The corpus stays byte-identical and the 9 `Release scout` assertions in
   `e2e/agent.spec.ts` are untouched.
 
-### M34.1.4 — instructions ride the system prompt
+### M34.1.4 — unattended instructions ride the system prompt
 
-- `src/lib/prompts.ts:215` `agentRunPrompt` stops folding the record's body into the
-  user message.
-- `useJobRunner` sets `systemPrompt: buildSystemPrompt(…) + record body`, delivered
-  via the existing `--append-system-prompt` path (`mod.rs:626`). No wire change.
-- Rationale: instructions are *standing*, not *this turn's request*. Folding them
-  into the user message means a multi-turn agent re-reads its own charter as if the
-  user had just typed it.
+- `agentRunPrompt` stops folding the record's body into the user message for
+  **useJobRunner runs only**: `systemPrompt: buildSystemPrompt(…) + record body`,
+  delivered via the existing `--append-system-prompt` path (`mod.rs:626`). No wire
+  change. Rationale: instructions are *standing*, not *this turn's request*, and an
+  unattended run is a fresh session every time.
+- **Attended addressed turns keep M33b.6's user-message preamble, deliberately.**
+  One conversation can address different agents per turn, and `--append-system-prompt`
+  is per-SESSION — a resumed session cannot swap its system prompt mid-conversation.
+  `addressedAgentPrompt` (`prompts.ts:278`) is the right shape there; do not "fix" it.
 
-### M34.1.5 — chat with a named agent
+### M34.1.5 — chat with a named agent — **DELIVERED by M33b.6** (`d841901`)
 
-- `AiPanel` gains an agent picker sourced from `listAgents(entries)`
-  (`src/engine/agents.ts:161`). Default is the unnamed assistant — existing behavior
-  is the default, not a migration.
-- `useAgentChat.ts:321-336` passes `actor`, `scope`, `connectorNames` and the agent's
-  `capabilities`-built `systemPrompt` through the existing `RunOptions` fields.
-- Consequence, free: attended runs gain identity → `runs.actor` populates →
-  `AgentDossier` and `FleetSection` light up with **no new code**, because both
-  already join on the actor string.
+Built by the concurrent session while this spec was in review, as mention-addressing
+rather than a picker: a turn addressed to an agent passes `actor`, `scope`,
+`connectorNames`, an intersected `allowedTools` (`narrowTools`, never union), and a
+shell ceiling. `runs.actor` populates; the fleet reads it. M33b.5 added
+stop-without-delete; M33b.1–.4 rebuilt the fleet surface and made background
+concurrency a setting. Nothing left to build here — this phase is now a
+verification-only checkpoint: confirm the M34.1.1 grant change composes with
+addressed turns (the intersected allowedTools must reach the grant, not just argv).
 
 ### What slice 1 delivers
 
@@ -323,19 +325,11 @@ test edits the phase is *about*, not collateral.
 adopts another worktree's app and produces confident, wrong failures. **Never
 `--no-verify`.**
 
-### Blocking prerequisite
+### Blocking prerequisite — RESOLVED
 
-The tree is **red** and being edited by a concurrent session:
-
-- `src/library/LibraryPage.test.tsx:216` asserts the read toolset's exact allowed-tools
-  list; `knowledge_about` was added at `src/engine/tools.ts:55` without updating it
-- `src/app/Sidebar.tsx:263` has a JSX parse error (bare comment as a ternary branch) —
-  `tsc` reports TS1005/TS1382/TS1381
-- HEAD advanced `0febd5c → 8326eaf` mid-recon; 16 files modified, 3 untracked
-
-Because one red test suppresses the whole coverage report, "are we still above the
-floor?" is currently unanswerable. **M34.1 starts from green, on a branch off a green
-commit.**
+The red tree this section originally described was the concurrent session's in-flight
+M33a/M33b work; it landed and the branch is green at `1e97866` (which also raised the
+coverage ratchet to what M33a/M33b earned). M34.1 builds on top of it.
 
 ---
 
@@ -343,16 +337,37 @@ commit.**
 
 Each is a separate spec. Ordering reflects dependency, not appetite.
 
+**Folded in from the design work (`docs/examples/cerebro-ds`, 2026-08-20).** The
+prototype settled six decisions this roadmap now assumes:
+
+1. A chat turn that writes IS a run — already true; every turn books a `runs` row.
+2. A handoff condition is a **sentence** the agent interprets (the `ask:` precedent),
+   never a second expression grammar.
+3. Handoffs run in **series only**.
+4. The hop budget is **fixed at two, in code** — enforcement, not configuration.
+5. A runaway chain is stopped by the **root run's ceiling**; hops bill to the root
+   (`parent_run_id` is the migration that makes both true).
+6. "Ask me first" **reuses the queued-proposal review queue** — one queue, two doors;
+   a second queue is a defect.
+
+It also surfaced three obligations the milestones below absorb: **read scoping**
+(the prototype draws "Can read / No access"; only writes are enforced today —
+`get_note`/`search_notes` are unscoped), **run-state honesty** (wrote-nothing /
+found-nothing / could-not-tell are three sentences, and a late run says how late),
+and **new agents arrive paused with triggers off**, so nothing fires by surprise.
+
 | Milestone | Sub-project | Gist |
 | --------- | ----------- | ---- |
-| **M34.2** | Durable schedules | Move `jobQueue` / `parseSchedule` / `diffEntries` and three localStorage ledgers into Rust. Catch-up on launch, marked LATE (D3). Needs a `lane_registry` migration and reconciliation with `ambient.rs`'s single lease. |
-| **M34.3** | Sources are the knowledge | Connector setup UI (today: hand-edit `connectors.json`). Promote `cache_source` records out of `knowledge/`. Source Monitor surfaces staleness on the source record. This is where `is_knowledge_path`'s 8 leak sites get addressed. |
-| **M34.4** | Agent invokes agent | The first genuinely new capability. Needs a run-starting MCP tool, a depth/cycle bound, and a cost-attribution decision (child run charged to whom?). |
+| **M34.2** | Durable schedules + honest runs | Move `jobQueue` / `parseSchedule` / `diffEntries` and three localStorage ledgers into Rust. Catch-up on launch, marked LATE ("late is not failed"). The three run states land here: wrote nothing / found nothing / could not tell, the last never rendered as empty. Needs a `lane_registry` migration and reconciliation with `ambient.rs`'s single lease. |
+| **M34.3** | Handoffs — agent invokes agent | Moved up from last: it is the centerpiece of the settled design. A run-starting MCP tool; series only; two hops fixed in code, a cycle refuses and names the agent it refused; `parent_run_id` migration so hops bill to the root and the root's ceiling gates the chain; a paused agent cannot be called and the chain stops with it — enforced at the call, not the UI. |
+| **M34.4** | Read scoping | `get_note` / `search_notes` / `knowledge_about` / `list_inbox` honor the grant. Until this ships, every surface that draws "Can read" says reads are unscoped — the prototype already carries that footnote; the code catches up to the drawing, not the other way around. |
+| **M34.5** | Sources are the knowledge | Connector setup UI (today: hand-edit `connectors.json`). Promote `cache_source` records out of `knowledge/`. Source Monitor surfaces staleness on the source record. Connection triggers are *noticed, not pushed* — checked while open, picked up late on launch. This is where `is_knowledge_path`'s 8 leak sites get addressed. |
 | **M35** | Knowledge as agent #1 | The Knowledge tab relocates to the knowledge agent's detail page. `okf.ts` becomes its private read model. The Rust constructs (`agent:m26-*`) either become Agent records or are declared permanently internal. |
-| **M36** | Governance per agent | The ledger capture gate moves off `is_knowledge_path`. Risk thresholds become agent settings. |
-| **M37** | Shell flattening | Rail → one Notion sidebar. Blast radius: `Rail.test.tsx`, 7/13 e2e specs, the `navigate` MCP tool's surface vocabulary. |
+| **M36** | Governance per agent | The ledger capture gate moves off `is_knowledge_path`. Risk thresholds become agent settings, rendered as consequence, not membership: *applies on its own / queues for you / locked — people only*, plus the escalator (revising a human-verified page queues, whatever the op). New agents default paused, triggers off. |
+| **M37** | Shell flattening | Rail → one sidebar. Naming locked now, spent later: **Base** (was Knowledge), **Work** (was Workspace), Studio. Blast radius: `Rail.test.tsx`, 7/13 e2e specs, the `navigate` MCP tool's surface vocabulary, and 89 occurrences of the type-vocabulary strings across 42 files. |
 | **M38** | Everything is a page | Delete the Docs surface. Nine enforcement points identified in recon, incl. the *deliberate absence* of "Open in full page" (`DetailHeaderActions.tsx:26-31`). |
 | **M39** | Types → databases | 89 occurrences of `type: 'Type'` across 42 files; `libraryKind`'s type-NAME routing (`library.ts:99-104`) must survive or Agents/Skills fall back to generic property editors. |
+| **M40** | Studio | Sub-project seven, from the design work: prototype-building surface (chat rail + live preview, builds into a vault folder). Sequenced last — it consumes the agent platform; it does not define it. |
 
 **Parked, explicitly:** R1–R14 deferral gates stay fired and dated — a firing licenses
 a plan, never code. The knowledge-shaped `runtime.db` tables (`coverage_cache`,
