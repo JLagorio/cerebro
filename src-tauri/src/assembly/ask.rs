@@ -641,6 +641,8 @@ mod tests {
             }),
             // The actor the live path stamps for this construct (M33.1).
             Some(ACTOR),
+            // A root: a person asked (M34.3).
+            None,
             now(),
             now(),
         )

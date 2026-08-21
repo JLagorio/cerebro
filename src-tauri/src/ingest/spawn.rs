@@ -109,6 +109,8 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                     // `dispatch::claim` already attributed the row this
                     // lease belongs to with the same constant.
                     actor: Some(ACTOR.to_string()),
+                    // Root by construction (M34.3): no tool call started this run.
+                    parent_run_id: None,
                 }),
                 Some(tx),
             )?;

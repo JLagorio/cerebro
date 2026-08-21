@@ -693,6 +693,7 @@ pub fn meter_attended(
     usage: Option<Usage>,
     facts: Option<&RunFacts>,
     actor: Option<&str>,
+    parent_run_id: Option<&str>,
     started_at: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -701,9 +702,9 @@ pub fn meter_attended(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
          outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
-         actor) \
+         actor, parent_run_id) \
          VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, \
-                 0, ?12)",
+                 0, ?12, ?13)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -717,6 +718,7 @@ pub fn meter_attended(
             counted.cache_read as i64,
             counted.cache_write as i64,
             actor,
+            parent_run_id,
         ],
     )
     .map_err(|e| format!("runs (attended): {e}"))?;
@@ -1967,6 +1969,7 @@ mod tests {
             }),
             None,
             None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -2030,6 +2033,7 @@ mod tests {
             None,
             None,
             Some("process:weekly-digest"),
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -2040,6 +2044,7 @@ mod tests {
             Some(&vault),
             Some("store"),
             RunOutcome::Succeeded,
+            None,
             None,
             None,
             None,
@@ -2071,6 +2076,57 @@ mod tests {
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_records_the_run_that_started_it_and_a_root_stays_null() {
+        // M34.3 — the chain is walkable from the table alone. NULL is a
+        // root, and every run before this shipped was one; nothing backfills
+        // and nothing guesses, exactly like `actor`.
+        let (_dir, conn, vault) = fixture("dispatch-parent");
+        let now = at("2026-08-09T10:00:00Z");
+        meter_attended(
+            &conn,
+            "root-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:librarian"),
+            None,
+            now,
+            at("2026-08-09T10:01:00Z"),
+        )
+        .unwrap();
+        meter_attended(
+            &conn,
+            "child-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:contradiction-hunter"),
+            Some("root-1"),
+            now,
+            at("2026-08-09T10:02:00Z"),
+        )
+        .unwrap();
+        let parent_of = |run_id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT parent_run_id FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(parent_of("root-1"), None, "a root run has no parent");
+        assert_eq!(
+            parent_of("child-1").as_deref(),
+            Some("root-1"),
+            "a handed-to run names the run whose tool call started it"
+        );
     }
 
     #[test]

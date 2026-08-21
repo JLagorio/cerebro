@@ -100,6 +100,8 @@ impl Spawn for Live<'_> {
                 // persona: the fleet shows what assembly has run, never a
                 // standing agent with a face (D6).
                 actor: Some(super::ask::ACTOR.to_string()),
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             }),
             Some(tx),
         )?;

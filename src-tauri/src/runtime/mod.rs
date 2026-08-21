@@ -85,8 +85,10 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// trigger-governance tables at 11. M31.5 adds the run-fact columns — plus
 /// the two M31.6 will write, whole per D5 — at 12. M33.1 adds `runs.actor`,
 /// nullable and never backfilled, at 13. M33b.1 rebuilds `ambient_dispatch`
-/// keyed by `run_id` at 14, retiring the singleton column.
-pub const USER_VERSION: i64 = 14;
+/// keyed by `run_id` at 14, retiring the singleton column. M34.3 adds
+/// `runs.parent_run_id`, nullable — NULL is a root, and every run before
+/// this was one — at 15.
+pub const USER_VERSION: i64 = 15;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -244,6 +246,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V14,
         validate: validate_v14,
     },
+    Migration {
+        to: 15,
+        sql: schema::SCHEMA_V15,
+        validate: validate_v15,
+    },
 ];
 
 /// What `user_version = 14` promises (M33b.1) — and, unusually, one thing it
@@ -255,6 +262,24 @@ const MIGRATIONS: &[Migration] = &[
 /// means the rename/copy/drop dance stopped halfway and every claim after it
 /// would be gated against a table nothing writes. The old table's absence is
 /// asserted the same way v9 asserts its predecessor's.
+fn validate_v15(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT parent_run_id FROM runs")
+        .map_err(|e| format!("validating runs.parent_run_id: {e}"))?;
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'runs_by_parent'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map_err(|e| format!("validating runs_by_parent: {e}"))
+    .and_then(|found| {
+        if found == 1 {
+            Ok(())
+        } else {
+            Err("runs_by_parent index missing after v15".to_string())
+        }
+    })
+}
+
 fn validate_v14(conn: &Connection) -> Result<(), String> {
     conn.query_row("SELECT count(*) FROM ambient_dispatch", [], |row| {
         row.get::<_, i64>(0)

@@ -1179,3 +1179,15 @@ pub const SCHEMA_V14: &str = "
     DROP TABLE ambient_dispatch_v13;
     CREATE INDEX ambient_dispatch_live ON ambient_dispatch (lease_expires_at);
 ";
+
+/// M34.3 — a run can be started by another run, and the chain must be
+/// walkable from the table alone. `parent_run_id` names the run whose tool
+/// call started this one; NULL is every run a person or a schedule started —
+/// the roots. A chain's total cost is the sum over the tree, derived at read
+/// time, never stored: a stored total would go stale the moment a late child
+/// finalized. The index is bare because the one query is "children of this
+/// run", and it already arrives holding the parent's id.
+pub const SCHEMA_V15: &str = "
+    ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
+    CREATE INDEX runs_by_parent ON runs (parent_run_id);
+";

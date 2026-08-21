@@ -86,6 +86,10 @@ pub struct Meter {
     /// being guessed at. Only [`Mode::Attended`] writes it here; the other
     /// two modes work on a row `dispatch::claim` already attributed.
     pub actor: Option<String>,
+    /// The run whose tool call started this one (M34.3). `None` is a root —
+    /// every run a person or a schedule started. Attended-mode only, like
+    /// `actor`, and for the same reason.
+    pub parent_run_id: Option<String>,
 }
 
 /// How a run ended, sent to whoever is waiting on it.
@@ -215,6 +219,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             counted,
             Some(&tally.facts),
             meter.actor.as_deref(),
+            meter.parent_run_id.as_deref(),
             meter.started_at,
             now,
         ),
@@ -401,6 +406,8 @@ mod tests {
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
                 actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -471,6 +478,8 @@ mod tests {
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
             actor: None,
+            // Root by construction (M34.3): no tool call started this run.
+            parent_run_id: None,
         };
         // No committed fixture carries a non-empty array, and none is needed:
         // the array's SHAPE is what the parser reads, so an inline event with
@@ -558,6 +567,8 @@ mod tests {
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
                 actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -637,6 +648,8 @@ mod tests {
                 started_at: Utc::now(),
                 elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
                 actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -682,6 +695,8 @@ mod tests {
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
                 actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &Tally::default(),
             false,
@@ -700,6 +715,8 @@ mod tests {
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
             actor: None,
+            // Root by construction (M34.3): no tool call started this run.
+            parent_run_id: None,
         };
         let live = Arc::new(AtomicBool::new(true));
         let aborted = arm_watchdog(&meter, &super::super::AgentState::default(), 0, live);

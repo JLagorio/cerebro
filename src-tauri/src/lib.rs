@@ -1109,6 +1109,8 @@ fn run_agent(
         // writes agree about who did the work. `None` is bare chat, and it
         // stays NULL — the fleet reads that as unattributed.
         actor: request.actor.clone(),
+        // Root by construction (M34.3): no tool call started this run.
+        parent_run_id: None,
     };
     agent::stream(
         app.clone(),

@@ -79,6 +79,8 @@ impl Runner for Live<'_> {
                 // meter returns before touching `runs`, and `dispatch::claim`
                 // already attributed the row with the same constant.
                 actor: Some(super::pass::ACTOR.to_string()),
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             }),
             Some(tx),
         )?;
