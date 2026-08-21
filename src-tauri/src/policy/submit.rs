@@ -477,10 +477,13 @@ mod tests {
         // nothing, or to answer the question it was given, whether or not it
         // could have proposed anything (an attended synthesis proposes
         // nothing at all). M33a.5 added `knowledge_about`, which is a plain
-        // read and belongs to no surface a switch governs.
+        // read and belongs to no surface a switch governs. M34.3.2 added
+        // `hand_to`, which starts another agent's run under that agent's
+        // own grant — a structural capability like the two before it, gated
+        // by the hop rules in the grant rather than by this switch.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 15, "{base:?}");
+        assert_eq!(base.len(), 16, "{base:?}");
         assert!(base.contains("report_window_outcome"));
         assert!(base.contains(crate::assembly::prompt::SUBMIT_TOOL));
         assert!(base.is_disjoint(&expected(&table)));

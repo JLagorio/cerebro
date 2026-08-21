@@ -1034,6 +1034,72 @@ fn grant_tools(request: &agent::AgentRequest) -> Option<Vec<String>> {
     request.allowed_tools.clone()
 }
 
+/// Spawn a run another run asked for (M34.3.2) — mcp.rs's `hand_to` is the
+/// one caller. The callee works under its OWN axes, taken from its record by
+/// the tool and enforced by the token minted here; calling never lends the
+/// caller's permissions. The row it books names the caller, so the chain is
+/// walkable, and its chain in the grant carries the ancestry the hop rules
+/// are enforced against. Booked `Attended` like every renderer-started agent
+/// run — the §8.3 accounting question is answered for all of them at once,
+/// not specially here.
+pub(crate) fn start_handoff_run(
+    app: &tauri::AppHandle,
+    vault: &Path,
+    mut request: agent::AgentRequest,
+    caller: &mcp::RunGrant,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let actor = request
+        .actor
+        .clone()
+        .ok_or("a handed-to run always has an actor — the callee's record names it")?;
+    let scope = runtime::open_vault(vault);
+    // The same pause gate run_agent enforces, for the same reason: a paused
+    // agent cannot be called, and the chain that would have reached it stops
+    // with it — before any token exists for a child to present.
+    if let Some(scope) = scope.as_ref() {
+        runtime::sink::with_sink(|conn| {
+            runtime::settings::refuse_if_agent_paused(conn, &scope.vault_id, Some(&actor))
+        })
+        .unwrap_or(Ok(()))?;
+    }
+    let mcp_state = app.state::<mcp::McpState>();
+    let run_id = ledger::new_run_id();
+    let durable = run_id.clone();
+    request.mcp_token = Some(mcp_state.handoff_token(
+        &actor,
+        request.scope.clone(),
+        request.read_scope.clone(),
+        request.allowed_tools.clone(),
+        run_id.clone(),
+        &caller.chain,
+    )?);
+    let dir = config_dir(app)?;
+    let meter = agent::meter::Meter {
+        data_dir: dir.clone(),
+        run_id,
+        mode: agent::meter::Mode::Attended,
+        vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
+        store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
+        started_at: chrono::Utc::now(),
+        elapsed_limit_seconds: None,
+        actor: Some(actor),
+        // The whole point of M34.3.1: this run knows who started it.
+        parent_run_id: Some(caller.run_id.clone()),
+    };
+    let agent_state = app.state::<agent::AgentState>();
+    agent::stream(
+        app.clone(),
+        agent_state.inner(),
+        vault,
+        request,
+        &dir,
+        Some(meter),
+        None,
+    )
+    .map(|_run| durable)
+}
+
 /// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
 fn run_agent(

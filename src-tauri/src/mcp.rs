@@ -97,6 +97,13 @@ pub struct RunGrant {
     /// in the same place, for the same reason: argv is advice, the grant is
     /// the boundary.
     pub tools: Option<Vec<String>>,
+    /// The actor chain from the root run to this one, self included (M34.3).
+    /// A root's chain is one element: its own actor. The chain is how the
+    /// two structural handoff rules are enforced — two hops then it stops,
+    /// and a cycle refuses before the call is made — and it rides the token
+    /// for the reason everything else here does: a callee cannot argue its
+    /// own ancestry away.
+    pub chain: Vec<String>,
 }
 
 /// A run id derived from a bearer token by hash.
@@ -122,6 +129,7 @@ impl RunGrant {
             scope: None,
             read_scope: None,
             tools: None,
+            chain: vec![actor.to_string()],
         }
     }
 
@@ -427,6 +435,8 @@ pub(crate) fn test_submit_answer(
             scope: Some(vec![]),
             // The narrowing the real mint site grants a synthesis run.
             tools: Some(crate::assembly::live::declared_tools()),
+            // A root: the synthesis construct is never handed to.
+            chain: vec![crate::assembly::ask::ACTOR.to_string()],
         },
     )
     .map(|_| ())
@@ -578,6 +588,38 @@ impl McpState {
         tools: Option<Vec<String>>,
         run_id: String,
     ) -> Result<String, String> {
+        // A root by definition: every caller of this mint is a person, a
+        // schedule, or an internal construct. A handed-to run is minted by
+        // `handoff_token`, which extends the caller's chain instead.
+        self.chained_run_token(actor, scope, read_scope, tools, run_id, None)
+    }
+
+    /// The handoff mint (M34.3): the same token, with the CALLER's chain
+    /// extended by the callee. Separate from `run_token` so the seven root
+    /// call sites cannot accidentally pass a chain they do not have.
+    pub fn handoff_token(
+        &self,
+        actor: &str,
+        scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
+        caller_chain: &[String],
+    ) -> Result<String, String> {
+        let mut chain = caller_chain.to_vec();
+        chain.push(normalize_actor(Some(actor)).to_string());
+        self.chained_run_token(Some(actor), scope, read_scope, tools, run_id, Some(chain))
+    }
+
+    fn chained_run_token(
+        &self,
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+        run_id: String,
+        chain: Option<Vec<String>>,
+    ) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
         let token = random_token();
@@ -585,11 +627,13 @@ impl McpState {
             .run_actors
             .lock()
             .map_err(|_| "run token lock poisoned")?;
+        let actor = normalize_actor(actor).to_string();
         push_run_token(
             &mut runs,
             token.clone(),
             RunGrant {
-                actor: normalize_actor(actor).to_string(),
+                chain: chain.unwrap_or_else(|| vec![actor.clone()]),
+                actor,
                 run_id,
                 // An empty declaration is not "everywhere" — a record that
                 // declares `scope:` and lists nothing has scoped itself to
@@ -757,6 +801,14 @@ fn base_tools() -> Vec<Value> {
             "name": "list_inbox",
             "description": "Captures waiting to be organized: untyped notes the user has not yet filed.",
             "inputSchema": schema(json!({}), &[])
+        }),
+        json!({
+            "name": "hand_to",
+            "description": "Start a run of another agent with a task. Fire-and-forget: the callee runs under its OWN scope and tools (calling never lends yours), writes to the vault, and cannot reply here — read its output from the vault, or say where the user can. Two hops then it stops; a cycle refuses; a paused agent cannot be called.",
+            "inputSchema": schema(json!({
+                "agent": { "type": "string", "description": "The agent's handle — its declared slug, or its slugified title" },
+                "message": { "type": "string", "description": "What you are handing it: the task, and any context it cannot read for itself" }
+            }), &["agent", "message"])
         }),
         json!({
             "name": "create_note",
@@ -1346,6 +1398,7 @@ fn call_tool(
         "get_note" => tool_get_note(&vault, args),
         "knowledge_about" => tool_knowledge_about(&vault, args),
         "list_inbox" => tool_list_inbox(&vault, grant),
+        "hand_to" => tool_hand_to(app, &vault, args, grant),
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
@@ -2011,6 +2064,180 @@ fn tool_list_inbox(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
             captures.join("\n")
         )
     }))
+}
+
+/// The two structural handoff rules (M34.3), refused BEFORE any spawn: two
+/// hops then it stops, and a cycle refuses before the call is made — naming
+/// the agent it refused, so the caller can say so instead of retrying. Pure
+/// over the grant so the rules are testable without a vault or a child.
+fn handoff_refusal(grant: &RunGrant, callee_actor: &str) -> Option<String> {
+    if grant.chain.iter().any(|a| a == callee_actor) {
+        return Some(format!(
+            "Refused: calling {callee_actor} would be a cycle — it is already in this run's chain ({}).",
+            grant.chain.join(" → ")
+        ));
+    }
+    if grant.chain.len() >= 3 {
+        return Some(
+            "Refused: two hops, then it stops. This run is already the second hop of its chain, \
+             so the work it cannot do stops here with a note rather than a guess."
+                .to_string(),
+        );
+    }
+    None
+}
+
+/// The name an agent answers to, from its record — a declared `slug:` or its
+/// slugified title. A deliberate TWIN of engine/agents.ts `agentHandle`
+/// (M33b.6): the renderer resolves @mentions with the TS half, this tool
+/// resolves `hand_to` with this one, and the two must agree or an agent is
+/// addressable in chat and not from a chain. Kept to the slug grammar's
+/// intersection (lowercase ASCII, dashes) so both sides derive the same name.
+fn agent_handle(entry: &vault::entry::Entry) -> String {
+    if let Some(slug) = entry.properties.get("slug").and_then(Value::as_str) {
+        let declared = slug.trim();
+        if !declared.is_empty() {
+            return declared.to_string();
+        }
+    }
+    let mut out = String::new();
+    for c in entry.title.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Resolve who `hand_to` names. Pure over the scan for the same reason
+/// `handoff_refusal` is pure over the grant.
+fn resolve_agent<'a>(
+    entries: &'a [vault::entry::Entry],
+    handle: &str,
+) -> Option<&'a vault::entry::Entry> {
+    entries
+        .iter()
+        .filter(|e| e.entry_type.as_deref() == Some("Agent") && e.parse_error.is_none())
+        .find(|e| agent_handle(e) == handle)
+}
+
+/// One frontmatter list, as the folder/tool grammar both axes share: a
+/// string or an array of strings; absent is None (unrestricted), declared
+/// and empty is Some([]) — the TS parse's exact reading (engine/agents.ts).
+fn frontmatter_list(entry: &vault::entry::Entry, key: &str) -> Option<Vec<String>> {
+    let raw = entry.properties.get(key)?;
+    let items: Vec<String> = match raw {
+        Value::String(s) => vec![s.clone()],
+        Value::Array(a) => a
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect(),
+        _ => return None,
+    };
+    Some(
+        items
+            .iter()
+            .map(|v| {
+                v.trim()
+                    .trim_start_matches("./")
+                    .trim_matches('/')
+                    .to_string()
+            })
+            .filter(|v| !v.is_empty())
+            .collect(),
+    )
+}
+
+/// Start a run of another agent (M34.3.2). Fire, don't await: a CLI run
+/// takes minutes and a tool call that blocked for one would time the caller
+/// out — so the callee is STARTED, its row names this run as parent, and its
+/// writes land in the vault where the caller (and the fleet) can read them.
+/// The callee works under its own record's axes; calling never lends
+/// permissions.
+fn tool_hand_to(
+    app: &AppHandle,
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let handle = arg_str(args, "agent").ok_or("hand_to needs an agent handle")?;
+    let message = arg_str(args, "message").ok_or("hand_to needs a message")?;
+    let entries = vault::scan::scan_vault(vault)?;
+    let Some(record) = resolve_agent(&entries, &handle) else {
+        return Ok(error_result(format!(
+            "No agent answers to \"{handle}\". Agents are records of type Agent; the handle is \
+             their declared slug or their slugified title."
+        )));
+    };
+    let callee_actor = format!("process:{}", agent_handle(record));
+    if let Some(refusal) = handoff_refusal(grant, &callee_actor) {
+        return Ok(error_result(refusal));
+    }
+    // The frontmatter pause — the runtime pause is enforced again at spawn,
+    // but a record that says `paused: true` refuses here with the reason.
+    if record.properties.get("paused").and_then(Value::as_bool) == Some(true) {
+        return Ok(error_result(format!(
+            "{} is paused. A paused agent cannot be called, and the chain that would have \
+             reached it stops with it.",
+            record.title
+        )));
+    }
+    let body = vault::write::read_note(vault, &record.path)
+        .map(|text| strip_frontmatter(&text))
+        .unwrap_or_default();
+    let request = crate::agent::AgentRequest {
+        message: format!(
+            "You were handed this by {}, mid-run:\n\n{message}",
+            grant.actor
+        ),
+        system_prompt: Some(format!(
+            "You are \"{}\", the agent defined at {} in this vault. Your writes are attributed \
+             to {}. Nobody is watching this run and no chat reply will be read — everything \
+             you produce must land in the vault through the tools.\n\nYour standing \
+             instructions:\n\n{}",
+            record.title, record.path, callee_actor, body
+        )),
+        session_id: None,
+        model: None,
+        // Fail closed, both: shell needs the Settings ceiling and connectors
+        // need the per-machine stdio approvals, and both live in the
+        // renderer. A missing field must never widen access — a handed-to
+        // run that needs either is a chain the person starts themselves.
+        shell: Some(false),
+        connectors: Some(false),
+        connector_names: Some(vec![]),
+        attended: Some(false),
+        mcp_url: None,
+        mcp_token: None,
+        actor: Some(callee_actor.clone()),
+        approved_stdio: Some(vec![]),
+        scope: frontmatter_list(record, "scope"),
+        read_scope: frontmatter_list(record, "read-scope"),
+        allowed_tools: frontmatter_list(record, "allowed-tools"),
+        internal: false,
+    };
+    let run_id = crate::start_handoff_run(app, vault, request, grant)?;
+    Ok(text_result(format!(
+        "Started {} (run {run_id}) with what you handed it. It works under its own scope and \
+         writes to the vault; it cannot reply here. Its outcome lands in the fleet, billed to \
+         this chain's root.",
+        record.title
+    )))
+}
+
+/// The body without its frontmatter block — the record's standing
+/// instructions, which ride the handed-to run's system prompt.
+fn strip_frontmatter(text: &str) -> String {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("---") {
+        if let Some(end) = rest.find("\n---") {
+            return rest[end + 4..].trim_start().to_string();
+        }
+    }
+    text.to_string()
 }
 
 /// M13.5 tells the agent it never creates or modifies `type: Type` docs —
@@ -2983,6 +3210,7 @@ mod tests {
     /// sentence a model can be talked out of.
     fn scoped(folders: &[&str]) -> RunGrant {
         RunGrant {
+            chain: vec!["test-chain".into()],
             actor: "process:scout".into(),
             run_id: run_id_of("process:scout"),
             read_scope: None,
@@ -2994,6 +3222,7 @@ mod tests {
     /// M34.4 — reads are structural too, on their own axis.
     fn read_scoped(folders: &[&str]) -> RunGrant {
         RunGrant {
+            chain: vec!["test-chain".into()],
             actor: "process:scout".into(),
             run_id: run_id_of("process:scout"),
             scope: None,
@@ -3051,6 +3280,78 @@ mod tests {
         assert!(
             text.contains("outside this run's read scope are not listed"),
             "hidden/b.md is an untyped capture this run may not see: {text}"
+        );
+    }
+
+    /// M34.3 — the hop rules are structural, like scope: not a sentence a
+    /// model can be talked out of, and refused before any child exists.
+    #[test]
+    fn two_hops_then_it_stops_and_a_cycle_refuses_naming_the_agent() {
+        let root = RunGrant::unrestricted("process:librarian");
+        assert!(
+            handoff_refusal(&root, "process:source-scout").is_none(),
+            "a root may hand off"
+        );
+
+        let mut first_hop = RunGrant::unrestricted("process:source-scout");
+        first_hop.chain = vec!["process:librarian".into(), "process:source-scout".into()];
+        assert!(
+            handoff_refusal(&first_hop, "process:contradiction-hunter").is_none(),
+            "the first hop may hand off once more"
+        );
+        let cycle = handoff_refusal(&first_hop, "process:librarian").expect("a cycle refuses");
+        assert!(cycle.contains("process:librarian"), "{cycle}");
+        assert!(cycle.contains("cycle"), "{cycle}");
+
+        let mut second_hop = RunGrant::unrestricted("process:contradiction-hunter");
+        second_hop.chain = vec![
+            "process:librarian".into(),
+            "process:source-scout".into(),
+            "process:contradiction-hunter".into(),
+        ];
+        let depth = handoff_refusal(&second_hop, "process:coverage-mapper")
+            .expect("the second hop may not hand off");
+        assert!(depth.contains("two hops"), "{depth}");
+    }
+
+    #[test]
+    fn an_agent_is_resolved_by_its_declared_slug_or_its_slugified_title() {
+        let mut scout = vault::entry::Entry::empty_for_test("records/agents/scout.md");
+        scout.title = "Release Scout".into();
+        scout.entry_type = Some("Agent".into());
+        let mut named = vault::entry::Entry::empty_for_test("records/agents/x.md");
+        named.title = "Whatever Title".into();
+        named.entry_type = Some("Agent".into());
+        named
+            .properties
+            .insert("slug".into(), Value::String("librarian".into()));
+        let mut skill = vault::entry::Entry::empty_for_test("records/skills/s.md");
+        skill.title = "Release Scout".into();
+        skill.entry_type = Some("Skill".into());
+        let entries = vec![scout, named, skill];
+
+        assert_eq!(
+            resolve_agent(&entries, "release-scout").map(|e| e.path.as_str()),
+            Some("records/agents/scout.md"),
+            "slugified title, and never the Skill with the same name"
+        );
+        assert_eq!(
+            resolve_agent(&entries, "librarian").map(|e| e.path.as_str()),
+            Some("records/agents/x.md"),
+            "a declared slug wins over any title"
+        );
+        assert!(resolve_agent(&entries, "nobody").is_none());
+    }
+
+    #[test]
+    fn standing_instructions_are_the_body_not_the_frontmatter() {
+        assert_eq!(
+            strip_frontmatter("---\ntype: Agent\nscope: [a/]\n---\n\nDo the thing."),
+            "Do the thing."
+        );
+        assert_eq!(
+            strip_frontmatter("No frontmatter at all."),
+            "No frontmatter at all."
         );
     }
 
@@ -3182,6 +3483,10 @@ mod tests {
             (
                 "submit_answer",
                 "records a run's own answer in memory; writes no file and no event",
+            ),
+            (
+                "hand_to",
+                "writes nothing itself; the run it starts writes under the CALLEE's own grant, minted from the callee's record — calling never lends the caller's scope",
             ),
         ]
         .into_iter()
@@ -3338,6 +3643,7 @@ mod tests {
 
     fn grant_for(run_id: &str) -> RunGrant {
         RunGrant {
+            chain: vec!["test-chain".into()],
             actor: "agent:m26-synthesis".into(),
             run_id: run_id.to_string(),
             scope: None,

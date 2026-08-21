@@ -89,6 +89,18 @@ export const TOOLSETS: Toolset[] = [
     tools: [{ name: 'propose_organize', summary: 'Suggest how to file a capture', writes: false }],
   },
   {
+    id: 'agents',
+    label: 'Hand work to agents',
+    hint: 'Starts another agent, which writes under its OWN scope — calling never lends the caller anything. Two hops, then it stops.',
+    tools: [
+      {
+        name: 'hand_to',
+        summary: 'Start a run of another agent with a task',
+        writes: false,
+      },
+    ],
+  },
+  {
     id: 'ui',
     label: 'Move the app',
     hint: 'Changes what is on screen. Rarely what you want for an unattended run — it moves the user while they are working.',
