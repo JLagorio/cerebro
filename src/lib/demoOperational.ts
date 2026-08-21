@@ -79,6 +79,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 0,
       applied: 0,
       rejected: 0,
+      parent_run_id: null,
     },
     {
       // Left work on the table: two of its three proposals are still waiting,
@@ -97,6 +98,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 3,
       applied: 1,
       rejected: 0,
+      parent_run_id: null,
     },
     {
       run_id: 'run-ingest-2',
@@ -113,6 +115,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 2,
       applied: 2,
       rejected: 0,
+      parent_run_id: null,
     },
     {
       // The CLI died without reporting usage. Its token columns are zero and
@@ -131,6 +134,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 0,
       applied: 0,
       rejected: 0,
+      parent_run_id: null,
     },
     {
       run_id: 'run-maint-1',
@@ -147,6 +151,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 1,
       applied: 0,
       rejected: 1,
+      parent_run_id: null,
     },
     {
       run_id: 'run-chat-1',
@@ -163,6 +168,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 0,
       applied: 0,
       rejected: 0,
+      parent_run_id: null,
     },
     {
       // A row from before M33.1 added the column: nothing attributed it, and
@@ -181,6 +187,7 @@ export function demoFleetRuns(): FleetRun[] {
       proposals_submitted: 0,
       applied: 0,
       rejected: 0,
+      parent_run_id: null,
     },
   ];
 }

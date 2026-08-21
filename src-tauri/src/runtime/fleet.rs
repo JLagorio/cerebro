@@ -66,6 +66,10 @@ pub struct FleetRun {
     pub proposals_submitted: u64,
     pub applied: u64,
     pub rejected: u64,
+    /// M34.3's hop lineage, surfaced in M41: the run this one was spawned
+    /// FROM. `None` is a root — every run before handoffs existed, and every
+    /// run a person or a schedule started directly.
+    pub parent_run_id: Option<String>,
 }
 
 /// One row of `run_cost_components` (M31.6).
@@ -136,7 +140,7 @@ pub struct ActorSummary {
 
 const RUN_COLUMNS: &str = "run_id, actor, vault_id, mode, lane, started_at, ended_at, outcome, \
                            usage_state, input_tokens, output_tokens, proposals_submitted, \
-                           applied, rejected";
+                           applied, rejected, parent_run_id";
 
 fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
     Ok(FleetRun {
@@ -154,6 +158,7 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
         proposals_submitted: row.get::<_, i64>(11)? as u64,
         applied: row.get::<_, i64>(12)? as u64,
         rejected: row.get::<_, i64>(13)? as u64,
+        parent_run_id: row.get(14)?,
     })
 }
 
@@ -472,6 +477,42 @@ mod tests {
             all[1].actor, None,
             "and the unattributed run is returned as such, not hidden"
         );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M41.2 — M34.3 wrote hop lineage and nothing SELECTed it; the chain
+    // trace starts here. NULL is a root, and every seeded legacy row reads
+    // back as one rather than erroring on the new column.
+    #[test]
+    fn a_hop_carries_its_parent_and_a_root_carries_none() {
+        let (dir, conn, vault) = fixture("fleet-parent");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new(
+                "root",
+                Some("process:digest"),
+                "2026-08-09T10:00:00Z",
+            )],
+        );
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, \
+             ended_at, outcome, usage_state, input_tokens, output_tokens, cache_read, \
+             cache_write, reserved_total_tokens, reserved_output_tokens, \
+             proposals_submitted, applied, rejected, actor, parent_run_id) \
+             VALUES ('hop', ?1, 'store', 'ambient', 'filed', '2026-08-09T10:05:00Z', \
+                     '2026-08-09T10:06:00Z', 'succeeded', 'exact', 5, 1, 0, 0, 0, 0, \
+                     0, 0, 0, 'process:knowledge', 'root')",
+            rusqlite::params![vault],
+        )
+        .unwrap();
+
+        let all = runs(&conn, &Filter::default()).unwrap();
+        let hop = all.iter().find(|r| r.run_id == "hop").unwrap();
+        assert_eq!(hop.parent_run_id.as_deref(), Some("root"));
+        let root = all.iter().find(|r| r.run_id == "root").unwrap();
+        assert_eq!(root.parent_run_id, None, "a root run reads back as one");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

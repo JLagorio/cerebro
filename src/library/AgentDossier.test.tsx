@@ -90,6 +90,7 @@ function run(over: Partial<FleetRun> = {}): FleetRun {
     proposals_submitted: 0,
     applied: 0,
     rejected: 0,
+    parent_run_id: null,
     ...over,
   };
 }

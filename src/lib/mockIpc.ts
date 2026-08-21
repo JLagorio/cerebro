@@ -1351,6 +1351,9 @@ export interface FleetRun {
   proposals_submitted: number;
   applied: number;
   rejected: number;
+  /** M34.3's hop lineage (M41): the run this one was spawned FROM; null is
+   * a root. Mirrors fleet.rs — the parity the mock owes the wire. */
+  parent_run_id: string | null;
 }
 
 /** One `run_cost_components` row (M31.6). */

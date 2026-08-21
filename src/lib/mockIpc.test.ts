@@ -827,6 +827,7 @@ describe('the deferral gates (M28.1)', () => {
     proposals_submitted: 0,
     applied: 0,
     rejected: 0,
+    parent_run_id: null,
     ...over,
   });
 
