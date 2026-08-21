@@ -45,11 +45,17 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   **Pages** tree, M40 added Studio, M41 added Agents; the selection KINDS
   stay `knowledge`/`workspace`, labels only), then the Pages tree,
   Collections, and the **Databases** section (M39 — the label; `type:` and
-  every internal identifier keep the old word), with Base's rows nested
-  under its destination while current.
+  every internal identifier keep the old word). **Destinations that own
+  subjects are GROUPS** (M42.2, the Notion turn): agents, mounted repos,
+  prototypes, and Base's whole nav nest under their destination on EVERY
+  surface — open by default, folded by a chevron that never navigates,
+  persisted as the closed set (`cerebro.navClosed`). The chrome is the DS's:
+  sunken sidebar, `--surface-selected` + cortex ink for the current row,
+  quiet mono counts — never a filled pill (M42.1).
   The ten names are asserted in `app/Sidebar.test.tsx`; specs scope
-  destination clicks to `nav-surfaces` (nested tree rows share accessible
-  names with destinations). Sections are addressed by `data-section`, never
+  destination clicks to `nav-surfaces` (nested rows live OUTSIDE those
+  containers precisely because they share accessible names with
+  destinations). Sections are addressed by `data-section`, never
   by a per-section testid, and `KnowledgeNav` carries the tab (plus `run`,
   for one fleet detail) so a section is a place the back button returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
