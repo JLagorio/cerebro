@@ -67,11 +67,14 @@ export default defineConfig({
       // the thread view, the agent roster and two governance gates, and a
       // floor left where M33.9 set it would have let all of that rot untested
       // while still reporting green.
+      // M34.1 measured 80.34 / 80.34 / 75.52 / 83.61 — the grant, capability,
+      // and prompt work arrived tested, so the floor follows it up. Ratchets
+      // only tighten.
       thresholds: {
-        lines: 79,
-        statements: 79,
-        functions: 74,
-        branches: 82,
+        lines: 80,
+        statements: 80,
+        functions: 75,
+        branches: 83,
       },
     },
   },
