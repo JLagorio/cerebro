@@ -905,9 +905,9 @@ fn base_tools() -> Vec<Value> {
         }),
         json!({
             "name": "navigate",
-            "description": "Move the cerebro UI to a surface: home, inbox, knowledge, docs, or a saved view.",
+            "description": "Move the cerebro UI to a surface: home, inbox, knowledge, or a saved view.",
             "inputSchema": schema(json!({
-                "to": { "type": "string", "description": "home | inbox | knowledge | docs | view" },
+                "to": { "type": "string", "description": "home | inbox | knowledge | view" },
                 "id": { "type": "string", "description": "View id, when to = view" }
             }), &["to"])
         }),
@@ -1764,7 +1764,7 @@ fn tool_vault_context(vault: &Path) -> Result<Value, String> {
     let inbox = entries.iter().filter(|e| is_capture(e)).count();
 
     Ok(text_result(format!(
-        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nContainers:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}\n\nConventions: notes are markdown with YAML frontmatter. A TYPED note is a record of its type; an untyped note is a doc — the two never blend. Types are declared by `type: Type` docs in types/ (their fields:, statuses:, folder:, and views: keys are the schema); records default to records/<plural>/. A Collection is a folder holding collection.yml (legacy project.md folders read as Collections); Lists are *.list.yml files inside one. The knowledge/ bundle is yours to maintain (Open Knowledge Format) and the user's to verify.",
+        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nContainers:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}\n\nConventions: notes are markdown with YAML frontmatter. A TYPED note is a record of its type; an untyped note is a doc — records peek in a side panel by default and can also open as full pages. Types are declared by `type: Type` docs in types/ (their fields:, statuses:, folder:, and views: keys are the schema); records default to records/<plural>/. A Collection is a folder holding collection.yml (legacy project.md folders read as Collections); Lists are *.list.yml files inside one. The knowledge/ bundle is yours to maintain (Open Knowledge Format) and the user's to verify.",
         vault.display(),
         entries.len(),
         types.join(", "),

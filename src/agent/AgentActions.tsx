@@ -67,8 +67,8 @@ export function toSelection(to: string, id?: string): Selection {
       return { kind: 'inbox' };
     case 'knowledge':
       return { kind: 'knowledge' };
-    case 'docs':
-      return { kind: 'docs' };
+    // 'docs' fell out with the surface (M38.3): an agent that says it goes
+    // Home like any other name the shell stopped answering to.
     case 'list':
       return id !== undefined ? { kind: 'list', id } : { kind: 'home' };
     default:

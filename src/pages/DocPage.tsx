@@ -321,7 +321,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       await deleteNote(vaultPath, deleteSubject.path);
       await rescan();
       setConfirmDelete(false);
-      navigate({ kind: 'docs' });
+      // Home, since M38.3: the page's surface of origin (Docs) is gone, and
+      // after a delete there is no page to stand on.
+      navigate({ kind: 'home' });
     } catch {
       toast("Couldn't move to Trash");
     } finally {
@@ -506,7 +508,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                     ? undefined
                     : () => navigate({ kind: 'type', name: entry.type as string }),
               })
-          : crumb('Docs', { icon: 'library', onClick: () => navigate({ kind: 'docs' }) })}
+          : // M38.3: no Docs surface to root at — a doc's crumb is its
+            // folder path, and the Pages tree in the nav is the way up.
+            crumb('Pages', { icon: 'library' })}
         {crumbFolders.map((seg, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
             {separator}

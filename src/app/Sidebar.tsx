@@ -147,14 +147,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     null,
   );
 
-  // Task 14 / M37.3: on the Docs surfaces the Drive-style file navigator nests
-  // under the Docs row rather than replacing the whole column.
-  const docsMode = selection.kind === 'docs' || selection.kind === 'doc';
   // M8.1: Base navigates by its own axes rather than borrowing Views and
-  // Types, which describe a corpus with a different author. Same nesting rule.
+  // Types, which describe a corpus with a different author; its rows nest
+  // under the Base row while that surface is current (M37.3).
   const knowledgeMode = selection.kind === 'knowledge';
-  // Docs owns the document surfaces; a .mmd diagram page is one too (M29.21).
-  const docsActive = docsMode || selection.kind === 'diagram';
   // M9.4: the two git surfaces share one slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
   const homeActive = HOME_KINDS.has(selection.kind);
@@ -348,32 +344,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               onClick={() => navigate({ kind: 'inbox' })}
             />
           )}
-          <SurfaceRow
-            icon="library"
-            label="Docs"
-            active={docsActive}
-            onClick={() => navigate({ kind: 'docs' })}
-          />
-        </div>
-        {/* Nested OUTSIDE the destinations container on purpose: the tree's
-            folder rows share accessible names with destination rows (`inbox/`
-            vs Inbox), and a spec scoped to `nav-surfaces` must never catch a
-            folder. Between the groups, so it still reads as "under Docs". */}
-        {docsMode && (
-          <div className="pl-3">
-            <FileTree
-              root=""
-              docsOnly
-              activePath={selection.kind === 'doc' ? selection.path : null}
-              onOpen={openPath}
-            />
-          </div>
-        )}
-        <div data-testid="nav-surfaces">
-          {/* M30 — mounted repositories. Its own room rather than a section of
-              Docs: Docs means untyped vault notes (`isDocEntry`), and a surface
-              that renders .ts files cannot mean that. The label is the locked
-              name (M37.2); the `workspace` KIND stays — kinds are internal
+          {/* M30 — mounted repositories. Its own room rather than a section
+              of the pages: pages are vault notes, and a surface that renders
+              .ts files cannot mean that. The label is the locked name
+              (M37.2); the `workspace` KIND stays — kinds are internal
               vocabulary shared with the navigate MCP tool. */}
           <SurfaceRow
             icon="folder-tree"
@@ -419,6 +393,19 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             onClick={() => navigate({ kind: 'pulse' })}
           />
         </div>
+        {/* M38.3 — the Docs destination died with its surface; the tree it
+            used to gate is a standing section now, because in a shell where
+            everything is a page the pages ARE navigation, not a mode. Outside
+            the destinations containers on purpose: the tree's folder rows
+            share accessible names with destination rows (`inbox/` vs Inbox),
+            and a spec scoped to `nav-surfaces` must never catch a folder. */}
+        <div className={SECTION_LABEL}>Pages</div>
+        <FileTree
+          root=""
+          docsOnly
+          activePath={selection.kind === 'doc' ? selection.path : null}
+          onOpen={openPath}
+        />
         {/* M10: Collections are the top-level navigation of the item world. A
             Collection is a container — it holds Lists, Folders and Docs —
             where a "view" used to be both the container and the query at once. */}

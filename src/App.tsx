@@ -16,7 +16,6 @@ import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
 import { DocPage } from '@/pages/DocPage';
-import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
@@ -108,8 +107,6 @@ function CanvasOutlet() {
     // pending edit had flushed — writing A's bytes into B and losing A's edit.
     case 'diagram':
       return <DiagramPage key={selection.path} selection={selection} />;
-    case 'docs':
-      return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.
     case 'collection':
       return <CollectionPage selection={selection} />;

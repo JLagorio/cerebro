@@ -106,13 +106,12 @@ describe('Sidebar', () => {
       return labels;
     };
 
-    it('carries exactly the nine destinations the shell has', () => {
+    it('carries exactly the eight destinations the shell has', () => {
       render(<Sidebar onNewView={vi.fn()} />);
       const labels = surfaceLabels();
       expect(labels).toEqual([
         'Home',
         'Inbox',
-        'Docs',
         'Work',
         'Base',
         'History',
@@ -121,14 +120,16 @@ describe('Sidebar', () => {
         'Settings',
       ]);
       // M33a.2 folded the Status hub into Knowledge; M37.2 spent the locked
-      // names (Base was Knowledge, Work was Workspace). Each merge that removes
-      // or renames a destination leaves the old name here, because the failure
-      // mode is a label silently coming back.
+      // names (Base was Knowledge, Work was Workspace); M38.3 retired Docs —
+      // pages are a standing tree section, not a destination. Each merge that
+      // removes or renames a destination leaves the old name here, because
+      // the failure mode is a label silently coming back.
       expect(labels).not.toContain('Status');
       expect(labels).not.toContain('Needs review');
       expect(labels).not.toContain('Background');
       expect(labels).not.toContain('Knowledge');
       expect(labels).not.toContain('Workspace');
+      expect(labels).not.toContain('Docs');
     });
 
     it('renders on every surface — the SIDEBARLESS set retired with the rail (M37.3)', () => {
@@ -147,26 +148,20 @@ describe('Sidebar', () => {
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
         render(<Sidebar onNewView={vi.fn()} />);
-        expect(surfaceLabels()).toHaveLength(9);
+        expect(surfaceLabels()).toHaveLength(8);
         cleanup();
       }
     });
 
-    it('keeps Docs active on a doc page and a diagram, Home active on collections', () => {
+    it('lets the Pages tree carry a doc page — no destination claims it (M38.3)', () => {
+      // A doc used to light the Docs destination; with the surface gone the
+      // open page is marked in the tree itself, and every destination row
+      // stays dark rather than one of them lying about where you are.
       useNavStore.setState({ selection: { kind: 'doc', path: 'inbox/welcome.md' } });
-      render(<Sidebar onNewView={vi.fn()} />);
-      expect(screen.getByRole('button', { name: 'Docs' }).getAttribute('aria-current')).toBe(
-        'page',
-      );
-      expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
-      cleanup();
-
-      // M29.21: a standalone .mmd is a document surface — Docs owns it too.
-      useNavStore.setState({ selection: { kind: 'diagram', path: 'diagrams/pipeline.mmd' } });
-      render(<Sidebar onNewView={vi.fn()} />);
-      expect(screen.getByRole('button', { name: 'Docs' }).getAttribute('aria-current')).toBe(
-        'page',
-      );
+      const { container } = render(<Sidebar onNewView={vi.fn()} />);
+      expect(
+        container.querySelectorAll('[data-testid="nav-surfaces"] [aria-current="page"]'),
+      ).toHaveLength(0);
       cleanup();
 
       // M12.5: projects retired — a container selection is a Collection.
@@ -175,7 +170,6 @@ describe('Sidebar', () => {
       expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBe(
         'page',
       );
-      expect(screen.getByRole('button', { name: 'Docs' }).getAttribute('aria-current')).toBeNull();
     });
 
     // M15: Home's active state used to be computed by negating every other
@@ -197,11 +191,14 @@ describe('Sidebar', () => {
     });
 
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
-      useNavStore.setState({ selection: { kind: 'docs' } });
+      useNavStore.setState({ selection: { kind: 'workspace' } });
       render(<Sidebar onNewView={vi.fn()} />);
-      expect(screen.getByRole('button', { name: 'Docs' }).getAttribute('aria-current')).toBe(
-        'page',
-      );
+      // Scoped: the demo fixtures hold a COLLECTION named Work too, and only
+      // the destination row wears aria-current.
+      const work = within(screen.getAllByTestId('nav-surfaces')[0]).getByRole('button', {
+        name: 'Work',
+      });
+      expect(work.getAttribute('aria-current')).toBe('page');
       // A toggle is not a destination: it reports pressed, never current.
       const assistant = screen.getByRole('button', { name: 'Assistant' });
       expect(assistant.getAttribute('aria-pressed')).toBe('false');
@@ -402,17 +399,16 @@ describe('Sidebar', () => {
     expect(wide.container.querySelector('nav')?.style.width).toBe('420px');
   });
 
-  // Task 14 / M37.3: on the Docs surfaces the Drive-style file tree nests
-  // under the Docs row rather than replacing the column — the Collections tree
-  // stays put, because the nav is the whole shell now.
-  it('nests the file tree under Docs on the Docs surface', () => {
+  // Task 14 / M38.3: the Drive-style file tree is the standing Pages section
+  // now — the Docs destination died with its surface, and in a shell where
+  // everything is a page the pages ARE navigation, not a mode.
+  it('carries the Pages tree on every surface', () => {
     const doc = mkEntry({
       path: 'inbox/welcome.md',
       filename: 'welcome.md',
       title: 'Welcome',
     });
     useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
-    useNavStore.setState({ selection: { kind: 'docs' } });
     render(<Sidebar onNewView={vi.fn()} />);
     const fileTree = screen.getByTestId('file-tree');
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
@@ -424,10 +420,11 @@ describe('Sidebar', () => {
     fireEvent.click(within(fileTree).getByRole('button', { name: /^Welcome/ }));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'inbox/welcome.md' });
     cleanup();
-    // Off the Docs surfaces the tree withdraws.
-    useNavStore.setState({ selection: { kind: 'home' } });
+    // And it does NOT withdraw off the doc surfaces — that was the mode the
+    // Docs destination gated, and both retired together.
+    useNavStore.setState({ selection: { kind: 'settings' } });
     render(<Sidebar onNewView={vi.fn()} />);
-    expect(screen.queryByTestId('file-tree')).toBeNull();
+    expect(screen.getByTestId('file-tree')).toBeTruthy();
   });
 
   // M3: collapsible Types section above Views.

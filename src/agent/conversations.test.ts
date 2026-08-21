@@ -129,7 +129,7 @@ describe('anchor (M17.5)', () => {
 
   it('refuses to re-anchor, so it is safe to call on every send', () => {
     const first = anchor(newConversation(), { kind: 'inbox' });
-    const again = anchor(first, { kind: 'docs' });
+    const again = anchor(first, { kind: 'pulse' });
     expect(again).toBe(first);
   });
 });

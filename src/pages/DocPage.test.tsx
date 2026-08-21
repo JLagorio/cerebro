@@ -64,7 +64,9 @@ describe('DocPage', () => {
     if (doc === undefined) throw new Error('fixture vault has no untyped doc');
     render(<DocPage selection={{ kind: 'doc', path: doc.path }} />);
     expect(screen.queryByTestId('page-properties')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Docs' })).toBeTruthy();
+    // M38.3: the crumb root is a plain 'Pages' label — the Docs surface it
+    // used to navigate to is gone, and the nav's tree is the way up.
+    expect(screen.getByText('Pages')).toBeTruthy();
   });
 
   it('the panel toggle hides and shows the side panel', async () => {

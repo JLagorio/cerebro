@@ -253,8 +253,6 @@ export function resolveSurface(
     case 'diagram':
       // A standalone .mmd renders in DiagramPage (M29.21); no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
-    case 'docs':
-      return { title: 'Docs', entries: [], presentation: defaultPresentation() };
     case 'changes':
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.

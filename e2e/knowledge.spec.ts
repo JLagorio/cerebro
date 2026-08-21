@@ -195,14 +195,16 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   await expect(types.filter({ hasText: 'Metric' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Playbook' })).toHaveCount(0);
 
-  // Not in Docs: the bundle is not yours to edit. Nav-row-scoped because the
-  // demo vault also has folders whose names collide with the nav items.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
-  await expect(page.getByTestId('recent-doc').first()).toBeVisible();
-  const docPaths = await page
-    .getByTestId('recent-doc')
+  // Not in the Pages tree: the bundle is not yours to edit, so `docsOnly`
+  // prunes its files and the knowledge/ folder with them (M38.3 — the tree
+  // is the standing pages nav now that the Docs surface is gone).
+  const tree = page.getByTestId('file-tree');
+  await expect(tree.getByTestId('tree-row').first()).toBeVisible();
+  const docPaths = await tree
+    .getByTestId('tree-row')
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
-  expect(docPaths.some((p) => p.startsWith('knowledge/'))).toBe(false);
+  expect(docPaths.length).toBeGreaterThan(0);
+  expect(docPaths.some((p) => p.startsWith('knowledge'))).toBe(false);
 
   // Not in the Inbox either, despite carrying no `_organized` flag.
   await page

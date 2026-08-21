@@ -64,7 +64,7 @@ describe('navStore', () => {
     it('navigate closes the record panel and the inline diff', () => {
       useUiStore.setState({ detailPath: 'records/bets/office-hours.md' });
       useUiStore.getState().openDiff('docs/plan.md');
-      useNavStore.getState().navigate({ kind: 'docs' });
+      useNavStore.getState().navigate({ kind: 'pulse' });
       expect(useUiStore.getState().detailPath).toBeNull();
       expect(useUiStore.getState().diffView).toBeNull();
     });
@@ -79,7 +79,7 @@ describe('navStore', () => {
 
     it('back and forward clear the panel too', () => {
       const { navigate, back, forward } = useNavStore.getState();
-      navigate({ kind: 'docs' });
+      navigate({ kind: 'pulse' });
       useUiStore.setState({ detailPath: 'records/bets/office-hours.md' });
       back();
       expect(useUiStore.getState().detailPath).toBeNull();
@@ -99,7 +99,7 @@ describe('navStore', () => {
     it('rewrites the open selection and the history entry behind it', () => {
       const { navigate, replacePath, back } = useNavStore.getState();
       navigate({ kind: 'doc', path: 'notes/capture.md' });
-      navigate({ kind: 'docs' });
+      navigate({ kind: 'pulse' });
       // "Add page" grows the single file into a folder-note doc.
       replacePath('notes/capture.md', 'notes/capture/capture.md');
       back();

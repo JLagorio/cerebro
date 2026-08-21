@@ -78,7 +78,6 @@ describe('placeOf — a place is a subject, not a lens', () => {
       selectionKey({ kind: 'list', id: 'notes' }),
       selectionKey({ kind: 'home' }),
       selectionKey({ kind: 'inbox' }),
-      selectionKey({ kind: 'docs' }),
       selectionKey({ kind: 'changes' }),
       selectionKey({ kind: 'pulse' }),
       selectionKey({ kind: 'settings' }),
@@ -134,7 +133,6 @@ describe('placeLabel', () => {
     const places: Selection[] = [
       { kind: 'home' },
       { kind: 'inbox' },
-      { kind: 'docs' },
       { kind: 'changes' },
       { kind: 'pulse' },
       { kind: 'settings' },

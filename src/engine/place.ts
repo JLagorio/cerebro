@@ -146,8 +146,6 @@ export function placeLabel(
       return 'Home';
     case 'inbox':
       return 'Inbox';
-    case 'docs':
-      return 'Docs';
     case 'changes':
       return 'Changes';
     case 'pulse':
@@ -199,10 +197,12 @@ export function placeLabel(
 export function isPlace(raw: unknown): raw is Place {
   if (typeof raw !== 'object' || raw === null) return false;
   const p = raw as Record<string, unknown>;
+  // 'docs' is deliberately not among the bare kinds (M38.3): the surface is
+  // gone, so a thread persisted against it fails the guard and loses its
+  // anchor rather than round-tripping into a selection nothing can render.
   switch (p.kind) {
     case 'home':
     case 'inbox':
-    case 'docs':
     case 'changes':
     case 'pulse':
     case 'review':

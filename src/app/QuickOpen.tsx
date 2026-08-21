@@ -124,18 +124,13 @@ export function QuickOpen() {
         alias: 'capture queue',
         sel: { kind: 'inbox' },
       },
-      {
-        id: 'go:docs',
-        label: 'Docs',
-        icon: 'library',
-        alias: 'documents pages',
-        sel: { kind: 'docs' },
-      },
+      // 'go:docs' fell out with the surface (M38.3) — pages are reached by
+      // NAME here, which is what this palette is for.
       {
         id: 'go:knowledge',
-        label: 'Knowledge',
+        label: 'Base',
         icon: 'brain',
-        alias: 'concepts base',
+        alias: 'knowledge concepts base',
         sel: { kind: 'knowledge' },
       },
       {

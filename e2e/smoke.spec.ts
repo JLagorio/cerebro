@@ -159,11 +159,10 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .poll(() => readMockFile(page, viewPath), { timeout: 5_000 })
     .toContain('type: board');
 
-  // -- Docs: new folder, new page inside it (the tree under the Docs row) --
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
+  // -- Pages: new folder, new page inside it (the standing tree, M38.3) ----
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Notes');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
   // exact: Playwright's `name` is a case-insensitive SUBSTRING by default, so
   // 'notes' also matched this row's "New page in Notes" and "Options for
   // Notes" once M15 stopped gating those on hover — three matches, strict-mode
@@ -173,7 +172,7 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await notesFolder.hover();
   await page.getByRole('button', { name: 'New page in Notes', exact: true }).click();
   await page.getByPlaceholder('Page name').fill('Smoke Notes');
-  await page.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
 
   // -- Lands on the doc page with the typed-capitalization H1 -------------
   await expect(page.getByTestId('doc-title')).toHaveText('Smoke Notes');
@@ -196,10 +195,13 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
     .poll(() => readMockFile(page, docPath), { timeout: 5_000 })
     .toContain('Written by the smoke test.');
 
-  // -- Navigate away and back through the nav (disk round trip) -----------
+  // -- Navigate away and back through the Pages tree (disk round trip) -----
   await page.getByRole('button', { name: 'Home' }).click();
-  await page.getByRole('button', { name: 'Docs' }).click();
-  const recent = page.getByTestId('recent-doc').filter({ hasText: 'Smoke Notes' }).first();
+  // The Notes folder was expanded during creation and expansion persists, so
+  // the new page's row is already in the standing tree.
+  const recent = page
+    .getByTestId('file-tree')
+    .getByRole('button', { name: 'Smoke Notes', exact: true });
   await expect(recent).toBeVisible();
   await recent.click();
   await expect(page.getByTestId('doc-title')).toHaveText('Smoke Notes');

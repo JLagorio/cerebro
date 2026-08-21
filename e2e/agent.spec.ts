@@ -471,8 +471,8 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
   // Any doc with a paragraph in it. The point of this test is the AFFORDANCE:
   // M17.16 built the rewrite surface and bound it to Cmd-K, and nothing on
   // screen said so — selecting text looked exactly as it had before the
-  // assistant existed.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Docs' }).click();
+  // assistant existed. M38.3: the Pages tree (and its New page) stands in the
+  // nav on every surface, so there is no Docs destination to click first.
   await page.getByRole('button', { name: 'New page', exact: true }).first().click();
   await page.getByPlaceholder('Page name').fill('Selection test');
   await page.getByRole('button', { name: 'Create' }).click();
