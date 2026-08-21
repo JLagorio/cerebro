@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAgentEvent } from '@/agent/agentIpc';
 import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
 import { nextFire, parseSchedule } from '@/engine/skills';
@@ -238,12 +239,13 @@ function useFleetPulse(): number {
 function Chip({ state }: { state: AgentState }) {
   // No colour ladder and no badge. Spec §6: this surface can become the
   // nagging screen M8 exists to prevent, and the way it would get there is by
-  // learning to shout. A state is a word.
+  // learning to shout. A state is a word — sentence case, because the DS
+  // reserves capitals for eyebrows and a status chip is not one (M42.3).
   return (
     <span
       data-testid="agent-state"
       data-state={state}
-      className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em] text-n-600"
+      className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
       style={{ border: '1px solid var(--n-200)' }}
     >
       {STATE_TEXT[state]}
@@ -449,36 +451,47 @@ export function AgentRoster({
               // "one level down" D5 asks for. Clicking again lets go of it,
               // because a filter you cannot clear is a trap.
               onClick={() => onFocus(focused ? null : ref.actor)}
+              // DS row, not a box (M42.3): hover is a wash, the narrowed
+              // agent is the selection wash, and the hairline grid the boxes
+              // drew is gone. Synapse on the tile because these rows ARE the
+              // AI surfaces the DS reserves violet for.
               className={[
-                'flex min-w-0 flex-1 flex-col gap-0.5 rounded border px-2.5 py-2 text-left',
-                focused ? 'border-n-400 bg-n-50' : 'border-n-200 hover:bg-n-50',
+                'flex min-w-0 flex-1 items-start gap-2.5 rounded-md border-0 px-2 py-2 text-left',
+                focused ? 'bg-surface-selected' : 'bg-transparent hover:bg-n-50',
               ].join(' ')}
             >
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-n-800">
-                  {ref.title}
-                </span>
-                <Chip state={state} />
+              <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-md bg-synapse-50 text-synapse-500">
+                <Icon name="bot" size={15} />
               </span>
-              <span data-testid="agent-duty" className="text-2xs text-n-600">
-                {dutyText(duty.schedule, onDuty, now)}
-              </span>
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
-                <span
-                  data-testid="agent-last-run"
-                  // The exact stamp is one hover away, so nothing is rounded
-                  // out of reach.
-                  title={
-                    facts.kind === 'some' ? (facts.summary.last_started_at ?? undefined) : undefined
-                  }
-                >
-                  {lastRunText(facts, now)}
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-n-900">
+                    {ref.title}
+                  </span>
+                  <Chip state={state} />
                 </span>
-                <span data-testid="agent-spend" className="tabular-nums">
-                  {spendText(facts)}
+                <span data-testid="agent-duty" className="text-2xs text-n-600">
+                  {dutyText(duty.schedule, onDuty, now)}
                 </span>
-                <span data-testid="agent-waiting" className="tabular-nums">
-                  {waitingText(waiting)}
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-n-500">
+                  <span
+                    data-testid="agent-last-run"
+                    // The exact stamp is one hover away, so nothing is rounded
+                    // out of reach.
+                    title={
+                      facts.kind === 'some'
+                        ? (facts.summary.last_started_at ?? undefined)
+                        : undefined
+                    }
+                  >
+                    {lastRunText(facts, now)}
+                  </span>
+                  <span data-testid="agent-spend" className="tabular-nums">
+                    {spendText(facts)}
+                  </span>
+                  <span data-testid="agent-waiting" className="tabular-nums">
+                    {waitingText(waiting)}
+                  </span>
                 </span>
               </span>
             </button>
