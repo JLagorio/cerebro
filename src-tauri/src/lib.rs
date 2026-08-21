@@ -1091,6 +1091,7 @@ fn run_agent(
     request.mcp_token = Some(mcp_state.run_token(
         request.actor.as_deref(),
         request.scope.clone(),
+        request.read_scope.clone(),
         grant_tools(&request),
         run_id.clone(),
     )?);
@@ -1342,6 +1343,7 @@ mod tests {
             actor: None,
             approved_stdio: None,
             scope: None,
+            read_scope: None,
             allowed_tools: None,
             internal: false,
         }

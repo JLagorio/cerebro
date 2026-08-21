@@ -62,6 +62,10 @@ impl Spawn for Live<'_> {
         self.mcp.run_token(
             Some(ACTOR),
             Some(vec![]),
+            // M34.4: the internal constructs read the whole vault by design —
+            // ingest and maintenance ARE whole-vault passes; their bound is
+            // the declared tool list, not a folder.
+            None,
             Some(declared_tools()),
             self.run_id.clone(),
         )
@@ -142,6 +146,8 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run answers, and an answer is not a write.
         scope: Some(vec![]),
+        // M34.4: reads unbounded by folder — see the mint above.
+        read_scope: None,
         // M31.1a — a synthesis run answers from the manifest and nothing
         // else. That was always the design (prompt::RULES); until now it was
         // a sentence. The same list `mint_token` grants (M31.1b).

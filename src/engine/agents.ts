@@ -61,6 +61,15 @@ export interface AgentRef {
    * this replaces.
    */
   scope: string[] | null;
+  /**
+   * Folders this agent may READ (M34.4) — `read-scope:`. Null when the
+   * record declares none: unrestricted, which is what every agent was. Its
+   * own axis because the normal agent reads broadly and writes narrowly;
+   * folding read into write would make the safest write scope also the
+   * blindest reader. Same null-vs-empty reading as `scope`, enforced on the
+   * same bearer token in Rust.
+   */
+  readScope: string[] | null;
   /** Tools this agent may use, intersected with the granted policy (M17.8). */
   allowedTools: string[] | null;
   /**
@@ -135,7 +144,15 @@ export function parseScope(entry: Entry): string[] | null {
   // Wikilink-valued fields land in `relationships`; a folder is not a
   // wikilink, so this only reads properties — but a hand-written
   // `scope: [[Product]]` would arrive there, and is not a folder either way.
-  const raw = entry.properties.scope;
+  return folderList(entry.properties.scope);
+}
+
+/** `read-scope:` frontmatter (M34.4) — same grammar, the READ axis. */
+export function parseReadScope(entry: Entry): string[] | null {
+  return folderList(entry.properties['read-scope']);
+}
+
+function folderList(raw: unknown): string[] | null {
   if (raw === undefined || raw === null) return null;
   const items = Array.isArray(raw) ? raw : [raw];
   return items
@@ -181,6 +198,7 @@ export function agentRef(entry: Entry): AgentRef {
         : '',
     shell: entry.properties.tools === 'shell',
     scope: parseScope(entry),
+    readScope: parseReadScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
     capabilities: parseAllowedTools(entry.properties.capabilities) ?? [],
     connectors: parseAllowedTools(entry.properties.connectors),

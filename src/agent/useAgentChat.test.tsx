@@ -699,6 +699,22 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     // in Rust rather than conjured, so this is a request to narrow, not a grant.
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].connectorNames).toEqual(['atlassian']);
   });
+
+  it('hands the run the read scope the record declared (M34.4)', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [agentEntry({ 'read-scope': ['sources/'] })],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: false, connectors: false }, null),
+    );
+    act(() => result.current.send('@release-scout what is stale'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    // The read axis rides the same bearer the write scope does — an addressed
+    // agent reads what its record says it reads, not what the panel can.
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].readScope).toEqual(['sources']);
+  });
 });
 
 /**

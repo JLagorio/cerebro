@@ -78,6 +78,9 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
             live.mcp.run_token(
                 Some(ACTOR),
                 Some(vec![]),
+                // M34.4: the internal constructs read the whole vault by
+                // design; their bound is the declared tool list.
+                None,
                 Some(declared_tools()),
                 run_id.to_string(),
             )
@@ -155,6 +158,8 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
+        // M34.4: reads unbounded by folder — see the mint above.
+        read_scope: None,
         // M31.1a — see `declared_tools` for what is granted and why. The
         // same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),

@@ -404,6 +404,7 @@ export function useJobRunner(): void {
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
             // Both are narrowings — neither can widen what Settings granted.
             scope: agent?.scope ?? null,
+            readScope: agent?.readScope ?? null,
             allowedTools: agent?.allowedTools ?? null,
             connectorNames: agent?.connectors ?? null,
             connectors,

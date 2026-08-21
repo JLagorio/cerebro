@@ -85,6 +85,13 @@ pub struct RunGrant {
     /// A Collection is a folder, so "the Product collection" is expressible;
     /// its empty entry set (surface.ts) is not consulted and does not matter.
     pub scope: Option<Vec<String>>,
+    /// Vault-relative folders this run may READ inside (M34.4). `None` is
+    /// unrestricted — every run before this shipped, and every run whose
+    /// record declares no `read-scope:`. Its own axis rather than a reuse of
+    /// `scope`, because the normal agent reads broadly and writes narrowly —
+    /// folding the two together would make the safest write scope also the
+    /// blindest reader. Folders only, same reasoning as `scope`.
+    pub read_scope: Option<Vec<String>>,
     /// Tool names this token may dispatch. `None` is unrestricted — the
     /// panel's own turns. Same upper-bound semantics as `scope`, and checked
     /// in the same place, for the same reason: argv is advice, the grant is
@@ -113,6 +120,7 @@ impl RunGrant {
             actor: actor.to_string(),
             run_id: run_id_of(actor),
             scope: None,
+            read_scope: None,
             tools: None,
         }
     }
@@ -122,15 +130,29 @@ impl RunGrant {
     /// escaped into `workspace/` — the classic prefix bug, and the reason this
     /// is a function rather than `starts_with`.
     pub fn may_write(&self, path: &str) -> bool {
-        let Some(scope) = &self.scope else {
-            return true;
-        };
-        let target = path.trim_start_matches("./").trim_start_matches('/');
-        scope.iter().any(|folder| {
-            let folder = folder.trim_matches('/');
-            folder.is_empty() || target == folder || target.starts_with(&format!("{folder}/"))
-        })
+        scope_admits(&self.scope, path)
     }
+
+    /// Is this run allowed to read here? (M34.4) Same containment, same
+    /// separator matching, different axis — see `read_scope` for why the two
+    /// are never one list.
+    pub fn may_read(&self, path: &str) -> bool {
+        scope_admits(&self.read_scope, path)
+    }
+}
+
+/// The one prefix check both axes share: `None` admits everything, an empty
+/// list admits nothing, and a folder admits itself and its descendants —
+/// matched at a path separator so `work` cannot be escaped into `workspace/`.
+fn scope_admits(scope: &Option<Vec<String>>, path: &str) -> bool {
+    let Some(scope) = scope else {
+        return true;
+    };
+    let target = path.trim_start_matches("./").trim_start_matches('/');
+    scope.iter().any(|folder| {
+        let folder = folder.trim_matches('/');
+        folder.is_empty() || target == folder || target.starts_with(&format!("{folder}/"))
+    })
 }
 
 #[derive(Clone)]
@@ -401,6 +423,7 @@ pub(crate) fn test_submit_answer(
         &RunGrant {
             actor: crate::assembly::ask::ACTOR.to_string(),
             run_id: run_id.to_string(),
+            read_scope: None,
             scope: Some(vec![]),
             // The narrowing the real mint site grants a synthesis run.
             tools: Some(crate::assembly::live::declared_tools()),
@@ -551,6 +574,7 @@ impl McpState {
         &self,
         actor: Option<&str>,
         scope: Option<Vec<String>>,
+        read_scope: Option<Vec<String>>,
         tools: Option<Vec<String>>,
         run_id: String,
     ) -> Result<String, String> {
@@ -571,6 +595,9 @@ impl McpState {
                 // declares `scope:` and lists nothing has scoped itself to
                 // nothing, and the only safe reading of that is no writes.
                 scope,
+                // Same reading again (M34.4): a declared-empty read scope
+                // reads nothing, and only `None` is unrestricted.
+                read_scope,
                 // Same reading (M31.1b): an empty tools list grants no
                 // dispatch, and only `None` — the panel — is unrestricted.
                 tools,
@@ -1280,6 +1307,34 @@ fn call_tool(
         return Ok(error_result(refusal));
     }
 
+    // M34.4 — and read PATHS, the axis the tool allowlist cannot express.
+    // The targeted readers refuse here, before the body; the enumerating
+    // readers (search_notes, list_inbox) filter inside their bodies instead
+    // and SAY how many hits were withheld, because a silently thinned result
+    // reads as "that is all there is". knowledge_about reads the knowledge
+    // bundle, so it is bounded by whether the grant admits that folder.
+    let read_target = match name {
+        "get_note" => arg_str(args, "path"),
+        "knowledge_about" => Some(crate::knowledge::KNOWLEDGE_DIR.to_string()),
+        _ => None,
+    };
+    if let Some(target) = read_target {
+        if !grant.may_read(&target) {
+            return Ok(error_result(format!(
+                "This run may read only {} and cannot read {target}.",
+                grant
+                    .read_scope
+                    .as_ref()
+                    .map(|s| if s.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        s.join(", ")
+                    })
+                    .unwrap_or_default()
+            )));
+        }
+    }
+
     if writes_preferences(&grant.actor, name, args) {
         return Ok(error_result(PREFERENCES_REFUSAL.to_string()));
     }
@@ -1287,10 +1342,10 @@ fn call_tool(
     let actor = grant.actor.as_str();
     let outcome = match name {
         "get_vault_context" => tool_vault_context(&vault),
-        "search_notes" => tool_search(&vault, args),
+        "search_notes" => tool_search(&vault, args, grant),
         "get_note" => tool_get_note(&vault, args),
         "knowledge_about" => tool_knowledge_about(&vault, args),
-        "list_inbox" => tool_list_inbox(&vault),
+        "list_inbox" => tool_list_inbox(&vault, grant),
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
@@ -1684,7 +1739,7 @@ fn is_capture(entry: &vault::entry::Entry) -> bool {
     }
 }
 
-fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+fn tool_search(vault: &Path, args: &Map<String, Value>, grant: &RunGrant) -> Result<Value, String> {
     let query = arg_str(args, "query").ok_or("search_notes needs a query")?;
     let type_filter = arg_str(args, "type");
     let limit = args
@@ -1696,7 +1751,18 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     // Every body is read either way — the old substring search did the same —
     // so ranking costs arithmetic over data already in hand and no index
     // (M17.19). Kept as one materialised corpus because `Doc` borrows it.
-    let entries: Vec<vault::entry::Entry> = vault::scan::scan_vault(vault)?
+    // M34.4: notes outside the read scope leave the corpus BEFORE ranking —
+    // an out-of-scope note must not even shape the ranking of what remains —
+    // and the count withheld is reported below, because a silently thinned
+    // result reads as "that is all there is".
+    let scanned = vault::scan::scan_vault(vault)?;
+    let total = scanned.len();
+    let readable: Vec<vault::entry::Entry> = scanned
+        .into_iter()
+        .filter(|e| grant.may_read(&e.path))
+        .collect();
+    let withheld = total - readable.len();
+    let entries: Vec<vault::entry::Entry> = readable
         .into_iter()
         .filter(|e| match &type_filter {
             Some(wanted) => e.entry_type.as_deref() == Some(wanted.as_str()),
@@ -1719,8 +1785,17 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
         .collect();
 
     let ranked = crate::search::rank(&query, &docs, limit);
+    // Named in BOTH outcomes: an empty result over a thinned corpus is the
+    // most misleading sentence this tool can emit.
+    let scope_note = if withheld == 0 {
+        String::new()
+    } else {
+        format!(" ({withheld} notes outside this run's read scope were not searched)")
+    };
     if ranked.hits.is_empty() {
-        return Ok(text_result(format!("No notes matched \"{query}\".")));
+        return Ok(text_result(format!(
+            "No notes matched \"{query}\".{scope_note}"
+        )));
     }
 
     let lines: Vec<String> = ranked
@@ -1748,7 +1823,7 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
         .collect();
 
     Ok(text_result(format!(
-        "{} match(es) for \"{}\"{}:\n{}",
+        "{} match(es) for \"{}\"{}{}:\n{}",
         lines.len(),
         query,
         // Said out loud: an agent handed loose matches as if they were tight
@@ -1758,6 +1833,7 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
         } else {
             " (best first)"
         },
+        scope_note,
         lines.join("\n")
     )))
 }
@@ -1903,19 +1979,35 @@ is tracking something nobody has written up yet. That is legitimate, not a broke
     Ok(text_result(out))
 }
 
-fn tool_list_inbox(vault: &Path) -> Result<Value, String> {
+fn tool_list_inbox(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
     let entries = vault::scan::scan_vault(vault)?;
-    let captures: Vec<String> = entries
+    // M34.4: withheld captures are COUNTED, never absorbed — "the Inbox is
+    // empty" and "this run may not see what is waiting" are opposite
+    // sentences, and an agent told the first when the second is true will
+    // report that nothing needs the user's attention.
+    let (readable, withheld): (Vec<_>, Vec<_>) = entries
         .iter()
         .filter(|e| is_capture(e))
+        .partition(|e| grant.may_read(&e.path));
+    let captures: Vec<String> = readable
+        .iter()
         .map(|e| format!("- {} — {}\n  {}", e.path, e.title, e.snippet))
         .collect();
-    Ok(text_result(if captures.is_empty() {
-        "The Inbox is empty.".to_string()
+    let scope_note = if withheld.is_empty() {
+        String::new()
     } else {
         format!(
-            "{} capture(s) waiting:\n{}",
+            " ({} capture(s) outside this run's read scope are not listed)",
+            withheld.len()
+        )
+    };
+    Ok(text_result(if captures.is_empty() {
+        format!("The Inbox is empty.{scope_note}")
+    } else {
+        format!(
+            "{} capture(s) waiting{}:\n{}",
             captures.len(),
+            scope_note,
             captures.join("\n")
         )
     }))
@@ -2893,9 +2985,73 @@ mod tests {
         RunGrant {
             actor: "process:scout".into(),
             run_id: run_id_of("process:scout"),
+            read_scope: None,
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
             tools: None,
         }
+    }
+
+    /// M34.4 — reads are structural too, on their own axis.
+    fn read_scoped(folders: &[&str]) -> RunGrant {
+        RunGrant {
+            actor: "process:scout".into(),
+            run_id: run_id_of("process:scout"),
+            scope: None,
+            read_scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+            tools: None,
+        }
+    }
+
+    #[test]
+    fn read_scope_is_its_own_axis_with_the_same_separator_matching() {
+        let g = read_scoped(&["projects/atlas", "knowledge"]);
+        assert!(g.may_read("projects/atlas/items/a.md"));
+        assert!(g.may_read("knowledge/concept.md"));
+        assert!(!g.may_read("projects/beta/items/a.md"));
+        // The classic prefix bug, on the read axis this time.
+        assert!(!g.may_read("projects/atlas-archive/a.md"));
+        // And writes stay unbounded here: the axes never fold together —
+        // the normal agent reads broadly and writes narrowly, and a grant
+        // must be able to say each independently.
+        assert!(g.may_write("records/anything.md"));
+    }
+
+    #[test]
+    fn an_undeclared_read_scope_reads_everywhere_and_a_declared_empty_one_nowhere() {
+        assert!(RunGrant::unrestricted("a").may_read("anywhere/at-all.md"));
+        assert!(!read_scoped(&[]).may_read("records/r.md"));
+    }
+
+    #[test]
+    fn search_and_inbox_say_how_many_results_the_read_scope_withheld() {
+        // Absent is never zero: a thinned result that does not say it was
+        // thinned reads as "that is all there is", and an empty Inbox that
+        // means "you may not see what is waiting" is the worse sentence.
+        let dir = std::env::temp_dir().join("cerebro-read-scope-withheld");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("visible")).unwrap();
+        std::fs::create_dir_all(dir.join("hidden")).unwrap();
+        std::fs::write(dir.join("visible/a.md"), "# Alpha\n\nfindable term\n").unwrap();
+        std::fs::write(dir.join("hidden/b.md"), "# Beta\n\nfindable term\n").unwrap();
+
+        let g = read_scoped(&["visible"]);
+        let mut args = Map::new();
+        args.insert("query".into(), Value::String("findable".into()));
+        let result = tool_search(&dir, &args, &g).unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("visible/a.md"));
+        assert!(!text.contains("hidden/b.md"));
+        assert!(
+            text.contains("1 notes outside this run's read scope were not searched"),
+            "the withheld count is the honesty: {text}"
+        );
+
+        let inbox = tool_list_inbox(&dir, &g).unwrap();
+        let text = inbox["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("outside this run's read scope are not listed"),
+            "hidden/b.md is an untyped capture this run may not see: {text}"
+        );
     }
 
     #[test]
@@ -3078,6 +3234,7 @@ mod tests {
             .run_token(
                 Some("agent:m26-ingest"),
                 Some(vec![]),
+                None,
                 Some(vec![COMMIT_TOOL.into()]),
                 crate::ledger::new_run_id(),
             )
@@ -3117,6 +3274,7 @@ mod tests {
             .run_token(
                 Some("agent:m26-synthesis"),
                 Some(vec![]),
+                None,
                 None,
                 durable.clone(),
             )
@@ -3183,6 +3341,7 @@ mod tests {
             actor: "agent:m26-synthesis".into(),
             run_id: run_id.to_string(),
             scope: None,
+            read_scope: None,
             tools: None,
         }
     }

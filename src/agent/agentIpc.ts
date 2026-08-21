@@ -92,6 +92,9 @@ export interface RunOptions {
    * unrestricted. Enforced in Rust against the bearer the child presents, so
    * an agent cannot talk its way out of it. */
   scope?: string[] | null;
+  /** Vault-relative folders this run may READ inside (M34.4). Same Option
+   * semantics as scope; its own axis, enforced in Rust on the same bearer. */
+  readScope?: string[] | null;
   mcp: McpInfo | null;
 }
 
@@ -162,6 +165,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunH
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       allowed_tools: options.allowedTools ?? null,
+      read_scope: options.readScope ?? null,
       connector_names: options.connectorNames ?? null,
       scope: options.scope ?? null,
       mcp_url: options.mcp?.url ?? null,

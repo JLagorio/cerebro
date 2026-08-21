@@ -384,6 +384,9 @@ export function useAgentChat(
             // M17.13: enforced in Rust against the bearer the child presents,
             // so an addressed agent cannot talk its way out of its folders.
             scope: recipient?.scope ?? null,
+            // M34.4: and the read axis, the same way — an addressed agent
+            // reads what its record says it reads, not what the panel can.
+            readScope: recipient?.readScope ?? null,
             // M13.4: attribution rides the bearer token, so what this turn
             // writes is stamped as the agent — and, free, the `runs` row it
             // books carries the actor the fleet reads.

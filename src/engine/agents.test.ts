@@ -41,6 +41,20 @@ describe('listAgents', () => {
     expect(listAgents([agent('Broken', { parseError: 'bad yaml' })])).toEqual([]);
   });
 
+  it('parses read-scope on its own axis, with the null-vs-empty reading scope has (M34.4)', () => {
+    const refs = listAgents([
+      agent('Bounded', { properties: { 'read-scope': ['sources/', './knowledge'] } }),
+      agent('Blind', { properties: { 'read-scope': [] } }),
+      agent('Open', { properties: {} }),
+    ]);
+    const by = (t: string) => refs.find((r) => r.title === t);
+    expect(by('Bounded')?.readScope).toEqual(['sources', 'knowledge']);
+    // Declared-and-empty reads NOTHING; undeclared reads everywhere. Folding
+    // these would make the safest-looking declaration the most dangerous one.
+    expect(by('Blind')?.readScope).toEqual([]);
+    expect(by('Open')?.readScope).toBeNull();
+  });
+
   it('parses capabilities, and an undeclared list is empty — not null, not knowledge', () => {
     // M34.1.3: a capability selects prompt TEXT, never a code path. Empty by
     // default because no agent is the knowledge agent unless it says so.

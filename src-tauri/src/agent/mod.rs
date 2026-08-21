@@ -123,6 +123,13 @@ pub struct AgentRequest {
     /// record that declares `scope:` and lists none. Enforced in mcp.rs at
     /// dispatch, against the bearer the request presents.
     pub scope: Option<Vec<String>>,
+    /// Vault-relative folders this run may READ inside (M34.4 `read-scope:`).
+    ///
+    /// The same Option semantics as `scope`, and its own axis for the reason
+    /// the grant documents: the normal agent reads broadly and writes
+    /// narrowly, so folding read into write would make the safest write
+    /// scope also the blindest reader. Enforced in mcp.rs at dispatch.
+    pub read_scope: Option<Vec<String>>,
     /// A NARROWING of this run's tools, declared by the vault file that
     /// started it (M17.8 `allowed-tools:`, M17.13 agent scope).
     ///
@@ -1095,6 +1102,7 @@ mod tests {
                 actor: None,
                 approved_stdio: None,
                 scope: None,
+                read_scope: None,
                 allowed_tools: None,
                 internal: false,
             },
@@ -1128,6 +1136,7 @@ mod tests {
             actor: None,
             approved_stdio: None,
             scope: None,
+            read_scope: None,
             allowed_tools: None,
             internal: false,
         }
@@ -1320,6 +1329,7 @@ mod tests {
                 actor: None,
                 approved_stdio: None,
                 scope: None,
+                read_scope: None,
                 allowed_tools: None,
                 internal: false,
             },
@@ -1350,6 +1360,7 @@ mod tests {
                 actor: None,
                 approved_stdio: None,
                 scope: None,
+                read_scope: None,
                 allowed_tools: declared
                     .map(|d| d.into_iter().map(String::from).collect::<Vec<String>>()),
                 internal: false,
@@ -1530,6 +1541,7 @@ mod tests {
                 actor: None,
                 approved_stdio: None,
                 scope: None,
+                read_scope: None,
                 allowed_tools: None,
                 internal: false,
             },
@@ -1568,6 +1580,7 @@ mod tests {
                 actor: None,
                 approved_stdio: None,
                 scope: None,
+                read_scope: None,
                 allowed_tools: None,
                 internal: false,
             },
