@@ -258,6 +258,22 @@ export function agentScopeLines(
 }
 
 /**
+ * The READ boundary, stated (M36.4) — the M34.4 deferral's other half. The
+ * enforcement has existed since the grant grew the axis; until now the agent
+ * discovered it as refused reads and searches that said "N withheld". A
+ * boundary the agent knows about is one it can plan around.
+ */
+export function agentReadScopeLines(readScope: readonly string[] | null | undefined): string[] {
+  if (readScope == null) return [];
+  return [
+    readScope.length === 0
+      ? 'You can read no note in this vault: every get_note is refused and every search returns only a withheld count. Work from what this message hands you.'
+      : `You may read notes only inside: ${readScope.join(', ')}. This is enforced — a note elsewhere is refused before its body is served, and searches tell you how many hits were withheld rather than pretending they do not exist.`,
+    '',
+  ];
+}
+
+/**
  * What a chat turn addressed to an agent is told (M33b.6).
  *
  * Prefixed to the person's own message, the way useJobRunner prefixes the
@@ -281,6 +297,10 @@ export function addressedAgentPrompt(
   actor: string,
   memory: { recent: string; preferences: string },
   scope?: readonly string[] | null,
+  /** Folders this turn may READ inside (M36.4) — the addressed turn runs
+   * under the agent's read grant (M34.4), so the agent is told the same
+   * boundary the tools will enforce. */
+  readScope?: readonly string[] | null,
 ): string {
   return [
     `This turn is addressed to "${title}", the agent defined at ${path} in this vault. Answer as that agent: your writes are attributed to ${actor}, and your standing instructions are the body of that record — read it before you answer. A person typed this and is waiting, so reply to them as well as writing anything down.`,
@@ -289,6 +309,7 @@ export function addressedAgentPrompt(
       scope,
       'Say that to the person rather than trying and reporting the refusal.',
     ),
+    ...agentReadScopeLines(readScope),
     ...agentMemoryLines(memory),
     '',
     'What they asked:',
@@ -307,6 +328,8 @@ export function agentRunPrompt(
   /** Folders this run may write inside (M17.13). Stated so the agent plans
    * inside its boundary rather than discovering it as a tool error. */
   scope?: readonly string[] | null,
+  /** Folders this run may READ inside (M36.4) — same reason, other axis. */
+  readScope?: readonly string[] | null,
 ): string {
   return [
     `You are "${title}", the agent defined at ${path} in this vault, on an unattended ${trigger == null ? 'scheduled' : 'event-triggered'} run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
@@ -335,6 +358,7 @@ export function agentRunPrompt(
           '',
         ]),
     ...agentScopeLines(scope, 'Say so in your memory and stop.'),
+    ...agentReadScopeLines(readScope),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',

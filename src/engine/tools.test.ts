@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
-import { ALL_TOOLS, matchedToolset, TOOLSETS, unknownTools, writesAnything } from './tools';
+import {
+  ALL_TOOLS,
+  holdsProposalTools,
+  matchedToolset,
+  proposalConsequence,
+  TOOLSETS,
+  unknownTools,
+  writesAnything,
+} from './tools';
 
 /**
  * M18.4 — the catalog is a MIRROR, and this is what keeps it one.
@@ -137,5 +145,25 @@ describe('writesAnything', () => {
     expect(writesAnything(['get_note', 'search_notes'])).toBe(false);
     expect(writesAnything(['get_note', 'create_note'])).toBe(true);
     expect(writesAnything([])).toBe(false);
+  });
+});
+
+describe('proposal consequence (M36.5)', () => {
+  it('the counts are the artifact, partitioned — never a second inventory', () => {
+    const { applies, queues } = proposalConsequence();
+    const ops = agentFacingOps(POLICY);
+    expect(applies + queues).toBe(ops.length);
+    expect(queues).toBe(ops.filter((op) => POLICY.ops[op].base_risk === 'HIGH').length);
+    // Both sides are non-empty in the shipped table — a table where either
+    // was zero would make one of the consequence sentences a lie.
+    expect(applies).toBeGreaterThan(0);
+    expect(queues).toBeGreaterThan(0);
+  });
+
+  it('the table renders for armed agents only', () => {
+    expect(holdsProposalTools(null)).toBe(false);
+    expect(holdsProposalTools(['get_note', 'write_concept'])).toBe(false);
+    expect(holdsProposalTools(['commit_proposals'])).toBe(true);
+    expect(holdsProposalTools([`propose_${agentFacingOps(POLICY)[0]}`])).toBe(true);
   });
 });

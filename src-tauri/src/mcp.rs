@@ -2217,8 +2217,9 @@ fn tool_hand_to(
         scope: frontmatter_list(record, "scope"),
         read_scope: frontmatter_list(record, "read-scope"),
         allowed_tools: frontmatter_list(record, "allowed-tools"),
-        // Handoffs keep the caller-side booking for now: the chain bills to
-        // its root, and the root-ceiling gate is M36's consequence work.
+        // Handoffs keep the caller-side booking: the chain bills to its
+        // root, and the root's ceiling gates the spawn itself
+        // (dispatch::refuse_if_chain_spent, M36.6) — no lane claim here.
         lane: None,
         internal: false,
     };

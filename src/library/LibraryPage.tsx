@@ -111,9 +111,17 @@ export function LibraryPage() {
           // starts running the moment it is created is something nobody had a
           // chance to read. A `slug:` from the start on the two that have an
           // identity, because this one is certainly about to be renamed.
+          //
+          // M36.2 — and an AGENT is born PAUSED, explicitly, not just inert
+          // by absence: inert-by-no-schedule ends the moment somebody adds
+          // one, and the settled design makes activation two acts —
+          // configure, then unpause. The duty toggle (which already writes
+          // `paused: null | true`) is the way back; nothing new to learn.
           tab === 'template'
             ? { type: null }
-            : { type: tab === 'skill' ? 'Skill' : 'Agent', slug, description: '' },
+            : tab === 'skill'
+              ? { type: 'Skill', slug, description: '' }
+              : { type: 'Agent', slug, description: '', paused: true },
           NEW_BODY[tab](title),
         );
         await rescan();

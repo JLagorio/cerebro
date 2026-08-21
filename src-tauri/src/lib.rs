@@ -1166,6 +1166,12 @@ pub(crate) fn start_handoff_run(
             runtime::settings::refuse_if_agent_paused(conn, &scope.vault_id, Some(&actor))
         })
         .unwrap_or(Ok(()))?;
+        // M36.6 — the root's ceiling stops the chain, enforced at the spawn
+        // like the hop budget and the cycle rule: hops bill to the root, so
+        // a chain that has spent what one background run may spend gets no
+        // further children, whatever its hop count says.
+        let conn = runtime::open_existing(&config_dir(app)?)?;
+        runtime::dispatch::refuse_if_chain_spent(&conn, &caller.run_id, chrono::Utc::now())?;
     }
     let mcp_state = app.state::<mcp::McpState>();
     let run_id = ledger::new_run_id();

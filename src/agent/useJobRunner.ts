@@ -414,6 +414,7 @@ export function useJobRunner(): void {
                   agent?.memory ?? { recent: '', preferences: '' },
                   woken,
                   agent?.scope ?? null,
+                  agent?.readScope ?? null,
                 )
               : job.kind === 'scheduled'
                 ? scheduledSkillPrompt(job.path, job.title, record)

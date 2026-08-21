@@ -356,7 +356,7 @@ export function useAgentChat(
           const outgoing =
             recipient === null
               ? composed
-              : `${addressedAgentPrompt(recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope)}\n\n${composed}`;
+              : `${addressedAgentPrompt(recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope, recipient.readScope)}\n\n${composed}`;
           mcpRef.current ??= await startMcp(vaultPath);
           if (cancelled()) return;
           // Attended, no lane: never gated, so a deferral here would be a

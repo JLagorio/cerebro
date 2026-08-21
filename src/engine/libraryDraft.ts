@@ -1,5 +1,5 @@
 import { slugify } from '@/lib/slug';
-import { parseMemory, parseScope, type AgentMemory } from './agents';
+import { parseMemory, parseReadScope, parseScope, type AgentMemory } from './agents';
 import { parseAllowedTools, parseArguments, type SkillArgument } from './skills';
 import { parseTriggers, type Trigger } from './triggers';
 import type { Entry } from './types';
@@ -80,6 +80,11 @@ export interface AgentDraft {
   description: string;
   /** Folders it may write inside. Null = anywhere; [] = nowhere. */
   scope: string[] | null;
+  /** Folders it may READ inside (M34.4 `read-scope:`, editable M36.3).
+   * Null = reads everything; [] = reads nothing. Its own axis: the normal
+   * agent reads broadly and writes narrowly, so folding read into write
+   * would make the safest write scope also the blindest reader. */
+  readScope: string[] | null;
   allowedTools: string[] | null;
   /** Connectors it may reach. Null = whatever the vault enabled; [] = none. */
   connectors: string[] | null;
@@ -100,6 +105,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     slug: text(entry.properties.slug),
     description: text(entry.properties.description),
     scope: parseScope(entry),
+    readScope: parseReadScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
     connectors: parseAllowedTools(entry.properties.connectors),
     shell: entry.properties.tools === 'shell',
@@ -116,6 +122,7 @@ export function agentPatch(draft: AgentDraft): Record<string, unknown> {
     slug: draft.slug.trim() === '' ? null : slugify(draft.slug),
     description: blank(draft.description),
     scope: draft.scope,
+    'read-scope': draft.readScope,
     'allowed-tools': draft.allowedTools,
     connectors: draft.connectors,
     // `tools: safe` is written rather than removed: the default is safe either

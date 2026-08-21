@@ -681,6 +681,62 @@ pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<u
     Ok(expired.len())
 }
 
+/// The root's ceiling stops the chain (M36.6, settled design decision 5).
+///
+/// Hops bill to the root — `parent_run_id` is the migration that made both
+/// true — so the chain's recorded spend is summed over the ROOT's whole tree
+/// and a hop that would extend a spent chain is refused before any child
+/// exists, like every other hop rule. The allowance is the day's per-run
+/// ambient ceiling: a chain is one job fanned out, and what one background
+/// run may spend is what its whole chain may spend.
+///
+/// Enforcement grows as rows land, and that is stated rather than hidden:
+/// an attended caller's own row is only written when it FINISHES, so a
+/// chain of still-running attended turns sums what its finished members
+/// spent. The two-hop budget bounds what that window can cost.
+pub fn refuse_if_chain_spent(
+    conn: &Connection,
+    caller_run_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    let root: String = conn
+        .query_row(
+            "WITH RECURSIVE up(run_id, parent) AS ( \
+               SELECT run_id, parent_run_id FROM runs WHERE run_id = ?1 \
+               UNION ALL \
+               SELECT r.run_id, r.parent_run_id FROM runs r JOIN up ON up.parent = r.run_id \
+             ) SELECT run_id FROM up WHERE parent IS NULL",
+            [caller_run_id],
+            |row| row.get(0),
+        )
+        // No row yet (the caller is mid-run and unfinished): the caller IS
+        // the root as far as the table can see.
+        .unwrap_or_else(|_| caller_run_id.to_string());
+    let spent: i64 = conn
+        .query_row(
+            "WITH RECURSIVE chain(run_id) AS ( \
+               SELECT run_id FROM runs WHERE run_id = ?1 \
+               UNION ALL \
+               SELECT r.run_id FROM runs r JOIN chain c ON r.parent_run_id = c.run_id \
+             ) SELECT coalesce(sum(input_tokens + output_tokens), 0) FROM runs \
+             WHERE run_id IN (SELECT run_id FROM chain)",
+            [&root],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("chain spend: {e}"))?;
+    let ceiling = super::budget::ensure_day(conn, now)?
+        .ceilings
+        .max_ambient_run_tokens;
+    if (spent as u64) >= ceiling {
+        return Err(format!(
+            "refused: this chain has already spent {spent} tokens, at or past the \
+             {ceiling}-token ceiling its root ({root}) runs under — a spent chain stops, \
+             however many hops it has left"
+        ));
+    }
+    Ok(())
+}
+
 /// Record one attended run. Metered, never gated: no reservation, no lease,
 /// no budget debit, and no way for a full day to stop it.
 #[allow(clippy::too_many_arguments)]
@@ -896,6 +952,54 @@ mod tests {
             total_tokens: 5_000,
             output_tokens: 1_000,
         }
+    }
+
+    /// One finished run row, raw — enough for the chain walk, which reads
+    /// only identity, parentage and the two token columns.
+    fn seed_run(conn: &Connection, vault: &str, run_id: &str, parent: Option<&str>, tokens: i64) {
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
+             outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+             reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, \
+             rejected, parent_run_id) \
+             VALUES (?1, ?2, 'store', 'attended', 'agent', '2026-08-09T01:00:00Z', \
+                     '2026-08-09T01:01:00Z', 'succeeded', 'exact', ?3, 0, 0, 0, 0, 0, 0, 0, 0, ?4)",
+            rusqlite::params![run_id, vault, tokens, parent],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_spent_chain_refuses_its_next_hop_and_names_the_root() {
+        let (dir, conn, vault) = fixture("dispatch-chain-ceiling");
+        let _lock = status::test_lock();
+        status::clear();
+        // Root spent past the 20k per-run ambient ceiling; the caller is a
+        // CHILD, so the walk has to find the root and sum the whole tree.
+        seed_run(&conn, &vault, "root-1", None, 19_000);
+        seed_run(&conn, &vault, "child-1", Some("root-1"), 2_000);
+        let err = refuse_if_chain_spent(&conn, "child-1", at("2026-08-09T02:00:00Z")).unwrap_err();
+        assert!(err.contains("root-1"), "{err}");
+        assert!(err.contains("21000 tokens"), "{err}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fresh_chain_and_an_unfinished_caller_both_pass_the_chain_gate() {
+        let (dir, conn, vault) = fixture("dispatch-chain-fresh");
+        let _lock = status::test_lock();
+        status::clear();
+        // No row at all — an attended caller mid-run whose row lands only at
+        // finish. The gate has nothing to sum and lets the hop through;
+        // stated in the fn docs rather than hidden.
+        refuse_if_chain_spent(&conn, "never-recorded", at("2026-08-09T02:00:00Z")).unwrap();
+        // A chain with real rows under the ceiling passes too.
+        seed_run(&conn, &vault, "root-2", None, 1_000);
+        seed_run(&conn, &vault, "child-2", Some("root-2"), 1_000);
+        refuse_if_chain_spent(&conn, "child-2", at("2026-08-09T02:00:00Z")).unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -47,6 +47,7 @@ function draft(over: Partial<AgentDraft> = {}): AgentDraft {
     slug: 'weekly-digest',
     description: '',
     scope: null,
+    readScope: null,
     allowedTools: null,
     connectors: null,
     shell: false,

@@ -48,6 +48,30 @@ describe('agentRunPrompt', () => {
     expect(prompt).toContain('scoped to no folder at all');
   });
 
+  it('states the READ boundary too, and says searches count what they withhold (M36.4)', () => {
+    // The enforcement is M34.4's; this is the agent being told, so it plans
+    // around the boundary instead of discovering it as refused reads.
+    const prompt = agentRunPrompt(
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      null,
+      null,
+      ['records/risks'],
+    );
+    expect(prompt).toContain('read notes only inside: records/risks');
+    expect(prompt).toContain('withheld');
+    // And absent stays silent: an unrestricted reader gets no boundary talk.
+    expect(base()).not.toContain('read notes only inside');
+  });
+
+  it('an empty read scope says work from what the message hands you (M36.4)', () => {
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, null, []);
+    expect(prompt).toContain('read no note in this vault');
+    expect(prompt).toContain('Work from what this message hands you');
+  });
+
   it('gives the model gate an explicit permission to do nothing', () => {
     // Without it, a model asked "is this important?" finds a way to say yes —
     // the whole point of the gate is that most wakings end here.
@@ -233,6 +257,20 @@ describe('addressedAgentPrompt', () => {
 
   it('ends by handing over to what the person actually asked', () => {
     expect(addressed().trimEnd().endsWith('What they asked:')).toBe(true);
+  });
+
+  it('states the read boundary the addressed turn actually runs under (M36.4)', () => {
+    const prompt = addressedAgentPrompt(
+      'records/agents/scout.md',
+      'Release scout',
+      'process:release-scout',
+      { recent: '', preferences: '' },
+      null,
+      ['records/risks'],
+    );
+    expect(prompt).toContain('read notes only inside: records/risks');
+    // And absent stays silent, exactly like the write axis.
+    expect(addressed()).not.toContain('read notes only inside');
   });
 });
 

@@ -189,6 +189,30 @@ export function toolSpec(name: string): ToolSpec | undefined {
 }
 
 /**
+ * What an armed agent's proposals DO (M36.5) — consequence, not membership.
+ *
+ * Derived from the SHARED policy artifact, never typed out: the counts are
+ * the same table Rust gates against, so the sentence on the agent's page and
+ * the behavior at the channel cannot drift. LOW and MEDIUM auto-apply once
+ * committed; HIGH waits on a card. The escalator sentence is rendered beside
+ * these but needs no derivation — `target_has_attestation → floor HIGH` has
+ * shipped in the artifact since M27.4.
+ */
+export function proposalConsequence(): { applies: number; queues: number } {
+  const ops = agentFacingOps(POLICY);
+  const queues = ops.filter((op) => POLICY.ops[op].base_risk === 'HIGH').length;
+  return { applies: ops.length - queues, queues };
+}
+
+/** True when this selection reaches the proposal channel at all — the
+ * consequence table is rendered for armed agents only; an unarmed agent
+ * gets no table about weapons it does not carry. */
+export function holdsProposalTools(names: readonly string[] | null): boolean {
+  if (names === null) return false;
+  return names.some((n) => PROPOSAL_TOOLS.some((t) => t.name === n));
+}
+
+/**
  * The toolset a picked set of names corresponds to, or null.
  *
  * Used to render "Read the vault" instead of four chips when the selection
