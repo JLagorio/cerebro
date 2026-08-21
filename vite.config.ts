@@ -71,10 +71,10 @@ export default defineConfig({
       // and prompt work arrived tested, so the floor follows it up. Ratchets
       // only tighten.
       thresholds: {
-        lines: 80,
-        statements: 80,
-        functions: 75,
-        branches: 83,
+        lines: 80.4,
+        statements: 80.4,
+        functions: 75.4,
+        branches: 83.6,
       },
     },
   },
