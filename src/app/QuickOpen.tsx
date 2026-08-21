@@ -299,7 +299,10 @@ export function QuickOpen() {
           <button
             key={r.target.id}
             type="button"
-            data-testid="quick-open-result"
+            // The ask row is an OFFER, not a result: it repeats whatever was
+            // typed, so a spec (or anything else) picking "the result whose
+            // text is X" must never land on it.
+            data-testid={r.target.id === 'ask:assistant' ? 'quick-open-ask' : 'quick-open-result'}
             role="option"
             aria-selected={i === activeIndex}
             onClick={() => r.target.run()}
