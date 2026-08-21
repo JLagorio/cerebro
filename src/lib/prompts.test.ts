@@ -23,7 +23,6 @@ const base = () =>
     'Release scout',
     'process:release-scout',
     { recent: '', preferences: '' },
-    'STANDING INSTRUCTIONS BODY',
   );
 
 describe('agentRunPrompt', () => {
@@ -37,7 +36,6 @@ describe('agentRunPrompt', () => {
       'Release scout',
       'process:release-scout',
       { recent: '', preferences: '' },
-      'body',
       null,
       ['records/risks'],
     );
@@ -46,14 +44,14 @@ describe('agentRunPrompt', () => {
   });
 
   it('says an empty scope means every record write will be refused', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, 'b', null, []);
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, []);
     expect(prompt).toContain('scoped to no folder at all');
   });
 
   it('gives the model gate an explicit permission to do nothing', () => {
     // Without it, a model asked "is this important?" finds a way to say yes —
     // the whole point of the gate is that most wakings end here.
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, 'b', {
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
       subject: 'records/risks/r.md',
       because: 'status becomes at-risk',
       ask: 'Does this threaten the release?',
@@ -68,7 +66,6 @@ describe('agentRunPrompt', () => {
       't',
       'a',
       { recent: 'MY OWN NOTES', preferences: 'HUMAN CORRECTION' },
-      'body',
     );
     expect(prompt.indexOf('HUMAN CORRECTION')).toBeLessThan(prompt.indexOf('MY OWN NOTES'));
     expect(prompt).toContain('This outranks your own notes');
@@ -127,7 +124,6 @@ describe('per-trigger instructions (M18.5)', () => {
       'Release scout',
       'process:release-scout',
       { recent: '', preferences: '' },
-      'STANDING INSTRUCTIONS BODY',
       {
         subject: 'records/risks/r.md',
         because: 'status becomes at-risk',
@@ -146,18 +142,18 @@ describe('per-trigger instructions (M18.5)', () => {
     const prompt = withDo();
     expect(prompt).toContain('on top of your standing instructions');
     expect(prompt).toContain('it does not replace them');
-    expect(prompt).toContain('STANDING INSTRUCTIONS BODY');
   });
 
-  it('puts it before the standing instructions, which arrive as the general case', () => {
-    const prompt = withDo();
-    expect(prompt.indexOf('Check the release date')).toBeLessThan(
-      prompt.indexOf('STANDING INSTRUCTIONS BODY'),
-    );
+  it('no longer carries the instructions — they are standing, so they ride the system prompt (M34.1.4)', () => {
+    // A multi-turn agent re-reading its charter as if the user had just typed
+    // it was the defect; the record body now arrives with the system prompt,
+    // and useJobRunner.test.tsx asserts that half.
+    expect(withDo()).not.toContain('Your instructions:');
+    expect(withDo()).not.toContain('STANDING INSTRUCTIONS BODY');
   });
 
   it('changes nothing for a trigger that declares none', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, 'body', {
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
       subject: 'records/risks/r.md',
       because: 'status becomes at-risk',
     });
@@ -167,7 +163,7 @@ describe('per-trigger instructions (M18.5)', () => {
   it('keeps the gate ahead of the instruction, so a "no" run never reads it', () => {
     // Order is the design: decide whether to act, then how. Reversed, the
     // model has already planned the work before being asked to skip it.
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, 'body', {
+    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, {
       subject: 's',
       because: 'b',
       ask: 'SHOULD I?',

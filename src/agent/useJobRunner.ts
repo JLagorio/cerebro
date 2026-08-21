@@ -313,6 +313,10 @@ export function useJobRunner(): void {
             openReviews,
           });
 
+          const record =
+            job.kind === 'agent' || job.kind === 'scheduled'
+              ? splitFrontmatter(await readNote(vaultPath, job.path)).body.trim()
+              : '';
           const body =
             job.kind === 'agent'
               ? agentRunPrompt(
@@ -320,16 +324,11 @@ export function useJobRunner(): void {
                   job.title,
                   agent?.actor ?? 'process:agent',
                   agent?.memory ?? { recent: '', preferences: '' },
-                  splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
                   woken,
                   agent?.scope ?? null,
                 )
               : job.kind === 'scheduled'
-                ? scheduledSkillPrompt(
-                    job.path,
-                    job.title,
-                    splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
-                  )
+                ? scheduledSkillPrompt(job.path, job.title, record)
                 : job.kind === 'refresh'
                   ? refreshSourcePrompt(job.path, job.title)
                   : job.kind === 'schema'
@@ -372,17 +371,25 @@ export function useJobRunner(): void {
             // panel decoration. `selection` is 'none': a background reader is
             // not standing anywhere, and telling it otherwise would colour
             // what it takes from a note with wherever you happen to be.
-            systemPrompt: buildSystemPrompt(
-              { kind: 'none' },
-              {
-                connectors,
-                issuePrefixes,
-                // M34.1.3: the knowledge lanes ARE the knowledge agent in all
-                // but name until M35 — they keep the fragment. An Agent
-                // record gets it only by declaring the capability.
-                capabilities: job.kind === 'agent' ? (agent?.capabilities ?? []) : ['knowledge'],
-              },
-            ),
+            systemPrompt:
+              buildSystemPrompt(
+                { kind: 'none' },
+                {
+                  connectors,
+                  issuePrefixes,
+                  // M34.1.3: the knowledge lanes ARE the knowledge agent in
+                  // all but name until M35 — they keep the fragment. An Agent
+                  // record gets it only by declaring the capability.
+                  capabilities: job.kind === 'agent' ? (agent?.capabilities ?? []) : ['knowledge'],
+                },
+              ) +
+              (job.kind === 'agent' && record !== ''
+                ? // M34.1.4: standing instructions are STANDING — they arrive
+                  // with the system prompt, not as something the user just
+                  // said. Delivered via --append-system-prompt; no wire
+                  // change.
+                  `\n\nYour standing instructions, from ${job.path}:\n\n${record}`
+                : ''),
             // A fresh session every time: a background turn that accumulated
             // context would carry one note's framing into the next one's.
             sessionId: null,

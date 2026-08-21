@@ -300,7 +300,6 @@ export function agentRunPrompt(
   title: string,
   actor: string,
   memory: { recent: string; preferences: string },
-  body: string,
   /** What woke this run, when an event did (M17.12) — layer TWO of the
    * trigger. Layer one already passed deterministically; this is the model
    * gate, and it comes with an explicit permission to do nothing. */
@@ -322,11 +321,11 @@ export function agentRunPrompt(
                 `Before doing anything else, answer this for yourself: ${trigger.ask}`,
                 'If the answer is no, write nothing and stop. A run that correctly does nothing is a success, and this question exists precisely so that most wakings end here.',
               ]),
-          // M18.5 — placed BEFORE the standing instructions and named as an
-          // addition to them, because the failure mode of per-trigger prose is
-          // a model that treats it as a replacement and forgets the agent's
-          // own rules. Said twice, in effect: here, and again by "Your
-          // instructions" arriving afterwards as the general case.
+          // M18.5 — named as an ADDITION to the standing instructions,
+          // because the failure mode of per-trigger prose is a model that
+          // treats it as a replacement and forgets the agent's own rules.
+          // The standing instructions themselves arrive with the system
+          // prompt (M34.1.4) — standing, not something the user just said.
           ...(trigger.do === undefined
             ? []
             : [
@@ -346,10 +345,6 @@ export function agentRunPrompt(
     '',
     `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
     'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
-    '',
-    'Your instructions:',
-    '',
-    body,
   ].join('\n');
 }
 

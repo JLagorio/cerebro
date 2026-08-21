@@ -605,12 +605,11 @@ describe('useAgentChat addressed by name (M33b.6)', () => {
  *   file tools are never in `--allowedTools` at all. The value asserted below
  *   is the whole boundary.
  * - `allowedTools` is enforced at argv the same way (`narrow()`, an
- *   intersection, mod.rs:586) — but NOT yet by the bearer grant:
- *   `lib.rs:1024-1029` passes `None` for the token's tools on every run started
- *   through `run_agent`, so `ungranted_tool_refusal` (mcp.rs:1278) refuses
- *   nothing for it. That is M34.1.1's fix, not this phase's, and it is why the
- *   assertion below is about what the ROUTING hands the run rather than about
- *   a tool call being refused end to end.
+ *   intersection, mod.rs:586) AND, since M34.1.1, by the bearer grant:
+ *   `run_agent` passes the request's tools into `run_token`, so
+ *   `ungranted_tool_refusal` (mcp.rs) refuses what the intersection below
+ *   withheld. The assertion here stays about what the ROUTING hands the run;
+ *   the refusal end of it is the Rust side's to test, and it does.
  */
 describe('useAgentChat cannot be widened by who it is addressed to', () => {
   const agentEntry = (properties: Record<string, unknown>) =>

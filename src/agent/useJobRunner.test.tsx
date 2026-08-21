@@ -391,6 +391,23 @@ describe('useJobRunner shell gating', () => {
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({ shell: false });
   });
 
+  it('hands an agent its record body with the system prompt, never the message (M34.1.4)', async () => {
+    // Standing instructions are STANDING. Folded into the user message, a
+    // multi-turn agent re-reads its own charter as if the user had just
+    // typed it; the mocked readNote body is 'playbook', so that string must
+    // appear on exactly one side of the wire.
+    useVaultStore.setState({
+      entries: [agentRecord('records/agents/scout.md', 'Scout')],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(options.systemPrompt).toContain('Your standing instructions, from records/agents/scout.md');
+    expect(options.systemPrompt).toContain('playbook');
+    expect(options.message).not.toContain('playbook');
+  });
+
   it('an agent gets shell only from its own tools: declaration, inside the ceiling', async () => {
     useVaultStore.setState({
       entries: [
