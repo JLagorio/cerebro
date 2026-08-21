@@ -39,14 +39,15 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
   and `EpistemicStatusPage` are all gone. **The shell is ONE nav column**
   (M37.3 flattened the icon rail and the per-surface sidebar into
-  `app/Sidebar.tsx`): vault header, search, nine destinations (Home, Inbox,
-  Work, Studio, Base, History, Assistant, Library, Settings — M37.2 spent
-  the locked names Base/Work, M38.3 retired Docs for the standing **Pages**
-  tree, M40 added Studio; the selection KINDS stay `knowledge`/`workspace`,
-  labels only), then the Pages tree, Collections, and the **Databases**
-  section (M39 — the label; `type:` and every internal identifier keep the
-  old word), with Base's rows nested under its destination while current.
-  The nine names are asserted in `app/Sidebar.test.tsx`; specs scope
+  `app/Sidebar.tsx`): vault header, search, ten destinations (Home, Inbox,
+  Agents, Work, Studio, Base, History, Assistant, Library, Settings — M37.2
+  spent the locked names Base/Work, M38.3 retired Docs for the standing
+  **Pages** tree, M40 added Studio, M41 added Agents; the selection KINDS
+  stay `knowledge`/`workspace`, labels only), then the Pages tree,
+  Collections, and the **Databases** section (M39 — the label; `type:` and
+  every internal identifier keep the old word), with Base's rows nested
+  under its destination while current.
+  The ten names are asserted in `app/Sidebar.test.tsx`; specs scope
   destination clicks to `nav-surfaces` (nested tree rows share accessible
   names with destinations). Sections are addressed by `data-section`, never
   by a per-section testid, and `KnowledgeNav` carries the tab (plus `run`,
