@@ -37,11 +37,16 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   `knowledge/KnowledgeNav.tsx` is the nav and `knowledge/BaseItself.tsx`
   composes the epistemic tabs from the section components in `src/status/`,
   each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
-  and `EpistemicStatusPage` are all gone, and the rail is 9 buttons (Home,
-  Inbox, Docs, Work, Base, History, Assistant, Library, Settings — M37.2
-  spent the locked names: Base was Knowledge, Work was Workspace; the
-  selection KINDS stay `knowledge`/`workspace`, labels only), asserted by
-  name in `app/Rail.test.tsx`. Sections are addressed by
+  and `EpistemicStatusPage` are all gone. **The shell is ONE nav column**
+  (M37.3 flattened the icon rail and the per-surface sidebar into
+  `app/Sidebar.tsx`): vault header, search, nine destinations (Home, Inbox,
+  Docs, Work, Base, History, Assistant, Library, Settings — M37.2 spent the
+  locked names: Base was Knowledge, Work was Workspace; the selection KINDS
+  stay `knowledge`/`workspace`, labels only), Collections + Types inline, and
+  the Docs tree / Base rows nested under their destination row while that
+  surface is current. The nine names are asserted in `app/Sidebar.test.tsx`;
+  specs scope destination clicks to `nav-surfaces` (nested tree rows share
+  accessible names with destinations). Sections are addressed by
   `data-section`, never by a per-section testid, and `KnowledgeNav` carries
   the tab (plus `run`, for one fleet detail) so a section is a place the back
   button returns to.
