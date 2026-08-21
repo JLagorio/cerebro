@@ -18,8 +18,11 @@ export function Topbar() {
           onClick={() => setQuickOpen(true)}
           className="flex h-9 w-[480px] items-center gap-2 rounded-lg border border-n-200 bg-n-25 px-3 text-sm text-n-400 hover:border-n-300"
         >
-          <Icon name="search" size={15} />
-          <span className="flex-1 text-left">Search or jump to…</span>
+          {/* The DS ask-bar (M42.5): the sparkle is synapse because asking is
+              the one AI act in this bar, and the palette's top row keeps the
+              promise the words make. */}
+          <Icon name="sparkles" size={15} color="var(--synapse-500)" />
+          <span className="flex-1 text-left">Search or ask…</span>
           <kbd className="rounded-sm border border-n-200 bg-n-0 px-1.5 text-2xs text-n-500 [font-family:var(--font-mono)]">
             ⌘K
           </kbd>

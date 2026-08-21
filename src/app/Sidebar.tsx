@@ -529,7 +529,9 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           <SurfaceRow
             icon="brain"
             label="Base"
-            active={knowledgeMode && (selection.kind !== 'knowledge' || selection.nav === undefined)}
+            active={
+              knowledgeMode && (selection.kind !== 'knowledge' || selection.nav === undefined)
+            }
             chevron={chevronFor('base')}
             onClick={() => navigate({ kind: 'knowledge' })}
           />

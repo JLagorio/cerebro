@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
@@ -40,6 +40,7 @@ interface Target {
 export function QuickOpen() {
   const visible = useUiStore((s) => s.quickOpenVisible);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
+  const askAgent = useUiStore((s) => s.askAgent);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -47,7 +48,8 @@ export function QuickOpen() {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const close = () => setQuickOpen(false);
+  // useCallback because `close` sits in the results memo's deps (M42.5).
+  const close = useCallback(() => setQuickOpen(false), [setQuickOpen]);
   const go = (selection: Selection) => {
     close();
     navigate(selection);
@@ -192,19 +194,47 @@ export function QuickOpen() {
   const results = useMemo(() => {
     const q = query.trim();
     if (q === '') return places.map((target) => ({ target, score: 0 }));
-    return targets
-      .map((t) => ({
-        target: t,
-        score: Math.max(quickOpenScore(q, t.label), quickOpenScore(q, t.alias)),
-      }))
-      .filter((r) => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 12);
-  }, [targets, places, query]);
+    // The DS ask-bar contract (M42.5): one synapse-tinted "ask" row at the
+    // top — a row, not a mode. It hands the typed words to the assistant
+    // panel, which is the one chat there is.
+    const ask: { target: Target; score: number } = {
+      target: {
+        id: 'ask:assistant',
+        label: `Ask the assistant: ${q}`,
+        icon: 'sparkles',
+        color: 'var(--synapse-500)',
+        hint: '',
+        meta: '',
+        kindLabel: 'Ask',
+        alias: '',
+        run: () => {
+          close();
+          askAgent(q);
+        },
+      },
+      score: 0,
+    };
+    return [
+      ask,
+      ...targets
+        .map((t) => ({
+          target: t,
+          score: Math.max(quickOpenScore(q, t.label), quickOpenScore(q, t.alias)),
+        }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12),
+    ];
+  }, [targets, places, query, askAgent, close]);
 
   useEffect(() => {
-    setActiveIndex(0);
-  }, [query]);
+    // The ask row is pinned, not preferred: with matches on screen the
+    // default highlight is the best MATCH, so Enter keeps meaning "open the
+    // thing I named" and asking is one ↑ away. With nothing else to offer,
+    // the ask row takes the highlight — Enter on a query nothing matches is
+    // exactly the moment to hand the words to the assistant.
+    setActiveIndex(query.trim() === '' ? 0 : Math.min(1, results.length - 1));
+  }, [query, results]);
 
   useEffect(() => {
     if (!visible) {

@@ -22,8 +22,27 @@ describe('QuickOpen', () => {
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided');
     const options = screen.getAllByRole('option');
-    // 'Guided onboarding' (prefix match) must rank first
-    expect(options[0].textContent).toContain('Guided onboarding');
+    // The ask row is pinned above every match (M42.5, the DS ask-bar
+    // contract); 'Guided onboarding' (prefix match) must rank first among
+    // the MATCHES — and carry the default highlight, so Enter still means
+    // "open the thing I named".
+    expect(options[0].textContent).toContain('Ask the assistant');
+    expect(options[0].getAttribute('aria-selected')).toBe('false');
+    expect(options[1].textContent).toContain('Guided onboarding');
+    expect(options[1].getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('the ask row hands the words to the assistant panel (M42.5)', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'why is onboarding stalling');
+    await user.click(screen.getByRole('option', { name: /Ask the assistant/ }));
+    expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().agentPendingPrompt).toEqual({
+      text: 'why is onboarding stalling',
+      subject: null,
+    });
+    expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });
 
   it('Enter opens the top result and closes the palette', async () => {
@@ -44,7 +63,8 @@ describe('QuickOpen', () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'wire');
-    await user.click(screen.getAllByRole('option')[0]);
+    // [0] is the pinned ask row (M42.5); the best match sits under it.
+    await user.click(screen.getAllByRole('option')[1]);
     // M12.5: containment still gives the backdrop, but the backdrop is the
     // folder's Collection — the project page is gone.
     expect(useNavStore.getState().selection).toEqual({
@@ -61,7 +81,8 @@ describe('QuickOpen', () => {
     useUiStore.setState({ detailPath: null });
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'ana');
-    await user.click(screen.getAllByRole('option')[0]);
+    // [0] is the pinned ask row (M42.5); the best match sits under it.
+    await user.click(screen.getAllByRole('option')[1]);
     expect(useNavStore.getState().selection).toEqual({
       kind: 'type',
       name: 'Person',
@@ -98,7 +119,8 @@ describe('QuickOpen', () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided');
-    const spans = [...screen.getAllByRole('option')[0].querySelectorAll('span')];
+    // [1]: the pinned ask row above it has no key chip to measure (M42.5).
+    const spans = [...screen.getAllByRole('option')[1].querySelectorAll('span')];
     const mono = spans.filter((s) => s.className.includes('font-mono'));
     expect(mono).toHaveLength(1);
     const kind = spans[spans.length - 1];
