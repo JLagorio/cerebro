@@ -60,8 +60,8 @@ describe('Rail', () => {
       'Home',
       'Inbox',
       'Docs',
-      'Workspace',
-      'Knowledge',
+      'Work',
+      'Base',
       'History',
       'Assistant',
       'Library',
@@ -73,6 +73,11 @@ describe('Rail', () => {
     expect(labels).not.toContain('Status');
     expect(labels).not.toContain('Needs review');
     expect(labels).not.toContain('Background');
+    // M37.2 spent the names the design locked: Base was Knowledge, Work was
+    // Workspace. The OLD labels join the tombstone list for the same reason —
+    // a label silently reverting is a shell change nobody decided.
+    expect(labels).not.toContain('Knowledge');
+    expect(labels).not.toContain('Workspace');
   });
 
   it('navigates to the Docs surface', () => {

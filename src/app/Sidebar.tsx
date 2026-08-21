@@ -243,8 +243,12 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
         {/* An h2, not an h1 (M15): this names the navigator, not the page. As an
             h1 it gave Docs two level-1 headings and made Inbox/Knowledge read as
             subsections of the file tree. */}
+        {/* M37.2 — the Base nav wears the locked name. The item-world
+            heading keeps "Workspace" for now: it names the vault navigator,
+            never appears beside the rail's Work surface (SIDEBARLESS), and
+            this whole column is M37.3's to restructure. */}
         <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-n-900">
-          {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
+          {docsMode ? 'Docs' : knowledgeMode ? 'Base' : 'Workspace'}
         </h2>
         <button
           type="button"

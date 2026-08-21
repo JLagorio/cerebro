@@ -70,7 +70,7 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   await boot(page);
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
 
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
@@ -258,7 +258,7 @@ test('retire: a replaced concept says so, and stops asking to be verified', asyn
   await boot(page);
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
 
   // The pilot's week-long offline window was replaced by the 72-hour decision.

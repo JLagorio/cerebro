@@ -47,7 +47,7 @@ async function seedRepos(page: Page): Promise<void> {
 }
 
 async function openWorkspace(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Workspace' }).click();
+  await page.getByRole('button', { name: 'Work', exact: true }).click();
   await expect(page.getByTestId('workspace-page')).toBeVisible();
 }
 

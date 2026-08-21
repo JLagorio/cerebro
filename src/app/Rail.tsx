@@ -143,9 +143,13 @@ export function Rail() {
       {/* M30 — mounted repositories. Its own room rather than a section of
           Docs: Docs means untyped vault notes (`isDocEntry`), and a surface
           that renders .ts files cannot mean that. */}
+      {/* M37.2 — "Work", the name the design locked. The selection KIND
+          stays `workspace`: kinds are internal vocabulary shared with the
+          navigate MCP tool and dozens of call sites; the label is the part
+          a person reads, and renaming the rest buys nothing visible. */}
       <RailButton
         icon="folder-tree"
-        label="Workspace"
+        label="Work"
         active={workspaceActive}
         onClick={() => navigate({ kind: 'workspace' })}
       />
@@ -165,9 +169,11 @@ export function Rail() {
           says itself on the agent's own row, in words, and gets no colour.
           A destination may say how big it is; nothing counts up at you from
           the chrome. */}
+      {/* M37.2 — "Base", the other locked name. Same rule: label only, the
+          `knowledge` kind stays. */}
       <RailButton
         icon="brain"
-        label="Knowledge"
+        label="Base"
         active={knowledgeActive}
         onClick={() => navigate({ kind: 'knowledge' })}
       />

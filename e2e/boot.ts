@@ -88,7 +88,7 @@ export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[
  * which is what every assertion downstream addresses.
  */
 export async function openKnowledgeTab(page: Page, row: string) {
-  await page.getByTestId('rail').getByRole('button', { name: 'Knowledge' }).click();
+  await page.getByTestId('rail').getByRole('button', { name: 'Base' }).click();
   await page.getByTestId('knowledge-nav-row').filter({ hasText: row }).click();
 }
 

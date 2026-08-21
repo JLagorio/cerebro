@@ -38,8 +38,10 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   composes the epistemic tabs from the section components in `src/status/`,
   each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
   and `EpistemicStatusPage` are all gone, and the rail is 9 buttons (Home,
-  Inbox, Docs, Workspace, Knowledge, History, Assistant, Library, Settings),
-  asserted by name in `app/Rail.test.tsx`. Sections are addressed by
+  Inbox, Docs, Work, Base, History, Assistant, Library, Settings — M37.2
+  spent the locked names: Base was Knowledge, Work was Workspace; the
+  selection KINDS stay `knowledge`/`workspace`, labels only), asserted by
+  name in `app/Rail.test.tsx`. Sections are addressed by
   `data-section`, never by a per-section testid, and `KnowledgeNav` carries
   the tab (plus `run`, for one fleet detail) so a section is a place the back
   button returns to.

@@ -8,7 +8,7 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
 
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
   // M33a.3 — the tab opens on the heaviest THREAD now, not the flat list, so
@@ -64,7 +64,7 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
   await boot(page);
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
   // The flat list, because the two concepts this walks between sit in
   // different threads (M33a.3 moved the default off `all`).
@@ -99,7 +99,7 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   await boot(page);
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
 
   // The sidebar stops being Home's. Collections and Types describe a corpus
@@ -185,8 +185,8 @@ test('knowledge: the Rail carries no review badge', async ({ page }) => {
 
   // A count in the chrome is the app nagging you to drain a queue. The same
   // number lives on the "Needs review" row, where it describes a destination.
-  const knowledge = page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ });
-  await expect(knowledge).toHaveAttribute('aria-label', 'Knowledge');
+  const knowledge = page.getByTestId('rail').getByRole('button', { name: /^Base/ });
+  await expect(knowledge).toHaveAttribute('aria-label', 'Base');
   await expect(knowledge.getByTestId('rail-badge')).toHaveCount(0);
 
   await knowledge.click();
@@ -325,7 +325,7 @@ test('knowledge: the three axes render per facet, and review is not one of them'
 
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
@@ -365,7 +365,7 @@ test('knowledge: a vault with no ledger shows no axes rather than empty ones', a
   await boot(page);
   await page
     .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
+    .getByRole('button', { name: /^Base/ })
     .click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
