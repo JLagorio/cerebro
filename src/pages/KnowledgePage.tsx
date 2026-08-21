@@ -10,6 +10,7 @@ import {
   verifyPatch,
   type Concept,
 } from '@/engine/okf';
+import { agentRef, isAgentEntry } from '@/engine/agents';
 import type { KnowledgeNav, Selection } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { NewRecordDialog } from '@/app/CreateMenu';
@@ -213,6 +214,18 @@ export function KnowledgePage({
   useEffect(() => {
     if (linkedPath !== null) setSelectedPath(linkedPath);
   }, [linkedPath]);
+
+  // M35.3 — who maintains this. Resolved by CAPABILITY, never by slug or
+  // title: `capabilities: knowledge` is what hands an agent the bundle's
+  // conventions (M34.1.3), so it is also what earns the byline. No record →
+  // null, and the header keeps its anonymous label — the tab predates the
+  // agent and an absent record is not a failure.
+  const maintainer = useMemo(() => {
+    const record = entries.find(
+      (e) => isAgentEntry(e) && agentRef(e).capabilities.includes('knowledge'),
+    );
+    return record === undefined ? null : { path: record.path, title: record.title };
+  }, [entries]);
 
   const today = todayIso();
   const all = useMemo(() => listConcepts(entries, today), [entries, today]);
@@ -466,12 +479,26 @@ export function KnowledgePage({
             {provenanceOpen ? 'Hide provenance' : 'Provenance'}
           </Button>
         )}
-        {!narrow && (
-          <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
-            <Icon name="lock" size={12} />
-            Maintained by the agent
-          </span>
-        )}
+        {/* M35.3 — the base's judgement has a face: the byline names the
+            knowledge-capable Agent record and opens it. Without one the
+            anonymous label stands, as it always has. */}
+        {!narrow &&
+          (maintainer !== null ? (
+            <button
+              type="button"
+              data-testid="knowledge-maintainer"
+              onClick={() => openPath(maintainer.path)}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:text-n-800"
+            >
+              <Icon name="lock" size={12} />
+              Maintained by {maintainer.title}
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
+              <Icon name="lock" size={12} />
+              Maintained by the agent
+            </span>
+          ))}
       </header>
 
       {selected === null && !showThread ? (

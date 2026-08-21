@@ -40,6 +40,14 @@ use super::usage::{self, RunFacts, Usage};
 /// read from ONE place (M31's no-twin-inventory rule applied to actor names).
 /// A construct added without appearing here is a construct the fleet cannot
 /// offer to filter by.
+///
+/// **Permanently internal — the M35 decision, recorded where the names
+/// live.** These three never become Agent records: their tool grants are
+/// structural (`AgentRequest.internal` is unreachable from the wire), their
+/// spawn sites are Rust, and a record would hand vault-authored frontmatter
+/// the steering of machinery the vault must not steer. The fleet renders
+/// them as the unowned rest of the roster — visible, named, and faceless BY
+/// DESIGN, not as an agent nobody got around to writing.
 pub const CONSTRUCT_ACTORS: [&str; 3] = [
     crate::ingest::driver::ACTOR,
     crate::maintain::pass::ACTOR,
