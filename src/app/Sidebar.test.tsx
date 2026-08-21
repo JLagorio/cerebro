@@ -81,6 +81,9 @@ describe('Sidebar', () => {
       inboxPeriod: 'all',
       aiPanelOpen: false,
       sidebarCollapsed: false,
+      // The nav groups open (M42.2) — a fold left behind by another test is
+      // state, not a default.
+      navClosed: [],
     });
   });
 
@@ -198,12 +201,15 @@ describe('Sidebar', () => {
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
       useNavStore.setState({ selection: { kind: 'workspace' } });
       render(<Sidebar onNewView={vi.fn()} />);
-      // Scoped: the demo fixtures hold a COLLECTION named Work too, and only
-      // the destination row wears aria-current.
-      const work = within(screen.getAllByTestId('nav-surfaces')[0]).getByRole('button', {
-        name: 'Work',
-      });
-      expect(work.getAttribute('aria-current')).toBe('page');
+      // Scoped to the destination containers: the demo fixtures hold a
+      // COLLECTION named Work too, and only the destination row wears
+      // aria-current. Since M42.2 each group head lives in its own container,
+      // so the search walks all of them.
+      const work = screen
+        .getAllByTestId('nav-surfaces')
+        .map((group) => within(group).queryByRole('button', { name: 'Work' }))
+        .find((button) => button !== null);
+      expect(work?.getAttribute('aria-current')).toBe('page');
       // A toggle is not a destination: it reports pressed, never current.
       const assistant = screen.getByRole('button', { name: 'Assistant' });
       expect(assistant.getAttribute('aria-pressed')).toBe('false');
@@ -234,17 +240,44 @@ describe('Sidebar', () => {
       expect(screen.getByRole('button', { name: 'Inbox (1)' })).toBeTruthy();
     });
 
-    it('nests the Base nav rows under the Base row while on Base (M35 relocation)', () => {
-      useNavStore.setState({ selection: { kind: 'knowledge' } });
-      render(<Sidebar onNewView={vi.fn()} />);
-      // The rows are KnowledgeNav's — same testid, same axes, new geometry.
-      expect(screen.getAllByTestId('knowledge-nav-row').length).toBeGreaterThan(0);
-      cleanup();
-      // And gone the moment the surface is not current: content is still a
-      // function of the destination (M15), it just stopped displacing the nav.
+    it('keeps the Base rows available on every surface, lighting none while elsewhere (M42.2)', () => {
+      // M37.3 nested these rows under Base only WHILE current; the Notion turn
+      // makes them standing — "we see it all there, available" — and the
+      // un-current nav elects no default row, because a highlight naming a
+      // view that is not on screen is worse than none.
       useNavStore.setState({ selection: { kind: 'home' } });
       render(<Sidebar onNewView={vi.fn()} />);
-      expect(screen.queryAllByTestId('knowledge-nav-row')).toEqual([]);
+      const rows = screen.getAllByTestId('knowledge-nav-row');
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([]);
+    });
+
+    it('nests the vault agents under Agents, and the chevron folds the group (M42.2)', () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          mkEntry({ path: 'records/agents/scout.md', title: 'Scout', type: 'Agent' }),
+        ],
+      });
+      render(<Sidebar onNewView={vi.fn()} />);
+      // The nested row is a destination for ONE agent — and it lives outside
+      // the `nav-surfaces` containers, so an agent named after a destination
+      // can never be caught by a spec scoped to them.
+      fireEvent.click(screen.getByTestId('nav-agent'));
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'agents',
+        actor: 'process:scout',
+      });
+      // Folding is not navigating: the chevron hides the rows and the
+      // selection stays where it was.
+      const head = screen.getByRole('button', { name: 'Agents' });
+      fireEvent.click(within(head).getByTestId('nav-chevron'));
+      expect(screen.queryAllByTestId('nav-agent')).toEqual([]);
+      expect(screen.queryByTestId('nav-agent-new')).toBeNull();
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'agents',
+        actor: 'process:scout',
+      });
     });
 
     it('the search row opens QuickOpen', () => {

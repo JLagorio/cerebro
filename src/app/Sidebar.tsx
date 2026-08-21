@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
@@ -15,12 +15,15 @@ import { CollectionDialog } from '@/app/CollectionDialog';
 import { deleteCollection, deleteList } from '@/app/listActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
+import { agentRef, isAgentEntry } from '@/engine/agents';
 import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { inboxCounts } from '@/engine/inbox';
+import { studioProjects } from '@/engine/studio';
 import { listTypes, type TypeListing } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
+import { useRootsStore } from '@/stores/rootsStore';
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -69,6 +72,7 @@ function SurfaceRow({
   toggle = false,
   count,
   onClick,
+  chevron,
 }: {
   icon: string;
   label: string;
@@ -78,6 +82,12 @@ function SurfaceRow({
   /** Queue size shown as a badge; omitted or 0 renders nothing. */
   count?: number;
   onClick: () => void;
+  /**
+   * Group disclosure (M42.2): a destination that owns nested rows leads with
+   * a rotating chevron. Toggling is not navigating, so the chevron eats its
+   * own click and the row still goes where it always went.
+   */
+  chevron?: { open: boolean; onToggle: () => void };
 }) {
   return (
     <button
@@ -86,8 +96,22 @@ function SurfaceRow({
       aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
       aria-current={!toggle && active ? 'page' : undefined}
       aria-pressed={toggle ? active : undefined}
+      aria-expanded={chevron === undefined ? undefined : chevron.open}
       className={rowClass(active)}
     >
+      {chevron !== undefined && (
+        <span
+          data-testid="nav-chevron"
+          onClick={(e) => {
+            e.stopPropagation();
+            chevron.onToggle();
+          }}
+          className="-ml-1 inline-flex flex-none text-n-400 transition-transform duration-[120ms]"
+          style={chevron.open ? { transform: 'rotate(90deg)' } : undefined}
+        >
+          <Icon name="chevron-right" size={13} />
+        </span>
+      )}
       <Icon name={icon} size={15} />
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       {count !== undefined && count > 0 && (
@@ -151,8 +175,30 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
 
   // M8.1: Base navigates by its own axes rather than borrowing Views and
   // Types, which describe a corpus with a different author; its rows nest
-  // under the Base row while that surface is current (M37.3).
+  // under the Base row (always available since M42.2).
   const knowledgeMode = selection.kind === 'knowledge';
+
+  // M42.2 — the Notion turn: a destination that owns subjects is a GROUP, and
+  // its subjects nest under it on every surface. Open unless closed, so a new
+  // vault shows everything it has.
+  const navClosed = useUiStore((s) => s.navClosed);
+  const setNavGroupOpen = useUiStore((s) => s.setNavGroupOpen);
+  const groupOpen = (key: string) => !navClosed.includes(key);
+  const chevronFor = (key: string) => ({
+    open: groupOpen(key),
+    onToggle: () => setNavGroupOpen(key, !groupOpen(key)),
+  });
+
+  const agents = useMemo(() => entries.filter(isAgentEntry).map(agentRef), [entries]);
+  const prototypes = useMemo(() => studioProjects(entries), [entries]);
+  // The mounted repos, read here rather than waiting for the Work surface to
+  // mount: rows the nav promises to show cannot depend on having visited the
+  // page that used to own the read.
+  const roots = useRootsStore((s) => s.roots);
+  const loadRoots = useRootsStore((s) => s.loadRoots);
+  useEffect(() => {
+    void loadRoots();
+  }, [loadRoots]);
   // M9.4: the two git surfaces share one slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
   const homeActive = HOME_KINDS.has(selection.kind);
@@ -332,6 +378,14 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
         <kbd className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">⌘K</kbd>
       </button>
       <div className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* M42.2 — every destination that owns subjects is a GROUP whose
+            rows nest under it, on every surface (the Notion shape the user
+            asked for by name). Heads live in `nav-surfaces` containers;
+            nested rows live OUTSIDE them, because nested labels are not
+            destinations and an agent named "Home" must never be caught by a
+            spec scoped to the destinations. Only the deepest thing you are
+            on lights up — a lit parent above a lit child is two rows
+            claiming one place. */}
         <div data-testid="nav-surfaces">
           <SurfaceRow
             icon="house"
@@ -356,9 +410,45 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           <SurfaceRow
             icon="bot"
             label="Agents"
-            active={selection.kind === 'agents'}
+            active={selection.kind === 'agents' && selection.actor === undefined}
+            chevron={chevronFor('agents')}
             onClick={() => navigate({ kind: 'agents' })}
           />
+        </div>
+        {groupOpen('agents') && (
+          <div className="pl-3" data-section="nav-agents">
+            {agents.map((ref) => {
+              const on = selection.kind === 'agents' && selection.actor === ref.actor;
+              return (
+                <button
+                  key={ref.path}
+                  type="button"
+                  data-testid="nav-agent"
+                  aria-current={on ? 'page' : undefined}
+                  onClick={() => navigate({ kind: 'agents', actor: ref.actor })}
+                  className={rowClass(on)}
+                >
+                  {/* Synapse, the one violet in the chrome: these rows ARE
+                      the AI surfaces the DS reserves it for. */}
+                  <Icon name="bot" size={15} color="var(--synapse-500)" />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                    {ref.title}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              data-testid="nav-agent-new"
+              onClick={() => navigate({ kind: 'library', tab: 'agent' })}
+              className={`${rowClass(false)} text-n-500`}
+            >
+              <Icon name="plus" size={15} color="var(--n-400)" />
+              <span>New agent</span>
+            </button>
+          </div>
+        )}
+        <div data-testid="nav-surfaces">
           {/* M30 — mounted repositories. Its own room rather than a section
               of the pages: pages are vault notes, and a surface that renders
               .ts files cannot mean that. The label is the locked name
@@ -367,17 +457,67 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           <SurfaceRow
             icon="folder-tree"
             label="Work"
-            active={selection.kind === 'workspace'}
+            active={selection.kind === 'workspace' && selection.root === undefined}
+            chevron={chevronFor('work')}
             onClick={() => navigate({ kind: 'workspace' })}
           />
+        </div>
+        {groupOpen('work') && roots.length > 0 && (
+          <div className="pl-3" data-section="nav-work">
+            {roots.map((root) => {
+              const on = selection.kind === 'workspace' && selection.root === root.id;
+              return (
+                <button
+                  key={root.id}
+                  type="button"
+                  data-testid="nav-root"
+                  aria-current={on ? 'page' : undefined}
+                  onClick={() => navigate({ kind: 'workspace', root: root.id })}
+                  className={rowClass(on)}
+                >
+                  <Icon name="folder-git-2" size={15} color={root.color ?? 'var(--n-500)'} />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                    {root.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div data-testid="nav-surfaces">
           {/* M40 — the third locked name. A making surface, so it sits with
               Work rather than below the fold with the chrome. */}
           <SurfaceRow
             icon="pencil-ruler"
             label="Studio"
-            active={selection.kind === 'studio'}
+            active={selection.kind === 'studio' && selection.project === undefined}
+            chevron={chevronFor('studio')}
             onClick={() => navigate({ kind: 'studio' })}
           />
+        </div>
+        {groupOpen('studio') && prototypes.length > 0 && (
+          <div className="pl-3" data-section="nav-studio">
+            {prototypes.map((project) => {
+              const on = selection.kind === 'studio' && selection.project === project.slug;
+              return (
+                <button
+                  key={project.slug}
+                  type="button"
+                  data-testid="nav-prototype"
+                  aria-current={on ? 'page' : undefined}
+                  onClick={() => navigate({ kind: 'studio', project: project.slug })}
+                  className={rowClass(on)}
+                >
+                  <Icon name="shapes" size={15} color="var(--n-500)" />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                    {project.title}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div data-testid="nav-surfaces">
           {/* M5: the agent's corpus is a peer of Home and Docs — different
               author, different rules. M33a.2 folded the Status hub in, so this
               one destination is both what the base holds and what it knows
@@ -389,20 +529,22 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           <SurfaceRow
             icon="brain"
             label="Base"
-            active={knowledgeMode}
+            active={knowledgeMode && (selection.kind !== 'knowledge' || selection.nav === undefined)}
+            chevron={chevronFor('base')}
             onClick={() => navigate({ kind: 'knowledge' })}
           />
         </div>
-        {/* M37.3 — the geometry M35 deferred: Base's nav rows live inline in
-            the one nav column now, nested under the destination that owns
-            them (and outside the destinations container, same as the Docs
-            tree — its row labels are not destinations). `nav` passed through
-            undefined on a nav-less selection: which view that lands on is the
-            nav's own answer (M33a.3), and defaulting it here would make the
-            sidebar a second opinion. */}
-        {knowledgeMode && selection.kind === 'knowledge' && (
-          <div className="pl-3">
-            <KnowledgeNav nav={selection.nav} />
+        {/* `nav` passed through undefined on a nav-less selection: which view
+            that lands on is the nav's own answer (M33a.3), and defaulting it
+            here would make the sidebar a second opinion. `current` keeps an
+            un-current nav from electing a default row for a canvas some other
+            surface owns. */}
+        {groupOpen('base') && (
+          <div className="pl-3" data-section="nav-base">
+            <KnowledgeNav
+              nav={selection.kind === 'knowledge' ? selection.nav : undefined}
+              current={knowledgeMode}
+            />
           </div>
         )}
         <div data-testid="nav-surfaces">

@@ -138,6 +138,14 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /**
+   * Destination groups COLLAPSED in the one nav column (M42.2). Stored as the
+   * closed set so the default — everything open, "we see it all there,
+   * available" — is an empty list rather than a roll of group names a new
+   * group has to remember to join.
+   */
+  navClosed: string[];
+  setNavGroupOpen(key: string, open: boolean): void;
 
   /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
@@ -337,6 +345,7 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const NAV_CLOSED_KEY = 'cerebro.navClosed';
 const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
 const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
 const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
@@ -711,6 +720,13 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
+  },
+  navClosed: loadStringList(NAV_CLOSED_KEY),
+  setNavGroupOpen: (key, open) => {
+    const closed = get().navClosed;
+    const next = open ? closed.filter((k) => k !== key) : [...new Set([...closed, key])];
+    storeString(NAV_CLOSED_KEY, JSON.stringify(next));
+    set({ navClosed: next });
   },
 
   workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',

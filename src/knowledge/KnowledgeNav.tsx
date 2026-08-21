@@ -81,7 +81,19 @@ function NavRow({
   );
 }
 
-export function KnowledgeNav({ nav }: { nav?: Nav }) {
+export function KnowledgeNav({
+  nav,
+  current = true,
+}: {
+  nav?: Nav;
+  /**
+   * Whether Base owns the canvas right now (M42.2). The nav renders on every
+   * surface since the groups nested — but electing the default row while some
+   * OTHER surface is on screen would be a highlight naming a view that is not
+   * there, so an un-current nav lights nothing.
+   */
+  current?: boolean;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const today = todayIso();
@@ -95,7 +107,7 @@ export function KnowledgeNav({ nav }: { nav?: Nav }) {
   // (M33a.3), resolved from the same function — a highlighted row that names a
   // different view than the one on screen is worse than no highlight at all.
   const here = nav ?? defaultKnowledgeNav(subjects);
-  const is = (candidate: Nav) => sameTab(here, candidate);
+  const is = (candidate: Nav) => current && sameTab(here, candidate);
 
   return (
     // M37.3: nested under the Base row of the one nav column, which owns the
