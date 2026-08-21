@@ -40,6 +40,19 @@ describe('listAgents', () => {
   it('skips unparseable records', () => {
     expect(listAgents([agent('Broken', { parseError: 'bad yaml' })])).toEqual([]);
   });
+
+  it('parses capabilities, and an undeclared list is empty — not null, not knowledge', () => {
+    // M34.1.3: a capability selects prompt TEXT, never a code path. Empty by
+    // default because no agent is the knowledge agent unless it says so.
+    const refs = listAgents([
+      agent('Curator', { properties: { capabilities: ['knowledge'] } }),
+      agent('Release scout', { properties: {} }),
+    ]);
+    const curator = refs.find((r) => r.title === 'Curator');
+    const scout = refs.find((r) => r.title === 'Release scout');
+    expect(curator?.capabilities).toEqual(['knowledge']);
+    expect(scout?.capabilities).toEqual([]);
+  });
 });
 
 /**

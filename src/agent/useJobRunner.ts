@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp } from './agentIpc';
-import { buildSystemPrompt } from './AiPanel';
+import { buildSystemPrompt } from './systemPrompt';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { diffEntries, type VaultEvent } from '@/engine/events';
@@ -372,7 +372,17 @@ export function useJobRunner(): void {
             // panel decoration. `selection` is 'none': a background reader is
             // not standing anywhere, and telling it otherwise would colour
             // what it takes from a note with wherever you happen to be.
-            systemPrompt: buildSystemPrompt({ kind: 'none' }, { connectors, issuePrefixes }),
+            systemPrompt: buildSystemPrompt(
+              { kind: 'none' },
+              {
+                connectors,
+                issuePrefixes,
+                // M34.1.3: the knowledge lanes ARE the knowledge agent in all
+                // but name until M35 — they keep the fragment. An Agent
+                // record gets it only by declaring the capability.
+                capabilities: job.kind === 'agent' ? (agent?.capabilities ?? []) : ['knowledge'],
+              },
+            ),
             // A fresh session every time: a background turn that accumulated
             // context would carry one note's framing into the next one's.
             sessionId: null,

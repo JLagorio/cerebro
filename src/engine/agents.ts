@@ -64,6 +64,14 @@ export interface AgentRef {
   /** Tools this agent may use, intersected with the granted policy (M17.8). */
   allowedTools: string[] | null;
   /**
+   * Named system-prompt fragments this agent opts into (M34.1.3).
+   * Deliberately the smallest possible mechanism: a capability selects TEXT,
+   * never a code path — routing behavior on it would be the type
+   * special-casing AGENTS.md forbids. Empty when undeclared: no agent is the
+   * knowledge agent by default.
+   */
+  capabilities: string[];
+  /**
    * Connectors this agent may reach (M18.4).
    *
    * Null when the record names none — the run gets whatever the vault has
@@ -174,6 +182,7 @@ export function agentRef(entry: Entry): AgentRef {
     shell: entry.properties.tools === 'shell',
     scope: parseScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
+    capabilities: parseAllowedTools(entry.properties.capabilities) ?? [],
     connectors: parseAllowedTools(entry.properties.connectors),
     memory: parseMemory(entry),
   };

@@ -29,7 +29,7 @@ vi.mock('./agentIpc', () => ({
 }));
 // The runner only needs the prompt string; importing the real panel drags the
 // whole chat surface into a hook test.
-vi.mock('./AiPanel', () => ({ buildSystemPrompt: () => 'sys' }));
+vi.mock('./systemPrompt', () => ({ buildSystemPrompt: () => 'sys' }));
 // Scheduled runs read their record's body before consuming the fire key.
 vi.mock('@/lib/ipc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/ipc')>();
