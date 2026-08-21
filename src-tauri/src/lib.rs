@@ -1025,6 +1025,15 @@ fn start_mcp(
     state.ensure(&app, Path::new(&vault))
 }
 
+/// M34.1.1: the tools half of the grant, taken from the REQUEST like the
+/// scope half always was. `None` is unrestricted (the panel's own turns: a
+/// person is watching them and no record narrowed them); `Some([])` is
+/// narrowed to nothing (the editor popovers say exactly that). The CLI never
+/// sees this and therefore cannot argue with it.
+fn grant_tools(request: &agent::AgentRequest) -> Option<Vec<String>> {
+    request.allowed_tools.clone()
+}
+
 /// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
 fn run_agent(
@@ -1077,12 +1086,12 @@ fn run_agent(
     let durable = run_id.clone();
     // M17.13: the scope rides the same token. It is taken from the REQUEST,
     // which the app builds from the Agent record — the CLI never sees it and
-    // therefore cannot argue with it. No tool narrowing (M31.1b): the
-    // panel's own turns are unrestricted, and a person is watching them.
+    // therefore cannot argue with it. M34.1.1: so do the tools. argv
+    // narrowing was always advice; this is the boundary behind it.
     request.mcp_token = Some(mcp_state.run_token(
         request.actor.as_deref(),
         request.scope.clone(),
-        None,
+        grant_tools(&request),
         run_id.clone(),
     )?);
     let dir = config_dir(&app)?;
@@ -1310,4 +1319,45 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A request shaped like the panel's — the same construction the agent
+    /// module's own tests use, since `AgentRequest` derives no Default.
+    fn panel_style_request() -> agent::AgentRequest {
+        agent::AgentRequest {
+            message: "hi".into(),
+            system_prompt: None,
+            session_id: None,
+            model: None,
+            shell: None,
+            connectors: None,
+            connector_names: None,
+            attended: None,
+            mcp_url: None,
+            mcp_token: None,
+            actor: None,
+            approved_stdio: None,
+            scope: None,
+            allowed_tools: None,
+            internal: false,
+        }
+    }
+
+    #[test]
+    fn grant_tools_passes_the_request_through_without_inventing_either_default() {
+        let mut req = panel_style_request();
+        assert_eq!(grant_tools(&req), None, "absent stays unrestricted");
+        req.allowed_tools = Some(vec![]);
+        assert_eq!(
+            grant_tools(&req),
+            Some(vec![]),
+            "narrowed-to-nothing stays nothing"
+        );
+        req.allowed_tools = Some(vec!["get_note".into()]);
+        assert_eq!(grant_tools(&req), Some(vec!["get_note".into()]));
+    }
 }
