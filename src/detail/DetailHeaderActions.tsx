@@ -7,6 +7,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { deleteNote } from '@/lib/ipc';
 import { duplicateRecord } from '@/app/recordActions';
 import type { Entry } from '@/engine/types';
+import { useNavStore } from '@/stores/navStore';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -22,11 +23,10 @@ import { useVaultStore } from '@/stores/vaultStore';
  * peek / Center peek / Full page) · previous/next · Share · page info ·
  * favourite · overflow.
  *
- * Three are deliberately absent.
+ * Two are deliberately absent. (Open in full page was the third — M38.2 made
+ * it real: a record can be a full page now, so the peek is a default rather
+ * than a wall.)
  *
- * - **Open in full page** would break M12.1's locked rule: a record opens in
- *   this panel and a doc opens full-page in Docs, and the two surfaces never
- *   blend. There is no full page to open.
  * - **Peek mode** is a choice between three ways of floating over the
  *   content. This panel is a COLUMN (M11) — it shrinks the canvas rather than
  *   covering it — so the equivalent question is how wide, and the answer is
@@ -43,6 +43,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
   const closeDetail = useUiStore((s) => s.closeDetail);
   const openDetail = useUiStore((s) => s.openDetail);
   const stepDetail = useUiStore((s) => s.stepDetail);
+  const navigate = useNavStore((s) => s.navigate);
   const siblings = useUiStore((s) => s.detailSiblings);
   const width = useUiStore((s) => s.detailWidth);
   const setWidth = useUiStore((s) => s.setDetailWidth);
@@ -138,6 +139,18 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
           )}
         </span>
       )}
+      {/* M38.2 — the peek stopped being a wall. Same page, full canvas: the
+          record's properties and body render in the page canvas, and the
+          panel closes because the same record twice is one time too many. */}
+      <IconButton
+        icon="maximize-2"
+        label="Open in full page"
+        size="sm"
+        onClick={() => {
+          navigate({ kind: 'doc', path: entry.path });
+          closeDetail();
+        }}
+      />
       <IconButton
         icon={wide ? 'chevrons-right' : 'chevrons-left'}
         label={wide ? 'Narrow the panel' : 'Widen the panel'}

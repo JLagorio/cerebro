@@ -24,10 +24,11 @@ const dirOf = (path: string) => {
 };
 
 /**
- * The one routing rule (M12.1, projects retired M12.5): a RECORD — any typed
- * entry — opens in the detail panel, and a DOC — any untyped note — opens
- * full-page in Docs. Records never land in the doc editor; the two surfaces
- * never blend, and no type name routes specially.
+ * The one routing DEFAULT (M12.1 as law, M38.2 as default; projects retired
+ * M12.5): a RECORD — any typed entry — peeks in the detail panel, and a DOC —
+ * any untyped note — opens full-page. The peek header's "Open in full page"
+ * is the explicit act that puts a record on the page canvas; nothing routes
+ * there implicitly, and no type name routes specially.
  *
  * `type: Type` docs are the schema, so opening one goes to the type screen
  * it declares. Templates and the knowledge bundle carry types that are not

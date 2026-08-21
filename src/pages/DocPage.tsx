@@ -14,7 +14,9 @@ import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
+import { RecordProperties } from '@/detail/RecordProperties';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
+import { isRecordEntry } from '@/engine/typeCatalog';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
@@ -241,11 +243,22 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const docPages = docPagesFor(entry, entries);
   const fullWidth = entry.properties.full_width === true;
+  // M38.2 — a record is a page too. Same canvas, plus the property surface
+  // the panel shows, minus nothing.
+  const record = isRecordEntry(entry);
 
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
   const folderSegments = entry.folder === '' ? [] : entry.folder.split('/');
   const crumbFolders = docPages !== null ? folderSegments.slice(0, -1) : folderSegments;
+
+  // A record's crumb root is its backdrop — the Collection it lives in when
+  // it has one, its type screen otherwise: the same rule useOpenPath applies
+  // when it picks a canvas to put behind the peek (M38.2).
+  const recordFolder =
+    entry.project !== null && entry.project.includes('/')
+      ? entry.project.slice(0, entry.project.lastIndexOf('/'))
+      : null;
 
   const moveSubject: { path: string; label: string } =
     docPages !== null
@@ -480,7 +493,20 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
       <div className="flex h-11 flex-none items-center gap-0.5 border-b border-n-200 px-3">
-        {crumb('Docs', { icon: 'library', onClick: () => navigate({ kind: 'docs' }) })}
+        {record
+          ? recordFolder !== null
+            ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
+                icon: 'folder',
+                onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
+              })
+            : crumb(entry.type ?? 'Records', {
+                icon: 'database',
+                onClick:
+                  entry.type === null
+                    ? undefined
+                    : () => navigate({ kind: 'type', name: entry.type as string }),
+              })
+          : crumb('Docs', { icon: 'library', onClick: () => navigate({ kind: 'docs' }) })}
         {crumbFolders.map((seg, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
             {separator}
@@ -579,6 +605,15 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       title={entry.title}
                       onCommit={(next) => void adoptTitle(next)}
                     />
+                  )}
+                  {/* M38.2 — the property surface the peek shows, on the
+                      page. The SAME component: one property editor, two
+                      geometries, so a field added here is a field added
+                      there. */}
+                  {record && (
+                    <div data-testid="page-properties" className="mb-4">
+                      <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+                    </div>
                   )}
                   <NoteBodyEditor
                     key={`${entry.path}#${reloadGen}`}
