@@ -39,6 +39,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 import * as agentIpc from './agentIpc';
 import { useJobRunner } from './useJobRunner';
 import { makeEntry } from '@/engine/testHelpers';
+import { loadRunLog } from '@/engine/runLog';
 import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -406,6 +407,46 @@ describe('useJobRunner shell gating', () => {
     expect(options.systemPrompt).toContain('Your standing instructions, from records/agents/scout.md');
     expect(options.systemPrompt).toContain('playbook');
     expect(options.message).not.toContain('playbook');
+  });
+
+  it('stamps a schedule-fired run with the moment it was owed (M34.2)', async () => {
+    // The clock is pinned to 10:30 and the schedule says 09:00, so this run
+    // is a catch-up — the log entry must know when it was due, and lateness
+    // is derived, never stored.
+    window.localStorage.removeItem('cerebro.runLog');
+    useVaultStore.setState({
+      entries: [agentRecord('records/agents/scout.md', 'Scout')],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+
+    const [entry] = loadRunLog();
+    expect(entry.dueAt).toBeDefined();
+    const due = new Date(entry.dueAt!);
+    expect([due.getHours(), due.getMinutes()]).toEqual([9, 0]);
+  });
+
+  it('logs a run that died before it started — could not tell is not found nothing (M34.2)', async () => {
+    // An unreadable record used to end in pure silence: no run row, no log
+    // entry, indistinguishable from "nothing was due". The absence of a row
+    // reads as an empty state, and this surface is not allowed to say
+    // "nothing happened" when it means "we could not tell".
+    window.localStorage.removeItem('cerebro.runLog');
+    vi.mocked(ipc.readNote).mockImplementationOnce(async () => {
+      throw new Error('EACCES');
+    });
+    useVaultStore.setState({
+      entries: [agentRecord('records/agents/scout.md', 'Scout')],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    const [entry] = loadRunLog();
+    expect(entry.status).toBe('failed');
+    expect(entry.error).toContain('could not read records/agents/scout.md');
+    expect(entry.error).toContain('cannot say what it found');
   });
 
   it('an agent gets shell only from its own tools: declaration, inside the ceiling', async () => {

@@ -46,6 +46,13 @@ export interface RunLogEntry {
   /** Present when status is 'failed'. One line, never a stack. */
   error?: string;
   /**
+   * When a schedule owed this run (M34.2), ISO. Present only for
+   * schedule-fired jobs — an event run is due the moment its event lands and
+   * a chat turn is due never. Optional like `durableId`, and for the same
+   * reason: old entries parse unchanged.
+   */
+  dueAt?: string;
+  /**
    * The durable run id (M33.7) — the key of this run's row in `runs`.
    *
    * OPTIONAL, and old entries parse unchanged: this log has always been keyed
@@ -113,8 +120,34 @@ export function clearRunLog(): void {
 export function describeRun(entry: RunLogEntry): string {
   if (entry.status === 'failed') return entry.error ?? 'Failed';
   if (entry.status === 'stopped') return 'Stopped';
-  if (entry.files.length === 0) return 'Wrote nothing';
-  return entry.files.length === 1 ? `Wrote ${entry.files[0]}` : `Wrote ${entry.files.length} files`;
+  const wrote =
+    entry.files.length === 0
+      ? 'Wrote nothing'
+      : entry.files.length === 1
+        ? `Wrote ${entry.files[0]}`
+        : `Wrote ${entry.files.length} files`;
+  const late = lateBy(entry);
+  return late === null ? wrote : `${wrote} · ran ${late} late`;
+}
+
+/**
+ * A run fired well after its due moment says how late (M34.2) — the visible
+ * consequence of app-lifetime scheduling, and deliberately NOT a failure: a
+ * laptop closed over the weekend owes one honest catch-up, not an apology.
+ * The threshold is the runner's own cadence (60s tick + settle) with margin;
+ * a run landing inside it was simply the next tick, not a missed window.
+ */
+const LATE_AFTER_MS = 5 * 60_000;
+
+function lateBy(entry: RunLogEntry): string | null {
+  if (entry.dueAt === undefined) return null;
+  const gap = Date.parse(entry.at) - Date.parse(entry.dueAt);
+  if (Number.isNaN(gap) || gap < LATE_AFTER_MS) return null;
+  const minutes = Math.round(gap / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 /**

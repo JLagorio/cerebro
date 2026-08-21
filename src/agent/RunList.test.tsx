@@ -207,6 +207,40 @@ describe('the run log (M17.15)', () => {
     ).toBe('Wrote nothing');
   });
 
+  it('says how late a catch-up run was, because late is not failed (M34.2)', () => {
+    expect(
+      describeRun({
+        id: 'r',
+        at: '2026-08-02T09:14:00.000Z',
+        owner: 'job',
+        label: 'x',
+        source: null,
+        trigger: 'schedule',
+        scope: null,
+        files: ['a.md'],
+        status: 'ok',
+        dueAt: '2026-07-31T06:00:00.000Z',
+      }),
+    ).toBe('Wrote a.md · ran 2d late');
+  });
+
+  it('does not call a run late for landing inside the tick cadence', () => {
+    expect(
+      describeRun({
+        id: 'r',
+        at: '2026-07-31T06:02:00.000Z',
+        owner: 'job',
+        label: 'x',
+        source: null,
+        trigger: 'schedule',
+        scope: null,
+        files: [],
+        status: 'ok',
+        dueAt: '2026-07-31T06:00:00.000Z',
+      }),
+    ).toBe('Wrote nothing');
+  });
+
   it('stays out of the status bar entirely when nothing has ever run', () => {
     render(<RunList />);
     expect(screen.queryByTestId('status-agent')).toBeNull();

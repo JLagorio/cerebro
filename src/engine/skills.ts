@@ -325,6 +325,34 @@ export function lastFireKey(schedule: Schedule, now: Date): string {
 }
 
 /**
+ * The instant a fire key names (M34.2) — the run's DUE moment, parsed back
+ * from the ledger key `lastFireKey` minted. Lives beside the mint because the
+ * two formats are one contract: dated keys are local wall-clock, hourly keys
+ * are UTC (the DST reasoning above), and nothing outside this module may
+ * guess at either. Null for anything else — an event runKey has no due time,
+ * and inventing one would let a triggered run claim it was "late".
+ */
+export function fireKeyDate(key: string): Date | null {
+  const dated = key.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+  if (dated !== null) {
+    return new Date(
+      Number(dated[1]),
+      Number(dated[2]) - 1,
+      Number(dated[3]),
+      Number(dated[4]),
+      Number(dated[5]),
+    );
+  }
+  const hourly = key.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):00Z$/);
+  if (hourly !== null) {
+    return new Date(
+      Date.UTC(Number(hourly[1]), Number(hourly[2]) - 1, Number(hourly[3]), Number(hourly[4])),
+    );
+  }
+  return null;
+}
+
+/**
  * When this schedule fires next (M33.6). The forward twin of `lastFireKey`,
  * and it lives here for the same reason that one does: what "weekdays" or
  * "weekly thu" MEANS is schedule arithmetic, and a dossier that worked it out

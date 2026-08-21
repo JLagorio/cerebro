@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listSkills, matchSkillInvocation, skillIndex, skillPrompt } from './skills';
+import { fireKeyDate, lastFireKey, listSkills, matchSkillInvocation, skillIndex, skillPrompt } from './skills';
 import { makeEntry } from './testHelpers';
 
 const skill = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>
@@ -269,5 +269,26 @@ describe('the catalogue is budgeted', () => {
   it('always ships at least one, however long its description', () => {
     const wordy = skill('Verbose', { properties: { description: 'x'.repeat(5_000) } });
     expect(skillIndex(listSkills([wordy]))).toContain('/verbose');
+  });
+});
+
+describe('fireKeyDate (M34.2)', () => {
+  // The runKey IS the due stamp — lastFireKey mints it, so only this module
+  // may parse it back. Round-tripping is the whole contract: a late run's
+  // "was due" must be the exact moment the ledger key names.
+  it('round-trips a dated key through the local clock', () => {
+    const now = new Date(2026, 6, 31, 10, 30);
+    const key = lastFireKey({ kind: 'daily', hour: 9, minute: 0 }, now);
+    expect(fireKeyDate(key)?.getTime()).toBe(new Date(2026, 6, 31, 9, 0).getTime());
+  });
+
+  it('round-trips an hourly key through UTC', () => {
+    const now = new Date(Date.UTC(2026, 6, 31, 14, 45));
+    const key = lastFireKey({ kind: 'hourly' }, now);
+    expect(fireKeyDate(key)?.getTime()).toBe(Date.UTC(2026, 6, 31, 14, 0));
+  });
+
+  it('returns null for an event runKey rather than inventing a due time', () => {
+    expect(fireKeyDate('event:changed:records/r.md@2026-07-31')).toBeNull();
   });
 });

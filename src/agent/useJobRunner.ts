@@ -9,7 +9,7 @@ import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
-import { isSkillEntry, parseSchedule } from '@/engine/skills';
+import { fireKeyDate, isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { fleetActorSummary, readNote, reviewQueue } from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
@@ -434,6 +434,16 @@ export function useJobRunner(): void {
             scope: agent?.scope ?? null,
             // Absent in the browser, where there is no row to point at.
             ...(durableId === null ? {} : { durableId }),
+            // M34.2: a schedule-fired job's runKey IS its due stamp, so the
+            // log can say when this run was owed — and, on a catch-up after a
+            // closed weekend, how late it ran. Late is not failed.
+            ...(() => {
+              const due =
+                job.ledger === 'skillRuns' && !job.runKey.startsWith('event:')
+                  ? fireKeyDate(job.runKey)
+                  : null;
+              return due === null ? {} : { dueAt: due.toISOString() };
+            })(),
           };
           unsubscribe.current = onAgentEvent((event) => {
             if (event.kind === 'ToolStart') {
@@ -444,9 +454,26 @@ export function useJobRunner(): void {
             if (event.kind === 'Done' || event.kind === 'Error') finish();
           }, runId);
         } catch {
-          // Silent by construction. A background runner that could raise a
-          // toast would be a notification, which is the one thing this whole
-          // surface is not allowed to be.
+          // Silent by construction — no toast: a background runner that could
+          // raise one would be a notification, which is the one thing this
+          // whole surface is not allowed to be. But silent is not INVISIBLE
+          // (M34.2): a run that died before it started still gets a log row,
+          // because "found nothing to do" and "could not tell" are different
+          // sentences and an absent row reads as the first one.
+          if (logged.current === null) {
+            appendRunLog({
+              id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              at: new Date().toISOString(),
+              owner: 'job',
+              label: job.title,
+              source: job.path,
+              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              scope: agent?.scope ?? null,
+              files: [],
+              status: 'failed',
+              error: `could not read ${job.path} — this run cannot say what it found`,
+            });
+          }
           if (!recorded) {
             setFailedReads((m) => ({
               ...m,
