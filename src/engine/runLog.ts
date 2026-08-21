@@ -42,8 +42,12 @@ export interface RunLogEntry {
   /** Vault paths it wrote, in call order. Empty is a real and common result —
    * an agent that correctly decides to do nothing has run successfully. */
   files: string[];
-  status: 'ok' | 'failed' | 'stopped';
-  /** Present when status is 'failed'. One line, never a stack. */
+  /** `deferred` (M34.2.4) is the budget gate saying "not now" — the run
+   * never started, its fire key was surrendered, and it retries on a later
+   * launch. Deliberately not `failed`: nothing went wrong. */
+  status: 'ok' | 'failed' | 'stopped' | 'deferred';
+  /** Present when status is 'failed' or 'deferred'. One line, never a
+   * stack — for a deferral, the gate's reasons. */
   error?: string;
   /**
    * When a schedule owed this run (M34.2), ISO. Present only for
@@ -120,6 +124,7 @@ export function clearRunLog(): void {
 export function describeRun(entry: RunLogEntry): string {
   if (entry.status === 'failed') return entry.error ?? 'Failed';
   if (entry.status === 'stopped') return 'Stopped';
+  if (entry.status === 'deferred') return entry.error ?? 'Deferred by the budget gate';
   const wrote =
     entry.files.length === 0
       ? 'Wrote nothing'

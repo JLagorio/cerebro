@@ -302,7 +302,10 @@ struct LedgerImportEntry {
     run_key: String,
 }
 
-fn job_ledger_scope(app: &tauri::AppHandle, vault: &str) -> Result<(rusqlite::Connection, String), String> {
+fn job_ledger_scope(
+    app: &tauri::AppHandle,
+    vault: &str,
+) -> Result<(rusqlite::Connection, String), String> {
     let conn = runtime::open_existing(&config_dir(app)?)?;
     let vault_id = runtime::scope::register(&conn, Path::new(vault))?;
     Ok((conn, vault_id))
@@ -338,6 +341,21 @@ fn job_ledger_claim(
 ) -> Result<bool, String> {
     let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
     runtime::job_ledger::claim(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// Surrender a claim the caller holds — the deferred runner's revert, so a
+/// gate refusal never eats the fire it refused. Conditional on the exact
+/// run_key, so a claim another window re-won is never destroyed.
+#[tauri::command(async)]
+fn job_ledger_unclaim(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<bool, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::unclaim(&conn, &vault_id, &ledger, &key, &run_key)
 }
 
 /// Overwrite a cooldown stamp. No verdict — a clock is not a claim.
@@ -1186,6 +1204,20 @@ pub(crate) fn start_handoff_run(
     .map(|_run| durable)
 }
 
+/// What starting a run answers (M34.2.4): a handle, or a typed deferral.
+///
+/// `Deferred` is the ambient gate saying "not now" — over a ceiling, paused,
+/// accounting unknown — and it is a RESULT, not an error: the caller is
+/// expected to read the reasons, log one honest row, and leave the fire key
+/// unconsumed so the run happens when the window resets. Untagged serde: the
+/// renderer tells the arms apart by which field is present.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RunStart {
+    Started(RunHandle),
+    Deferred { deferred: Vec<String> },
+}
+
 /// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
 fn run_agent(
@@ -1194,7 +1226,7 @@ fn run_agent(
     mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
-) -> Result<RunHandle, String> {
+) -> Result<RunStart, String> {
     // Attribution rides the run's own bearer token (M13.4): the MCP server
     // stamps `generated.by` from the token each request presents, so a
     // child killed while a write is in flight still stamps as itself.
@@ -1227,11 +1259,74 @@ fn run_agent(
         })
         .unwrap_or(Ok(()))?;
     }
+    // M34.2.4 — an unattended run that names its lane is AMBIENT spend, and
+    // spec §8.3 is answered here: `mode='attended', lane='agent'` on every
+    // renderer-started run was a gap, not intent. The claim is the same call
+    // the ingest driver makes — zero items, the job's lane, the record's
+    // actor, the day's per-run reservation — so schedules and ingest share
+    // one budget, one concurrency ceiling, and one deferral record. A
+    // deferral returns TYPED, with its reasons: the runner logs one honest
+    // row and the fire key stays unconsumed, because a run the gate refused
+    // must not eat the period it was refused in.
+    //
+    // No lane, or no runtime scope to claim against, keeps the legacy
+    // attended booking — metering is a record, never a precondition.
+    let dir = config_dir(&app)?;
+    let mut lease: Option<runtime::dispatch::Lease> = None;
+    if !request.attended.unwrap_or(false) {
+        if let Some(lane) = request.lane.as_deref() {
+            if !runtime::schema::LANES
+                .iter()
+                .any(|(name, _, _)| *name == lane)
+            {
+                return Err(format!(
+                    "unknown lane {lane:?} — a lane is added by migration, not by request"
+                ));
+            }
+            if let Some((vault_id, store)) = scope
+                .as_ref()
+                .and_then(|s| s.store_uuid.as_ref().map(|store| (&s.vault_id, store)))
+            {
+                let conn = runtime::open_existing(&dir)?;
+                let now = chrono::Utc::now();
+                let reservation = ingest::driver::reservation(&conn, now)?;
+                match runtime::dispatch::claim(
+                    &conn,
+                    vault_id,
+                    store,
+                    lane,
+                    reservation,
+                    &[],
+                    request.actor.as_deref(),
+                    now,
+                )? {
+                    runtime::dispatch::Dispatched::Started(l) => lease = Some(l),
+                    runtime::dispatch::Dispatched::Deferred(reasons) => {
+                        return Ok(RunStart::Deferred {
+                            deferred: reasons.iter().map(|r| r.as_str().to_string()).collect(),
+                        });
+                    }
+                    // Unreachable with an empty item list — the empty-claim
+                    // guard deliberately passes it to the gate — but if it
+                    // ever arrives, honesty over spawning: nothing to do.
+                    runtime::dispatch::Dispatched::NothingToClaim => {
+                        return Ok(RunStart::Deferred {
+                            deferred: vec!["nothing_to_claim".to_string()],
+                        });
+                    }
+                }
+            }
+        }
+    }
     // M31.2a: the durable id is minted BEFORE the token so the grant and the
     // meter carry the SAME one — an attended run used to hold two (the meter's
     // here, a token-derived hash in the grant), and everything that joins runs
-    // to proposals, answers, or costs needs them to be one.
-    let run_id = ledger::new_run_id();
+    // to proposals, answers, or costs needs them to be one. A leased run's id
+    // was minted by the CLAIM, which already booked its row.
+    let run_id = lease
+        .as_ref()
+        .map(|l| l.run_id.clone())
+        .unwrap_or_else(ledger::new_run_id);
     // M33.7: the renderer gets this id back, so its device-local run log and
     // the durable `runs` row can finally name the same run. Cloned rather
     // than moved because the meter takes ownership below.
@@ -1247,15 +1342,23 @@ fn run_agent(
         grant_tools(&request),
         run_id.clone(),
     )?);
-    let dir = config_dir(&app)?;
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
         run_id,
-        mode: agent::meter::Mode::Attended,
+        // A leased run finalizes through the dispatcher: usage lands in
+        // budget_days, the reservation is released, and the lease row goes
+        // with it (M34.2.4). Everything else keeps the attended booking.
+        mode: if lease.is_some() {
+            agent::meter::Mode::Ambient
+        } else {
+            agent::meter::Mode::Attended
+        },
         vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
         store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
         started_at: chrono::Utc::now(),
-        elapsed_limit_seconds: None,
+        // The lease's own limit, so the watchdog and the lease agree about
+        // when a run has outstayed its welcome.
+        elapsed_limit_seconds: lease.as_ref().map(|l| l.elapsed_limit_seconds),
         // M33.1: the same actor the run's bearer token already stamps on
         // every write it makes, so the operational row and the run's ledger
         // writes agree about who did the work. `None` is bare chat, and it
@@ -1275,9 +1378,11 @@ fn run_agent(
         // event stream, and the person is watching it.
         None,
     )
-    .map(|run| RunHandle {
-        run,
-        run_id: durable,
+    .map(|run| {
+        RunStart::Started(RunHandle {
+            run,
+            run_id: durable,
+        })
     })
 }
 
@@ -1394,6 +1499,7 @@ pub fn run() {
             fleet_actor_summaries,
             job_ledger_read,
             job_ledger_claim,
+            job_ledger_unclaim,
             job_ledger_stamp,
             job_ledger_import,
             set_global_pause,
@@ -1503,6 +1609,7 @@ mod tests {
             scope: None,
             read_scope: None,
             allowed_tools: None,
+            lane: None,
             internal: false,
         }
     }

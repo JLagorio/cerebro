@@ -165,6 +165,9 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         // M31.1a — see `declared_tools` for what is granted and why. The
         // same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // Claimed by this driver's own dispatch, never by the request
+        // (M34.2.4's lane field is the renderer's path to the same gate).
+        lane: None,
         // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
         // tools are withdrawn in build_args. Only the three internal spawn
         // sites ever set this.

@@ -2217,6 +2217,9 @@ fn tool_hand_to(
         scope: frontmatter_list(record, "scope"),
         read_scope: frontmatter_list(record, "read-scope"),
         allowed_tools: frontmatter_list(record, "allowed-tools"),
+        // Handoffs keep the caller-side booking for now: the chain bills to
+        // its root, and the root-ceiling gate is M36's consequence work.
+        lane: None,
         internal: false,
     };
     let run_id = crate::start_handoff_run(app, vault, request, grant)?;

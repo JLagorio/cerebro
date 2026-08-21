@@ -95,6 +95,11 @@ export interface RunOptions {
   /** Vault-relative folders this run may READ inside (M34.4). Same Option
    * semantics as scope; its own axis, enforced in Rust on the same bearer. */
   readScope?: string[] | null;
+  /** Which budget lane an UNATTENDED run bills to (M34.2.4) — the job
+   * runner names its job's kind. Present, the run claims a dispatcher lease
+   * and faces the ambient gate; the answer can be `{ deferred }` and the
+   * caller must read it. Absent keeps the legacy attended booking. */
+  lane?: string;
   mcp: McpInfo | null;
 }
 
@@ -122,9 +127,32 @@ export interface RunHandle {
   durableId: string | null;
 }
 
+/**
+ * What starting a run answers (M34.2.4): a handle, or a typed deferral.
+ *
+ * `deferred` is the ambient gate saying "not now" — over a ceiling, paused,
+ * accounting unknown — and only an unattended run that named a `lane` can
+ * receive it. It is a RESULT the caller must read, not an error to toast
+ * away: the runner logs one honest row and surrenders the fire key so the
+ * run happens when the window resets.
+ */
+export type RunStart = RunHandle | { deferred: string[] };
+
+/** Narrow a RunStart to its handle. Attended callers — every call without a
+ * `lane` — are never gated and never deferred, so reaching a deferral there
+ * is a contract break: thrown loudly rather than rendered as a silent
+ * no-run. Unattended callers must NOT use this — they read the deferral. */
+export function startedOrThrow(start: RunStart): RunHandle {
+  if ('deferred' in start) {
+    throw new Error(`run deferred by the budget gate: ${start.deferred.join(', ')}`);
+  }
+  return start;
+}
+
 /** Start a run. Resolves to the process tag and, where one exists, the
- * durable id of the row this run will be recorded in. */
-export async function runAgent(vault: string, options: RunOptions): Promise<RunHandle> {
+ * durable id of the row this run will be recorded in — or to a typed
+ * deferral when the ambient gate refused an unattended, laned run. */
+export async function runAgent(vault: string, options: RunOptions): Promise<RunStart> {
   if (!inTauri()) {
     // M33b.5 — the browser mirrors the Rust guard rather than skipping it. In
     // Tauri the refusal lives in `run_agent`, ahead of the token and the
@@ -152,7 +180,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunH
     // invent for it.
     return { run, durableId: null };
   }
-  return invokeTauri<{ run: number; run_id: string }>('run_agent', {
+  return invokeTauri<{ run: number; run_id: string } | { deferred: string[] }>('run_agent', {
     vault,
     request: {
       message: options.message,
@@ -168,10 +196,13 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunH
       read_scope: options.readScope ?? null,
       connector_names: options.connectorNames ?? null,
       scope: options.scope ?? null,
+      lane: options.lane ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
-  }).then(({ run, run_id }) => ({ run, durableId: run_id }));
+  }).then((result) =>
+    'deferred' in result ? result : { run: result.run, durableId: result.run_id },
+  );
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { onAgentEvent, runAgent, startMcp, stopAgent } from './agentIpc';
+import { onAgentEvent, runAgent, startMcp, startedOrThrow, stopAgent } from './agentIpc';
 import { newRunId } from './runs';
 import type { AgentEvent, ChatMessage, McpInfo } from './types';
 import { narrowTools, readAddress } from '@/engine/agents';
@@ -359,7 +359,10 @@ export function useAgentChat(
               : `${addressedAgentPrompt(recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope)}\n\n${composed}`;
           mcpRef.current ??= await startMcp(vaultPath);
           if (cancelled()) return;
-          const { run } = await runAgent(vaultPath, {
+          // Attended, no lane: never gated, so a deferral here would be a
+          // contract break — startedOrThrow turns it into a visible error.
+          const { run } = startedOrThrow(
+            await runAgent(vaultPath, {
             message: outgoing,
             systemPrompt: turn.systemPrompt,
             sessionId: sessionRef.current,
@@ -392,7 +395,8 @@ export function useAgentChat(
             // books carries the actor the fleet reads.
             actor: recipient?.actor ?? null,
             mcp: mcpRef.current,
-          });
+            }),
+          );
           // Cancelled during the spawn itself: the child exists now, so it has
           // to be killed by id rather than abandoned.
           if (cancelled()) {

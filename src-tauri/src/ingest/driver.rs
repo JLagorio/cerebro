@@ -337,7 +337,11 @@ fn assemble(
 /// Reserving less would let a run overspend what was set aside for it, and
 /// reserving more would be refused by the gate for exceeding the ceiling it
 /// was measured against.
-fn reservation(conn: &Connection, now: DateTime<Utc>) -> Result<Reservation, String> {
+///
+/// `pub(crate)` since M34.2.4: the unattended-run claim in `lib.rs` faces
+/// the same gate and must size its reservation the same way — a second
+/// definition is the drift the no-twin-inventory rule forbids.
+pub(crate) fn reservation(conn: &Connection, now: DateTime<Utc>) -> Result<Reservation, String> {
     let day = budget::ensure_day(conn, now)?;
     Ok(Reservation {
         total_tokens: day.ceilings.max_ambient_run_tokens,

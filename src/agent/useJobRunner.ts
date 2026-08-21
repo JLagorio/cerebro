@@ -17,6 +17,7 @@ import {
   jobLedgerImport,
   jobLedgerRead,
   jobLedgerStamp,
+  jobLedgerUnclaim,
   readNote,
   reviewQueue,
 } from '@/lib/ipc';
@@ -451,18 +452,8 @@ export function useJobRunner(): void {
               finish();
               return;
             }
-            // The cooldown clock starts at the RUN, not at its end: an agent
-            // that watches a folder it also writes to would otherwise re-fire
-            // on its own output the moment it finished (M17.12). Fire and
-            // forget — a clock is not a claim, and a stamp that failed only
-            // costs one extra cooldown check on the next launch.
-            if (job.runKey.startsWith('event:')) {
-              const at = new Date().toISOString();
-              useUiStore.getState().recordTriggerRun(vaultPath, job.key, at);
-              void jobLedgerStamp(vaultPath, job.key, at).catch(() => undefined);
-            }
           }
-          const { run: runId, durableId } = await runAgent(vaultPath, {
+          const start = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
@@ -514,9 +505,52 @@ export function useJobRunner(): void {
             // path to connectors on a schedule is the vault's own explicit
             // list, stdio entries machine-approved (PR #5 security review).
             attended: false,
+            // M34.2.4: the job's kind IS its budget lane — the run claims a
+            // dispatcher lease and faces the ambient gate, so schedules and
+            // ingest share one budget and one deferral record.
+            lane: job.kind,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });
+          if ('deferred' in start) {
+            // The gate said "not now" — over a ceiling, paused, accounting
+            // unknown. One honest row, and the claim is SURRENDERED so the
+            // deferral never eats the fire it refused: the next launch
+            // re-hydrates the open fire and retries it. The local record
+            // stays, as this session's suppression — re-asking the gate
+            // every tick would be sixty deferral rows an hour.
+            if (job.ledger === 'skillRuns' || job.ledger === 'attempts') {
+              void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
+                () => undefined,
+              );
+            }
+            appendRunLog({
+              id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              at: new Date().toISOString(),
+              owner: 'job',
+              label: job.title,
+              source: job.path,
+              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              scope: agent?.scope ?? null,
+              files: [],
+              status: 'deferred',
+              error: `deferred by the budget gate: ${start.deferred.join(', ')}`,
+            });
+            finish();
+            return;
+          }
+          const { run: runId, durableId } = start;
+          // The cooldown clock starts at the RUN, not at its end: an agent
+          // that watches a folder it also writes to would otherwise re-fire
+          // on its own output the moment it finished (M17.12). After the
+          // spawn, so a deferred run starts no cooldown. Fire and forget —
+          // a clock is not a claim, and a stamp that failed only costs one
+          // extra cooldown check on the next launch.
+          if (job.ledger === 'skillRuns' && job.runKey.startsWith('event:')) {
+            const at = new Date().toISOString();
+            useUiStore.getState().recordTriggerRun(vaultPath, job.key, at);
+            void jobLedgerStamp(vaultPath, job.key, at).catch(() => undefined);
+          }
           // Scoped to THIS job's run (M17.3). The old subscription saw every
           // event in the app and guessed with `running.current`, which is how
           // a chat turn's Done could end a background job — and vice versa.

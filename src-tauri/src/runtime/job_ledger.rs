@@ -24,7 +24,10 @@ use rusqlite::Connection;
 pub const LEDGERS: [&str; 3] = ["attempts", "skillRuns", "triggerRuns"];
 
 /// Every row for one vault, as (ledger, key, run_key) — the hydration read.
-pub fn read_all(conn: &Connection, vault_id: &str) -> Result<Vec<(String, String, String)>, String> {
+pub fn read_all(
+    conn: &Connection,
+    vault_id: &str,
+) -> Result<Vec<(String, String, String)>, String> {
     let mut statement = conn
         .prepare(
             "SELECT ledger, key, run_key FROM job_ledger \
@@ -62,6 +65,29 @@ pub fn claim(
             rusqlite::params![vault_id, ledger, key, run_key, super::now_utc()],
         )
         .map_err(|e| format!("job_ledger claim {ledger}/{key}: {e}"))?;
+    Ok(changed > 0)
+}
+
+/// Surrender a claim this caller holds (M34.2.4): delete the row ONLY if it
+/// still records exactly `run_key`. The one caller is the runner whose
+/// freshly claimed run was DEFERRED by the budget gate — the fire was never
+/// answered, and a consumed key would make the deferral eat the whole
+/// period. Conditional on the value, so a claim another window has since
+/// re-won is never destroyed. Returns whether anything was surrendered.
+pub fn unclaim(
+    conn: &Connection,
+    vault_id: &str,
+    ledger: &str,
+    key: &str,
+    run_key: &str,
+) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "DELETE FROM job_ledger \
+             WHERE vault_id = ?1 AND ledger = ?2 AND key = ?3 AND run_key = ?4",
+            rusqlite::params![vault_id, ledger, key, run_key],
+        )
+        .map_err(|e| format!("job_ledger unclaim {ledger}/{key}: {e}"))?;
     Ok(changed > 0)
 }
 
@@ -160,11 +186,53 @@ mod tests {
     }
 
     #[test]
+    fn unclaim_surrenders_only_the_exact_claim_still_held() {
+        let (dir, conn, vault) = fixture("ledger-unclaim");
+        assert!(claim(&conn, &vault, "skillRuns", "agent:risks", "2026-08-20").unwrap());
+        // The deferred runner surrenders its own claim: the fire is open again.
+        assert!(unclaim(&conn, &vault, "skillRuns", "agent:risks", "2026-08-20").unwrap());
+        assert!(
+            claim(&conn, &vault, "skillRuns", "agent:risks", "2026-08-20").unwrap(),
+            "a surrendered fire can be claimed again"
+        );
+        // A claim someone else has since re-won is never destroyed.
+        assert!(claim(&conn, &vault, "skillRuns", "agent:risks", "2026-08-21").unwrap());
+        assert!(
+            !unclaim(&conn, &vault, "skillRuns", "agent:risks", "2026-08-20").unwrap(),
+            "an old run_key surrenders nothing"
+        );
+        assert_eq!(read_all(&conn, &vault).unwrap()[0].2, "2026-08-21");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_stamp_always_overwrites_because_a_cooldown_clock_must_move() {
         let (dir, conn, vault) = fixture("ledger-stamp");
-        stamp(&conn, &vault, "triggerRuns", "agent:risks", "2026-08-20T10:00:00Z").unwrap();
-        stamp(&conn, &vault, "triggerRuns", "agent:risks", "2026-08-20T10:00:00Z").unwrap();
-        stamp(&conn, &vault, "triggerRuns", "agent:risks", "2026-08-20T11:00:00Z").unwrap();
+        stamp(
+            &conn,
+            &vault,
+            "triggerRuns",
+            "agent:risks",
+            "2026-08-20T10:00:00Z",
+        )
+        .unwrap();
+        stamp(
+            &conn,
+            &vault,
+            "triggerRuns",
+            "agent:risks",
+            "2026-08-20T10:00:00Z",
+        )
+        .unwrap();
+        stamp(
+            &conn,
+            &vault,
+            "triggerRuns",
+            "agent:risks",
+            "2026-08-20T11:00:00Z",
+        )
+        .unwrap();
         let rows = read_all(&conn, &vault).unwrap();
         assert_eq!(rows[0].2, "2026-08-20T11:00:00Z");
         drop(conn);
@@ -179,9 +247,23 @@ mod tests {
         let (dir, conn, vault_a) = fixture("ledger-vaults-a");
         let other = testutil::temp_vault("ledger-vaults-b");
         let vault_b = crate::runtime::scope::register(&conn, &other).unwrap();
-        assert!(claim(&conn, &vault_a, "skillRuns", "skills/daily.md", "2026-08-20").unwrap());
+        assert!(claim(
+            &conn,
+            &vault_a,
+            "skillRuns",
+            "skills/daily.md",
+            "2026-08-20"
+        )
+        .unwrap());
         assert!(
-            claim(&conn, &vault_b, "skillRuns", "skills/daily.md", "2026-08-20").unwrap(),
+            claim(
+                &conn,
+                &vault_b,
+                "skillRuns",
+                "skills/daily.md",
+                "2026-08-20"
+            )
+            .unwrap(),
             "vault B never heard of vault A's fire"
         );
         drop(conn);

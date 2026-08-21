@@ -1089,6 +1089,23 @@ describe('the job ledgers (M34.2.2) — parity with runtime/job_ledger.rs', () =
     ).toBe(true);
   });
 
+  it('unclaim surrenders only the exact claim still held', async () => {
+    await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20');
+    expect(await mock.jobLedgerUnclaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20')).toBe(
+      true,
+    );
+    // A surrendered fire can be claimed again — the deferral did not eat it.
+    expect(await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20')).toBe(
+      true,
+    );
+    // A claim someone else has since re-won is never destroyed.
+    await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-21');
+    expect(await mock.jobLedgerUnclaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20')).toBe(
+      false,
+    );
+    expect((await mock.jobLedgerRead('/vault-unclaim')).skillRuns['agent:risks']).toBe('2026-08-21');
+  });
+
   it('a stamp always overwrites because a cooldown clock must move', async () => {
     await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T10:00:00Z');
     await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T11:00:00Z');

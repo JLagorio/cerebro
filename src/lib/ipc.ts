@@ -529,6 +529,20 @@ export function jobLedgerClaim(
     : mock.jobLedgerClaim(vault, ledger, key, runKey);
 }
 
+/** Surrender a claim this caller holds — the deferred runner's revert, so a
+ * budget refusal never eats the fire it refused. Conditional on the exact
+ * runKey: a claim another window re-won is never destroyed. */
+export function jobLedgerUnclaim(
+  vault: string,
+  ledger: 'attempts' | 'skillRuns',
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('job_ledger_unclaim', { vault, ledger, key, runKey })
+    : mock.jobLedgerUnclaim(vault, ledger, key, runKey);
+}
+
 /** Overwrite the trigger cooldown clock. No verdict — a clock is not a claim. */
 export function jobLedgerStamp(vault: string, key: string, runKey: string): Promise<void> {
   return inTauri()

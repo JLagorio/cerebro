@@ -40,6 +40,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
     readNote: vi.fn(async () => '---\ntype: Skill\n---\nplaybook'),
     jobLedgerRead: vi.fn(async () => ({ attempts: {}, skillRuns: {}, triggerRuns: {} })),
     jobLedgerClaim: vi.fn(async () => true),
+    jobLedgerUnclaim: vi.fn(async () => true),
     jobLedgerStamp: vi.fn(async () => undefined),
     jobLedgerImport: vi.fn(async () => 0),
   };
@@ -91,6 +92,8 @@ function resetLedgerMocks(): void {
   }));
   vi.mocked(ipc.jobLedgerClaim).mockReset();
   vi.mocked(ipc.jobLedgerClaim).mockImplementation(async () => true);
+  vi.mocked(ipc.jobLedgerUnclaim).mockReset();
+  vi.mocked(ipc.jobLedgerUnclaim).mockImplementation(async () => true);
   vi.mocked(ipc.jobLedgerStamp).mockReset();
   vi.mocked(ipc.jobLedgerStamp).mockImplementation(async () => undefined);
   vi.mocked(ipc.jobLedgerImport).mockReset();
@@ -550,6 +553,12 @@ describe('useJobRunner durable ledgers', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
     vi.mocked(agentIpc.runAgent).mockClear();
+    // Implementation too, not just calls: the deferral test scripts a
+    // deferred answer and it must not leak into its neighbours.
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
     vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Skill\n---\nplaybook');
     resetLedgerMocks();
     useVaultStore.setState({
@@ -626,6 +635,42 @@ describe('useJobRunner durable ledgers', () => {
     expect(vi.mocked(ipc.jobLedgerImport)).toHaveBeenCalledWith('/vault', [
       { ledger: 'skillRuns', key: 'records/skills/digest.md', runKey: FIRE_KEY },
     ]);
+  });
+
+  it('a deferred run surrenders its fire key and logs one deferred row (M34.2.4)', async () => {
+    // The ambient gate said "not now". The fire was never answered, so the
+    // claim is surrendered — a consumed key would make the deferral eat the
+    // whole period — and the log row is DEFERRED, not failed: nothing went
+    // wrong.
+    window.localStorage.removeItem('cerebro.runLog');
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      deferred: ['daily_token_ceiling'],
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+
+    expect(vi.mocked(ipc.jobLedgerUnclaim)).toHaveBeenCalledWith(
+      '/vault',
+      'skillRuns',
+      'records/skills/digest.md',
+      FIRE_KEY,
+    );
+    const [entry] = loadRunLog();
+    expect(entry.status).toBe('deferred');
+    expect(entry.error).toContain('daily_token_ceiling');
+    // The runner is free again, and the local record suppresses a sixty-
+    // deferrals-an-hour retry loop for the rest of the session.
+    expect(useUiStore.getState().runs).toEqual([]);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('every unattended job names its kind as its budget lane (M34.2.4)', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({
+      attended: false,
+      lane: 'scheduled',
+    });
   });
 
   it('does not import into a table that already remembers anything', async () => {

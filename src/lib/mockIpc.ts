@@ -1593,6 +1593,20 @@ export async function jobLedgerStamp(
   jobLedgerFor(vault, ledger).set(key, runKey);
 }
 
+export async function jobLedgerUnclaim(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  const map = jobLedgerFor(vault, ledger);
+  // Conditional on the exact value, like the Rust DELETE: a claim another
+  // window has since re-won is never destroyed.
+  if (map.get(key) !== runKey) return false;
+  map.delete(key);
+  return true;
+}
+
 export async function jobLedgerImport(
   vault: string,
   entries: readonly { ledger: string; key: string; runKey: string }[],

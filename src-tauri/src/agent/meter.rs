@@ -590,6 +590,77 @@ mod tests {
     }
 
     #[test]
+    fn an_unattended_schedule_run_books_ambient_on_its_own_lane_and_settles_the_budget() {
+        // M34.2.4 end to end at the meter: a zero-item claim on the job's
+        // lane — exactly what run_agent makes for an unattended laned
+        // request — books mode='ambient' with the real lane and actor, and
+        // finalization releases the reservation and commits the spend to the
+        // day. This is the §8.3 answer as a test: scheduled runs face the
+        // same books ingest does.
+        let dir = crate::vault::testutil::temp_vault("meter-unattended");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+
+        let dispatch::Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            crate::runtime::budget::Reservation {
+                total_tokens: 20_000,
+                output_tokens: 4_000,
+            },
+            &[],
+            Some("process:scout"),
+            Utc::now(),
+        )
+        .unwrap() else {
+            panic!("an empty item list must still reach the gate and claim");
+        };
+        drop(conn);
+
+        let mut tally = Tally::default();
+        tally.observe(&result(json!({ "output_tokens": 42 }), false, "ok"));
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: lease.run_id.clone(),
+                mode: Mode::Ambient,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+                actor: None,
+                parent_run_id: None,
+            },
+            &tally,
+            false,
+            Utc::now(),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (mode, lane, actor, outcome, output): (String, String, String, String, i64) = conn
+            .query_row(
+                "SELECT mode, lane, actor, outcome, output_tokens FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(mode, "ambient", "unattended is ambient spend, not attended");
+        assert_eq!(lane, "scheduled", "the job's real lane, not 'agent'");
+        assert_eq!(actor, "process:scout", "the claim attributed the run");
+        assert_eq!(outcome, "succeeded");
+        assert_eq!(output, 42);
+        let day = crate::runtime::budget::read_day(&conn, &lease.window_start_utc).unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "the reservation was released");
+        assert_eq!(day.ambient_output_tokens, 42, "the spend landed on the day");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_supervised_run_is_left_for_its_supervisor_to_finalize() {
         // The route decides where the items land, not whether the CLI exited
         // cleanly: a window that ran and concluded "nothing material"

@@ -138,6 +138,15 @@ pub struct AgentRequest {
     /// is a thing a read-only skill is allowed to ask for. The distinction is
     /// the whole reason this is an Option<Vec> rather than a Vec.
     pub allowed_tools: Option<Vec<String>>,
+    /// Which budget lane an UNATTENDED run bills to (M34.2.4) — the job
+    /// runner names its job's kind ('scheduled', 'agent', 'refresh', 'stale',
+    /// 'schema'). Present on an unattended request, the run must claim a
+    /// dispatcher lease on this lane and face the ambient gate; a deferral
+    /// is a typed answer, not an error. Absent means the legacy attended
+    /// booking — the panel's turns, and unattended callers that predate the
+    /// gate. The name must exist in `lane_registry`; a new lane is a
+    /// migration, not a request.
+    pub lane: Option<String>,
     /// True only for cerebro's own three internal runs (ingest, maintain,
     /// assembly synthesis), whose spawn sites construct this struct directly
     /// in Rust — nothing else CAN set it: `skip_deserializing` makes the
@@ -1104,6 +1113,7 @@ mod tests {
                 scope: None,
                 read_scope: None,
                 allowed_tools: None,
+                lane: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -1138,6 +1148,7 @@ mod tests {
             scope: None,
             read_scope: None,
             allowed_tools: None,
+            lane: None,
             internal: false,
         }
     }
@@ -1331,6 +1342,7 @@ mod tests {
                 scope: None,
                 read_scope: None,
                 allowed_tools: None,
+                lane: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -1363,6 +1375,7 @@ mod tests {
                 read_scope: None,
                 allowed_tools: declared
                     .map(|d| d.into_iter().map(String::from).collect::<Vec<String>>()),
+                lane: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -1543,6 +1556,7 @@ mod tests {
                 scope: None,
                 read_scope: None,
                 allowed_tools: None,
+                lane: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),
@@ -1582,6 +1596,7 @@ mod tests {
                 scope: None,
                 read_scope: None,
                 allowed_tools: None,
+                lane: None,
                 internal: false,
             },
             Path::new("/tmp/mcp.json"),

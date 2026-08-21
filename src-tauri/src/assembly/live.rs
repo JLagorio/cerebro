@@ -154,6 +154,9 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         // else. That was always the design (prompt::RULES); until now it was
         // a sentence. The same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // No lane: an attended synthesis run is metered, never gated
+        // (M34.2.4's lane field is the unattended path to the dispatcher).
+        lane: None,
         // Cerebro's own run: attended means a person awaits the ANSWER, not
         // that anybody supervises the child, so the CLI built-ins are
         // withdrawn here too. Only the three internal spawn sites set this.

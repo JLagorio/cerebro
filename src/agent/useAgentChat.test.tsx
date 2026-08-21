@@ -5,6 +5,12 @@ const handlers: Array<(event: unknown) => void> = [];
 vi.mock('./agentIpc', () => ({
   // M33.7: the pair, not the bare tag. The chat path uses only `run`.
   runAgent: vi.fn(async () => ({ run: 8, durableId: 'durable-chat-8' })),
+  // The real narrowing (M34.2.4): a scripted deferral must throw here the
+  // way production would, not slip through a permissive stub.
+  startedOrThrow: (start: { run: number } | { deferred: string[] }) => {
+    if ('deferred' in start) throw new Error(`run deferred: ${start.deferred.join(', ')}`);
+    return start;
+  },
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
   stopAgent: vi.fn(async () => true),
   // Mirrors the real fan-out (M17.3): a subscriber that names a run sees only
