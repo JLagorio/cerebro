@@ -12,6 +12,8 @@
  * appearing, unreviewed, in the surfaces you author.
  */
 
+import type { Entry } from './types';
+
 export type IngestFormat = 'vtt' | 'srt' | 'markdown' | 'text';
 
 /** One speaker turn, after adjacent cues from the same speaker are merged. */
@@ -301,6 +303,48 @@ export interface ExternalRef {
 /** Cached copies of fetched external material. A sibling of `knowledge/`:
  * both are machine-written, but this one is raw input, not distilled. */
 export const SOURCES_DIR = 'sources';
+
+/**
+ * What one cached copy's freshness IS (M34.5.2) — the fact the vault has
+ * held since `cache_source` first stamped it, said out loud for the first
+ * time. Derived from the fetch bookkeeping PROPERTIES, never from `type:
+ * Source` — behavior is capability-gated (AGENTS.md), and a record carrying
+ * `fetched_at`/`stale_after` is a cached copy wherever it lives.
+ *
+ * The honesty rules are the point:
+ * - An absent `stale_after` is NOT fresh. It is `no-expiry`: nobody said
+ *   this copy expires, and the Source Monitor's own header forbids
+ *   inventing a default refresh schedule.
+ * - An absent `fetched_at` is `null`, never an epoch or a blank — "fetch
+ *   not recorded" is a sentence the surface has to say.
+ * - Stale means `stale_after <= today`, the same local-date-word comparison
+ *   the refresh lane uses (engine/jobs.ts), so the chip and the queue can
+ *   never disagree about whether a copy is due.
+ */
+export interface SourceFreshness {
+  state: 'stale' | 'fresh' | 'no-expiry';
+  /** The declared refresh date. Present for stale and fresh; absent means
+   * nobody set one, which is what `no-expiry` says. */
+  staleAfter?: string;
+  /** ISO of the last fetch. `null` is NOT RECORDED — never zero. */
+  fetchedAt: string | null;
+}
+
+/** Null for every record without fetch bookkeeping — the detail panel
+ * self-gates on this rather than on a type name. */
+export function sourceFreshness(entry: Entry, today: string): SourceFreshness | null {
+  const stale = entry.properties.stale_after;
+  const fetched = entry.properties.fetched_at;
+  const staleAfter = typeof stale === 'string' && stale !== '' ? stale : null;
+  const fetchedAt = typeof fetched === 'string' && fetched !== '' ? fetched : null;
+  if (staleAfter === null && fetchedAt === null) return null;
+  if (staleAfter === null) return { state: 'no-expiry', fetchedAt };
+  return {
+    state: staleAfter <= today ? 'stale' : 'fresh',
+    staleAfter,
+    fetchedAt,
+  };
+}
 
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>()[\]"']+/g;
 

@@ -3,6 +3,7 @@ import {
   detectFormat,
   findExternalRefs,
   parseTranscript,
+  sourceFreshness,
   speakersOf,
   titleFromContent,
   titleFromFilename,
@@ -10,6 +11,7 @@ import {
   turnsToMarkdown,
   uncachedRefs,
 } from './ingest';
+import { makeEntry } from './testHelpers';
 
 const AT = '2026-07-28T14:00:00Z';
 
@@ -282,5 +284,46 @@ describe('external references', () => {
     expect(
       uncachedRefs(text, ['sources/issues/phx-421.md', 'sources/issues/phx-9.md'], PHX),
     ).toEqual([]);
+  });
+});
+
+
+describe('sourceFreshness (M34.5.2)', () => {
+  const TODAY = '2026-08-21';
+  const cached = (properties: Record<string, unknown>) =>
+    makeEntry({ path: 'sources/issues/phx-421.md', title: 'PHX-421', properties });
+
+  it('a record without fetch bookkeeping is not a cached copy — null, not a state', () => {
+    expect(sourceFreshness(cached({}), TODAY)).toBeNull();
+    // Gated on PROPERTIES, never on a type name: a Source-typed record with
+    // no bookkeeping still says nothing, and a record elsewhere with it does.
+    expect(sourceFreshness(makeEntry({ path: 'records/x.md', title: 'X' }), TODAY)).toBeNull();
+  });
+
+  it('past its refresh date is stale, and says since when', () => {
+    expect(
+      sourceFreshness(cached({ stale_after: '2026-08-01', fetched_at: '2026-07-20T10:00:00Z' }), TODAY),
+    ).toEqual({ state: 'stale', staleAfter: '2026-08-01', fetchedAt: '2026-07-20T10:00:00Z' });
+    // The boundary matches the refresh lane: due ON the date, not after it.
+    expect(sourceFreshness(cached({ stale_after: TODAY }), TODAY)?.state).toBe('stale');
+  });
+
+  it('a future refresh date is fresh until then', () => {
+    expect(
+      sourceFreshness(cached({ stale_after: '2026-09-01', fetched_at: '2026-08-20T10:00:00Z' }), TODAY),
+    ).toEqual({ state: 'fresh', staleAfter: '2026-09-01', fetchedAt: '2026-08-20T10:00:00Z' });
+  });
+
+  it('no stale_after is NO EXPIRY — never silently fresh, never a default schedule', () => {
+    expect(sourceFreshness(cached({ fetched_at: '2026-08-20T10:00:00Z' }), TODAY)).toEqual({
+      state: 'no-expiry',
+      fetchedAt: '2026-08-20T10:00:00Z',
+    });
+  });
+
+  it('an unrecorded fetch is null, never zero', () => {
+    expect(sourceFreshness(cached({ stale_after: '2026-08-01' }), TODAY)?.fetchedAt).toBeNull();
+    // Malformed bookkeeping reads as absent, not as a state.
+    expect(sourceFreshness(cached({ stale_after: 7, fetched_at: '' }), TODAY)).toBeNull();
   });
 });

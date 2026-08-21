@@ -104,6 +104,61 @@ describe('DetailPanel', () => {
     expect(screen.getByText('field-ops')).toBeTruthy();
   });
 
+  // M34.5.3 — a cached copy says its own freshness. Gated on the fetch
+  // bookkeeping properties, never on `type: Source`; extreme dates keep the
+  // assertions clock-proof without pinning the system time.
+  it('a cached copy past its refresh date says stale, and when it was fetched', () => {
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'sources/issues/phx-421.md',
+          title: 'PHX-421',
+          properties: { stale_after: '2020-01-01', fetched_at: '2019-12-20T10:00:00Z' },
+        }),
+      ],
+    });
+    useUiStore.setState({ detailPath: 'sources/issues/phx-421.md' });
+    render(<DetailPanel />);
+    const line = screen.getByTestId('detail-source-freshness');
+    expect(line.textContent).toContain('stale since 2020-01-01');
+    expect(line.textContent).toContain('fetched 2019-12-20');
+  });
+
+  it('a copy nobody gave a refresh date says so — and an unrecorded fetch is said, not zero', () => {
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'sources/web/wiki.md',
+          title: 'Wiki page',
+          properties: { fetched_at: '2026-08-20T10:00:00Z' },
+        }),
+        makeEntry({
+          path: 'sources/web/unstamped.md',
+          title: 'Unstamped',
+          properties: { stale_after: '2999-01-01' },
+        }),
+      ],
+    });
+    useUiStore.setState({ detailPath: 'sources/web/wiki.md' });
+    const { unmount } = render(<DetailPanel />);
+    expect(screen.getByTestId('detail-source-freshness').textContent).toContain(
+      'no refresh date set',
+    );
+    unmount();
+    useUiStore.setState({ detailPath: 'sources/web/unstamped.md' });
+    render(<DetailPanel />);
+    const line = screen.getByTestId('detail-source-freshness');
+    expect(line.textContent).toContain('fresh until 2999-01-01');
+    expect(line.textContent).toContain('fetch not recorded');
+  });
+
+  it('a record without fetch bookkeeping gets no freshness line at all', () => {
+    render(<DetailPanel />);
+    expect(screen.queryByTestId('detail-source-freshness')).toBeNull();
+  });
+
   it('closes on Escape', () => {
     render(<DetailPanel />);
     fireEvent.keyDown(window, { key: 'Escape' });

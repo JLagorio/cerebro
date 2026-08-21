@@ -9,6 +9,7 @@ import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { sourceFreshness } from '@/engine/ingest';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry } from '@/engine/types';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
@@ -37,6 +38,41 @@ import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore
  * (M12.5 aftermath), so the dossier that lived on the project page rides the
  * record panel now — no type name routes specially.
  */
+/**
+ * One sentence a cached copy owes its reader (M34.5.3): whether it is past
+ * its refresh date, and when it was last fetched. The vault has held both
+ * facts since `cache_source` first stamped them; this is the first surface
+ * that says them. Renders nothing without the fetch bookkeeping — gated on
+ * the PROPERTIES, never on `type: Source`, so it follows the record
+ * wherever it lives (the no-type-routing rule).
+ */
+function SourceFreshnessLine({ entry }: { entry: Entry }) {
+  const freshness = sourceFreshness(entry, todayIso());
+  if (freshness === null) return null;
+  const state =
+    freshness.state === 'stale'
+      ? `stale since ${freshness.staleAfter}`
+      : freshness.state === 'fresh'
+        ? `fresh until ${freshness.staleAfter}`
+        : // Nobody said this copy expires — which is different from fresh,
+          // and the Source Monitor refuses to invent a default schedule.
+          'no refresh date set';
+  const fetched =
+    // NOT RECORDED, said out loud — never an epoch, never omitted into
+    // looking fine.
+    freshness.fetchedAt === null ? 'fetch not recorded' : `fetched ${freshness.fetchedAt.slice(0, 10)}`;
+  return (
+    <div
+      data-testid="detail-source-freshness"
+      className={`mb-3.5 [font-family:var(--font-mono)] text-2xs ${
+        freshness.state === 'stale' ? 'text-warn-600' : 'text-n-400'
+      }`}
+    >
+      Cached copy · {state} · {fetched}
+    </div>
+  );
+}
+
 function KnowledgeSection({ entry }: { entry: Entry }) {
   const [open, setOpen] = useState(false);
   const entries = useVaultStore((s) => s.entries);
@@ -281,6 +317,9 @@ export function DetailPanel() {
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
             on the path) so the add-property flyout closes on switch. */}
         <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+        {/* M34.5.3 — a cached copy says its own freshness. Null for every
+            record without fetch bookkeeping. */}
+        <SourceFreshnessLine entry={entry} />
         {/* M12: records lost the doc side panel when display:doc died, and
             the knowledge loop must not die with it — the same commit state
             and related-concepts view, collapsed until asked (M8.3's rule:
