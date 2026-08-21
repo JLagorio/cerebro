@@ -11,7 +11,15 @@ import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
 import { fireKeyDate, isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
-import { fleetActorSummary, readNote, reviewQueue } from '@/lib/ipc';
+import {
+  fleetActorSummary,
+  jobLedgerClaim,
+  jobLedgerImport,
+  jobLedgerRead,
+  jobLedgerStamp,
+  readNote,
+  reviewQueue,
+} from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
 import {
   agentRunPrompt,
@@ -109,6 +117,70 @@ export function useJobRunner(): void {
   const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
   /**
+   * The durable ledgers, hydrated before the queue may fire (M34.2.3).
+   *
+   * False until the vault's `job_ledger` rows are in the store — an
+   * unhydrated map reads as "nothing ever ran", which is the launch storm the
+   * ledgers exist to prevent. A read that FAILS leaves the gate closed for
+   * the same reason: better a queue that waits than one that re-fires every
+   * schedule ever answered. The one-time import feeds the localStorage era
+   * into the table; the table has been the arbiter since it existed, so
+   * import never overwrites a key the database holds.
+   */
+  const [ledgersReady, setLedgersReady] = useState(false);
+  useEffect(() => {
+    if (vaultPath === null) return;
+    let cancelled = false;
+    setLedgersReady(false);
+    void (async () => {
+      try {
+        let read = await jobLedgerRead(vaultPath);
+        const empty =
+          Object.keys(read.attempts).length === 0 &&
+          Object.keys(read.skillRuns).length === 0 &&
+          Object.keys(read.triggerRuns).length === 0;
+        if (empty) {
+          const ui = useUiStore.getState();
+          const entries = [
+            // Flat across vaults in its localStorage era: a foreign vault's
+            // path lands here too, harmlessly — it suppresses nothing unless
+            // this vault holds the same path at the same recorded version.
+            ...Object.entries(ui.learnAttempts).map(([key, runKey]) => ({
+              ledger: 'attempts',
+              key,
+              runKey,
+            })),
+            ...Object.entries(ui.skillRuns[vaultPath] ?? {}).map(([key, runKey]) => ({
+              ledger: 'skillRuns',
+              key,
+              runKey,
+            })),
+            ...Object.entries(ui.triggerRuns[vaultPath] ?? {}).map(([key, runKey]) => ({
+              ledger: 'triggerRuns',
+              key,
+              runKey,
+            })),
+          ];
+          if (entries.length > 0) {
+            await jobLedgerImport(vaultPath, entries);
+            read = await jobLedgerRead(vaultPath);
+          }
+        }
+        if (cancelled) return;
+        useUiStore.getState().hydrateJobLedgers(vaultPath, read);
+        setLedgersReady(true);
+      } catch {
+        // Gated, not empty. "We could not read the ledgers" and "nothing
+        // ever ran" are opposite sentences; acting on the second when the
+        // first is true would double-spend every schedule.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultPath]);
+
+  /**
    * What changed since the last scan (M17.12) — the trigger event source.
    *
    * The runner's own memory of what it has already looked at, rather than
@@ -130,7 +202,7 @@ export function useJobRunner(): void {
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
-    if (!autoLearn || vaultPath === null) return null;
+    if (!autoLearn || vaultPath === null || !ledgersReady) return null;
     return (
       jobQueue(entries, listConcepts(entries, today), {
         attempts,
@@ -151,6 +223,7 @@ export function useJobRunner(): void {
     entries,
     failedReads,
     events,
+    ledgersReady,
     now,
     skillRuns,
     today,
@@ -238,12 +311,14 @@ export function useJobRunner(): void {
         run: null,
         startedAt: Date.now(),
       });
-      // Recorded first, on purpose — see the header. The job SAYS which
-      // ledger gates it (jobs.ts decides both sides); re-deriving that here
-      // is how agent runs briefly looped forever. Fire-key jobs are the one
-      // exception: they must read their record's body before anything else
-      // can fail, so their record sits after that read, below.
-      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.key, job.runKey);
+      // Recorded first, on purpose — see the header, and since M34.2.3 the
+      // record is a CLAIM in the durable table: the database arbitrates,
+      // so two windows deriving the same due job race for one insert and
+      // the loser spawns nothing. The claim moved inside the async block
+      // with the rest of the start-up; the ordering it pins is unchanged.
+      // Fire-key jobs stay the one exception: they must read their record's
+      // body before anything else can fail, so their claim sits after that
+      // read, below.
 
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
@@ -257,8 +332,20 @@ export function useJobRunner(): void {
           : null;
 
       void (async () => {
-        let recorded = job.ledger === 'attempts';
+        let recorded = false;
         try {
+          if (job.ledger === 'attempts') {
+            const fresh = await jobLedgerClaim(vaultPath, 'attempts', job.key, job.runKey);
+            useUiStore.getState().recordLearnAttempt(job.key, job.runKey);
+            recorded = true;
+            if (!fresh) {
+              // Another window or an earlier session already answered this
+              // exact version. Nothing to log: the run that DID happen owns
+              // the story.
+              finish();
+              return;
+            }
+          }
           // M17.12: an event run says what woke it and carries the trigger's
           // `ask:` — layer two, reached only because layer one already passed
           // deterministically, with no model consulted.
@@ -352,16 +439,28 @@ export function useJobRunner(): void {
           // The body is in hand: NOW the fire key is consumed — still before
           // the run itself, so a run that dies waits for the next fire, but
           // after the read, so a read that dies surrenders the key instead
-          // of eating the whole period (PR #5 review).
+          // of eating the whole period (PR #5 review). Since M34.2.3 the
+          // consumption is a durable CLAIM, and the verdict is read: losing
+          // it means another window answered this fire, and this one spawns
+          // nothing.
           if (job.ledger === 'skillRuns') {
+            const fresh = await jobLedgerClaim(vaultPath, 'skillRuns', job.key, job.runKey);
             useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
+            recorded = true;
+            if (!fresh) {
+              finish();
+              return;
+            }
             // The cooldown clock starts at the RUN, not at its end: an agent
             // that watches a folder it also writes to would otherwise re-fire
-            // on its own output the moment it finished (M17.12).
+            // on its own output the moment it finished (M17.12). Fire and
+            // forget — a clock is not a claim, and a stamp that failed only
+            // costs one extra cooldown check on the next launch.
             if (job.runKey.startsWith('event:')) {
-              useUiStore.getState().recordTriggerRun(vaultPath, job.key, new Date().toISOString());
+              const at = new Date().toISOString();
+              useUiStore.getState().recordTriggerRun(vaultPath, job.key, at);
+              void jobLedgerStamp(vaultPath, job.key, at).catch(() => undefined);
             }
-            recorded = true;
           }
           const { run: runId, durableId } = await runAgent(vaultPath, {
             message,

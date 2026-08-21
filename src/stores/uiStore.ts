@@ -287,6 +287,22 @@ interface UiState {
   triggerRuns: Record<string, Record<string, string>>;
   recordTriggerRun(vault: string, agent: string, at: string): void;
   /**
+   * Replace this vault's slices of all three ledgers with what the durable
+   * table remembers (M34.2.3). The database has been the arbiter since it
+   * existed, so on hydration it wins over whatever localStorage still says —
+   * except `learnAttempts`, which is merged rather than replaced because its
+   * localStorage era was flat across vaults and a replace would forget every
+   * other vault's entries mid-session.
+   */
+  hydrateJobLedgers(
+    vault: string,
+    ledgers: {
+      attempts: Record<string, string>;
+      skillRuns: Record<string, string>;
+      triggerRuns: Record<string, string>;
+    },
+  ): void;
+  /**
    * Everything the assistant is doing, in start order (M17.7).
    *
    * Was `agentBusy` (a boolean) plus `learningPath` (a string), both unowned
@@ -828,6 +844,18 @@ export const useUiStore = create<UiState>((set, get) => ({
       const next = { ...s.skillRuns, [vault]: scoped };
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };
+    }),
+  hydrateJobLedgers: (vault, ledgers) =>
+    set((s) => {
+      // localStorage keeps being written as a MIRROR: it is the browser
+      // mock's persistence and the import source after a runtime-DB loss.
+      const attempts = { ...s.learnAttempts, ...ledgers.attempts };
+      const skills = { ...s.skillRuns, [vault]: ledgers.skillRuns };
+      const triggers = { ...s.triggerRuns, [vault]: ledgers.triggerRuns };
+      storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(attempts));
+      storeString(SKILL_RUNS_KEY, JSON.stringify(skills));
+      storeString(TRIGGER_RUNS_KEY, JSON.stringify(triggers));
+      return { learnAttempts: attempts, skillRuns: skills, triggerRuns: triggers };
     }),
   runs: [],
   startRun: (record) => set((s) => ({ runs: [...s.runs, record] })),
