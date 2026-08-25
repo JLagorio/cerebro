@@ -208,3 +208,31 @@ describe('uiStore', () => {
     expect(remaining[0].message).toBe('Second');
   });
 });
+
+// M43 — the pin. Ordered pointers, workspace state (the navClosed rule).
+describe('favorites', () => {
+  beforeEach(() => {
+    window.localStorage.removeItem('cerebro.favorites');
+    useUiStore.setState({ favorites: [] });
+  });
+
+  it('toggles a path in and out, preserving pin order', () => {
+    useUiStore.getState().toggleFavorite('a.md');
+    useUiStore.getState().toggleFavorite('b.md');
+    expect(useUiStore.getState().favorites).toEqual(['a.md', 'b.md']);
+    useUiStore.getState().toggleFavorite('a.md');
+    expect(useUiStore.getState().favorites).toEqual(['b.md']);
+  });
+
+  it('prunes favorites that no longer resolve', () => {
+    useUiStore.getState().toggleFavorite('gone.md');
+    useUiStore.getState().toggleFavorite('here.md');
+    useUiStore.getState().pruneFavorites(new Set(['here.md']));
+    expect(useUiStore.getState().favorites).toEqual(['here.md']);
+  });
+
+  it('persists under cerebro.favorites', () => {
+    useUiStore.getState().toggleFavorite('a.md');
+    expect(JSON.parse(window.localStorage.getItem('cerebro.favorites') ?? '[]')).toEqual(['a.md']);
+  });
+});

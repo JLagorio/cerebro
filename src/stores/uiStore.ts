@@ -148,6 +148,16 @@ interface UiState {
   setNavGroupOpen(key: string, open: boolean): void;
 
   /**
+   * Pinned paths (M43) — ordered, vault-relative. Workspace state, not vault
+   * content: the same rule that put `cerebro.navClosed` here. A favorite is a
+   * POINTER — pruneFavorites drops any that stopped resolving, which the
+   * sidebar calls with the paths that still exist.
+   */
+  favorites: string[];
+  toggleFavorite(path: string): void;
+  pruneFavorites(existing: Set<string>): void;
+
+  /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
    *
    * On by default because shape and colour are what make a repo tree scannable
@@ -346,6 +356,7 @@ const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
 const NAV_CLOSED_KEY = 'cerebro.navClosed';
+const FAVORITES_KEY = 'cerebro.favorites';
 const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
 const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
 const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
@@ -727,6 +738,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     const next = open ? closed.filter((k) => k !== key) : [...new Set([...closed, key])];
     storeString(NAV_CLOSED_KEY, JSON.stringify(next));
     set({ navClosed: next });
+  },
+
+  favorites: loadStringList(FAVORITES_KEY),
+  toggleFavorite: (path) => {
+    const current = get().favorites;
+    const next = current.includes(path)
+      ? current.filter((p) => p !== path)
+      : [...current, path];
+    storeString(FAVORITES_KEY, JSON.stringify(next));
+    set({ favorites: next });
+  },
+  pruneFavorites: (existing) => {
+    const current = get().favorites;
+    const next = current.filter((p) => existing.has(p));
+    if (next.length === current.length) return;
+    storeString(FAVORITES_KEY, JSON.stringify(next));
+    set({ favorites: next });
   },
 
   workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',
