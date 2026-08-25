@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { useOpenPath } from '@/app/useOpenPath';
-import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -85,9 +84,17 @@ export function CreateMenu() {
 
   return (
     <div className="relative" ref={trigger}>
-      <Button variant="primary" size="sm" icon="plus" onClick={() => setMenuOpen((v) => !v)}>
+      {/* The design's bordered New row (M43) — the sidebar is this menu's
+          one home now, so the trigger dresses for it rather than taking
+          variants it would never use. */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        className="flex h-8 w-full items-center gap-[9px] rounded-md border border-n-200 bg-n-0 px-2 text-left text-sm font-medium text-n-800 hover:bg-n-100"
+      >
+        <Icon name="plus" size={15} color="var(--n-500)" />
         New
-      </Button>
+      </button>
       {menuOpen && (
         <>
           <button
@@ -102,7 +109,7 @@ export function CreateMenu() {
             ref={popup}
             role="menu"
             aria-label="New"
-            className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-md)]"
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 w-44 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-md)]"
           >
             {/* `circle-check` is the app's completion glyph — it marks notes
                 organized and rows ready — so the primary create action read as

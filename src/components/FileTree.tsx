@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MoveDialog } from '@/components/MoveDialog';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
@@ -183,6 +183,12 @@ export interface FileTreeProps {
   docsOnly?: boolean;
   /** A file row (or freshly created page) was chosen. */
   onOpen: (path: string) => void;
+  /** Hide the inline New page / New folder bar — the Pages section header
+   * owns those affordances in the one-column shell (M43). */
+  showCreateBar?: boolean;
+  /** Imperative doorway for that header: the tree assigns its root-level
+   * creation openers here so the caller need not reimplement the dialogs. */
+  createRef?: React.MutableRefObject<{ newPage(): void; newFolder(): void } | null>;
 }
 
 /** Folder/note tree over the vault (M2 Task 10): create, rename, move,
@@ -193,6 +199,8 @@ export function FileTree({
   activePath = null,
   docsOnly = false,
   onOpen,
+  showCreateBar = true,
+  createRef,
 }: FileTreeProps) {
   const entries = useVaultStore((s) => s.entries);
   const folders = useVaultStore((s) => s.folders);
@@ -383,6 +391,19 @@ export function FileTree({
     setDialog(null);
     setName('');
   };
+
+  // No dep array on purpose: `openDialog` closes over per-render state, and a
+  // stale opener would prefill a dialog with a name from a previous render.
+  useEffect(() => {
+    if (createRef === undefined) return;
+    createRef.current = {
+      newPage: () => openDialog({ mode: 'new-page', dir: root }),
+      newFolder: () => openDialog({ mode: 'new-folder', dir: root }),
+    };
+    return () => {
+      createRef.current = null;
+    };
+  });
 
   const submitDialog = async () => {
     const trimmed = name.trim();
@@ -704,24 +725,26 @@ export function FileTree({
       className="flex min-w-0 max-w-[720px] flex-col"
       onContextMenu={onRowContextMenu(null)}
     >
-      <div className="mb-1.5 flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => openDialog({ mode: 'new-page', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
-        >
-          <Icon name="file-plus" size={13} />
-          New page
-        </button>
-        <button
-          type="button"
-          onClick={() => openDialog({ mode: 'new-folder', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
-        >
-          <Icon name="folder-plus" size={13} />
-          New folder
-        </button>
-      </div>
+      {showCreateBar && (
+        <div className="mb-1.5 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => openDialog({ mode: 'new-page', dir: root })}
+            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
+          >
+            <Icon name="file-plus" size={13} />
+            New page
+          </button>
+          <button
+            type="button"
+            onClick={() => openDialog({ mode: 'new-folder', dir: root })}
+            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-700"
+          >
+            <Icon name="folder-plus" size={13} />
+            New folder
+          </button>
+        </div>
+      )}
       {tree.length === 0 ? (
         <p className="m-0 px-1.5 py-2 text-sm text-n-500">
           No pages yet. Use New page to write the first one.

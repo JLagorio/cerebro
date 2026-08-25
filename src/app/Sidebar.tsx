@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
@@ -12,19 +12,29 @@ import {
 import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
+import { CreateMenu } from '@/app/CreateMenu';
 import { deleteCollection, deleteList } from '@/app/listActions';
+import { SectionHeader } from '@/app/SectionHeader';
 import { useOpenPath } from '@/app/useOpenPath';
-import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
+import { rowClass } from '@/app/sidebarChrome';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { inboxCounts } from '@/engine/inbox';
+import { isPaused } from '@/engine/jobs';
+import { openWork } from '@/engine/myWork';
 import { studioProjects } from '@/engine/studio';
-import { listTypes, type TypeListing } from '@/engine/typeCatalog';
+import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode } from '@/engine/types';
+import { SyncBadge } from '@/git/SyncBadge';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
 import { useRootsStore } from '@/stores/rootsStore';
-import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
+import {
+  SIDEBAR_WIDTH_MAX,
+  SIDEBAR_WIDTH_MIN,
+  useUiStore,
+  type ThemeMode,
+} from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
@@ -53,6 +63,10 @@ export interface SidebarProps {
  */
 const HOME_KINDS = new Set(['home', 'collection', 'list', 'type']);
 
+/** The footer's theme cycle (M43): what each mode wears, and what follows it. */
+const THEME_ICONS: Record<ThemeMode, string> = { system: 'monitor', light: 'sun', dark: 'moon' };
+const THEME_NEXT: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark', dark: 'system' };
+
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
 type CollectionDialogState = { mode: 'new' } | { mode: 'rename'; collection: CollectionFile };
@@ -71,6 +85,7 @@ function SurfaceRow({
   active,
   toggle = false,
   count,
+  hot = false,
   onClick,
   chevron,
 }: {
@@ -81,6 +96,9 @@ function SurfaceRow({
   toggle?: boolean;
   /** Queue size shown as a badge; omitted or 0 renders nothing. */
   count?: number;
+  /** A count that wants acting on — cortex ink instead of the quiet gray
+   * (M43, the design's Inbox). Still a number, never a filled pill. */
+  hot?: boolean;
   onClick: () => void;
   /**
    * Group disclosure (M42.2): a destination that owns nested rows leads with
@@ -119,7 +137,9 @@ function SurfaceRow({
           // DS: "numbers are quiet facts" — a count, not a filled pill
           // shouting from the chrome (M42.1). Same testid, same text.
           data-testid="nav-badge"
-          className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-500 tabular-nums"
+          className={`ml-auto [font-family:var(--font-mono)] text-2xs tabular-nums ${
+            hot ? 'text-cortex-600' : 'text-n-500'
+          }`}
         >
           {count > 99 ? '99+' : count}
         </span>
@@ -129,21 +149,18 @@ function SurfaceRow({
 }
 
 /**
- * The one nav column (M37.3 — the shell flattening).
+ * The one nav column (M37.3 — the shell flattening), which M43 made the whole
+ * chrome: the Topbar's tenants (wordmark, ask, search, create, SyncBadge)
+ * live here now, so the canvas starts at the window's top edge.
  *
- * The 72px icon rail and the per-surface contextual sidebar were two answers
- * to one question. This column is the single answer, Notion-shaped: vault
- * header, search, the destinations as rows, the item world's Collections and
- * Types inline, and the chrome destinations at the foot. A surface's own
- * navigation (the Docs file tree, Base's rows) nests under its destination row
- * while that surface is current — content is still a function of the
- * destination (M15), it just stopped displacing everything else.
- *
- * The six surfaces that used to render NO sidebar (settings, pulse, inbox,
- * library, workspace, diagram) get this one like everything else: their old
- * objection was Collections-and-Types-as-irrelevant-width, and a nav that is
- * the whole shell is not irrelevant to any surface. The collapse control
- * remains the escape hatch for the canvas surfaces that want the width back.
+ * Shape, top to bottom: header (vault tile · wordmark · zap · search ·
+ * collapse), the New button, the destination rows (Inbox, Home, My work,
+ * Work, Studio, Base, History, Library — groups keep their M42.2 chevrons),
+ * then the sections — Collections, Pages, Agents, Databases, Favorites — all
+ * wearing SectionHeader's one anatomy, then the footer (SyncBadge · Theme ·
+ * Settings). Agents left the destination list for a section because the
+ * design's `sec()` treats a roster the way Databases already reads: a
+ * labelled shelf of subjects, not a place with children.
  */
 export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -163,6 +180,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
+  const themeMode = useUiStore((s) => s.themeMode);
+  const setThemeMode = useUiStore((s) => s.setThemeMode);
+  const favorites = useUiStore((s) => s.favorites);
+  const pruneFavorites = useUiStore((s) => s.pruneFavorites);
   const openPath = useOpenPath();
 
   const collections = useVaultStore((s) => s.collections);
@@ -172,6 +193,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
   );
+  const pagesCreate = useRef<{ newPage(): void; newFolder(): void } | null>(null);
 
   // M8.1: Base navigates by its own axes rather than borrowing Views and
   // Types, which describe a corpus with a different author; its rows nest
@@ -180,7 +202,8 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
 
   // M42.2 — the Notion turn: a destination that owns subjects is a GROUP, and
   // its subjects nest under it on every surface. Open unless closed, so a new
-  // vault shows everything it has.
+  // vault shows everything it has. M43 rides the same closed set for the
+  // section shelves (collections/pages/agents/favorites).
   const navClosed = useUiStore((s) => s.navClosed);
   const setNavGroupOpen = useUiStore((s) => s.setNavGroupOpen);
   const groupOpen = (key: string) => !navClosed.includes(key);
@@ -189,7 +212,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     onToggle: () => setNavGroupOpen(key, !groupOpen(key)),
   });
 
-  const agents = useMemo(() => entries.filter(isAgentEntry).map(agentRef), [entries]);
+  const agents = useMemo(
+    () => entries.filter(isAgentEntry).map((e) => ({ ref: agentRef(e), paused: isPaused(e) })),
+    [entries],
+  );
   const prototypes = useMemo(() => studioProjects(entries), [entries]);
   // The mounted repos, read here rather than waiting for the Work surface to
   // mount: rows the nav promises to show cannot depend on having visited the
@@ -210,6 +236,10 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     [entries, inboxEnabled, inboxPeriod],
   );
 
+  // M43: the same contract as the Inbox badge — the count is the page's own
+  // membership rule, so the nav never promises work the page cannot show.
+  const openCount = useMemo(() => openWork(entries, schema).length, [entries, schema]);
+
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
 
@@ -227,6 +257,39 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     () => effectiveCollections(collections, views, entries),
     [collections, views, entries],
   );
+
+  // M43 — favorites are POINTERS, so a dead one is pruned rather than drawn:
+  // the list stays truthful, and the star on any live page shows real state.
+  const favoriteRows = useMemo(() => {
+    const byPath = new Map(entries.map((e) => [e.path, e]));
+    return favorites.flatMap((path) => {
+      const entry = byPath.get(path);
+      if (entry === undefined) return [];
+      if (isAgentEntry(entry)) {
+        const ref = agentRef(entry);
+        return [
+          {
+            entry,
+            icon: 'bot',
+            color: 'var(--synapse-500)',
+            onOpen: () => navigate({ kind: 'agents', actor: ref.actor }),
+          },
+        ];
+      }
+      const style = entry.type !== null ? typeStyle(entry.type, schema) : null;
+      return [
+        {
+          entry,
+          icon: style?.icon ?? 'file-text',
+          color: style?.color ?? 'var(--n-500)',
+          onOpen: () => openPath(entry.path),
+        },
+      ];
+    });
+  }, [favorites, entries, schema, navigate, openPath]);
+  useEffect(() => {
+    pruneFavorites(new Set(entries.map((e) => e.path)));
+  }, [entries, pruneFavorites]);
 
   const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
     if (node.kind === 'collection') {
@@ -320,8 +383,8 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     );
   }
 
-  // The vault, named as its folder. The wordmark lives in the Topbar; this
-  // header answers "which vault", which the shell never said anywhere before.
+  // The vault, named as its folder — worn as the header tile (M43), which
+  // keeps answering "which vault" from the slot the design gives an avatar.
   const vaultName = vaultPath?.split('/').filter(Boolean).pop() ?? 'Vault';
 
   return (
@@ -352,32 +415,56 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           onResize={setWidth}
         />
       )}
-      <div className="flex items-center justify-between pb-1 pl-4 pr-3 pt-3.5">
-        {/* An h2, not an h1 (M15): this names the navigator, not the page. */}
-        <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-n-900">{vaultName}</h2>
+      <div className="flex items-center gap-2 py-3 pl-3.5 pr-2.5">
+        <span
+          data-testid="vault-tile"
+          title={vaultName}
+          className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md bg-cortex-500 text-xs font-bold text-n-0"
+        >
+          {vaultName.charAt(0).toUpperCase()}
+        </span>
+        <span className="text-[15px] font-bold tracking-[-0.02em] text-n-900">
+          cerebro<span className="text-synapse-500">.</span>
+        </span>
+        <span className="flex-1" />
+        {/* The one AI act in the chrome — synapse, and a toggle, not a door. */}
+        <button
+          type="button"
+          aria-label="Assistant"
+          aria-pressed={aiPanelOpen}
+          onClick={() => setAiPanelOpen(!aiPanelOpen)}
+          className={`flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 ${
+            aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
+          } hover:bg-n-100`}
+        >
+          <Icon name="zap" size={15} color="var(--synapse-500)" />
+        </button>
+        {/* The same ⌘K QuickOpen; here because a one-column nav is where the
+            hand already is. One dialog, one door since the Topbar dissolved. */}
+        <button
+          type="button"
+          aria-label="Search"
+          title="Search  ⌘K"
+          onClick={() => setQuickOpen(true)}
+          className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
+        >
+          <Icon name="search" size={15} />
+        </button>
         <button
           type="button"
           aria-label="Hide sidebar"
           data-testid="sidebar-collapse"
           onClick={() => setCollapsed(true)}
-          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
+          className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
         >
-          <Icon name="panel-left-close" size={15} />
+          <Icon name="panel-left" size={15} />
         </button>
       </div>
-      {/* The same ⌘K the Topbar advertises; here because a one-column nav is
-          where the hand already is. One dialog, two doors. */}
-      <button
-        type="button"
-        aria-label="Search"
-        onClick={() => setQuickOpen(true)}
-        className="mx-2 mb-1 flex h-[30px] flex-none items-center gap-[7px] rounded-md border-0 bg-transparent px-2 text-left text-sm text-n-500 hover:bg-n-100 hover:text-n-700"
-      >
-        <Icon name="search" size={15} />
-        <span>Search</span>
-        <kbd className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">⌘K</kbd>
-      </button>
       <div className="flex-1 overflow-y-auto px-2 pb-4">
+        {/* The New button (M43) — the CreateMenu, rehomed from the Topbar. */}
+        <div className="mb-2">
+          <CreateMenu />
+        </div>
         {/* M42.2 — every destination that owns subjects is a GROUP whose
             rows nest under it, on every surface (the Notion shape the user
             asked for by name). Heads live in `nav-surfaces` containers;
@@ -387,67 +474,33 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             on lights up — a lit parent above a lit child is two rows
             claiming one place. */}
         <div data-testid="nav-surfaces">
+          {inboxEnabled && (
+            <SurfaceRow
+              icon="inbox"
+              label="Inbox"
+              hot
+              active={selection.kind === 'inbox'}
+              count={queued}
+              onClick={() => navigate({ kind: 'inbox' })}
+            />
+          )}
           <SurfaceRow
             icon="house"
             label="Home"
             active={homeActive}
             onClick={() => navigate({ kind: 'home' })}
           />
-          {inboxEnabled && (
-            <SurfaceRow
-              icon="inbox"
-              label="Inbox"
-              active={selection.kind === 'inbox'}
-              count={queued}
-              onClick={() => navigate({ kind: 'inbox' })}
-            />
-          )}
-          {/* M41 — the agents' front door, this high on purpose: D2 says
-              agent platform FIRST, and until this row the platform's
-              subjects had config in Library, runs under Base, and no house.
-              No badge — the waiting-on-you count says itself on the agent's
-              own row, in words (the M8.1 rule, still standing). */}
+          {/* M43 — open work across every database. The quiet count is the
+              page's own membership rule (engine/myWork), never a promise the
+              page cannot keep. */}
           <SurfaceRow
-            icon="bot"
-            label="Agents"
-            active={selection.kind === 'agents' && selection.actor === undefined}
-            chevron={chevronFor('agents')}
-            onClick={() => navigate({ kind: 'agents' })}
+            icon="circle-check"
+            label="My work"
+            active={selection.kind === 'mywork'}
+            count={openCount}
+            onClick={() => navigate({ kind: 'mywork' })}
           />
         </div>
-        {groupOpen('agents') && (
-          <div className="pl-3" data-section="nav-agents">
-            {agents.map((ref) => {
-              const on = selection.kind === 'agents' && selection.actor === ref.actor;
-              return (
-                <button
-                  key={ref.path}
-                  type="button"
-                  data-testid="nav-agent"
-                  aria-current={on ? 'page' : undefined}
-                  onClick={() => navigate({ kind: 'agents', actor: ref.actor })}
-                  className={rowClass(on)}
-                >
-                  {/* Synapse, the one violet in the chrome: these rows ARE
-                      the AI surfaces the DS reserves it for. */}
-                  <Icon name="bot" size={15} color="var(--synapse-500)" />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                    {ref.title}
-                  </span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              data-testid="nav-agent-new"
-              onClick={() => navigate({ kind: 'library', tab: 'agent' })}
-              className={`${rowClass(false)} text-n-500`}
-            >
-              <Icon name="plus" size={15} color="var(--n-400)" />
-              <span>New agent</span>
-            </button>
-          </div>
-        )}
         <div data-testid="nav-surfaces">
           {/* M30 — mounted repositories. Its own room rather than a section
               of the pages: pages are vault notes, and a surface that renders
@@ -551,7 +604,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
         )}
         <div data-testid="nav-surfaces">
           {/* M9.4 — the vault's history. No badge: a count of commits is
-              chrome. The topbar SyncBadge speaks instead, and only when
+              chrome. The footer SyncBadge speaks instead, and only when
               something needs doing. */}
           <SurfaceRow
             icon="activity"
@@ -559,86 +612,152 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             active={historyActive}
             onClick={() => navigate({ kind: 'pulse' })}
           />
+          {/* Up from the footer (M43): the Library is a place you work —
+              agents, skills, blocks — not a dial you set. `blocks`, not
+              `library`: Pages already owns the book glyph, and two rows drawn
+              identically is the nav failing at the one job it has (M18). */}
+          <SurfaceRow
+            icon="blocks"
+            label="Library"
+            active={selection.kind === 'library'}
+            onClick={() => navigate({ kind: 'library' })}
+          />
         </div>
-        {/* M38.3 — the Docs destination died with its surface; the tree it
-            used to gate is a standing section now, because in a shell where
-            everything is a page the pages ARE navigation, not a mode. Outside
-            the destinations containers on purpose: the tree's folder rows
-            share accessible names with destination rows (`inbox/` vs Inbox),
-            and a spec scoped to `nav-surfaces` must never catch a folder. */}
-        <div className={SECTION_LABEL}>Pages</div>
-        <FileTree
-          root=""
-          docsOnly
-          activePath={selection.kind === 'doc' ? selection.path : null}
-          onOpen={openPath}
-        />
         {/* M10: Collections are the top-level navigation of the item world. A
             Collection is a container — it holds Lists, Folders and Docs —
             where a "view" used to be both the container and the query at once. */}
-        <div className="flex items-center justify-between pr-1">
-          <div className={SECTION_LABEL}>Collections</div>
-          <button
-            type="button"
-            aria-label="New collection"
-            data-testid="new-collection"
-            onClick={() => setCollectionDialog({ mode: 'new' })}
-            className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
-          >
-            <Icon name="plus" size={13} />
-          </button>
-        </div>
-        {tree.length === 0 ? (
-          <div className="px-2 py-1 text-xs leading-[17px] text-n-400">
-            No collections yet — make one to hold lists, folders, and docs.
-          </div>
-        ) : null}
-        {/* Everything lives in a Collection. There is deliberately no second
-            grouping beside this one: a folder holding Lists IS a Collection, so
-            a List cannot be orphaned and nothing needs a home of last resort. */}
-        <CollectionTree
-          nodes={tree}
-          selection={selection}
-          onNavigate={navigate}
-          onOpenDoc={openPath}
-          menuFor={nodeMenuItems}
-          onAdd={(node) => onNewView(node.id)}
+        <SectionHeader
+          label="Collections"
+          open={groupOpen('collections')}
+          onToggle={() => setNavGroupOpen('collections', !groupOpen('collections'))}
+          actions={[
+            {
+              icon: 'plus',
+              label: 'New collection',
+              testId: 'new-collection',
+              onClick: () => setCollectionDialog({ mode: 'new' }),
+            },
+          ]}
         />
+        {groupOpen('collections') && (
+          <>
+            {tree.length === 0 ? (
+              <div className="px-2 py-1 text-xs leading-[17px] text-n-400">
+                No collections yet — make one to hold lists, folders, and docs.
+              </div>
+            ) : null}
+            {/* Everything lives in a Collection. There is deliberately no second
+                grouping beside this one: a folder holding Lists IS a Collection, so
+                a List cannot be orphaned and nothing needs a home of last resort. */}
+            <CollectionTree
+              nodes={tree}
+              selection={selection}
+              onNavigate={navigate}
+              onOpenDoc={openPath}
+              menuFor={nodeMenuItems}
+              onAdd={(node) => onNewView(node.id)}
+            />
+          </>
+        )}
+        {/* M38.3 — the Docs destination died with its surface; the tree it
+            used to gate is a standing section, because in a shell where
+            everything is a page the pages ARE navigation, not a mode. Outside
+            the destinations containers on purpose: the tree's folder rows
+            share accessible names with destination rows (`inbox/` vs Inbox),
+            and a spec scoped to `nav-surfaces` must never catch a folder.
+            M43: creation moved into the header's reveals — the tree's own
+            openers, through createRef, so there is exactly one dialog. */}
+        <SectionHeader
+          label="Pages"
+          open={groupOpen('pages')}
+          onToggle={() => setNavGroupOpen('pages', !groupOpen('pages'))}
+          actions={[
+            {
+              icon: 'folder-plus',
+              label: 'New folder',
+              onClick: () => pagesCreate.current?.newFolder(),
+            },
+            { icon: 'file-plus', label: 'New page', onClick: () => pagesCreate.current?.newPage() },
+          ]}
+        />
+        {groupOpen('pages') && (
+          <FileTree
+            root=""
+            docsOnly
+            showCreateBar={false}
+            createRef={pagesCreate}
+            activePath={selection.kind === 'doc' ? selection.path : null}
+            onOpen={openPath}
+          />
+        )}
+        {/* M43 — Agents is a SECTION now, the design's sec(): the fleet is a
+            roster of subjects, and the ↗ is the door to the fleet surface the
+            M41 destination row used to be. Rows keep their testids and stay
+            outside `nav-surfaces` (the e2e scoping rule survives the move). */}
+        <SectionHeader
+          label="Agents"
+          open={groupOpen('agents')}
+          onToggle={() => setNavGroupOpen('agents', !groupOpen('agents'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: 'Open all agents',
+              onClick: () => navigate({ kind: 'agents' }),
+            },
+            {
+              icon: 'plus',
+              label: 'New agent',
+              testId: 'nav-agent-new',
+              onClick: () => navigate({ kind: 'library', tab: 'agent' }),
+            },
+          ]}
+        />
+        {groupOpen('agents') && (
+          <div data-section="nav-agents">
+            {agents.map(({ ref, paused }) => {
+              const on = selection.kind === 'agents' && selection.actor === ref.actor;
+              return (
+                <button
+                  key={ref.path}
+                  type="button"
+                  data-testid="nav-agent"
+                  aria-current={on ? 'page' : undefined}
+                  onClick={() => navigate({ kind: 'agents', actor: ref.actor })}
+                  className={`${rowClass(on)}${paused && !on ? ' text-n-500' : ''}`}
+                >
+                  {/* Synapse, the one violet in the chrome: these rows ARE
+                      the AI surfaces the DS reserves it for. A paused agent
+                      dims and wears the pause tail — off duty, not gone. */}
+                  <Icon name="bot" size={15} color={paused ? 'var(--n-400)' : 'var(--synapse-500)'} />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                    {ref.title}
+                  </span>
+                  {paused && (
+                    <span className="ml-auto inline-flex text-n-400">
+                      <Icon name="pause" size={12} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
         {/* M3's collapsible Types section, wearing what it always was
             (M39.2): the databases. The `type:` key, the metamodel, and every
             internal identifier keep the old word — labels spend, kinds stay,
-            same rule as M37.2. */}
-        <div className="flex items-center justify-between pr-1">
-          <button
-            type="button"
-            aria-expanded={typesOpen}
-            onClick={() => setTypesOpen(!typesOpen)}
-            className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-n-700`}
-          >
-            <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-            Databases
-          </button>
-          <span className="inline-flex">
-            {/* M12.6: the schema doctor — adopt an existing vault's freeform
-                frontmatter into declared types, one reviewed pass. */}
-            <button
-              type="button"
-              aria-label="Adopt vault schema"
-              onClick={() => setAdopting(true)}
-              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
-            >
-              <Icon name="wand-sparkles" size={12} />
-            </button>
-            <button
-              type="button"
-              aria-label="New database"
-              onClick={() => setTypeDialog({ mode: 'new' })}
-              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
-            >
-              <Icon name="plus" size={13} />
-            </button>
-          </span>
-        </div>
+            same rule as M37.2. Open state stays on `typesOpen` — it was
+            persisted long before the closed set existed. */}
+        <SectionHeader
+          label="Databases"
+          open={typesOpen}
+          onToggle={() => setTypesOpen(!typesOpen)}
+          actions={[
+            // M12.6: the schema doctor — adopt an existing vault's freeform
+            // frontmatter into declared types, one reviewed pass.
+            { icon: 'wand-sparkles', label: 'Adopt vault schema', onClick: () => setAdopting(true) },
+            { icon: 'plus', label: 'New database', onClick: () => setTypeDialog({ mode: 'new' }) },
+          ]}
+        />
         {typesOpen &&
           types.map((t) => {
             const typeActive = selection.kind === 'type' && selection.name === t.name;
@@ -663,33 +782,66 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               </button>
             );
           })}
+        {/* M43 — pinned pages, records, and agents. An empty list IS
+            measured-at-zero (nobody pinned anything), so words are the honest
+            render — never a hidden section, which would make the first pin
+            appear to invent a place. */}
+        <SectionHeader
+          label="Favorites"
+          open={groupOpen('favorites')}
+          onToggle={() => setNavGroupOpen('favorites', !groupOpen('favorites'))}
+        />
+        {groupOpen('favorites') &&
+          (favoriteRows.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-n-400">No favorites yet</div>
+          ) : (
+            favoriteRows.map(({ entry, icon, color, onOpen }) => (
+              <button
+                key={entry.path}
+                type="button"
+                data-testid="nav-favorite"
+                onClick={onOpen}
+                className={rowClass(false)}
+              >
+                <Icon name={icon} size={15} color={color} />
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                  {entry.title}
+                </span>
+              </button>
+            ))
+          ))}
       </div>
-      {/* The chrome destinations, below the fold the way Notion keeps its
-          Settings: where you go to CHANGE how the app works rather than
-          somewhere you work. The assistant is a companion to whatever surface
-          you are on, so it toggles rather than navigating. `blocks`, not
-          `library`, for the Library — Docs already owns that glyph, and two
-          rows drawn identically is the nav failing at the one job it has (M18). */}
-      <div data-testid="nav-surfaces" className="flex-none border-t border-n-200 px-2 py-2">
-        <SurfaceRow
-          icon="sparkles"
-          label="Assistant"
-          toggle
-          active={aiPanelOpen}
-          onClick={() => setAiPanelOpen(!aiPanelOpen)}
-        />
-        <SurfaceRow
-          icon="blocks"
-          label="Library"
-          active={selection.kind === 'library'}
-          onClick={() => navigate({ kind: 'library' })}
-        />
-        <SurfaceRow
-          icon="settings"
-          label="Settings"
-          active={selection.kind === 'settings'}
+      {/* The footer (M43): the SyncBadge speaks only when something needs
+          doing (M9.4), the theme cycles in place, and Settings keeps its
+          below-the-fold seat — where you go to CHANGE how the app works
+          rather than somewhere you work. */}
+      <div
+        data-testid="nav-surfaces"
+        className="flex flex-none items-center gap-0.5 border-t border-n-200 px-2 py-1.5"
+      >
+        <SyncBadge />
+        <button
+          type="button"
+          onClick={() => setThemeMode(THEME_NEXT[themeMode])}
+          title={`Theme: ${themeMode}`}
+          className="flex h-[30px] flex-1 items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-xs text-n-600 hover:bg-n-100 hover:text-n-800"
+        >
+          <Icon name={THEME_ICONS[themeMode]} size={15} />
+          Theme
+        </button>
+        <button
+          type="button"
+          aria-current={selection.kind === 'settings' ? 'page' : undefined}
           onClick={() => navigate({ kind: 'settings' })}
-        />
+          className={`flex h-[30px] flex-1 items-center gap-2 rounded-md border-0 px-2 text-left text-xs ${
+            selection.kind === 'settings'
+              ? 'bg-surface-selected font-medium text-cortex-700'
+              : 'bg-transparent text-n-600 hover:bg-n-100 hover:text-n-800'
+          }`}
+        >
+          <Icon name="settings" size={15} />
+          Settings
+        </button>
       </div>
       {typeMenu !== null && (
         <ContextMenu

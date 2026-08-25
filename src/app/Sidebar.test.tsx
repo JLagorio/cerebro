@@ -102,42 +102,50 @@ describe('Sidebar', () => {
       const labels: string[] = [];
       for (const group of screen.getAllByTestId('nav-surfaces')) {
         for (const button of within(group).getAllByRole('button')) {
-          // The inbox label carries its count; everything else is a bare name.
-          labels.push((button.getAttribute('aria-label') ?? '').replace(/ \(\d+\)$/, ''));
+          // The inbox label carries its count; the footer rows name
+          // themselves by text. Everything else is a bare aria-label.
+          labels.push(
+            (button.getAttribute('aria-label') ?? button.textContent ?? '').replace(
+              / \(\d+\)$/,
+              '',
+            ),
+          );
         }
       }
       return labels;
     };
 
-    it('carries exactly the ten destinations the shell has', () => {
+    it('carries exactly the destinations the shell has (M43)', () => {
       render(<Sidebar onNewView={vi.fn()} />);
       const labels = surfaceLabels();
-      // Studio is M40's (the third locked name, seated with Work); Agents is
-      // M41's — the platform's front door, this high because D2 says agent
-      // platform first.
+      // M43: Inbox leads (the design's hot queue), My work is new, Library
+      // came up from the footer, and the footer holds Theme + Settings.
       expect(labels).toEqual([
-        'Home',
         'Inbox',
-        'Agents',
+        'Home',
+        'My work',
         'Work',
         'Studio',
         'Base',
         'History',
-        'Assistant',
         'Library',
+        'Theme',
         'Settings',
       ]);
       // M33a.2 folded the Status hub into Knowledge; M37.2 spent the locked
       // names (Base was Knowledge, Work was Workspace); M38.3 retired Docs —
-      // pages are a standing tree section, not a destination. Each merge that
-      // removes or renames a destination leaves the old name here, because
-      // the failure mode is a label silently coming back.
+      // pages are a standing tree section, not a destination. M43 moved
+      // Agents into a section and the Assistant onto the header zap. Each
+      // merge that removes or renames a destination leaves the old name here,
+      // because the failure mode is a label silently coming back.
       expect(labels).not.toContain('Status');
       expect(labels).not.toContain('Needs review');
       expect(labels).not.toContain('Background');
       expect(labels).not.toContain('Knowledge');
       expect(labels).not.toContain('Workspace');
       expect(labels).not.toContain('Docs');
+      expect(labels).not.toContain('Agents');
+      expect(labels).not.toContain('Assistant');
     });
 
     it('renders on every surface — the SIDEBARLESS set retired with the rail (M37.3)', () => {
@@ -252,7 +260,7 @@ describe('Sidebar', () => {
       expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([]);
     });
 
-    it('nests the vault agents under Agents, and the chevron folds the group (M42.2)', () => {
+    it('lists the vault agents in the Agents SECTION, whose header folds it (M43)', () => {
       useVaultStore.setState({
         entries: [
           project,
@@ -260,24 +268,28 @@ describe('Sidebar', () => {
         ],
       });
       render(<Sidebar onNewView={vi.fn()} />);
-      // The nested row is a destination for ONE agent — and it lives outside
-      // the `nav-surfaces` containers, so an agent named after a destination
-      // can never be caught by a spec scoped to them.
+      // The row is a destination for ONE agent — and it lives outside the
+      // `nav-surfaces` containers, so an agent named after a destination can
+      // never be caught by a spec scoped to them.
       fireEvent.click(screen.getByTestId('nav-agent'));
       expect(useNavStore.getState().selection).toEqual({
         kind: 'agents',
         actor: 'process:scout',
       });
-      // Folding is not navigating: the chevron hides the rows and the
+      // The header's reveals: ↗ is the door to the fleet, ＋ starts a new
+      // agent — the affordances the destination row and its nested "New
+      // agent" row used to carry.
+      fireEvent.click(screen.getByRole('button', { name: 'Open all agents' }));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'agents' });
+      // Folding is not navigating: the header hides the rows and the
       // selection stays where it was.
       const head = screen.getByRole('button', { name: 'Agents' });
-      fireEvent.click(within(head).getByTestId('nav-chevron'));
+      expect(head.getAttribute('aria-expanded')).toBe('true');
+      fireEvent.click(head);
       expect(screen.queryAllByTestId('nav-agent')).toEqual([]);
-      expect(screen.queryByTestId('nav-agent-new')).toBeNull();
-      expect(useNavStore.getState().selection).toEqual({
-        kind: 'agents',
-        actor: 'process:scout',
-      });
+      expect(useNavStore.getState().selection).toEqual({ kind: 'agents' });
+      // The header action survives the fold — creation is not membership.
+      expect(screen.getByTestId('nav-agent-new')).toBeTruthy();
     });
 
     it('the search row opens QuickOpen', () => {
@@ -407,13 +419,15 @@ describe('Sidebar', () => {
     expect(onNewView).toHaveBeenCalledWith('product');
   });
 
-  // M15: the sidebar names the NAVIGATOR, not the page — as an h1 it gave Docs
-  // two level-1 headings. M37.3: what it names is the VAULT now, because a nav
-  // that is the whole shell answers "which vault" rather than "which mode".
-  it('titles itself with the vault name as an h2 so the page keeps the only h1', () => {
+  // M37.3 made the header answer "which vault"; M43 moved that answer onto
+  // the tile (the slot the design gives an avatar) so the wordmark could take
+  // the line — and no heading at all, so every page keeps its own h1 story.
+  it('wears the vault as the header tile (M43)', () => {
     render(<Sidebar onNewView={vi.fn()} />);
-    expect(screen.getByRole('heading', { name: 'demo-vault', level: 2 })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'demo-vault', level: 1 })).toBeNull();
+    const tile = screen.getByTestId('vault-tile');
+    expect(tile.getAttribute('title')).toBe('demo-vault');
+    expect(tile.textContent).toBe('D');
+    expect(screen.queryByRole('heading', { name: 'demo-vault' })).toBeNull();
   });
 
   // M15: `flex-none` here was what made the canvas absorb every pixel of a
@@ -555,4 +569,83 @@ describe('Sidebar', () => {
     // No "Views"/"Foundations" container conjured from its folder either.
     expect(screen.queryByText('Views')).toBeNull();
   });
+  // M43 — the new shelves.
+  describe('M43 sections', () => {
+    it('counts open work on the My work row — the page\'s own membership rule', () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          mkEntry({
+            path: 'types/task.md',
+            title: 'Task',
+            type: 'Type',
+            properties: {
+              fields: { status: { kind: 'status' } },
+              statuses: [
+                { id: 'todo', group: 'active' },
+                { id: 'done', group: 'done' },
+              ],
+            } as unknown as Entry['properties'],
+          }),
+          mkEntry({
+            path: 'records/tasks/open.md',
+            title: 'Open task',
+            type: 'Task',
+            properties: { status: 'todo' } as unknown as Entry['properties'],
+          }),
+          mkEntry({
+            path: 'records/tasks/shipped.md',
+            title: 'Shipped task',
+            type: 'Task',
+            properties: { status: 'done' } as unknown as Entry['properties'],
+          }),
+        ],
+      });
+      render(<Sidebar onNewView={vi.fn()} />);
+      const row = screen.getByRole('button', { name: 'My work (1)' });
+      fireEvent.click(row);
+      expect(useNavStore.getState().selection).toEqual({ kind: 'mywork' });
+    });
+
+    it('says the empty Favorites in words — nobody pinned anything is a real zero', () => {
+      useUiStore.setState({ favorites: [] });
+      render(<Sidebar onNewView={vi.fn()} />);
+      expect(screen.getByText('No favorites yet')).toBeTruthy();
+    });
+
+    it('renders a pinned page as a row and prunes a pointer whose file is gone', () => {
+      useVaultStore.setState({
+        entries: [project, mkEntry({ path: 'notes/keep.md', title: 'Keep me' })],
+      });
+      useUiStore.setState({ favorites: ['notes/keep.md', 'notes/gone.md'] });
+      render(<Sidebar onNewView={vi.fn()} />);
+      const rows = screen.getAllByTestId('nav-favorite');
+      expect(rows.map((r) => r.textContent)).toEqual(['Keep me']);
+      // The dead pointer left the STORE, not just the render — the list is
+      // truthful, and the next session does not resurrect it.
+      expect(useUiStore.getState().favorites).toEqual(['notes/keep.md']);
+      fireEvent.click(rows[0]);
+      expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
+    });
+
+    it('creates pages from the Pages header through the tree\'s own dialog', () => {
+      render(<Sidebar onNewView={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'New page' }));
+      // The FileTree's dialog — one creation flow, now opened from the header.
+      expect(screen.getByRole('dialog', { name: 'New page' })).toBeTruthy();
+    });
+
+    it('cycles the theme from the footer', () => {
+      useUiStore.setState({ themeMode: 'system' });
+      render(<Sidebar onNewView={vi.fn()} />);
+      const theme = screen.getByRole('button', { name: 'Theme' });
+      fireEvent.click(theme);
+      expect(useUiStore.getState().themeMode).toBe('light');
+      fireEvent.click(theme);
+      expect(useUiStore.getState().themeMode).toBe('dark');
+      fireEvent.click(theme);
+      expect(useUiStore.getState().themeMode).toBe('system');
+    });
+  });
 });
+
