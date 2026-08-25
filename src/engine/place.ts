@@ -163,6 +163,8 @@ export function placeLabel(
       return 'Home';
     case 'inbox':
       return 'Inbox';
+    case 'mywork':
+      return 'My work';
     case 'changes':
       return 'Changes';
     case 'pulse':

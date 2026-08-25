@@ -20,6 +20,7 @@ import { DocPage } from '@/pages/DocPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
+import { MyWorkPage } from '@/pages/MyWorkPage';
 import { PulsePage } from '@/pages/PulsePage';
 import { LibraryPage } from '@/library/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -96,6 +97,9 @@ function CanvasOutlet() {
       return <HomePage />;
     case 'inbox':
       return <InboxPage />;
+    // M43 — open work across every database, grouped by type.
+    case 'mywork':
+      return <MyWorkPage />;
     case 'knowledge':
       return <KnowledgePage selection={selection} />;
     // M12.5: `project` retired — a project is a folder, and a folder on

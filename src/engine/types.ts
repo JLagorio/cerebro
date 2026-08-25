@@ -184,6 +184,9 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
 export type Selection =
   | { kind: 'home' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
+  // M43 — open work across every database. Capability-gated membership
+  // (engine/myWork); no per-entry state rides on the selection.
+  | { kind: 'mywork' }
   // AI knowledge base: OKF bundle, read-only (M5). An absent `nav` means "no
   // view was asked for", which `defaultKnowledgeNav` answers with the heaviest
   // thread (M33a.3) — it was a plain `all` from M8.1 until then.

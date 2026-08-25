@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { openWork } from './myWork';
 import { columnUniverse, defaultColumnsFor } from './columns';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
@@ -245,6 +246,14 @@ export function resolveSurface(
       return {
         title: 'Inbox',
         entries: inboxEntries(entries),
+        presentation: defaultPresentation(),
+      };
+    case 'mywork':
+      // MyWorkPage draws its own grouped layout; the surface still reports
+      // the real open set so any consumer sees the truth, the Inbox rule.
+      return {
+        title: 'My work',
+        entries: openWork(entries, schema).map((r) => r.entry),
         presentation: defaultPresentation(),
       };
     case 'doc':
