@@ -153,7 +153,7 @@ describe('App boot flow', () => {
       act(() => useUiStore.getState().openDetail(BET));
       const slot = await screen.findByTestId('right-panel-slot');
       // Beside the canvas — NOT beside the whole main column, which is what
-      // let the assistant steal width from the Topbar and StatusBar as well.
+      // let the assistant steal width from the StatusBar as well.
       expect(slot.parentElement).toBe(main.parentElement);
       // Capped against the canvas ROW, so the cap actually engages — `50vw`
       // resolved against the viewport, a box the panel does not live in.

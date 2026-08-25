@@ -365,19 +365,41 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     return items;
   };
 
-  // M11: collapsed to a hairline rather than unmounted, so the reopen control
-  // stays where the sidebar was instead of moving to a different chrome.
+  // M43 — the design's collapsed state: no hairline column, a floating
+  // cluster at the window's top-left instead. Expand, ask, and search stay
+  // reachable because those three are the chrome's whole promise; the canvas
+  // gets every other pixel.
   if (collapsed) {
     return (
-      <div className="flex w-8 flex-none items-start justify-center border-r border-n-200 bg-surface-sunken pt-3.5">
+      <div className="absolute left-2.5 top-2.5 z-20 flex items-center gap-0.5">
         <button
           type="button"
           aria-label="Show sidebar"
           data-testid="sidebar-expand"
           onClick={() => setCollapsed(false)}
-          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
+          className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
         >
-          <Icon name="panel-left-open" size={15} />
+          <Icon name="panel-left" size={15} />
+        </button>
+        <button
+          type="button"
+          aria-label="Assistant"
+          aria-pressed={aiPanelOpen}
+          onClick={() => setAiPanelOpen(!aiPanelOpen)}
+          className={`flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 ${
+            aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
+          } hover:bg-n-100`}
+        >
+          <Icon name="zap" size={15} color="var(--synapse-500)" />
+        </button>
+        <button
+          type="button"
+          aria-label="Search"
+          title="Search  ⌘K"
+          onClick={() => setQuickOpen(true)}
+          className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
+        >
+          <Icon name="search" size={15} />
         </button>
       </div>
     );

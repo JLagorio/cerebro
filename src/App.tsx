@@ -27,7 +27,6 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { StudioPage } from '@/pages/StudioPage';
 import { TypePage } from '@/pages/TypePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
-import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
 import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
@@ -344,7 +343,6 @@ function App() {
           minWidth: CANVAS_MIN_WIDTH + drawnPanels * RIGHT_PANEL_MIN_WIDTH,
         }}
       >
-        <Topbar />
         {/* M23.7: the divergence circuit breaker's banner — visible only
             while the ledger's reconciliation mode is open (never in the
             browser mock, which has no ledger). */}
@@ -353,7 +351,7 @@ function App() {
             than a fixed overlay on top of it. That is what lets a table keep
             its full horizontal scroll while a record is open.
             M15: the assistant moved in here too. As a sibling of the whole main
-            column it stole width from the Topbar and the StatusBar as well as
+            column it stole width from the StatusBar as well as
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` lets a page respond to the width it actually
             has rather than the viewport's. */}
