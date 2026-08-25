@@ -39,8 +39,8 @@ test('agents: the front door — roster, agent page, chain trace, one editor', a
   await seedBeforeBoot(page, '__cerebroSeedFleet', [ROOT, HOP], {});
   await boot(page);
 
-  // -- The destination exists and composes roster + run feed --------------
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Agents' }).click();
+  // -- The fleet door is the Agents SECTION's open-all reveal (M43) --------
+  await page.getByRole('button', { name: 'Open all agents' }).click();
   await expect(page.getByTestId('agents-page')).toBeVisible();
   const roster = page.getByTestId('agent-row');
   await expect(roster).toHaveCount(2);

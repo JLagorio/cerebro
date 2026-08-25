@@ -571,7 +571,7 @@ describe('Sidebar', () => {
   });
   // M43 — the new shelves.
   describe('M43 sections', () => {
-    it('counts open work on the My work row — the page\'s own membership rule', () => {
+    it("counts open work on the My work row — the page's own membership rule", () => {
       useVaultStore.setState({
         entries: [
           project,
@@ -628,7 +628,7 @@ describe('Sidebar', () => {
       expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
     });
 
-    it('creates pages from the Pages header through the tree\'s own dialog', () => {
+    it("creates pages from the Pages header through the tree's own dialog", () => {
       render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', { name: 'New page' }));
       // The FileTree's dialog — one creation flow, now opened from the header.
@@ -648,4 +648,3 @@ describe('Sidebar', () => {
     });
   });
 });
-

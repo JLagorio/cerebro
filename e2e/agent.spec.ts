@@ -12,7 +12,7 @@ import { boot, seedBeforeBoot } from './boot';
 test('agent: the panel streams a reply and shows what it did', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
 
@@ -40,7 +40,7 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
 test('agent: walking away keeps the thread, and moves the context with you', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('What is at risk right now?');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -80,7 +80,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // SHELL_TWO_PANEL_MIN); below that the record wins and the assistant parks.
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
 
   // Where you are is context, and it says so rather than being folded
@@ -136,7 +136,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
 test('agent: a turn can be addressed by name, and the thread stays put', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   const composer = panel.getByLabel('Message the assistant');
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
@@ -194,7 +194,7 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   // M8.1: the three-mode dropdown is gone from the panel. It asked the user to
   // declare a policy before knowing what they were going to ask for; what the
   // agent may change now follows from which folder it is writing to.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
 
   await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
@@ -224,7 +224,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   // since the dev server started (`?t=<hmr>`). Two module instances, two
   // listener sets, and the emit reached nobody — so the test passed on a cold
   // server and failed on a warm one.
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('Help me clear the Inbox');
   await panel.getByRole('button', { name: 'Send' }).click();

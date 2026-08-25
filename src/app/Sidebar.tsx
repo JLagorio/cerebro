@@ -29,12 +29,7 @@ import { SyncBadge } from '@/git/SyncBadge';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
 import { useRootsStore } from '@/stores/rootsStore';
-import {
-  SIDEBAR_WIDTH_MAX,
-  SIDEBAR_WIDTH_MIN,
-  useUiStore,
-  type ThemeMode,
-} from '@/stores/uiStore';
+import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore, type ThemeMode } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
@@ -750,7 +745,11 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                   {/* Synapse, the one violet in the chrome: these rows ARE
                       the AI surfaces the DS reserves it for. A paused agent
                       dims and wears the pause tail — off duty, not gone. */}
-                  <Icon name="bot" size={15} color={paused ? 'var(--n-400)' : 'var(--synapse-500)'} />
+                  <Icon
+                    name="bot"
+                    size={15}
+                    color={paused ? 'var(--n-400)' : 'var(--synapse-500)'}
+                  />
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                     {ref.title}
                   </span>
@@ -776,7 +775,11 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           actions={[
             // M12.6: the schema doctor — adopt an existing vault's freeform
             // frontmatter into declared types, one reviewed pass.
-            { icon: 'wand-sparkles', label: 'Adopt vault schema', onClick: () => setAdopting(true) },
+            {
+              icon: 'wand-sparkles',
+              label: 'Adopt vault schema',
+              onClick: () => setAdopting(true),
+            },
             { icon: 'plus', label: 'New database', onClick: () => setTypeDialog({ mode: 'new' }) },
           ]}
         />

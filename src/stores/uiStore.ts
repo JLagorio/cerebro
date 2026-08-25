@@ -743,9 +743,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   favorites: loadStringList(FAVORITES_KEY),
   toggleFavorite: (path) => {
     const current = get().favorites;
-    const next = current.includes(path)
-      ? current.filter((p) => p !== path)
-      : [...current, path];
+    const next = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
   },
