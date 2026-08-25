@@ -5,6 +5,7 @@ import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { FavoriteStar } from '@/app/FavoriteStar';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
@@ -555,6 +556,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             {SAVE_LABEL[saveState]}
           </span>
         )}
+        <FavoriteStar path={entry.path} />
         {/* 'Add page' and 'Move to folder' are BOTH in the overflow menu
             below — the toolbar's only labelled control was a duplicate of the
             action users need least. The toolbar is now menu + panel toggle. */}

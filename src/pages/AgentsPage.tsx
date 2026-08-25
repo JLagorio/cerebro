@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { FavoriteStar } from '@/app/FavoriteStar';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { agentDraft, type AgentDraft } from '@/engine/libraryDraft';
 import { holdsProposalTools, proposalConsequence } from '@/engine/tools';
@@ -312,6 +313,7 @@ function AgentDetail({ actor }: { actor: string }) {
               <p className="m-0 mt-0.5 text-sm text-n-600">{draft.description}</p>
             )}
           </div>
+          <FavoriteStar path={entry.path} />
           {paused && (
             <span
               data-testid="agent-paused-chip"

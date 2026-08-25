@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
+import { FavoriteStar } from '@/app/FavoriteStar';
 import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
@@ -139,6 +140,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
           )}
         </span>
       )}
+      <FavoriteStar path={entry.path} />
       {/* M38.2 — the peek stopped being a wall. Same page, full canvas: the
           record's properties and body render in the page canvas, and the
           panel closes because the same record twice is one time too many. */}
