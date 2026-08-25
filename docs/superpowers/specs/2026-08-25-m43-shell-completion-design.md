@@ -62,9 +62,9 @@ the canvas. Expand restores the stored width.
   retired status) is not "active" and not "done" — it is unresolvable, and
   the entry is EXCLUDED from My work rather than guessed at. The count counts
   what the page shows.
-- New selection kind `mywork` in the nav store, plus the navigate MCP tool's
-  kind vocabulary (kinds are shared internal vocabulary — the Rust side and
-  the mock must both accept it).
+- New selection kind `mywork` in the Selection union. TS-only: the navigate
+  MCP tool enumerates just `home | inbox | knowledge | view`, so no Rust or
+  mock change rides on this kind.
 - Page: open work grouped by database (type display name), DS list rows,
   status chip per row, opens the record. Empty state: words, not a zero.
 - Nav count: quiet mono count of open work, same anatomy as Inbox's.
@@ -78,8 +78,9 @@ localStorage (`cerebro.navClosed`, the M42.2 store — section ids join the
 group keys). Open by default.
 
 - **COLLECTIONS**: ＋ "New collection". Tree unchanged (CollectionTree).
-- **PAGES**: hover reveals folder-plus "New folder" and ＋ "New doc"
-  (wired to the FileTree's existing creation flows). Tree unchanged.
+- **PAGES**: hover reveals folder-plus "New folder" and file-plus "New page"
+  (wired to the FileTree's existing creation flows — its language, since
+  M38.3, is pages). Tree unchanged.
 - **AGENTS**: ↗ "Open all agents" (navigates `{ kind: 'agents' }`, the fleet)
   and ＋ "New agent" (navigates to Library's agent tab, as today). One row per
   agent record: bot icon in synapse-500, paused agents render dimmed
