@@ -241,7 +241,7 @@ export function resolveSurface(
       return { title: 'Knowledge', entries: [], presentation: defaultPresentation() };
     case 'inbox':
       // InboxPage draws its own queue/reading/organize layout, but the
-      // collection still reports the real contents so the topbar and any
+      // collection still reports the real contents so the shell and any
       // other consumer see the truth rather than an empty stand-in.
       return {
         title: 'Inbox',

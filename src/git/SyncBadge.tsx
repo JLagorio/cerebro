@@ -10,7 +10,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
- * Sync state in the topbar (M9.4).
+ * Sync state in the shell (M9.4; the sidebar footer since M43).
  *
  * Held to the no-idle-chrome rule: a clean, remoteless vault renders NOTHING.
  * The badge appears only when it has something to tell you — uncommitted

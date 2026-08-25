@@ -123,7 +123,7 @@ export function isFailure(result: RemoteResult): boolean {
   );
 }
 
-/** Sync state for the topbar badge, derived rather than stored. */
+/** Sync state for the shell SyncBadge, derived rather than stored. */
 export type SyncState = 'clean' | 'local-changes' | 'ahead' | 'behind' | 'diverged' | 'conflict';
 
 export function syncState(
