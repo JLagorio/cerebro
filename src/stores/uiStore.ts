@@ -148,14 +148,20 @@ interface UiState {
   setNavGroupOpen(key: string, open: boolean): void;
 
   /**
-   * Pinned paths (M43) — ordered, vault-relative. Workspace state, not vault
-   * content: the same rule that put `cerebro.navClosed` here. A favorite is a
-   * POINTER — pruneFavorites drops any that stopped resolving, which the
-   * sidebar calls with the paths that still exist.
+   * Vault path → pinned paths (M43) — ordered, vault-relative. Workspace
+   * state, not vault content: the same rule that put `cerebro.navClosed`
+   * here. A favorite is a POINTER — pruneFavorites drops any that stopped
+   * resolving, which the sidebar calls with the paths that still exist.
+   *
+   * Scoped by vault like `stdioApprovals` and `skillRuns` (PR #17 review).
+   * A flat list would be pruned against whichever vault happens to be open,
+   * so opening a second vault would permanently drop every pin belonging to
+   * the first — and `notes/plan.md` exists in more than one vault, so even
+   * the survivors would be the wrong rows.
    */
-  favorites: string[];
-  toggleFavorite(path: string): void;
-  pruneFavorites(existing: Set<string>): void;
+  favorites: Record<string, string[]>;
+  toggleFavorite(vault: string, path: string): void;
+  pruneFavorites(vault: string, existing: Set<string>): void;
 
   /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
@@ -538,6 +544,10 @@ function loadStdioApprovals(key: string): Record<string, string[]> {
   return scrubbed.map;
 }
 
+/** vault → list. A stored ARRAY is the pre-scoping flat format and reads as
+ * `{}`: nothing records which vault those entries belonged to, so attributing
+ * them to whichever vault opens next would be a guess. Dropping is the honest
+ * migration — one re-approval, one re-pin. */
 function loadStringListMap(key: string): Record<string, string[]> {
   try {
     const raw = window.localStorage.getItem(key);
@@ -740,17 +750,19 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ navClosed: next });
   },
 
-  favorites: loadStringList(FAVORITES_KEY),
-  toggleFavorite: (path) => {
-    const current = get().favorites;
-    const next = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
+  favorites: loadStringListMap(FAVORITES_KEY),
+  toggleFavorite: (vault, path) => {
+    const current = get().favorites[vault] ?? [];
+    const pinned = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
+    const next = { ...get().favorites, [vault]: pinned };
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
   },
-  pruneFavorites: (existing) => {
-    const current = get().favorites;
-    const next = current.filter((p) => existing.has(p));
-    if (next.length === current.length) return;
+  pruneFavorites: (vault, existing) => {
+    const current = get().favorites[vault] ?? [];
+    const pinned = current.filter((p) => existing.has(p));
+    if (pinned.length === current.length) return;
+    const next = { ...get().favorites, [vault]: pinned };
     storeString(FAVORITES_KEY, JSON.stringify(next));
     set({ favorites: next });
   },

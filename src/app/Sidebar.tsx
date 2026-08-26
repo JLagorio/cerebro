@@ -155,7 +155,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
   const themeMode = useUiStore((s) => s.themeMode);
   const setThemeMode = useUiStore((s) => s.setThemeMode);
-  const favorites = useUiStore((s) => s.favorites);
+  const favoritesByVault = useUiStore((s) => s.favorites);
   const pruneFavorites = useUiStore((s) => s.pruneFavorites);
   const openPath = useOpenPath();
 
@@ -228,6 +228,12 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
 
   // M43 — favorites are POINTERS, so a dead one is pruned rather than drawn:
   // the list stays truthful, and the star on any live page shows real state.
+  // Read (and pruned) for THIS vault only: another vault's pins are none of
+  // this scan's business, and pruning them against it would delete them.
+  const favorites = useMemo(
+    () => (vaultPath === null ? [] : (favoritesByVault[vaultPath] ?? [])),
+    [favoritesByVault, vaultPath],
+  );
   const favoriteRows = useMemo(() => {
     const byPath = new Map(entries.map((e) => [e.path, e]));
     return favorites.flatMap((path) => {
@@ -256,8 +262,9 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     });
   }, [favorites, entries, schema, navigate, openPath]);
   useEffect(() => {
-    pruneFavorites(new Set(entries.map((e) => e.path)));
-  }, [entries, pruneFavorites]);
+    if (vaultPath === null) return;
+    pruneFavorites(vaultPath, new Set(entries.map((e) => e.path)));
+  }, [entries, pruneFavorites, vaultPath]);
 
   const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
     if (node.kind === 'collection') {

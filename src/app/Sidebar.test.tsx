@@ -611,7 +611,7 @@ describe('Sidebar', () => {
     });
 
     it('says the empty Favorites in words — nobody pinned anything is a real zero', () => {
-      useUiStore.setState({ favorites: [] });
+      useUiStore.setState({ favorites: {} });
       render(<Sidebar onNewView={vi.fn()} />);
       expect(screen.getByText('No favorites yet')).toBeTruthy();
     });
@@ -620,13 +620,13 @@ describe('Sidebar', () => {
       useVaultStore.setState({
         entries: [project, mkEntry({ path: 'notes/keep.md', title: 'Keep me' })],
       });
-      useUiStore.setState({ favorites: ['notes/keep.md', 'notes/gone.md'] });
+      useUiStore.setState({ favorites: { '/demo-vault': ['notes/keep.md', 'notes/gone.md'] } });
       render(<Sidebar onNewView={vi.fn()} />);
       const rows = screen.getAllByTestId('nav-favorite');
       expect(rows.map((r) => r.textContent)).toEqual(['Keep me']);
       // The dead pointer left the STORE, not just the render — the list is
       // truthful, and the next session does not resurrect it.
-      expect(useUiStore.getState().favorites).toEqual(['notes/keep.md']);
+      expect(useUiStore.getState().favorites['/demo-vault']).toEqual(['notes/keep.md']);
       fireEvent.click(rows[0]);
       expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
     });

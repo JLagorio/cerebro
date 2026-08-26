@@ -211,28 +211,50 @@ describe('uiStore', () => {
 
 // M43 — the pin. Ordered pointers, workspace state (the navClosed rule).
 describe('favorites', () => {
+  const VAULT = '/vaults/one';
+  const OTHER = '/vaults/two';
   beforeEach(() => {
     window.localStorage.removeItem('cerebro.favorites');
-    useUiStore.setState({ favorites: [] });
+    useUiStore.setState({ favorites: {} });
   });
 
   it('toggles a path in and out, preserving pin order', () => {
-    useUiStore.getState().toggleFavorite('a.md');
-    useUiStore.getState().toggleFavorite('b.md');
-    expect(useUiStore.getState().favorites).toEqual(['a.md', 'b.md']);
-    useUiStore.getState().toggleFavorite('a.md');
-    expect(useUiStore.getState().favorites).toEqual(['b.md']);
+    useUiStore.getState().toggleFavorite(VAULT, 'a.md');
+    useUiStore.getState().toggleFavorite(VAULT, 'b.md');
+    expect(useUiStore.getState().favorites[VAULT]).toEqual(['a.md', 'b.md']);
+    useUiStore.getState().toggleFavorite(VAULT, 'a.md');
+    expect(useUiStore.getState().favorites[VAULT]).toEqual(['b.md']);
   });
 
   it('prunes favorites that no longer resolve', () => {
-    useUiStore.getState().toggleFavorite('gone.md');
-    useUiStore.getState().toggleFavorite('here.md');
-    useUiStore.getState().pruneFavorites(new Set(['here.md']));
-    expect(useUiStore.getState().favorites).toEqual(['here.md']);
+    useUiStore.getState().toggleFavorite(VAULT, 'gone.md');
+    useUiStore.getState().toggleFavorite(VAULT, 'here.md');
+    useUiStore.getState().pruneFavorites(VAULT, new Set(['here.md']));
+    expect(useUiStore.getState().favorites[VAULT]).toEqual(['here.md']);
   });
 
-  it('persists under cerebro.favorites', () => {
-    useUiStore.getState().toggleFavorite('a.md');
-    expect(JSON.parse(window.localStorage.getItem('cerebro.favorites') ?? '[]')).toEqual(['a.md']);
+  // PR #17 review: the pin is per-vault, and a prune run against the vault
+  // you just opened must not delete the pins of the one you just left —
+  // especially since the same relative path exists in both.
+  it("keeps each vault's pins, and prunes only the vault it was asked about", () => {
+    useUiStore.getState().toggleFavorite(VAULT, 'notes/plan.md');
+    useUiStore.getState().toggleFavorite(OTHER, 'notes/other.md');
+    useUiStore.getState().pruneFavorites(OTHER, new Set(['notes/other.md']));
+    expect(useUiStore.getState().favorites).toEqual({
+      [VAULT]: ['notes/plan.md'],
+      [OTHER]: ['notes/other.md'],
+    });
+    // And a pin that exists in both vaults is two pins, not one.
+    useUiStore.getState().toggleFavorite(OTHER, 'notes/plan.md');
+    useUiStore.getState().toggleFavorite(VAULT, 'notes/plan.md');
+    expect(useUiStore.getState().favorites[VAULT]).toEqual([]);
+    expect(useUiStore.getState().favorites[OTHER]).toEqual(['notes/other.md', 'notes/plan.md']);
+  });
+
+  it('persists under cerebro.favorites, keyed by vault', () => {
+    useUiStore.getState().toggleFavorite(VAULT, 'a.md');
+    expect(JSON.parse(window.localStorage.getItem('cerebro.favorites') ?? '{}')).toEqual({
+      [VAULT]: ['a.md'],
+    });
   });
 });
