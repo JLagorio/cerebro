@@ -27,3 +27,5 @@ coverage/
 
 # Superpowers brainstorming scratch (mockups, server state)
 .superpowers/
+docs/cerebro
+docs/cerebro-ds
