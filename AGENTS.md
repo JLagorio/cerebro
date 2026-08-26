@@ -41,20 +41,21 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   IS the chrome** (M37.3 flattened the rail and per-surface sidebar into
   `app/Sidebar.tsx`; M43 dissolved the Topbar into it): header (vault tile ·
   wordmark · Assistant zap · search · collapse), the New button, then the
-  destinations (Inbox, Home, My work, Work, Studio, Base, History, Library —
-  M37.2 spent the locked names Base/Work, M38.3 retired Docs for the standing
-  **Pages** tree, M40 added Studio, M43 added My work and moved Library up;
-  the selection KINDS stay `knowledge`/`workspace`, labels only, plus M43's
-  `mywork`), then the sections — Collections, Pages, Agents (M43 turned M41's
-  destination into a roster section whose ↗ opens the fleet), **Databases**
-  (M39 — the label; `type:` and every internal identifier keep the old word),
-  and Favorites (pinned paths, `cerebro.favorites`, pruned when a pointer
-  dies) — all wearing `app/SectionHeader.tsx`'s one anatomy, then the footer
-  (SyncBadge · Theme · Settings). **Destinations that own subjects are
-  GROUPS** (M42.2, the Notion turn): mounted repos, prototypes, and Base's
-  whole nav nest under their destination on EVERY surface — open by default,
-  folded by a chevron that never navigates, persisted with the section
-  shelves as the closed set (`cerebro.navClosed`). The chrome is the DS's:
+  STANDALONE destinations (Inbox, Home, My work, Studio, History, Library —
+  M37.2 spent the locked names, M38.3 retired Docs for the standing **Pages**
+  tree, M40 added Studio, M43 added My work and moved Library up; the
+  selection KINDS stay `knowledge`/`workspace`, labels only, plus M43's
+  `mywork`), then the sections — Collections, Pages, **Work** (M43.10: each
+  mounted repo is a row; ↗ opens the surface; empty says "No repositories
+  mounted"), **Base** (M43.10: KnowledgeNav's rows stand on every surface;
+  ↗ opens the base home), Agents (M43 turned M41's destination into a roster
+  section whose ↗ opens the fleet), **Databases** (M39 — the label; `type:`
+  and every internal identifier keep the old word), and Favorites (pinned
+  paths, `cerebro.favorites`, pruned when a pointer dies) — all wearing
+  `app/SectionHeader.tsx`'s one anatomy, then the footer (SyncBadge · Theme ·
+  Settings). No destination owns nested rows anymore — M42.2's group chevrons
+  retired with M43.10; section fold state rides the closed set
+  (`cerebro.navClosed`; Databases keeps `typesOpen`). The chrome is the DS's:
   sunken sidebar, `--surface-selected` + cortex ink for the current row,
   quiet mono counts — never a filled pill (M42.1).
   The destination names are asserted in `app/Sidebar.test.tsx`; specs scope

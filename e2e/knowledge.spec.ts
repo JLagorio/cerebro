@@ -6,7 +6,7 @@ const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
 test('knowledge: browse the bundle, read provenance, and verify a concept', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
   // M33a.3 — the tab opens on the heaviest THREAD now, not the flat list, so
   // a spec about the whole bundle has to ask for the whole bundle.
@@ -59,7 +59,7 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
   // The flat list, because the two concepts this walks between sit in
   // different threads (M33a.3 moved the default off `all`).
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
@@ -91,7 +91,7 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
 
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
 
   // M37.3: the one nav column keeps the item world inline — what makes the
   // bundle's axes ITS OWN is that they nest under the Base row rather than
@@ -171,16 +171,17 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
   await expect(page.getByTestId('concept-body')).toContainText('Go-live night');
 });
 
-test('knowledge: the Base row carries no review badge', async ({ page }) => {
+test('knowledge: the Base section carries no review badge', async ({ page }) => {
   await boot(page);
 
   // A count in the chrome is the app nagging you to drain a queue. The same
   // number lives on the "Needs review" row, where it describes a destination.
-  const knowledge = page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ });
-  await expect(knowledge).toHaveAttribute('aria-label', 'Base');
-  await expect(knowledge.getByTestId('nav-badge')).toHaveCount(0);
+  // M43.10: Base is a SECTION — its header wears no badge, and its rows
+  // stand on every surface.
+  const base = page.getByRole('button', { name: 'Base', exact: true });
+  await expect(base).toBeVisible();
+  await expect(base.getByTestId('nav-badge')).toHaveCount(0);
 
-  await knowledge.click();
   await expect(
     page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }),
   ).toContainText(/\d/);
@@ -316,7 +317,7 @@ test('knowledge: the three axes render per facet, and review is not one of them'
   await boot(page);
   await page.evaluate((rows) => window.__cerebroSeedChips(rows), AXES);
 
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
   const panel = page.getByTestId('knowledge-panel');
@@ -353,7 +354,7 @@ test('knowledge: a vault with no ledger shows no axes rather than empty ones', a
   // nobody folded would be inventing an answer, and an empty chip row would
   // read as "we looked and found nothing".
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
   await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
 
   const panel = page.getByTestId('knowledge-panel');

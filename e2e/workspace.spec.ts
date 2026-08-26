@@ -47,7 +47,8 @@ async function seedRepos(page: Page): Promise<void> {
 }
 
 async function openWorkspace(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Work', exact: true }).click();
+  // M43.10: the Work destination row died — the section's ↗ is the door.
+  await page.getByRole('button', { name: 'Open all repositories' }).click();
   await expect(page.getByTestId('workspace-page')).toBeVisible();
 }
 

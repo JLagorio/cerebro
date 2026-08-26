@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
+import { useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { Sidebar } from './Sidebar';
@@ -120,13 +121,14 @@ describe('Sidebar', () => {
       const labels = surfaceLabels();
       // M43: Inbox leads (the design's hot queue), My work is new, Library
       // came up from the footer, and the footer holds Theme + Settings.
+      // M43.10: Work and Base left the destinations for SECTIONS — their
+      // subjects list like every other shelf — so Studio and History stand
+      // alone under My work.
       expect(labels).toEqual([
         'Inbox',
         'Home',
         'My work',
-        'Work',
         'Studio',
-        'Base',
         'History',
         'Library',
         'Theme',
@@ -146,6 +148,8 @@ describe('Sidebar', () => {
       expect(labels).not.toContain('Docs');
       expect(labels).not.toContain('Agents');
       expect(labels).not.toContain('Assistant');
+      expect(labels).not.toContain('Work');
+      expect(labels).not.toContain('Base');
     });
 
     it('renders on every surface — the SIDEBARLESS set retired with the rail (M37.3)', () => {
@@ -164,7 +168,7 @@ describe('Sidebar', () => {
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
         render(<Sidebar onNewView={vi.fn()} />);
-        expect(surfaceLabels()).toHaveLength(10);
+        expect(surfaceLabels()).toHaveLength(8);
         cleanup();
       }
     });
@@ -207,17 +211,16 @@ describe('Sidebar', () => {
     });
 
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
-      useNavStore.setState({ selection: { kind: 'workspace' } });
+      useNavStore.setState({ selection: { kind: 'studio' } });
       render(<Sidebar onNewView={vi.fn()} />);
-      // Scoped to the destination containers: the demo fixtures hold a
-      // COLLECTION named Work too, and only the destination row wears
-      // aria-current. Since M42.2 each group head lives in its own container,
-      // so the search walks all of them.
-      const work = screen
+      // Scoped to the destination containers: only the destination row wears
+      // aria-current (M43.10 — Studio is a standalone row, lit for the whole
+      // surface now that no prototype rows nest under it).
+      const studio = screen
         .getAllByTestId('nav-surfaces')
-        .map((group) => within(group).queryByRole('button', { name: 'Work' }))
-        .find((button) => button !== null);
-      expect(work?.getAttribute('aria-current')).toBe('page');
+        .map((group) => within(group).queryByRole('button', { name: 'Studio' }))
+        .find((button) => button != null);
+      expect(studio?.getAttribute('aria-current')).toBe('page');
       // A toggle is not a destination: it reports pressed, never current.
       const assistant = screen.getByRole('button', { name: 'Assistant' });
       expect(assistant.getAttribute('aria-pressed')).toBe('false');
@@ -633,6 +636,40 @@ describe('Sidebar', () => {
       fireEvent.click(screen.getByRole('button', { name: 'New page' }));
       // The FileTree's dialog — one creation flow, now opened from the header.
       expect(screen.getByRole('dialog', { name: 'New page' })).toBeTruthy();
+    });
+
+    it('lists mounted repos in the Work SECTION, whose ↗ opens the surface (M43.10)', () => {
+      useRootsStore.setState({
+        roots: [
+          {
+            id: 'cerebro',
+            label: 'cerebro',
+            path: '/repos/cerebro',
+            alias: '',
+            color: null,
+            caps: { knowledge: false, git: false, writable: false },
+          },
+        ],
+      });
+      render(<Sidebar onNewView={vi.fn()} />);
+      // Each mounted folder is a row, like every other shelf's subjects.
+      fireEvent.click(screen.getByTestId('nav-root'));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'workspace', root: 'cerebro' });
+      // The ↗ is the door to the whole surface — the destination row died.
+      fireEvent.click(screen.getByRole('button', { name: 'Open all repositories' }));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'workspace' });
+    });
+
+    it('says the empty Work section in words — nothing mounted is a real zero', () => {
+      useRootsStore.setState({ roots: [] });
+      render(<Sidebar onNewView={vi.fn()} />);
+      expect(screen.getByText('No repositories mounted')).toBeTruthy();
+    });
+
+    it('opens the Base home from the section’s ↗ (M43.10)', () => {
+      render(<Sidebar onNewView={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Open base' }));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'knowledge' });
     });
 
     it('cycles the theme from the footer', () => {

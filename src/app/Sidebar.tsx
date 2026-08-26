@@ -22,7 +22,6 @@ import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { inboxCounts } from '@/engine/inbox';
 import { isPaused } from '@/engine/jobs';
 import { openWork } from '@/engine/myWork';
-import { studioProjects } from '@/engine/studio';
 import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { SyncBadge } from '@/git/SyncBadge';
@@ -82,7 +81,6 @@ function SurfaceRow({
   count,
   hot = false,
   onClick,
-  chevron,
 }: {
   icon: string;
   label: string;
@@ -95,12 +93,6 @@ function SurfaceRow({
    * (M43, the design's Inbox). Still a number, never a filled pill. */
   hot?: boolean;
   onClick: () => void;
-  /**
-   * Group disclosure (M42.2): a destination that owns nested rows leads with
-   * a rotating chevron. Toggling is not navigating, so the chevron eats its
-   * own click and the row still goes where it always went.
-   */
-  chevron?: { open: boolean; onToggle: () => void };
 }) {
   return (
     <button
@@ -109,22 +101,8 @@ function SurfaceRow({
       aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
       aria-current={!toggle && active ? 'page' : undefined}
       aria-pressed={toggle ? active : undefined}
-      aria-expanded={chevron === undefined ? undefined : chevron.open}
       className={rowClass(active)}
     >
-      {chevron !== undefined && (
-        <span
-          data-testid="nav-chevron"
-          onClick={(e) => {
-            e.stopPropagation();
-            chevron.onToggle();
-          }}
-          className="-ml-1 inline-flex flex-none text-n-400 transition-transform duration-[120ms]"
-          style={chevron.open ? { transform: 'rotate(90deg)' } : undefined}
-        >
-          <Icon name="chevron-right" size={13} />
-        </span>
-      )}
       <Icon name={icon} size={15} />
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       {count !== undefined && count > 0 && (
@@ -202,16 +180,11 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const navClosed = useUiStore((s) => s.navClosed);
   const setNavGroupOpen = useUiStore((s) => s.setNavGroupOpen);
   const groupOpen = (key: string) => !navClosed.includes(key);
-  const chevronFor = (key: string) => ({
-    open: groupOpen(key),
-    onToggle: () => setNavGroupOpen(key, !groupOpen(key)),
-  });
 
   const agents = useMemo(
     () => entries.filter(isAgentEntry).map((e) => ({ ref: agentRef(e), paused: isPaused(e) })),
     [entries],
   );
-  const prototypes = useMemo(() => studioProjects(entries), [entries]);
   // The mounted repos, read here rather than waiting for the Work surface to
   // mount: rows the nav promises to show cannot depend on having visited the
   // page that used to own the read.
@@ -517,109 +490,17 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             count={openCount}
             onClick={() => navigate({ kind: 'mywork' })}
           />
-        </div>
-        <div data-testid="nav-surfaces">
-          {/* M30 — mounted repositories. Its own room rather than a section
-              of the pages: pages are vault notes, and a surface that renders
-              .ts files cannot mean that. The label is the locked name
-              (M37.2); the `workspace` KIND stays — kinds are internal
-              vocabulary shared with the navigate MCP tool. */}
-          <SurfaceRow
-            icon="folder-tree"
-            label="Work"
-            active={selection.kind === 'workspace' && selection.root === undefined}
-            chevron={chevronFor('work')}
-            onClick={() => navigate({ kind: 'workspace' })}
-          />
-        </div>
-        {groupOpen('work') && roots.length > 0 && (
-          <div className="pl-3" data-section="nav-work">
-            {roots.map((root) => {
-              const on = selection.kind === 'workspace' && selection.root === root.id;
-              return (
-                <button
-                  key={root.id}
-                  type="button"
-                  data-testid="nav-root"
-                  aria-current={on ? 'page' : undefined}
-                  onClick={() => navigate({ kind: 'workspace', root: root.id })}
-                  className={rowClass(on)}
-                >
-                  <Icon name="folder-git-2" size={15} color={root.color ?? 'var(--n-500)'} />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                    {root.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div data-testid="nav-surfaces">
-          {/* M40 — the third locked name. A making surface, so it sits with
-              Work rather than below the fold with the chrome. */}
+          {/* M43.10 — the app-like surfaces are STANDALONE rows under My
+              work: Studio and History carry no nested subjects (a prototype
+              is reachable from Studio's own bench), and the repos and Base
+              moved down into sections, where their rows read like every
+              other shelf. */}
           <SurfaceRow
             icon="pencil-ruler"
             label="Studio"
-            active={selection.kind === 'studio' && selection.project === undefined}
-            chevron={chevronFor('studio')}
+            active={selection.kind === 'studio'}
             onClick={() => navigate({ kind: 'studio' })}
           />
-        </div>
-        {groupOpen('studio') && prototypes.length > 0 && (
-          <div className="pl-3" data-section="nav-studio">
-            {prototypes.map((project) => {
-              const on = selection.kind === 'studio' && selection.project === project.slug;
-              return (
-                <button
-                  key={project.slug}
-                  type="button"
-                  data-testid="nav-prototype"
-                  aria-current={on ? 'page' : undefined}
-                  onClick={() => navigate({ kind: 'studio', project: project.slug })}
-                  className={rowClass(on)}
-                >
-                  <Icon name="shapes" size={15} color="var(--n-500)" />
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                    {project.title}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div data-testid="nav-surfaces">
-          {/* M5: the agent's corpus is a peer of Home and Docs — different
-              author, different rules. M33a.2 folded the Status hub in, so this
-              one destination is both what the base holds and what it knows
-              about itself. Still no badge, deliberately: a review count is the
-              chrome nagging you to drain a queue (M8.1), a contradiction count
-              is worse (M27.8), and the queued-proposal count (M33b.3) says
-              itself on the agent's own row, in words. A destination may say how
-              big it is; nothing counts up at you from the chrome. */}
-          <SurfaceRow
-            icon="brain"
-            label="Base"
-            active={
-              knowledgeMode && (selection.kind !== 'knowledge' || selection.nav === undefined)
-            }
-            chevron={chevronFor('base')}
-            onClick={() => navigate({ kind: 'knowledge' })}
-          />
-        </div>
-        {/* `nav` passed through undefined on a nav-less selection: which view
-            that lands on is the nav's own answer (M33a.3), and defaulting it
-            here would make the sidebar a second opinion. `current` keeps an
-            un-current nav from electing a default row for a canvas some other
-            surface owns. */}
-        {groupOpen('base') && (
-          <div className="pl-3" data-section="nav-base">
-            <KnowledgeNav
-              nav={selection.kind === 'knowledge' ? selection.nav : undefined}
-              current={knowledgeMode}
-            />
-          </div>
-        )}
-        <div data-testid="nav-surfaces">
           {/* M9.4 — the vault's history. No badge: a count of commits is
               chrome. The footer SyncBadge speaks instead, and only when
               something needs doing. */}
@@ -706,6 +587,78 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             activePath={selection.kind === 'doc' ? selection.path : null}
             onOpen={openPath}
           />
+        )}
+        {/* M30 — mounted repositories, worn as a section since M43.10: each
+            mounted folder is a row, the way every other shelf lists its
+            subjects. The label is the locked name (M37.2); the `workspace`
+            KIND stays — kinds are internal vocabulary shared with the
+            navigate MCP tool. The ↗ is the door to the Work surface. */}
+        <SectionHeader
+          label="Work"
+          open={groupOpen('work')}
+          onToggle={() => setNavGroupOpen('work', !groupOpen('work'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: 'Open all repositories',
+              onClick: () => navigate({ kind: 'workspace' }),
+            },
+          ]}
+        />
+        {groupOpen('work') &&
+          (roots.length === 0 ? (
+            <div className="px-2 py-1 text-xs text-n-400">No repositories mounted</div>
+          ) : (
+            <div data-section="nav-work">
+              {roots.map((root) => {
+                const on = selection.kind === 'workspace' && selection.root === root.id;
+                return (
+                  <button
+                    key={root.id}
+                    type="button"
+                    data-testid="nav-root"
+                    aria-current={on ? 'page' : undefined}
+                    onClick={() => navigate({ kind: 'workspace', root: root.id })}
+                    className={rowClass(on)}
+                  >
+                    <Icon name="folder-git-2" size={15} color={root.color ?? 'var(--n-500)'} />
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                      {root.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        {/* M5: the agent's corpus — different author, different rules — worn
+            as a section since M43.10, the same anatomy as Pages. M33a.2
+            folded the Status hub in, so this one shelf is both what the base
+            holds and what it knows about itself. Still no badge, deliberately
+            (M8.1/M27.8): a shelf may say how big it is; nothing counts up at
+            you from the chrome. `nav` passed through undefined on a nav-less
+            selection: which view that lands on is the nav's own answer
+            (M33a.3), and defaulting it here would make the sidebar a second
+            opinion. `current` keeps an un-current nav from electing a default
+            row for a canvas some other surface owns. */}
+        <SectionHeader
+          label="Base"
+          open={groupOpen('base')}
+          onToggle={() => setNavGroupOpen('base', !groupOpen('base'))}
+          actions={[
+            {
+              icon: 'arrow-up-right',
+              label: 'Open base',
+              onClick: () => navigate({ kind: 'knowledge' }),
+            },
+          ]}
+        />
+        {groupOpen('base') && (
+          <div data-section="nav-base">
+            <KnowledgeNav
+              nav={selection.kind === 'knowledge' ? selection.nav : undefined}
+              current={knowledgeMode}
+            />
+          </div>
         )}
         {/* M43 — Agents is a SECTION now, the design's sec(): the fleet is a
             roster of subjects, and the ↗ is the door to the fleet surface the

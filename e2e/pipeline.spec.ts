@@ -68,7 +68,7 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
 
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
   await page.locator(`[data-testid="concept-row"][data-path="${CONCEPT}"]`).click();
@@ -253,7 +253,7 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
 
 test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Open base' }).click();
 
   // The pilot's week-long offline window was replaced by the 72-hour decision.
   const replaced = page.locator(
