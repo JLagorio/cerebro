@@ -158,15 +158,42 @@ pub fn clean_orphan_temps(vault: &Path) {
 }
 
 /// Join a vault-relative path onto the vault root, rejecting empty paths,
-/// absolute paths (`Path::join` would replace the base!), and any `..`
-/// traversal, so no read or write can escape the vault.
+/// absolute paths (`Path::join` would replace the base!), any `..`
+/// traversal, AND any symlink — planted anywhere along the path, leaf or
+/// intermediate — that resolves outside the vault. The component check
+/// alone only looks at the string; a name with no `..` in it can still be a
+/// symlink pointing wherever it likes, so containment has to be verified
+/// against the resolved filesystem path, not the requested one.
 fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
     let contained = !rel.is_empty()
         && Path::new(rel)
             .components()
             .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
-    if contained {
-        Ok(vault.join(rel))
+    if !contained {
+        return Err(format!("path escapes the vault: {rel:?}"));
+    }
+    let joined = vault.join(rel);
+    let canonical_vault = vault
+        .canonicalize()
+        .map_err(|e| format!("resolving vault root: {e}"))?;
+    // `canonicalize` requires the path to exist, and most of the paths this
+    // function sees are about to be CREATED. Walk up to the longest
+    // existing ancestor (the vault root itself always exists, so this
+    // terminates) and resolve symlinks from there — a symlink further up
+    // the chain than the leaf is exactly as much an escape as one at the
+    // leaf.
+    let mut existing = joined.as_path();
+    while !existing.exists() {
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => break,
+        }
+    }
+    let canonical_existing = existing
+        .canonicalize()
+        .map_err(|e| format!("resolving path: {e}"))?;
+    if canonical_existing.starts_with(&canonical_vault) {
+        Ok(joined)
     } else {
         Err(format!("path escapes the vault: {rel:?}"))
     }
@@ -1403,6 +1430,46 @@ mod tests {
         assert!(read_note(&vault, abs).is_err());
         // Traversal buried mid-path is still traversal.
         assert!(read_note(&vault, "items/../../x.md").is_err());
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM);
+        let _ = std::fs::remove_file(&victim);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // A component-only check (Task 7's `../` rejection) cannot see that a
+    // perfectly normal-looking name resolves somewhere else on disk. This is
+    // the M1 gap: a symlink planted inside the vault made every containment
+    // check upstream of the filesystem call vacuously true.
+    #[test]
+    fn writes_reject_paths_through_a_symlink_that_escapes_the_vault() {
+        let vault = vault_with_note("wfm-symlink-escape");
+        let victim = vault
+            .parent()
+            .unwrap()
+            .join(format!("cerebro-symlink-victim-{}.md", std::process::id()));
+        const VICTIM: &str = "---\nsafe: true\n---\nUntouched.\n";
+        std::fs::write(&victim, VICTIM).unwrap();
+
+        // A symlink INSIDE the vault whose own name has no `..` and isn't
+        // absolute, so it sails through the component check — but it
+        // resolves outside the vault root.
+        let link_rel = "link.md";
+        std::os::unix::fs::symlink(&victim, vault.join(link_rel)).unwrap();
+
+        let hacked = patch(&[("hacked", serde_json::json!(true))]);
+        assert!(update_frontmatter(&vault, link_rel, &hacked).is_err());
+        assert!(save_note(&vault, link_rel, "hacked\n").is_err());
+        assert!(set_note_title(&vault, link_rel, "Hacked").is_err());
+        assert!(read_note(&vault, link_rel).is_err());
+
+        // Same attack one directory down: the escaping symlink is an
+        // intermediate component, not the leaf, and the leaf itself does
+        // not exist yet.
+        let escape_dir_rel = "escape";
+        std::os::unix::fs::symlink(vault.parent().unwrap(), vault.join(escape_dir_rel)).unwrap();
+        let nested_rel = format!("{escape_dir_rel}/new-file.md");
+        assert!(save_note(&vault, &nested_rel, "hacked\n").is_err());
+        assert!(read_note(&vault, &nested_rel).is_err());
 
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM);
         let _ = std::fs::remove_file(&victim);
