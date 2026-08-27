@@ -274,7 +274,14 @@ fn shadow_write(vault: &Path, rel: &str, content: &str, kind: &str, actor: Optio
 /// The shared patch → composed-file step behind `update_frontmatter` and
 /// `verify_frontmatter` — same bytes on disk either way; only the shadow
 /// event kind differs.
-fn patched_frontmatter(
+/// The exact bytes `update_frontmatter` will write for a patch.
+///
+/// Public for the same reason as `compose_new_note`: a guard has to read what
+/// LANDS ON DISK. A patch that nulls out every remaining key leaves an empty
+/// mapping, which serialises as no block at all — and then the body is the
+/// whole file, so a `---` fence sitting in that body arrives at byte zero and
+/// becomes the frontmatter the scanner reads (PR #17 security review).
+pub fn patched_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
@@ -376,14 +383,7 @@ pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
     if rel.ends_with(".mmd") {
         return None;
     }
-    let content = read_file(vault, rel).ok()?;
-    let (block, _) = parse::split_frontmatter(&content);
-    let mapping = parse::parse_frontmatter(block?).ok()?;
-    mapping
-        .iter()
-        .find(|(key, _)| parse::yaml_key_string(key) == "type")
-        .and_then(|(_, value)| value.as_str())
-        .map(str::to_string)
+    parse::declared_type(&read_file(vault, rel).ok()?)
 }
 
 /// Return the note body only (frontmatter stripped). `.mmd` files pass
@@ -526,19 +526,19 @@ pub fn import_attachment(vault: &Path, source: &str) -> Result<String, String> {
     Ok(rel)
 }
 
-/// Create `<folder>/<slug>.md` (deduping to `-2`, `-3`, …) with the given
-/// frontmatter and body; empty body gets a humanized `# Title` line.
-/// Returns the vault-relative path.
-pub fn create_note(
-    vault: &Path,
-    folder: &str,
-    slug: &str,
+/// The exact bytes `create_note` will write for a frontmatter map and a body.
+///
+/// Split out because a guard has to read what LANDS ON DISK, not what was
+/// typed into the `frontmatter` argument: an all-empty mapping serialises as
+/// no YAML block at all, and then `body` is the whole file — so a body that
+/// opens with its own `---` fence becomes the frontmatter the scanner reads
+/// (PR #17 security review). Composing in one place is what keeps the guard
+/// and the write from ever disagreeing about that.
+pub fn compose_new_note(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
+    slug: &str,
     body: &str,
 ) -> Result<String, String> {
-    safe_join(vault, folder)?; // folder must stay inside the vault
-    safe_component("slug", slug)?;
-    let rel = unique_rel_path(vault, folder, slug);
     let mut mapping = serde_yaml::Mapping::new();
     for (k, v) in frontmatter {
         if v.is_null() {
@@ -552,10 +552,26 @@ pub fn create_note(
     } else {
         body.to_string()
     };
-    let content = match block {
+    Ok(match block {
         Some(b) => format!("---\n{b}---\n\n{body}"),
         None => body,
-    };
+    })
+}
+
+/// Create `<folder>/<slug>.md` (deduping to `-2`, `-3`, …) with the given
+/// frontmatter and body; empty body gets a humanized `# Title` line.
+/// Returns the vault-relative path.
+pub fn create_note(
+    vault: &Path,
+    folder: &str,
+    slug: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<String, String> {
+    safe_join(vault, folder)?; // folder must stay inside the vault
+    safe_component("slug", slug)?;
+    let rel = unique_rel_path(vault, folder, slug);
+    let content = compose_new_note(frontmatter, slug, body)?;
     write_file(&vault.join(&rel), &content)?;
     shadow_write(vault, &rel, &content, "vault.write", None);
     Ok(rel)

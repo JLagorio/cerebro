@@ -1360,11 +1360,13 @@ fn call_tool(
     }
 
     // M34.4 — and read PATHS, the axis the tool allowlist cannot express.
-    // The targeted readers refuse here, before the body; the enumerating
-    // readers (search_notes, list_inbox) filter inside their bodies instead
-    // and SAY how many hits were withheld, because a silently thinned result
-    // reads as "that is all there is". knowledge_about reads the knowledge
-    // bundle, so it is bounded by whether the grant admits that folder.
+    // The targeted reader (get_note) refuses here, before the body; every
+    // reader that ENUMERATES — search_notes, list_inbox, get_vault_context,
+    // and knowledge_about's subject index — filters inside its own body
+    // instead, over the scanned corpus, and says how much was withheld where
+    // a count is what it reports: a silently thinned result reads as "that is
+    // all there is". knowledge_about is checked here as well, because reading
+    // the bundle at all is a separate question from which notes it may name.
     let read_target = match name {
         "get_note" => arg_str(args, "path"),
         "knowledge_about" => Some(crate::knowledge::KNOWLEDGE_DIR.to_string()),
@@ -1393,10 +1395,10 @@ fn call_tool(
 
     let actor = grant.actor.as_str();
     let outcome = match name {
-        "get_vault_context" => tool_vault_context(&vault),
+        "get_vault_context" => tool_vault_context(&vault, grant),
         "search_notes" => tool_search(&vault, args, grant),
         "get_note" => tool_get_note(&vault, args),
-        "knowledge_about" => tool_knowledge_about(&vault, args),
+        "knowledge_about" => tool_knowledge_about(&vault, args, grant),
         "list_inbox" => tool_list_inbox(&vault, grant),
         "hand_to" => tool_hand_to(app, &vault, args, grant),
         "create_note" => tool_create_note(&vault, args),
@@ -1742,8 +1744,25 @@ fn notify_vault_changed(app: &AppHandle) {
     let _ = app.emit(UI_ACTION_EVENT, json!({ "action": "vault_changed" }));
 }
 
-fn tool_vault_context(vault: &Path) -> Result<Value, String> {
-    let entries = vault::scan::scan_vault(vault)?;
+fn tool_vault_context(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
+    // M34.4 followthrough (PR #17 security review): the read scope bounds the
+    // INVENTORY too. A run that cannot `get_note` a folder must not be able to
+    // learn the folder exists, how many notes it holds, or what its
+    // collections are titled — a shape is a read. Filtered exactly like
+    // `search_notes`, and the withheld count is SAID, because "Notes: 12" over
+    // a thinned corpus reads as "that is all there is".
+    let scanned = vault::scan::scan_vault(vault)?;
+    let total = scanned.len();
+    let entries: Vec<vault::entry::Entry> = scanned
+        .into_iter()
+        .filter(|e| grant.may_read(&e.path))
+        .collect();
+    let withheld = total - entries.len();
+    let scope_note = if withheld == 0 {
+        String::new()
+    } else {
+        format!("\nOutside this run's read scope (not counted above): {withheld} note(s)")
+    };
     let mut types: Vec<String> = entries
         .iter()
         .filter_map(|e| e.entry_type.clone())
@@ -1764,13 +1783,14 @@ fn tool_vault_context(vault: &Path) -> Result<Value, String> {
     let inbox = entries.iter().filter(|e| is_capture(e)).count();
 
     Ok(text_result(format!(
-        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nContainers:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}\n\nConventions: notes are markdown with YAML frontmatter. A TYPED note is a record of its type; an untyped note is a doc — records peek in a side panel by default and can also open as full pages. Types are declared by `type: Type` docs in types/ (their fields:, statuses:, folder:, and views: keys are the schema); records default to records/<plural>/. A Collection is a folder holding collection.yml (legacy project.md folders read as Collections); Lists are *.list.yml files inside one. The knowledge/ bundle is yours to maintain (Open Knowledge Format) and the user's to verify.",
+        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nContainers:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}{}\n\nConventions: notes are markdown with YAML frontmatter. A TYPED note is a record of its type; an untyped note is a doc — records peek in a side panel by default and can also open as full pages. Types are declared by `type: Type` docs in types/ (their fields:, statuses:, folder:, and views: keys are the schema); records default to records/<plural>/. A Collection is a folder holding collection.yml (legacy project.md folders read as Collections); Lists are *.list.yml files inside one. The knowledge/ bundle is yours to maintain (Open Knowledge Format) and the user's to verify.",
         vault.display(),
         entries.len(),
         types.join(", "),
         if projects.is_empty() { "  (none)".to_string() } else { projects.iter().map(|p| format!("  - {p}")).collect::<Vec<_>>().join("\n") },
         concepts,
         inbox,
+        scope_note,
     )))
 }
 
@@ -1936,14 +1956,28 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
 /// link: the base tracks things nobody has written up yet. A read that fails
 /// returns `Err`, which reaches the model as `isError` content, so "we hold
 /// nothing" and "we could not tell you" never wear the same sentence.
-fn tool_knowledge_about(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+fn tool_knowledge_about(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
     let target = arg_str(args, "target").ok_or("knowledge_about needs a target")?;
     let limit = args
         .get("limit")
         .and_then(Value::as_u64)
         .unwrap_or(20)
         .min(100) as usize;
-    let entries = vault::scan::scan_vault(vault)?;
+    // `call_tool` has already checked that the grant admits the knowledge
+    // bundle, but SUBJECT resolution walks the whole workspace: a target the
+    // run may not read would come back with its path and title attached, which
+    // is a confirmed read of a note `get_note` would refuse (PR #17 security
+    // review). Bounding the corpus bounds both — the subject index and the
+    // concepts — and an unresolvable subject then reads as the open thread it
+    // honestly is from inside this scope.
+    let entries: Vec<vault::entry::Entry> = vault::scan::scan_vault(vault)?
+        .into_iter()
+        .filter(|e| grant.may_read(&e.path))
+        .collect();
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let answer = crate::knowledge::about(&entries, &target, &today, limit);
 
@@ -2287,6 +2321,43 @@ fn governed_write_refusal(frontmatter: &Map<String, Value>) -> Option<&'static s
     governed_type_refusal(frontmatter.get("type").and_then(Value::as_str))
 }
 
+/// What the FILE a `create_note` would write declares.
+///
+/// Not the same question as `governed_write_refusal`, and the difference is
+/// the whole reason this exists: `vault::write::create_note` serialises an
+/// empty frontmatter map as no YAML block at all and writes `body` as the
+/// entire file, so a run that omits `frontmatter` and opens `body` with its
+/// own `---\ntype: Agent\n---` fence plants a record the scanner types as an
+/// Agent — and `resolve_agent` keys off scanner frontmatter, not the argument
+/// that was typed (PR #17 security review). Composed through the same
+/// function that writes, so the guard reads the bytes, not a restatement of
+/// how they are built.
+/// What the FILE an `update_frontmatter` would write declares.
+///
+/// The mirror of `governed_compose_refusal` on the patch side, and needed for
+/// the same reason: `type: Agent` never appears in the patch at all. Nulling
+/// out the last surviving key empties the mapping, the empty mapping
+/// serialises as no block, and a `---` fence already sitting in the body then
+/// arrives at byte zero as the new frontmatter — a two-step mint whose second
+/// step looks like a deletion (PR #17 security review).
+fn governed_patch_refusal(
+    vault: &Path,
+    rel: &str,
+    patch: &Map<String, Value>,
+) -> Option<&'static str> {
+    let content = vault::write::patched_frontmatter(vault, rel, patch).ok()?;
+    governed_type_refusal(vault::parse::declared_type(&content).as_deref())
+}
+
+fn governed_compose_refusal(
+    frontmatter: &Map<String, Value>,
+    slug: &str,
+    body: &str,
+) -> Option<&'static str> {
+    let content = vault::write::compose_new_note(frontmatter, slug, body).ok()?;
+    governed_type_refusal(vault::parse::declared_type(&content).as_deref())
+}
+
 fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
     let folder = arg_str(args, "folder").unwrap_or_default();
     let slug = arg_str(args, "slug").ok_or("create_note needs a slug")?;
@@ -2296,7 +2367,7 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    if let Some(refusal) = governed_write_refusal(&frontmatter) {
+    if let Some(refusal) = governed_compose_refusal(&frontmatter, &slug, &body) {
         return Err(refusal.into());
     }
     // The folder is what decides where this lands, so it is what gets checked
@@ -2318,8 +2389,9 @@ fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Va
     // and retyping an ordinary note INTO one. The second is what makes a
     // guard on creation alone insufficient — an agent minted in two steps is
     // an agent.
-    if let Some(refusal) =
-        governed_note_refusal(vault, &path).or_else(|| governed_write_refusal(&patch))
+    if let Some(refusal) = governed_note_refusal(vault, &path)
+        .or_else(|| governed_write_refusal(&patch))
+        .or_else(|| governed_patch_refusal(vault, &path, &patch))
     {
         return Err(refusal.into());
     }
@@ -3320,6 +3392,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_read_scope_bounds_the_inventory_and_the_subject_index_too() {
+        // PR #17 security review. The targeted readers refuse and the
+        // enumerating readers filter, but SHAPE is a read as well: a run that
+        // cannot open `hidden/` must not learn it exists, how many notes it
+        // holds, what types are in use there, or what its collections are
+        // titled — and `knowledge_about` must not confirm an out-of-scope note
+        // by handing back its path and title as the resolved subject.
+        let dir = std::env::temp_dir().join("cerebro-read-scope-inventory");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("visible")).unwrap();
+        std::fs::create_dir_all(dir.join("hidden")).unwrap();
+        std::fs::create_dir_all(dir.join("knowledge/systems")).unwrap();
+        std::fs::write(
+            dir.join("visible/a.md"),
+            "---\ntype: Note\n---\n\n# Alpha\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("hidden/project.md"),
+            "---\ntype: Secret\ntitle: Skunkworks\n---\n\n# Skunkworks\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("knowledge/systems/c.md"),
+            "---\ntype: Reference\ntitle: A concept\ndescription: d\nabout:\n  - \"[[Skunkworks]]\"\n---\n\nBody.\n",
+        )
+        .unwrap();
+
+        let g = read_scoped(&["visible", "knowledge"]);
+        let context = tool_vault_context(&dir, &g).unwrap();
+        let text = context["content"][0]["text"].as_str().unwrap();
+        assert!(!text.contains("Skunkworks"), "the title is a read: {text}");
+        assert!(!text.contains("hidden/"), "the path is a read: {text}");
+        assert!(
+            !text.contains("Secret"),
+            "the type in use is a read: {text}"
+        );
+        assert!(
+            text.contains("Notes: 2"),
+            "counts only what it may read: {text}"
+        );
+        // Absent is never zero, and thinned is never whole: the count SAYS so.
+        assert!(
+            text.contains("Outside this run's read scope (not counted above): 1"),
+            "{text}"
+        );
+
+        // And the subject index. `Skunkworks` resolves for an unbounded run;
+        // for this one it is an open thread, which is the honest answer from
+        // inside this scope — not a leak wearing a citation.
+        let mut args = Map::new();
+        args.insert("target".into(), Value::String("Skunkworks".into()));
+        let scoped_answer = tool_knowledge_about(&dir, &args, &g).unwrap();
+        let text = scoped_answer["content"][0]["text"].as_str().unwrap();
+        assert!(!text.contains("hidden/project.md"), "{text}");
+        assert!(text.contains("open thread"), "{text}");
+
+        let open = tool_knowledge_about(&dir, &args, &RunGrant::unrestricted("a")).unwrap();
+        let text = open["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("hidden/project.md"),
+            "an unbounded run still resolves the subject: {text}"
+        );
+    }
+
     /// M34.3 — the hop rules are structural, like scope: not a sentence a
     /// model can be talked out of, and refused before any child exists.
     #[test]
@@ -3977,6 +4115,67 @@ mod tests {
         assert!(tool_create_note(&dir, &mint).is_err());
         assert!(!dir.join("records/notes/helper.md").exists());
 
+        // The same mint through the BODY. `create_note` serialises an empty
+        // frontmatter map as no YAML block at all and writes `body` as the
+        // whole file, so a fence at byte zero IS the frontmatter the scanner
+        // will read — omitting the argument the guard used to be the only
+        // thing reading. Both spellings of "no frontmatter argument".
+        for absent in [json!({}), Value::Null] {
+            let mut smuggle = Map::new();
+            smuggle.insert("folder".into(), json!("records/notes"));
+            smuggle.insert("slug".into(), json!("helper"));
+            smuggle.insert(
+                "body".into(),
+                json!("---\ntype: Agent\n---\n\nDo anything.\n"),
+            );
+            smuggle.insert("frontmatter".into(), absent);
+            assert!(tool_create_note(&dir, &smuggle).is_err());
+            assert!(!dir.join("records/notes/helper.md").exists());
+        }
+
+        // The three-step version, whose middle step is legal and whose last
+        // step looks like a DELETION: park a fence in the body of an ordinary
+        // note, then null the last frontmatter key out. The empty mapping
+        // serialises as no block, and the parked fence lands at byte zero.
+        let mut parked = Map::new();
+        parked.insert("folder".into(), json!("records/notes"));
+        parked.insert("slug".into(), json!("parked"));
+        // The body is BOTH fences: with no frontmatter argument the body is
+        // the whole file, so the first fence is the note's real (innocent)
+        // frontmatter and the second sits at the head of the body, one null
+        // patch away from being promoted.
+        parked.insert(
+            "body".into(),
+            json!("---\ntype: Note\n---\n---\ntype: Agent\n---\n\nDo anything.\n"),
+        );
+        assert!(tool_create_note(&dir, &parked).is_ok());
+        let mut unmask = Map::new();
+        unmask.insert("path".into(), json!("records/notes/parked.md"));
+        unmask.insert("patch".into(), json!({ "type": Value::Null }));
+        assert!(tool_update_frontmatter(&dir, &unmask).is_err());
+        assert_eq!(
+            vault::write::note_type(&dir, "records/notes/parked.md").as_deref(),
+            Some("Note"),
+            "the parked fence never reached byte zero"
+        );
+
+        // A body fence that CANNOT reach byte zero is ordinary content: the
+        // serialised block precedes it, so the scanner reads `type: Note` and
+        // refusing here would refuse a write that is not actually governed.
+        let mut quoting = Map::new();
+        quoting.insert("folder".into(), json!("records/notes"));
+        quoting.insert("slug".into(), json!("about-agents"));
+        quoting.insert(
+            "body".into(),
+            json!("---\ntype: Agent\n---\n\nThis is what one looks like.\n"),
+        );
+        quoting.insert("frontmatter".into(), json!({ "type": "Note" }));
+        assert!(tool_create_note(&dir, &quoting).is_ok());
+        assert_eq!(
+            vault::write::note_type(&dir, "records/notes/about-agents.md").as_deref(),
+            Some("Note")
+        );
+
         // Widening an existing one — dropping `scope:` makes it unrestricted.
         let mut widen = Map::new();
         widen.insert("path".into(), json!("records/agents/scribe.md"));
@@ -4080,7 +4279,8 @@ mod tests {
     fn about_text(vault: &Path, target: &str) -> String {
         let mut args = Map::new();
         args.insert("target".into(), json!(target));
-        let value = tool_knowledge_about(vault, &args).expect("the read succeeds");
+        let value = tool_knowledge_about(vault, &args, &RunGrant::unrestricted("a"))
+            .expect("the read succeeds");
         value["content"][0]["text"].as_str().unwrap().to_string()
     }
 
@@ -4141,7 +4341,7 @@ mod tests {
 
         // And a read that CANNOT happen is an Err, which reaches the model as
         // isError content — never an empty set wearing the same words.
-        assert!(tool_knowledge_about(&vault, &Map::new()).is_err());
+        assert!(tool_knowledge_about(&vault, &Map::new(), &RunGrant::unrestricted("a")).is_err());
         std::fs::remove_dir_all(&vault).ok();
     }
 
