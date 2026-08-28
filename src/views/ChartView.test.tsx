@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ChartView, sliceColor } from '@/views/ChartView';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
@@ -65,6 +65,51 @@ const wide = (): Entry[] => {
   );
   return entries;
 };
+
+/** vault() with a second groupable dimension — the stacked/series fixture. */
+const stacked = (): Entry[] => [
+  makeEntry({
+    path: 'types/work-item.md',
+    title: 'Work item',
+    type: 'Type',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        estimate: { kind: 'number' },
+        priority: {
+          kind: 'select',
+          options: [
+            { id: 'high', color: 'red' },
+            { id: 'low', color: 'gray' },
+          ],
+        },
+      },
+      statuses: [
+        { id: 'todo', group: 'active', color: 'blue' },
+        { id: 'doing', group: 'active', color: 'orange' },
+      ],
+    } as unknown as Entry['properties'],
+  }),
+  makeEntry({
+    path: 'items/a.md',
+    title: 'A',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'high', estimate: 3 },
+  }),
+  makeEntry({
+    path: 'items/b.md',
+    title: 'B',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'low', estimate: 5 },
+  }),
+  // Doing holds no `low` row — the gap-rule band for a multi-series line.
+  makeEntry({
+    path: 'items/c.md',
+    title: 'C',
+    type: 'Work item',
+    properties: { status: 'doing', priority: 'high', estimate: 2 },
+  }),
+];
 
 const records = (entries: Entry[]) => entries.filter((e) => e.path.startsWith('items/'));
 
@@ -562,6 +607,293 @@ describe('ChartView', () => {
       />,
     );
     expect(container.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+});
+
+/**
+ * The second dimension on screen (M44.3): stacked segments, one line per
+ * series, and a legend that answers back — rows toggle `hidden`/`hiddenG`
+ * through `onChartChange` when a host supplies one, and stay static spans
+ * when none does (an embedded dashboard chart).
+ */
+describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
+  it('groupBy renders stacked segments that sum to the band height', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segments = [...container.querySelectorAll('[data-testid="chart-bar-segment"]')];
+    // Todo splits high+low; Doing holds only high. No whole-band rect remains
+    // underneath — the segments ARE the bar.
+    expect(segments).toHaveLength(3);
+    expect(container.querySelectorAll('[data-testid="chart-bar"]')).toHaveLength(0);
+    const heights = (label: string) =>
+      segments
+        .filter((r) => r.getAttribute('data-label') === label)
+        .reduce((sum, r) => sum + Number(r.getAttribute('height')), 0);
+    for (const r of segments) expect(Number(r.getAttribute('height'))).toBeGreaterThan(0);
+    // Values 2 vs 1 on a linear scale: the stacks keep the same ratio.
+    expect(heights('Todo') / heights('Doing')).toBeCloseTo(2, 5);
+    // The two Todo segments wear their series' own hues, not one paint.
+    const fills = segments
+      .filter((r) => r.getAttribute('data-label') === 'Todo')
+      .map((r) => r.getAttribute('fill'));
+    expect(new Set(fills).size).toBe(2);
+    expect(fills).toContain('var(--opt-red)');
+  });
+
+  it('horizontal stacked bars run their segments along x', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segments = [...container.querySelectorAll('[data-testid="chart-bar-segment"]')];
+    expect(segments).toHaveLength(3);
+    const widths = (label: string) =>
+      segments
+        .filter((r) => r.getAttribute('data-label') === label)
+        .reduce((sum, r) => sum + Number(r.getAttribute('width')), 0);
+    expect(widths('Todo') / widths('Doing')).toBeCloseTo(2, 5);
+  });
+
+  it('a multi-series line draws one path per visible series, strokes distinct', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const lines = [...container.querySelectorAll('[data-testid="chart-line"]')];
+    expect(lines).toHaveLength(2);
+    expect(new Set(lines.map((l) => l.getAttribute('stroke'))).size).toBe(2);
+  });
+
+  // Decision B (M44.3), plain half: a band without the series gets NO point —
+  // the path connects the points that exist. Doing has no `low` row.
+  it('a band without the series is a gap: no point drawn there', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const points = [...container.querySelectorAll('[data-testid="chart-point"]')];
+    expect(points.filter((p) => p.getAttribute('data-series') === 'High')).toHaveLength(2);
+    expect(points.filter((p) => p.getAttribute('data-series') === 'Low')).toHaveLength(1);
+  });
+
+  // Decision B, cumulative half: the engine's plateau parts make every band
+  // hold a point, so the lines are continuous.
+  it('under cumulative the plateau parts make every series continuous', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority', cumulative: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const points = [...container.querySelectorAll('[data-testid="chart-point"]')];
+    expect(points.filter((p) => p.getAttribute('data-series') === 'Low')).toHaveLength(2);
+  });
+
+  // With MULTIPLE series the per-series strokes ARE what is drawn, so the
+  // series swatches must show them — the uniform-cortex rule is single-series
+  // only (see the no-palette line legend test above).
+  it('multi-series legend swatches match the drawn strokes, not cortex', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const strokes = [...container.querySelectorAll('[data-testid="chart-line"]')].map((l) =>
+      l.getAttribute('stroke'),
+    );
+    const swatches = [
+      ...container.querySelectorAll('[data-testid="chart-legend-series"] span.rounded-sm'),
+    ].map((s) => (s as HTMLElement).style.background);
+    expect(new Set(swatches)).toEqual(new Set(strokes));
+  });
+
+  it('legend rows are buttons that toggle the band into hidden', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ legend: true, hidden: ['todo'] });
+  });
+
+  it('unhiding drops the key, and an emptied array leaves the spec entirely', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ legend: true });
+  });
+
+  it('series legend rows toggle hiddenG', () => {
+    const entries = stacked();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /High/ }));
+    expect(onChartChange).toHaveBeenCalledWith({
+      legend: true,
+      groupBy: 'priority',
+      hiddenG: ['high'],
+    });
+  });
+
+  it('a hidden row is struck through, unpressed, and shows its label only', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={vi.fn()}
+      />,
+    );
+    const rows = screen.getAllByTestId('chart-legend-item');
+    const todo = rows.find((r) => r.textContent?.startsWith('Todo'));
+    // Its display value is stale by definition — the label alone remains.
+    expect(todo?.textContent).toBe('Todo');
+    expect(todo?.className).toContain('line-through');
+    expect(todo?.className).toContain('text-n-400');
+    expect(todo?.querySelector('button')?.getAttribute('aria-pressed')).toBe('false');
+    const doing = rows.find((r) => r.textContent?.startsWith('Doing'));
+    expect(doing?.textContent).toBe('Doing1');
+    expect(doing?.querySelector('button')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('without onChartChange the legend is static — no buttons, as today', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-legend-item').length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  // The all-hidden empty state without a legend would be a dead end: the
+  // legend below it is the way back, and it must work.
+  it('all-hidden renders the legend below the empty state as the recovery path', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hidden: ['todo', 'doing'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    expect(screen.getByTestId('chart-empty').getAttribute('data-reason')).toBe('all-hidden');
+    expect(screen.getAllByTestId('chart-legend-item')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ hidden: ['doing'] });
+  });
+
+  // The engine already filtered the hidden slice out of `total`, so the arcs
+  // must still close the ring — their lengths sum to the circumference.
+  it('a donut with hidden slices still closes its ring', () => {
+    const entries = wide();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const arcs = [...container.querySelectorAll('[data-testid="chart-arc"]')];
+    expect(arcs.length).toBeGreaterThan(0);
+    const total = arcs.reduce(
+      (sum, a) => sum + Number(a.getAttribute('stroke-dasharray')?.split(' ')[0]),
+      0,
+    );
+    expect(total).toBeCloseTo(2 * Math.PI * 92, 6);
+  });
+
+  // Decision C (M44.3): the caption reads "Average of X", but under groupBy
+  // each segment is its sub-band's average and the bar is their SUM — the
+  // clause names the deviation.
+  it('the caption says "stacked averages" when avg meets groupBy', () => {
+    const entries = stacked();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'avg', value: 'estimate', groupBy: 'priority' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).toContain('stacked averages');
+    cleanup();
+    // A donut ignores groupBy, so its caption must not claim the stacking.
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'donut', agg: 'avg', value: 'estimate', groupBy: 'priority' },
+        })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).not.toContain('stacked averages');
   });
 });
 

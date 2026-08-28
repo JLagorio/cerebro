@@ -221,6 +221,14 @@ export function ViewCanvas({
           presentation={presentation}
           schema={schema}
           filtered={filtered}
+          // The legend's writer, derived from the presentation writer the
+          // pages already pass (M44.3). A dashboard's embedded canvas passes
+          // no onPresentationChange, so its chart legend stays static.
+          onChartChange={
+            onPresentationChange === undefined
+              ? undefined
+              : (chart) => onPresentationChange({ ...presentation, chart })
+          }
         />
       );
     case 'gallery':

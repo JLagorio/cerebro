@@ -1,7 +1,7 @@
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { computeChart, niceCeiling } from '@/engine/chart';
-import type { ChartData, ChartSlice } from '@/engine/chart';
+import type { ChartData, ChartRosterItem, ChartSlice, ChartSlicePart } from '@/engine/chart';
 import type {
   ChartHeight,
   ChartKind,
@@ -34,6 +34,9 @@ export interface ChartViewProps {
   /** True when the view has filters, so the empty state can say why. Required,
    * not optional — see BoardViewProps.filtered (M16.35). */
   filtered: boolean;
+  /** Persists a legend toggle into the view's chart spec (M44.3). Absent —
+   * an embedded dashboard chart — the legend renders static. */
+  onChartChange?: (next: ChartSpec) => void;
 }
 
 const W = 640;
@@ -66,7 +69,9 @@ function paletteBase(palette: string): string {
  * giving it a hue makes it look like one more status.
  */
 export function sliceColor(
-  slice: ChartSlice,
+  // Structural on purpose: a slice, a stacked part, and a legend roster item
+  // (which carries no `ghost`) all colour through the one rule (M44.3).
+  slice: { key: string; color: string | null; ghost?: boolean },
   index: number,
   opts?: { palette?: string; share?: number },
 ): string {
@@ -141,6 +146,12 @@ function clip(label: string, band: number): string {
 function captionNotes(chart: ChartSpec | undefined, kind: ChartKind): string[] {
   const notes: string[] = [];
   if (chart?.cumulative === true && kind !== 'donut') notes.push('cumulative');
+  // An avg chart under groupBy: each segment is its sub-band's average and
+  // the bar is their SUM. The caption reads "Average of X", so this clause
+  // names the deviation (M44.3) — and a donut ignores groupBy, so it must
+  // not claim the stacking either.
+  if (chart?.agg === 'avg' && chart.groupBy !== undefined && kind !== 'donut')
+    notes.push('stacked averages');
   if (chart?.sort === 'value-desc') notes.push('biggest first');
   if (chart?.sort === 'value-asc') notes.push('smallest first');
   if (chart?.sort === 'label') notes.push('A to Z');
@@ -227,6 +238,18 @@ function XLabels({ slices, band, plotH }: { slices: ChartSlice[]; band: number; 
   );
 }
 
+/** Where each stacked segment starts, laid out before render — the same
+ * accumulator-outside-`.map()` shape as `arcs` below, for the same lint
+ * reason. Parts arrive visible-only and in series order from the engine. */
+function stackLayout(parts: ChartSlicePart[]): { part: ChartSlicePart; start: number }[] {
+  let offset = 0;
+  return parts.map((part) => {
+    const start = offset;
+    offset += part.value;
+    return { part, start };
+  });
+}
+
 function BarChart({
   data,
   chart,
@@ -250,23 +273,47 @@ function BarChart({
       />
       {data.slices.map((s, i) => {
         const height = (s.value / top) * plotH;
+        const x = PAD.left + band * i + (band - width) / 2;
         return (
           <g key={s.key || s.label}>
-            <rect
-              data-testid="chart-bar"
-              data-label={s.label}
-              data-value={s.value}
-              x={PAD.left + band * i + (band - width) / 2}
-              // A zero-height rect is invisible; 1px says "measured, and it
-              // is zero" rather than "no band here".
-              y={PAD.top + plotH - Math.max(height, s.value > 0 ? 1 : 0)}
-              width={width}
-              height={Math.max(height, s.value > 0 ? 1 : 0)}
-              rx={3}
-              fill={sliceColor(s, i, colorOpts(chart, data, s))}
-            >
-              <title>{`${s.label}: ${s.display}`}</title>
-            </rect>
+            {s.parts !== undefined && s.parts.length > 0 ? (
+              // Under groupBy the segments ARE the bar: they stack to exactly
+              // the band value, so no whole-band rect sits underneath.
+              stackLayout(s.parts).map(({ part, start }) =>
+                part.value <= 0 ? null : (
+                  <rect
+                    key={part.key || part.label}
+                    data-testid="chart-bar-segment"
+                    data-label={s.label}
+                    data-series={part.label}
+                    data-value={part.value}
+                    x={x}
+                    y={PAD.top + plotH - ((start + part.value) / top) * plotH}
+                    width={width}
+                    height={(part.value / top) * plotH}
+                    fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
+                  >
+                    <title>{`${s.label} · ${part.label}: ${part.display}`}</title>
+                  </rect>
+                ),
+              )
+            ) : (
+              <rect
+                data-testid="chart-bar"
+                data-label={s.label}
+                data-value={s.value}
+                x={x}
+                // A zero-height rect is invisible; 1px says "measured, and it
+                // is zero" rather than "no band here".
+                y={PAD.top + plotH - Math.max(height, s.value > 0 ? 1 : 0)}
+                width={width}
+                height={Math.max(height, s.value > 0 ? 1 : 0)}
+                rx={3}
+                fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
+              >
+                <title>{`${s.label}: ${s.display}`}</title>
+              </rect>
+            )}
             {chart?.hideLabels !== true && band > 34 && (
               <text
                 x={PAD.left + band * i + band / 2}
@@ -329,19 +376,42 @@ function HBarChart({
             >
               {clip(s.label, HPAD.left)}
             </text>
-            <rect
-              data-testid="chart-bar"
-              data-label={s.label}
-              data-value={s.value}
-              x={HPAD.left}
-              y={y}
-              width={s.value > 0 ? Math.max(1, width) : width}
-              height={barH}
-              rx={3}
-              fill={sliceColor(s, i, colorOpts(chart, data, s))}
-            >
-              <title>{`${s.label}: ${s.display}`}</title>
-            </rect>
+            {s.parts !== undefined && s.parts.length > 0 ? (
+              // The vertical chart's rule, laid sideways: segments stack
+              // along x and no whole-band rect sits underneath.
+              stackLayout(s.parts).map(({ part, start }) =>
+                part.value <= 0 ? null : (
+                  <rect
+                    key={part.key || part.label}
+                    data-testid="chart-bar-segment"
+                    data-label={s.label}
+                    data-series={part.label}
+                    data-value={part.value}
+                    x={HPAD.left + (start / top) * plotW}
+                    y={y}
+                    width={(part.value / top) * plotW}
+                    height={barH}
+                    fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
+                  >
+                    <title>{`${s.label} · ${part.label}: ${part.display}`}</title>
+                  </rect>
+                ),
+              )
+            ) : (
+              <rect
+                data-testid="chart-bar"
+                data-label={s.label}
+                data-value={s.value}
+                x={HPAD.left}
+                y={y}
+                width={s.value > 0 ? Math.max(1, width) : width}
+                height={barH}
+                rx={3}
+                fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
+              >
+                <title>{`${s.label}: ${s.display}`}</title>
+              </rect>
+            )}
             {chart?.hideLabels !== true && (
               <text
                 x={fits ? HPAD.left + width + 6 : HPAD.left + width - 6}
@@ -376,6 +446,76 @@ function LineChart({
     x: PAD.left + band * i + band / 2,
     y: PAD.top + plotH - (s.value / top) * plotH,
   });
+  // The multi-series pivot (M44.3): one path per VISIBLE series, points read
+  // from each band's matching part. Two rules govern a band that lacks the
+  // series: under plain rendering it gets NO point — a gap; the path connects
+  // the points that exist — and under cumulative the engine's synthesized
+  // plateau parts carry every begun series into every band, so the lines are
+  // continuous. `area` stays single-series only: overlapping washes at one
+  // opacity read as mud, not as data.
+  if (data.series.length > 0) {
+    return (
+      <>
+        <Axes
+          top={top}
+          label={data.measure}
+          plotH={plotH}
+          hideGrid={chart?.hideGrid === true}
+          hideAxis={chart?.hideAxis === true}
+        />
+        {data.series
+          .filter((item) => !item.hidden)
+          .map((item) => {
+            const pts = data.slices.flatMap((s, i) => {
+              const part = s.parts?.find((p) => p.key === item.key);
+              if (part === undefined) return [];
+              return [
+                {
+                  x: PAD.left + band * i + band / 2,
+                  y: PAD.top + plotH - (part.value / top) * plotH,
+                  s,
+                  part,
+                },
+              ];
+            });
+            if (pts.length === 0) return null;
+            const seriesStroke = sliceColor(item, item.hue, { palette: chart?.palette });
+            return (
+              <g key={item.key || item.label}>
+                <path
+                  data-testid="chart-line"
+                  data-series={item.label}
+                  d={linePath(pts, chart?.smooth === true)}
+                  fill="none"
+                  stroke={seriesStroke}
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                {pts.map((p) => (
+                  <circle
+                    key={p.s.key || p.s.label}
+                    data-testid="chart-point"
+                    data-series={item.label}
+                    data-label={p.s.label}
+                    data-value={p.part.value}
+                    cx={p.x}
+                    cy={p.y}
+                    r={3.5}
+                    fill="var(--n-0)"
+                    stroke={seriesStroke}
+                    strokeWidth={2}
+                  >
+                    <title>{`${p.s.label} · ${p.part.label}: ${p.part.display}`}</title>
+                  </circle>
+                ))}
+              </g>
+            );
+          })}
+        {chart?.hideAxis !== true && <XLabels slices={data.slices} band={band} plotH={plotH} />}
+      </>
+    );
+  }
   const points = data.slices.map((s, i) => at(s, i));
   // One line, one hue: the palette when the spec declares one, cortex
   // otherwise. Per-band colours would claim the line is several series.
@@ -417,7 +557,7 @@ function LineChart({
           r={3.5}
           fill="var(--n-0)"
           stroke={
-            chart?.palette !== undefined ? sliceColor(s, i, colorOpts(chart, data, s)) : stroke
+            chart?.palette !== undefined ? sliceColor(s, s.hue, colorOpts(chart, data, s)) : stroke
           }
           strokeWidth={2}
         >
@@ -472,7 +612,7 @@ function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undef
       {/* -90° so the first slice starts at twelve o'clock, which is where a
           reader starts. */}
       <g transform={`rotate(-90 ${c} ${c})`}>
-        {segments.map(({ slice: s, start, length }, i) =>
+        {segments.map(({ slice: s, start, length }) =>
           // A zero-value band contributes no arc: `stroke-dasharray: 0 …`
           // still paints a linecap-width hairline at twelve o'clock.
           s.value <= 0 ? null : (
@@ -485,7 +625,7 @@ function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undef
               cy={c}
               r={DONUT.r}
               fill="none"
-              stroke={sliceColor(s, i, colorOpts(chart, data, s))}
+              stroke={sliceColor(s, s.hue, colorOpts(chart, data, s))}
               strokeWidth={DONUT.stroke}
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-start}
@@ -516,44 +656,115 @@ function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undef
   );
 }
 
-/** One legend for every kind, under the chart — the donut's old private list,
- * lifted out so a bar or line can ask for the same thing.
+/** One legend for every kind, under the chart — and, when the host supplies
+ * `onChartChange`, the chart's switchboard (M44.3): rows render from the
+ * ROSTERS, hidden entries included, and each toggles its key in
+ * `hidden`/`hiddenG`. A hidden row keeps its swatch but shows its label only
+ * — its display value is stale by definition — struck through, so the way
+ * back stays visible. Without the writer (an embedded dashboard chart) the
+ * rows stay static spans.
  *
- * A no-palette line draws every point in LineChart's one uniform
- * `var(--cortex-500)` stroke — per-band option hues here would be swatches
- * that match nothing actually drawn. A palette line already colours its
- * points through `sliceColor`, so that path is untouched. */
+ * A no-palette SINGLE-series line draws in LineChart's one uniform
+ * `var(--cortex-500)` stroke, so its band swatches show that — per-band
+ * option hues would be swatches matching nothing actually drawn. With
+ * multiple series the per-series strokes ARE what is drawn, so the mono rule
+ * does not apply; a palette line already colours through `sliceColor`. */
 function Legend({
   data,
   chart,
   kind,
+  onChartChange,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   kind: ChartKind;
+  onChartChange?: (next: ChartSpec) => void;
 }) {
-  const lineMono = kind === 'line' && chart?.palette === undefined;
+  const lineMono = kind === 'line' && chart?.palette === undefined && data.series.length === 0;
+  const toggle = (prop: 'hidden' | 'hiddenG', key: string) => {
+    if (onChartChange === undefined) return;
+    // Build the next array from the CURRENT spec; an emptied array leaves
+    // the spec entirely — no `hidden: []` residue in the view file.
+    const current = (prop === 'hidden' ? chart?.hidden : chart?.hiddenG) ?? [];
+    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+    const spec: ChartSpec = { ...chart };
+    if (next.length === 0) delete spec[prop];
+    else spec[prop] = next;
+    onChartChange(spec);
+  };
+  const row = (
+    item: ChartRosterItem,
+    prop: 'hidden' | 'hiddenG',
+    testid: string,
+    swatch: string,
+    display: string | undefined,
+  ) => {
+    const tone = item.hidden ? 'text-n-400 line-through' : 'text-n-600';
+    const body = (
+      <>
+        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: swatch }} />
+        {item.label}
+        {display !== undefined && (
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{display}</span>
+        )}
+      </>
+    );
+    return (
+      <li
+        key={item.key || item.label}
+        data-testid={testid}
+        className={`flex items-center gap-1.5 text-xs ${tone}`}
+      >
+        {onChartChange === undefined ? (
+          body
+        ) : (
+          // line-through does not propagate into an atomic inline box, so the
+          // button repeats the tone classes rather than inheriting them.
+          <button
+            type="button"
+            aria-pressed={!item.hidden}
+            onClick={() => toggle(prop, item.key)}
+            className={`flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-xs ${tone}`}
+          >
+            {body}
+          </button>
+        )}
+      </li>
+    );
+  };
   return (
-    <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 pt-3">
-      {data.slices.map((s, i) => (
-        <li
-          key={s.key || s.label}
-          data-testid="chart-legend-item"
-          className="flex items-center gap-1.5 text-xs text-n-600"
-        >
-          <span
-            className="inline-block h-2.5 w-2.5 rounded-sm"
-            style={{
-              background: lineMono
-                ? 'var(--cortex-500)'
-                : sliceColor(s, i, colorOpts(chart, data, s)),
-            }}
-          />
-          {s.label}
-          <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{s.display}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 pt-3">
+        {data.bands.map((item) => {
+          // The visible slice carries the display value and the colorByValue
+          // share; a hidden band has neither, and claims neither.
+          const slice = data.slices.find((s) => s.key === item.key);
+          const swatch = lineMono
+            ? 'var(--cortex-500)'
+            : sliceColor(
+                item,
+                item.hue,
+                slice !== undefined ? colorOpts(chart, data, slice) : { palette: chart?.palette },
+              );
+          return row(item, 'hidden', 'chart-legend-item', swatch, slice?.display);
+        })}
+      </ul>
+      {data.series.length > 0 && (
+        <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 pt-1.5">
+          {data.series.map((item) =>
+            // A series has no one total to print — its values live per band —
+            // so its row is label-only, visible or not.
+            row(
+              item,
+              'hiddenG',
+              'chart-legend-series',
+              sliceColor(item, item.hue, { palette: chart?.palette }),
+              undefined,
+            ),
+          )}
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -595,7 +806,13 @@ const BLOCKED: Record<
 
 const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4';
 
-export function ChartView({ entries, presentation, schema, filtered }: ChartViewProps) {
+export function ChartView({
+  entries,
+  presentation,
+  schema,
+  filtered,
+  onChartChange,
+}: ChartViewProps) {
   const data = computeChart(entries, presentation, schema);
   const chart = presentation.chart;
   const kind: ChartKind = chart?.kind ?? 'bar';
@@ -624,6 +841,11 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
             }
             description={BLOCKED[data.blocked].description}
           />
+          {/* all-hidden carries its rosters, and the legend is the only way
+              back — it renders whatever `chart.legend` says (M44.3). */}
+          {data.blocked === 'all-hidden' && (
+            <Legend data={data} chart={chart} kind={kind} onChartChange={onChartChange} />
+          )}
         </div>
       ) : kind === 'number' ? (
         // A number chart totals every visible row into one stat — there is no
@@ -673,7 +895,9 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
               )}
             </svg>
           )}
-          {showLegend && <Legend data={data} chart={chart} kind={kind} />}
+          {showLegend && (
+            <Legend data={data} chart={chart} kind={kind} onChartChange={onChartChange} />
+          )}
         </figure>
       )}
     </div>
