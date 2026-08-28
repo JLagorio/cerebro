@@ -889,7 +889,9 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
       />,
     );
     expect(screen.getAllByTestId('chart-legend-item').length).toBeGreaterThan(0);
-    expect(container.querySelectorAll('button')).toHaveLength(0);
+    // Scoped to the legend rows: the figure grew an export trigger (M44.3),
+    // and THAT button is not a legend toggle.
+    expect(container.querySelectorAll('[data-testid="chart-legend-item"] button')).toHaveLength(0);
   });
 
   // The all-hidden empty state without a legend would be a dead end: the

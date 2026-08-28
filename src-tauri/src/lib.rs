@@ -1099,6 +1099,28 @@ async fn export_png(
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
+/// Save an SVG document wherever the user points the native dialog (M44.3).
+/// `export_png` minus the base64 — the payload is text. Cancel is `Ok(None)`.
+#[tauri::command]
+async fn export_svg(
+    app: tauri::AppHandle,
+    default_name: String,
+    svg: String,
+) -> Result<Option<String>, String> {
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("SVG image", &["svg"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, svg).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // --- Local agent + MCP (M6) ------------------------------------------------
 
 #[tauri::command(async)]
@@ -1541,6 +1563,7 @@ pub fn run() {
             import_attachment,
             write_text_file,
             export_png,
+            export_svg,
             ledger_head,
             ledger_status,
             start_watcher,

@@ -747,6 +747,17 @@ export async function exportPng(defaultName: string, bytes: Uint8Array): Promise
   return defaultName;
 }
 
+/** Browser stand-in for the native SVG save: the text, as a plain download (M44.3). */
+export async function exportSvg(defaultName: string, svg: string): Promise<string | null> {
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return defaultName;
+}
+
 // --- The review surface (M24.9) --------------------------------------------
 // The browser mock has no ledger, so it has no proposals, no policy, and
 // nothing to review. It holds FIXTURE cards a UI test can drive — data, not

@@ -1,11 +1,16 @@
 import { useLayoutEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
+import type { MouseEvent as ReactMouseEvent, Ref, RefObject } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Dialog } from '@/components/ui/Dialog';
+import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { MenuItem, MenuSurface } from '@/components/ui/Menu';
+import { Popover } from '@/components/ui/Popover';
 import { seedView } from '@/app/viewActions';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useUiStore } from '@/stores/uiStore';
+import { copyChartPng, copyChartSvg, saveChartPng, saveChartSvg } from '@/views/chartExport';
 import { computeChart, niceCeiling } from '@/engine/chart';
 import { bandKind, bandValueFor, NO_VALUE_KEY } from '@/engine/grouping';
 import { filterOpsFor } from '@/engine/viewFilters';
@@ -665,16 +670,20 @@ function DonutChart({
   data,
   chart,
   events,
+  svgRef,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   events: SliceEvents;
+  /** The export menu's aim: the donut draws its OWN svg root (M44.3). */
+  svgRef?: Ref<SVGSVGElement>;
 }) {
   const c = DONUT.size / 2;
   const circumference = 2 * Math.PI * DONUT.r;
   const segments = arcs(data, circumference);
   return (
     <svg
+      ref={svgRef}
       width={DONUT.size}
       height={DONUT.size}
       viewBox={`0 0 ${DONUT.size} ${DONUT.size}`}
@@ -936,6 +945,100 @@ function ChartTooltip({
   );
 }
 
+/**
+ * The figure's way out (M44.3): four affordances over the mermaid export
+ * pipeline, aimed at whichever svg root this chart drew — the axis kinds'
+ * shared one, or the donut's own. The host renders it only where an svg
+ * exists: never for `number` (nothing drawn to leave), never for a blocked
+ * state, never for the zero-total donut that draws prose instead of a ring.
+ * The figure supplies the resolver probe's home and the ground the export
+ * keeps, so a dark-theme chart leaves dark.
+ */
+function ExportMenu({
+  svgRef,
+  figureRef,
+  name,
+}: {
+  svgRef: RefObject<SVGSVGElement | null>;
+  figureRef: RefObject<HTMLElement | null>;
+  /** The default filename stem — the caption's own sentence. */
+  name: string;
+}) {
+  const toast = useUiStore((s) => s.toast);
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  // The lightbox's toast law (M29.5): a cancelled save resolves null and
+  // gets NO toast — not a failure, not a success either. The copies resolve
+  // undefined, which is `!== null`, so they always toast.
+  const act = (
+    success: string,
+    failure: string,
+    run: (el: SVGSVGElement, host: HTMLElement) => Promise<unknown>,
+  ) => {
+    setOpen(false);
+    const el = svgRef.current;
+    const host = figureRef.current;
+    if (el === null || host === null) return;
+    void run(el, host)
+      .then((result) => {
+        if (result !== null) toast(success);
+      })
+      .catch(() => toast(failure));
+  };
+  return (
+    // stopPropagation: the figure is full of shapes whose click drills; a
+    // menu interaction must never fall through into one.
+    <div
+      data-testid="chart-export"
+      className="absolute right-2.5 top-2.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <IconButton
+        ref={btnRef}
+        icon="download"
+        label="Export chart"
+        size="sm"
+        onClick={() => setOpen(true)}
+      />
+      {open && (
+        <Popover
+          onClose={() => setOpen(false)}
+          anchorRef={btnRef}
+          role="menu"
+          ariaLabel="Export chart"
+        >
+          <MenuSurface width={168}>
+            <MenuItem
+              label="Copy SVG"
+              onSelect={() => act('SVG copied', 'Copy SVG failed', copyChartSvg)}
+            />
+            <MenuItem
+              label="Copy PNG"
+              onSelect={() => act('PNG copied', 'Copy PNG failed', copyChartPng)}
+            />
+            <MenuItem
+              label="Save PNG…"
+              onSelect={() =>
+                act('PNG saved', 'Save PNG failed', (el, host) =>
+                  saveChartPng(el, host, `${name}.png`),
+                )
+              }
+            />
+            <MenuItem
+              label="Save SVG…"
+              onSelect={() =>
+                act('SVG saved', 'Save SVG failed', (el, host) =>
+                  saveChartSvg(el, host, `${name}.svg`),
+                )
+              }
+            />
+          </MenuSurface>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
 /** What an unchartable view says, and which control fixes it. Never a blank
  * box: "there is nothing here" and "you have not said what to chart" look
  * identical when both render as white space. */
@@ -1166,6 +1269,8 @@ export function ChartView({
 
   // The band under the pointer and where the pointer is, figure-relative.
   const figureRef = useRef<HTMLElement>(null);
+  // Whichever svg root this render draws — the export menu's aim (M44.3).
+  const svgRef = useRef<SVGSVGElement>(null);
   const [hovered, setHovered] = useState<{ slice: ChartSlice; x: number; y: number } | null>(null);
   // The band a click drilled into — the dialog's subject (M44.3).
   const [drill, setDrill] = useState<{
@@ -1238,10 +1343,11 @@ export function ChartView({
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (
-              <DonutChart data={data} chart={chart} events={events} />
+              <DonutChart data={data} chart={chart} events={events} svgRef={svgRef} />
             )
           ) : (
             <svg
+              ref={svgRef}
               viewBox={`0 0 ${W} ${H}`}
               // Scales with the panel, keeps its proportions, and never forces
               // the canvas to scroll sideways.
@@ -1260,6 +1366,17 @@ export function ChartView({
           )}
           {showLegend && (
             <Legend data={data} chart={chart} kind={kind} onChartChange={onChartChange} />
+          )}
+          {/* After the chart svg in the DOM on purpose — absolute placement
+              puts it in the corner either way, and the chart svg staying the
+              figure's first svg keeps `querySelector('svg')` honest. The
+              zero-total donut draws prose, not an svg, so it gets no menu. */}
+          {!(kind === 'donut' && data.total <= 0) && (
+            <ExportMenu
+              svgRef={svgRef}
+              figureRef={figureRef}
+              name={`${data.measure} by ${data.axis}`}
+            />
           )}
           {hovered !== null && (
             <ChartTooltip
