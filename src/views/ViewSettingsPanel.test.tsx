@@ -543,6 +543,29 @@ describe('chart axis pickers (M44.3)', () => {
     });
   });
 
+  /** The matrix's remaining cells (Task 4 review): set→different-field on X,
+   * and set→absent on Group by. Each drops exactly its own roster — the other
+   * dimension's bands or series did not change, so its keys stay. */
+  it('a set X axis moving to another field drops hidden; Group by cleared drops hiddenG', () => {
+    const extra: ColumnDef[] = [{ name: 'team', kind: 'select' }];
+    const first = chartSetup(
+      { xField: 'priority', groupBy: 'team', hidden: ['todo'], hiddenG: ['a'] },
+      extra,
+    );
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: 'status' } });
+    expect(first.nextPresentation().chart).toEqual({
+      xField: 'status',
+      groupBy: 'team',
+      hiddenG: ['a'],
+    });
+    cleanup();
+    const second = chartSetup({ groupBy: 'priority', hidden: ['todo'], hiddenG: ['low'] });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: NONE } });
+    expect(second.nextPresentation().chart).toEqual({ hidden: ['todo'] });
+  });
+
   /** Multi-series lines never read `area` — overlapping washes at one opacity
    * are unreadable, so LineChart draws the fill single-series only. A switch
    * under groupBy would be dead, and a stored `area` a key nothing reads. */

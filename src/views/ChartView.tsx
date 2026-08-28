@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { computeChart, niceCeiling } from '@/engine/chart';
@@ -131,8 +133,8 @@ function linePath(pts: { x: number; y: number }[], smooth: boolean): string {
 /** Tick labels, trimmed — a 4-way split of 25 is 6.25, not 6.25000000001. */
 const tick = (n: number) => String(Number(n.toFixed(2)));
 
-/** X labels sit in a band a few dozen pixels wide; the full text is on the
- * `<title>`, which is the SVG tooltip. */
+/** X labels sit in a band a few dozen pixels wide; the full text is in the
+ * DOM tooltip that hovering the band's shape shows (M44.3). */
 function clip(label: string, band: number): string {
   const max = Math.max(4, Math.floor(band / 7));
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
@@ -231,12 +233,29 @@ function XLabels({ slices, band, plotH }: { slices: ChartSlice[]; band: number; 
           fontSize={10.5}
           fill="var(--n-500)"
         >
-          <title>{`${s.label}: ${s.display}`}</title>
           {clip(s.label, band)}
         </text>
       ))}
     </g>
   );
+}
+
+/** Hover wiring every band shape shares (M44.3): enter and move report the
+ * band under the pointer, leave clears it. A stacked segment reports its whole
+ * BAND — the tooltip's per-series rows disambiguate, and the card holding
+ * still while the pointer crosses segments beats it flickering per stripe. */
+interface HoverProps {
+  onHover: (slice: ChartSlice, e: ReactMouseEvent) => void;
+  onLeave: () => void;
+}
+
+/** The three handler attributes, spread onto each shape. */
+function hoverAttrs(hover: HoverProps, slice: ChartSlice) {
+  return {
+    onMouseEnter: (e: ReactMouseEvent) => hover.onHover(slice, e),
+    onMouseMove: (e: ReactMouseEvent) => hover.onHover(slice, e),
+    onMouseLeave: hover.onLeave,
+  };
 }
 
 /** Where each stacked segment starts, laid out before render — the same
@@ -255,10 +274,12 @@ function BarChart({
   data,
   chart,
   plotH,
+  hover,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   plotH: number;
+  hover: HoverProps;
 }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
@@ -299,9 +320,8 @@ function BarChart({
                     width={width}
                     height={(part.value / top) * plotH}
                     fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
-                  >
-                    <title>{`${s.label} · ${part.label}: ${part.display}`}</title>
-                  </rect>
+                    {...hoverAttrs(hover, s)}
+                  />
                 ),
               )
             ) : (
@@ -317,9 +337,8 @@ function BarChart({
                 height={Math.max(height, s.value > 0 ? 1 : 0)}
                 rx={3}
                 fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
-              >
-                <title>{`${s.label}: ${s.display}`}</title>
-              </rect>
+                {...hoverAttrs(hover, s)}
+              />
             )}
             {chart?.hideLabels !== true && band > 34 && (
               <text
@@ -350,10 +369,12 @@ function HBarChart({
   data,
   chart,
   h,
+  hover,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   h: number;
+  hover: HoverProps;
 }) {
   const plotW = W - HPAD.left - HPAD.right;
   const plotH = h - HPAD.top - HPAD.bottom;
@@ -402,9 +423,8 @@ function HBarChart({
                     width={(part.value / top) * plotW}
                     height={barH}
                     fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
-                  >
-                    <title>{`${s.label} · ${part.label}: ${part.display}`}</title>
-                  </rect>
+                    {...hoverAttrs(hover, s)}
+                  />
                 ),
               )
             ) : (
@@ -418,9 +438,8 @@ function HBarChart({
                 height={barH}
                 rx={3}
                 fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
-              >
-                <title>{`${s.label}: ${s.display}`}</title>
-              </rect>
+                {...hoverAttrs(hover, s)}
+              />
             )}
             {chart?.hideLabels !== true && (
               <text
@@ -449,10 +468,12 @@ function LineChart({
   data,
   chart,
   plotH,
+  hover,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   plotH: number;
+  hover: HoverProps;
 }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
@@ -536,9 +557,8 @@ function LineChart({
                     fill="var(--n-0)"
                     stroke={seriesStroke}
                     strokeWidth={2}
-                  >
-                    <title>{`${p.s.label} · ${p.part.label}: ${p.part.display}`}</title>
-                  </circle>
+                    {...hoverAttrs(hover, p.s)}
+                  />
                 ))}
               </g>
             );
@@ -591,9 +611,8 @@ function LineChart({
             chart?.palette !== undefined ? sliceColor(s, s.hue, colorOpts(chart, data, s)) : stroke
           }
           strokeWidth={2}
-        >
-          <title>{`${s.label}: ${s.display}`}</title>
-        </circle>
+          {...hoverAttrs(hover, s)}
+        />
       ))}
       {chart?.hideAxis !== true && <XLabels slices={data.slices} band={band} plotH={plotH} />}
     </>
@@ -619,7 +638,15 @@ function arcs(data: ChartData, circumference: number) {
   });
 }
 
-function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undefined }) {
+function DonutChart({
+  data,
+  chart,
+  hover,
+}: {
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  hover: HoverProps;
+}) {
   const c = DONUT.size / 2;
   const circumference = 2 * Math.PI * DONUT.r;
   const segments = arcs(data, circumference);
@@ -660,9 +687,8 @@ function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undef
               strokeWidth={DONUT.stroke}
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-start}
-            >
-              <title>{`${s.label}: ${s.display}`}</title>
-            </circle>
+              {...hoverAttrs(hover, s)}
+            />
           ),
         )}
       </g>
@@ -799,6 +825,81 @@ function Legend({
   );
 }
 
+/**
+ * The hover card (M44.3) — the chart's only tooltip, replacing the SVG-native
+ * `<title>` children the shapes used to carry.
+ *
+ * Three honesty rules govern its rows. Share is a percentage of the VISIBLE
+ * total — what the reader sees is the whole it is a share of. Under
+ * cumulative there is NO Share row: a band's `value` there IS the running
+ * total, so a share of it is a lie, and the row count speaks instead. And the
+ * records line always uses `count` — the band's true rows — never `value`,
+ * which cumulative mutates.
+ */
+function ChartTooltip({
+  slice: s,
+  x,
+  y,
+  data,
+  chart,
+  running,
+  bounds,
+}: {
+  slice: ChartSlice;
+  x: number;
+  y: number;
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  /** True when the drawn values are running totals (cumulative, non-donut). */
+  running: boolean;
+  bounds: { width: number; height: number } | null;
+}) {
+  // Clamped into the figure box with an assumed card size — measuring the
+  // card for exact clamping is more machinery than a tooltip is worth.
+  const left = Math.max(0, Math.min(x + 12, (bounds?.width ?? W) - 190));
+  const top = Math.max(0, Math.min(y + 12, Math.max(0, (bounds?.height ?? 0) - 48)));
+  const share = !running && data.total > 0 ? Math.round((s.value / data.total) * 100) : null;
+  const mono = '[font-family:var(--font-mono)] text-n-500';
+  return (
+    <div
+      data-testid="chart-tooltip"
+      className="pointer-events-none absolute z-10 min-w-32 rounded-lg border border-n-200 bg-n-0 px-2.5 py-1.5 text-xs shadow-[var(--shadow-lg)]"
+      style={{ left, top }}
+    >
+      <div className="font-semibold text-n-800">{s.label}</div>
+      {s.parts !== undefined && s.parts.length > 0 && (
+        <div className="flex flex-col gap-0.5 pt-1">
+          {s.parts.map((part) => (
+            <div key={part.key || part.label} className="flex items-center gap-1.5">
+              <span
+                className="inline-block h-2 w-2 flex-none rounded-sm"
+                style={{ background: sliceColor(part, part.hue, colorOpts(chart, data, s)) }}
+              />
+              <span className="flex-1 text-n-600">{part.label}</span>
+              <span className={mono}>{part.display}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-1 flex flex-col gap-0.5 border-t border-n-100 pt-1">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-n-600">Total</span>
+          <span className={mono}>{s.display}</span>
+        </div>
+        {share !== null && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-n-600">Share</span>
+            <span className={mono}>{share}%</span>
+          </div>
+        )}
+        <div className="text-n-500">
+          {s.count} {s.count === 1 ? 'record' : 'records'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** What an unchartable view says, and which control fixes it. Never a blank
  * box: "there is nothing here" and "you have not said what to chart" look
  * identical when both render as white space. */
@@ -853,6 +954,17 @@ export function ChartView({
   const showLegend = chart?.legend ?? kind === 'donut';
   const notes = captionNotes(chart, kind);
 
+  // The band under the pointer and where the pointer is, figure-relative.
+  const figureRef = useRef<HTMLElement>(null);
+  const [hovered, setHovered] = useState<{ slice: ChartSlice; x: number; y: number } | null>(null);
+  const hover: HoverProps = {
+    onHover: (slice, e) => {
+      const box = figureRef.current?.getBoundingClientRect();
+      setHovered({ slice, x: e.clientX - (box?.left ?? 0), y: e.clientY - (box?.top ?? 0) });
+    },
+    onLeave: () => setHovered(null),
+  };
+
   return (
     <div
       data-testid="chart-view"
@@ -889,7 +1001,7 @@ export function ChartView({
           </div>
         </figure>
       ) : (
-        <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
+        <figure ref={figureRef} className="relative m-0 rounded-xl border border-n-200 bg-n-0 p-4">
           <figcaption data-testid="chart-caption" className="pb-3 text-sm font-semibold text-n-800">
             {data.measure}
             <span className="pl-1.5 font-normal text-n-500">by {data.axis}</span>
@@ -905,7 +1017,7 @@ export function ChartView({
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (
-              <DonutChart data={data} chart={chart} />
+              <DonutChart data={data} chart={chart} hover={hover} />
             )
           ) : (
             <svg
@@ -917,16 +1029,33 @@ export function ChartView({
               aria-label={`${data.measure} by ${data.axis}`}
             >
               {horizontal ? (
-                <HBarChart data={data} chart={chart} h={H} />
+                <HBarChart data={data} chart={chart} h={H} hover={hover} />
               ) : kind === 'line' ? (
-                <LineChart data={data} chart={chart} plotH={PLOT_H} />
+                <LineChart data={data} chart={chart} plotH={PLOT_H} hover={hover} />
               ) : (
-                <BarChart data={data} chart={chart} plotH={PLOT_H} />
+                <BarChart data={data} chart={chart} plotH={PLOT_H} hover={hover} />
               )}
             </svg>
           )}
           {showLegend && (
             <Legend data={data} chart={chart} kind={kind} onChartChange={onChartChange} />
+          )}
+          {hovered !== null && (
+            <ChartTooltip
+              slice={hovered.slice}
+              x={hovered.x}
+              y={hovered.y}
+              data={data}
+              chart={chart}
+              // computeChart ignores `cumulative` for a donut, so the tooltip
+              // must not treat the donut's plain values as running totals.
+              running={chart?.cumulative === true && kind !== 'donut'}
+              bounds={
+                figureRef.current !== null
+                  ? { width: figureRef.current.clientWidth, height: figureRef.current.clientHeight }
+                  : null
+              }
+            />
           )}
         </figure>
       )}

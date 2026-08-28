@@ -971,6 +971,145 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
   });
 });
 
+/**
+ * The hover tooltip (M44.3): one DOM card, `chart-tooltip`, that follows the
+ * pointer across bars, segments, points and arcs. It REPLACES the SVG-native
+ * `<title>` children — two tooltips is one too many — so those are asserted
+ * gone. Under cumulative the Share row is refused: a band's `value` there IS
+ * the running total, so a percentage of it would be a lie, and the honest
+ * number is the band's true row count.
+ */
+describe('ChartView hover tooltip (M44.3)', () => {
+  it('hovering a bar shows the band label and value, and leaving hides it', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        filtered={false}
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+    const bar = screen
+      .getAllByTestId('chart-bar')
+      .find((b) => b.getAttribute('data-label') === 'Todo')!;
+    fireEvent.mouseEnter(bar, { clientX: 120, clientY: 60 });
+    fireEvent.mouseMove(bar, { clientX: 124, clientY: 64 });
+    const tip = screen.getByTestId('chart-tooltip');
+    expect(tip.textContent).toContain('Todo');
+    expect(tip.textContent).toContain('2');
+    fireEvent.mouseLeave(bar);
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+  });
+
+  it('a stacked band lists its series with swatches, a total, and its share of the visible whole', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segment = container.querySelector('[data-testid="chart-bar-segment"][data-label="Todo"]');
+    fireEvent.mouseEnter(segment!, { clientX: 120, clientY: 60 });
+    const tip = screen.getByTestId('chart-tooltip');
+    // Both series of the band, whichever segment sits under the pointer.
+    expect(tip.textContent).toContain('High');
+    expect(tip.textContent).toContain('Low');
+    const swatches = [...tip.querySelectorAll('span.rounded-sm')].map(
+      (s) => (s as HTMLElement).style.background,
+    );
+    expect(swatches).toHaveLength(2);
+    expect(swatches).toContain('var(--opt-red)');
+    expect(tip.textContent).toContain('Total');
+    // Todo counts 2 of the 3 visible rows: Math.round(2/3 * 100) = 67.
+    expect(tip.textContent).toContain('67%');
+    expect(tip.textContent).toContain('2 records');
+  });
+
+  it('under cumulative the tooltip reports the true row count and refuses a share', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'sum', value: 'estimate', cumulative: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const doing = container.querySelector('[data-testid="chart-bar"][data-label="Doing"]');
+    fireEvent.mouseEnter(doing!, { clientX: 0, clientY: 0 });
+    const tip = screen.getByTestId('chart-tooltip');
+    // Doing holds ONE row; its cumulative `value` is the running total 10.
+    // The count line uses `count` — the rows actually in the band — and the
+    // Share row is absent: a share of a running total is not a share.
+    expect(tip.textContent).toContain('1 record');
+    expect(tip.textContent).not.toContain('%');
+  });
+
+  it('the svg-native titles are gone — the DOM card is the only tooltip', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const bar = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(bar.container.querySelector('svg title')).toBeNull();
+    cleanup();
+    const line = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(line.container.querySelector('svg title')).toBeNull();
+    // The points hover like the bars do.
+    fireEvent.mouseEnter(line.container.querySelector('[data-testid="chart-point"]')!, {
+      clientX: 100,
+      clientY: 40,
+    });
+    expect(screen.getByTestId('chart-tooltip').textContent).toContain('Todo');
+    cleanup();
+    const donut = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(donut.container.querySelector('svg title')).toBeNull();
+    fireEvent.mouseEnter(
+      donut.container.querySelector('[data-testid="chart-arc"][data-label="Doing"]')!,
+      { clientX: 100, clientY: 100 },
+    );
+    expect(screen.getByTestId('chart-tooltip').textContent).toContain('Doing');
+  });
+
+  it('a number chart never grows a tooltip — there is nothing to point at', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [], chart: { kind: 'number' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('svg')).toBeNull();
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+  });
+});
+
 describe('sliceColor', () => {
   const slice = (over: Partial<ChartSlice> = {}): ChartSlice => ({
     key: 'todo',
