@@ -14,6 +14,7 @@ import { resolveLayout } from '@/engine/layout';
 import { isEmptyForVisibility, splitByVisibility } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldDef, TypeDef } from '@/engine/types';
+import { deepEqual } from '@/lib/deepEqual';
 import { isTemplate } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -80,22 +81,13 @@ export function updateDraft(
 }
 
 /**
- * Does the draft differ from its seed? Recursive structural compare, the
- * navStore `sameSelection` shape: a stringify compare would make the answer
- * depend on key order, and these two objects were built by different code
- * paths. Arrays compare positionally through their index keys, so a reorder
- * counts as an edit — which for a layout it is.
+ * Does the draft differ from its seed? Structural, because these two objects
+ * were built by different code paths and a stringify compare would depend on
+ * key order. Arrays compare positionally, so a reorder counts as an edit —
+ * which for a layout it is.
  */
 export function draftDirty(draft: TypeLayoutDraft, seed: TypeLayoutDraft): boolean {
-  const equal = (x: unknown, y: unknown): boolean => {
-    if (x === y) return true;
-    if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null) return false;
-    const xr = x as Record<string, unknown>;
-    const yr = y as Record<string, unknown>;
-    const keys = new Set([...Object.keys(xr), ...Object.keys(yr)]);
-    return [...keys].every((k) => equal(xr[k], yr[k]));
-  };
-  return !equal(draft, seed);
+  return !deepEqual(draft, seed);
 }
 
 /**

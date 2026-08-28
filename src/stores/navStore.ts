@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Selection } from '@/engine/types';
+import { deepEqual } from '@/lib/deepEqual';
 import { useUiStore } from '@/stores/uiStore';
 
 export interface NavigateOptions {
@@ -72,20 +73,11 @@ function leaveSurface(keepDetail: boolean): void {
 
 /**
  * Structural equality. A Selection is a flat bag of primitives except for
- * `knowledge.nav`, which is one level deeper — hence the recursion rather than
+ * `knowledge.nav`, which is one level deeper — hence `deepEqual` rather than
  * a stringify compare, which would also make the answer depend on key order.
  */
 function sameSelection(a: Selection | undefined, b: Selection): boolean {
-  if (a === undefined) return false;
-  const equal = (x: unknown, y: unknown): boolean => {
-    if (x === y) return true;
-    if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null) return false;
-    const xr = x as Record<string, unknown>;
-    const yr = y as Record<string, unknown>;
-    const keys = new Set([...Object.keys(xr), ...Object.keys(yr)]);
-    return [...keys].every((k) => equal(xr[k], yr[k]));
-  };
-  return equal(a, b);
+  return a !== undefined && deepEqual(a, b);
 }
 
 export const useNavStore = create<NavState>((set, get) => ({
