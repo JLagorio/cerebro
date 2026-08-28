@@ -579,34 +579,6 @@ export async function setTypeViews(
 }
 
 /**
- * Persist the record panel's per-type display config onto its Type doc
- * (M44.1). Deviations only — a type left at the defaults carries no
- * `display:` key at all.
- */
-export async function setTypeDisplay(
-  listing: { name: string; docPath: string | null },
-  display: DisplayConfig,
-): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
-  const doc = findTypeDoc(entries, listing.name);
-  if (!guardEditable(doc, listing.name)) return false;
-  const serialized = serializeDisplayConfig(display);
-  try {
-    if (doc === null) {
-      if (serialized === null) return true; // nothing to write and nowhere to write it
-      await ensureTypeDoc({ name: listing.name, docPath: null }, { display: serialized });
-    } else {
-      if (!(await patchFrontmatter(doc.path, { display: serialized }))) return false;
-    }
-  } catch {
-    toast(`Couldn't update ${listing.name} display`);
-    return false;
-  }
-  return true;
-}
-
-/**
  * Persist a type's record-page tabs onto its Type doc (M44.5). The whole
  * array is written each time, same contract as `setTypeViews`; an empty
  * list deletes the key so the synthesized Overview default returns.
