@@ -1310,7 +1310,8 @@ export function ChartView({
             description={BLOCKED[data.blocked].description}
           />
           {/* all-hidden carries its rosters, and the legend is the only way
-              back — it renders whatever `chart.legend` says (M44.3). */}
+              back — so it renders UNCONDITIONALLY here, even when the spec
+              stores `legend: false` (M44.3). */}
           {data.blocked === 'all-hidden' && (
             <Legend data={data} chart={chart} kind={kind} onChartChange={onChartChange} />
           )}

@@ -62,10 +62,23 @@ function fixtureSvg(): SVGSVGElement {
   literal.textContent = 'Todo';
   const styled = document.createElementNS(SVG_NS, 'circle');
   styled.setAttribute('style', 'fill: var(--n-0); stroke-width: 2');
-  svg.append(rect, path, literal, styled);
+  // The ticks' mono face — the one non-colour token our charts write.
+  const tick = document.createElementNS(SVG_NS, 'text');
+  tick.setAttribute('font-family', 'var(--font-mono)');
+  tick.textContent = '4';
+  svg.append(rect, path, literal, styled, tick);
   document.body.appendChild(svg);
   return svg;
 }
+
+const APP_FACE = "'Instrument Sans', sans-serif";
+const MONO_FACE = "'SF Mono', monospace";
+
+/** The production shape: the app face stamped, the mono token resolved. */
+const FONT = {
+  root: APP_FACE,
+  resolve: (expr: string) => (expr === 'var(--font-mono)' ? MONO_FACE : expr),
+};
 
 const TABLE: Record<string, string> = {
   'var(--opt-blue)': 'rgb(35, 131, 226)',
@@ -78,13 +91,26 @@ describe('chartSvgString', () => {
     document.body.replaceChildren();
   });
 
-  it('rewrites every token-bearing fill and stroke to the literal the resolver names', () => {
+  it('rewrites every token to a literal — no var() survives anywhere in the output', () => {
     const el = fixtureSvg();
-    const out = chartSvgString(el, (expr) => TABLE[expr] ?? expr);
+    const out = chartSvgString(el, (expr) => TABLE[expr] ?? expr, FONT);
     expect(out).toContain('fill="rgb(35, 131, 226)"');
     expect(out).toContain('stroke="rgb(196, 84, 61)"');
+    // The whole-output pin: paints AND faces, attributes AND styles.
     expect(out).not.toContain('var(');
     expect(out).not.toContain('color-mix(');
+  });
+
+  it('stamps the root with the app face and resolves font-family tokens', () => {
+    const el = fixtureSvg();
+    const out = chartSvgString(el, (expr) => TABLE[expr] ?? expr, FONT);
+    // The root names the face — without it a detached document inherits from
+    // nobody and the embedded @font-face sits unreferenced.
+    const doc = new DOMParser().parseFromString(out, 'image/svg+xml');
+    expect(doc.documentElement.getAttribute('font-family')).toBe(APP_FACE);
+    // The ticks' mono token went through the injected font resolver.
+    expect(out).toContain(`font-family="${MONO_FACE}"`);
+    expect(out).not.toContain('var(--font-mono)');
   });
 
   it('passes literal paints through untouched, without probing them', () => {
@@ -147,6 +173,17 @@ describe('cssColorResolver', () => {
       .mockReturnValue({ color: '' } as CSSStyleDeclaration);
     const resolver = cssColorResolver(host);
     expect(resolver.resolve('var(--unset)')).toBe('var(--unset)');
+    resolver.dispose();
+  });
+
+  it('resolves font expressions through the probe’s computed fontFamily', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    spy = vi
+      .spyOn(window, 'getComputedStyle')
+      .mockReturnValue({ color: '', fontFamily: MONO_FACE } as CSSStyleDeclaration);
+    const resolver = cssColorResolver(host);
+    expect(resolver.resolveFont('var(--font-mono)')).toBe(MONO_FACE);
     resolver.dispose();
   });
 });

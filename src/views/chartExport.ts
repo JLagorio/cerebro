@@ -41,18 +41,42 @@ function resolveStyle(style: string, resolve: (expr: string) => string): string 
     .join(';');
 }
 
+/** The face the export text wears: the resolved family to stamp on the root,
+ * and the resolver for any `font-family` attribute that names a token. */
+export interface FontOptions {
+  root?: string;
+  resolve?: (expr: string) => string;
+}
+
 /**
  * The chart element as a standalone SVG document string: a clone — the live
  * element keeps rendering with its tokens — with every `fill`/`stroke`
  * attribute and inline-style colour that names a token rewritten through
- * `resolve`. Literal paints (`#fff`, `none`) pass through unprobed.
+ * `resolve`, and every `font-family` token rewritten through `font.resolve`.
+ * Literal paints (`#fff`, `none`) pass through unprobed.
+ *
+ * `font.root` is stamped onto the cloned root: no chart text names a family
+ * of its own — inside the app every label inherits the figure's — and a
+ * detached document inherits from nobody, so without the stamp the embedded
+ * `@font-face` sits unreferenced and every label renders in the viewer's
+ * default serif.
  */
-export function chartSvgString(el: SVGSVGElement, resolve: (expr: string) => string): string {
+export function chartSvgString(
+  el: SVGSVGElement,
+  resolve: (expr: string) => string,
+  font?: FontOptions,
+): string {
   const clone = el.cloneNode(true) as SVGSVGElement;
+  if (font?.root !== undefined && font.root !== '') clone.setAttribute('font-family', font.root);
   for (const node of [clone, ...Array.from(clone.querySelectorAll('*'))]) {
     for (const attr of ['fill', 'stroke'] as const) {
       const value = node.getAttribute(attr);
       if (value !== null && needsResolve(value)) node.setAttribute(attr, resolve(value));
+    }
+    // The one non-colour token our charts write: the ticks' mono face.
+    const family = node.getAttribute('font-family');
+    if (family !== null && family.includes('var(') && font?.resolve !== undefined) {
+      node.setAttribute('font-family', font.resolve(family));
     }
     const style = node.getAttribute('style');
     if (style !== null && needsResolve(style)) {
@@ -66,35 +90,48 @@ export function chartSvgString(el: SVGSVGElement, resolve: (expr: string) => str
 
 export interface ColorResolver {
   resolve: (expr: string) => string;
+  /** The same probe, read through `fontFamily` — for the ticks' mono token. */
+  resolveFont: (expr: string) => string;
   dispose: () => void;
 }
 
 /**
  * The production resolver: a hidden probe span inside `host` — the figure,
  * so the probe computes under exactly the custom properties the chart drew
- * with — takes each expression as its `color` and reads the literal back out
- * of `getComputedStyle`. Cached per expression; a probe that reads nothing
- * (an undefined token) keeps the raw expression, degrading to what the
- * markup already said.
+ * with — takes each expression as its `color` (or `fontFamily`) and reads
+ * the literal back out of `getComputedStyle`. Cached per expression, per
+ * lane; a probe that reads nothing (an undefined token) keeps the raw
+ * expression, degrading to what the markup already said.
  */
 export function cssColorResolver(host: HTMLElement): ColorResolver {
-  const cache = new Map<string, string>();
+  const colors = new Map<string, string>();
+  const fonts = new Map<string, string>();
   let probe: HTMLSpanElement | null = null;
+  const ensureProbe = (): HTMLSpanElement => {
+    if (probe === null) {
+      probe = document.createElement('span');
+      probe.style.display = 'none';
+      host.appendChild(probe);
+    }
+    return probe;
+  };
+  const through = (
+    cache: Map<string, string>,
+    prop: 'color' | 'fontFamily',
+    expr: string,
+  ): string => {
+    const hit = cache.get(expr);
+    if (hit !== undefined) return hit;
+    const el = ensureProbe();
+    el.style[prop] = expr;
+    const computed = getComputedStyle(el)[prop];
+    const literal = computed === '' ? expr : computed;
+    cache.set(expr, literal);
+    return literal;
+  };
   return {
-    resolve(expr: string): string {
-      const hit = cache.get(expr);
-      if (hit !== undefined) return hit;
-      if (probe === null) {
-        probe = document.createElement('span');
-        probe.style.display = 'none';
-        host.appendChild(probe);
-      }
-      probe.style.color = expr;
-      const computed = getComputedStyle(probe).color;
-      const literal = computed === '' ? expr : computed;
-      cache.set(expr, literal);
-      return literal;
-    },
+    resolve: (expr) => through(colors, 'color', expr),
+    resolveFont: (expr) => through(fonts, 'fontFamily', expr),
     dispose(): void {
       probe?.remove();
       probe = null;
@@ -110,15 +147,18 @@ function figureBackground(host: HTMLElement): string {
   return bg === '' || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)' ? '#ffffff' : bg;
 }
 
-/** Tokens resolved, the figure's ground painted in, the app's face embedded —
- * the string every affordance below hands on. */
+/** The string every affordance below hands on: tokens resolved, the figure's
+ * ground painted in, the figure's computed `font-family` stamped on the root
+ * so every label actually names the app's face — which is what makes the
+ * embedded `@font-face` bytes worth carrying. */
 async function prepared(el: SVGSVGElement, host: HTMLElement): Promise<string> {
   const resolver = cssColorResolver(host);
   try {
-    return withFontFace(
-      withBackground(chartSvgString(el, resolver.resolve), figureBackground(host)),
-      await embeddedFontCss(),
-    );
+    const svg = chartSvgString(el, resolver.resolve, {
+      root: getComputedStyle(host).fontFamily,
+      resolve: resolver.resolveFont,
+    });
+    return withFontFace(withBackground(svg, figureBackground(host)), await embeddedFontCss());
   } finally {
     resolver.dispose();
   }
