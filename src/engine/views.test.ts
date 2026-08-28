@@ -1542,4 +1542,9 @@ describe('tab list on a Type doc (M44.5)', () => {
     expect(parseTabList(undefined)).toEqual([]);
     expect(parseTabList('sideways')).toEqual([]);
   });
+
+  it('a minted id checks who already answers to it, including a later declared one', () => {
+    const parsed = parseTabList([{ id: 'tab-2', name: 'Two' }, { name: 'x' }]);
+    expect(parsed.map((t) => t.id)).toEqual(['tab-2', 'tab-3']);
+  });
 });

@@ -933,6 +933,14 @@ export function serializeViewList(views: ViewDefinition[]): unknown[] {
 
 const TAB_CONTENT_SET = new Set<string>(TAB_CONTENTS);
 
+/** A minted `tab-N` id, checked against who already answers to it — a blind
+ * `tab-${i + 1}` can collide with an id a LATER entry declares explicitly. */
+function mintTabId(i: number, taken: Set<string>): string {
+  let n = i + 1;
+  while (taken.has(`tab-${n}`)) n += 1;
+  return `tab-${n}`;
+}
+
 /**
  * Tabs persisted on a Type doc (M44.5): an array under `tabs:`, one entry per
  * record-page tab. Tolerant like every Type-doc block — absent or malformed
@@ -944,7 +952,7 @@ export function parseTabList(raw: unknown): TabDef[] {
   return raw.map((r, i) => {
     const obj = asRecord(r);
     const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
-    const id = declared !== '' && !taken.has(declared) ? declared : `tab-${i + 1}`;
+    const id = declared !== '' && !taken.has(declared) ? declared : mintTabId(i, taken);
     taken.add(id);
     return {
       id,
