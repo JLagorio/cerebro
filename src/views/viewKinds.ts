@@ -66,7 +66,8 @@ export interface ViewKind {
    */
   nameColumn?: boolean;
   /** Draws an aggregation rather than records, so it gets the Chart page
-   * (M16.27). Its X axis is the grouping chain, hence `groupable` too. */
+   * (M16.27). Its X axis is `chart.xField` when set, and the grouping chain
+   * otherwise (M44.3) — that default is why it stays `groupable` too. */
   charted?: boolean;
   /** Composed of blocks rather than records, so it gets the Blocks page
    * (M16.28). It renders other views, so it cannot itself be one of them. */
@@ -145,9 +146,9 @@ const CAPABILITIES = {
   chart: {
     label: 'Chart',
     icon: 'chart-column',
-    // The grouping chain IS the X axis, so the Group control configures the
-    // chart and there is no second "group by" to drift from it (a `number`
-    // chart totals every row and reads no grouping — M44.2).
+    // Groupable because the Group control is the chart's DEFAULT axis
+    // source: `chart.xField` overrides it per chart (M44.3), and a `number`
+    // chart reads no axis from either (M44.2).
     groupable: true,
     charted: true,
   },

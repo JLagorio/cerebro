@@ -392,8 +392,9 @@ export function ViewSettingsPanel({
               />
             )}
 
-            {/* M16.27: the chart's shape and measure. Its X axis is NOT here —
-                that is the Group row above, which every layout shares. */}
+            {/* The chart's shape, measure and axis (M16.27; since M44.3 the X
+                axis can be set on this page too — the Group row above stays
+                its default source). */}
             {isCharted(p.type) && (
               <Row
                 icon="chart-column"
@@ -1198,12 +1199,14 @@ function CardsPage({
 }
 
 /**
- * The chart's shape and measure (M16.27).
+ * The chart's shape, measure and axes (M16.27; the axis decoupled in M44.3).
  *
- * Its X AXIS IS ABSENT ON PURPOSE — that is the Group row, the same control
- * every other layout uses, and duplicating it here would give a chart two
- * grouping settings that could disagree. The panel says so rather than leaving
- * the reader hunting for it.
+ * The X axis is set HERE when `xField` names a property, and falls back to
+ * the Group row — the control every other layout shares — when it does not,
+ * so a chart configured before `xField` existed keeps drawing what its
+ * grouping says. `groupBy` is the second dimension: stacked bars and
+ * multi-series lines. The footnote under the controls names whichever axis
+ * source is live.
  *
  * The properties offered for sum/average come from the `numeric` flag on
  * KIND_META, not a field-kind `=== 'number'` compare — the rule M16.4
@@ -1226,6 +1229,10 @@ function ChartPage({
   const axisKind = kind === 'bar' || kind === 'line' || kind === 'donut';
   const horizontal = kind === 'bar' && chart.horizontal === true;
   const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+  // The same roster the Group control offers (GROUPABLE_KINDS, M16.13): the
+  // axis and the second dimension band records exactly the way a grouping
+  // level does, so a field one can offer the other must offer too.
+  const groupable = fields.filter((f) => GROUPABLE_KINDS.has(f.kind));
   const band = bandLevels(presentation.group)[0];
 
   /**
@@ -1242,6 +1249,14 @@ function ChartPage({
     // bands — so on a horizontal bar those two keys would be stored words
     // nothing reads.
     const nextHorizontal = nextKind === 'bar' && next.horizontal === true;
+    // The axis keys (M44.3). `xField` is read by every axis kind — the donut
+    // bands its ring by it too — while `groupBy` splits bands into
+    // stacked/series parts, which only bar and line draw.
+    const nextXField = next.xField !== undefined && nextAxisKind ? next.xField : undefined;
+    const nextGroupBy =
+      next.groupBy !== undefined && (nextKind === 'bar' || nextKind === 'line')
+        ? next.groupBy
+        : undefined;
     const cleaned: ChartSpec = {
       ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
       ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
@@ -1249,6 +1264,19 @@ function ChartPage({
       // the YAML claim a measure the view does not use.
       ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
         ? { value: next.value }
+        : {}),
+      ...(nextXField !== undefined ? { xField: nextXField } : {}),
+      ...(nextGroupBy !== undefined ? { groupBy: nextGroupBy } : {}),
+      // The legend's hidden rosters are written through onChartChange, never
+      // by a control on this page — so each is carried from the CURRENT spec,
+      // and dropped exactly when its own dimension changes (absent⇄present
+      // included): a new axis or groupBy mints new band/series keys, and the
+      // stale ones would silently hide nothing, or the wrong thing.
+      ...(chart.hidden !== undefined && nextAxisKind && nextXField === chart.xField
+        ? { hidden: chart.hidden }
+        : {}),
+      ...(chart.hiddenG !== undefined && nextGroupBy !== undefined && nextGroupBy === chart.groupBy
+        ? { hiddenG: chart.hiddenG }
         : {}),
       ...(next.omitZero === true && nextAxisKind ? { omitZero: true } : {}),
       ...(nextHorizontal ? { horizontal: true } : {}),
@@ -1278,7 +1306,12 @@ function ChartPage({
       // hideLabels is read only by the two bar layouts (vertical + horizontal).
       ...(next.hideLabels === true && nextKind === 'bar' ? { hideLabels: true } : {}),
       ...(next.smooth === true && nextKind === 'line' ? { smooth: true } : {}),
-      ...(next.area === true && nextKind === 'line' ? { area: true } : {}),
+      // `area` is single-series only: LineChart never reads it under groupBy
+      // (overlapping washes at one opacity are unreadable), so with a second
+      // dimension it would be a stored word nothing draws.
+      ...(next.area === true && nextKind === 'line' && nextGroupBy === undefined
+        ? { area: true }
+        : {}),
       ...(next.hideDonutCenter === true && nextKind === 'donut' ? { hideDonutCenter: true } : {}),
       // The legend defaults ON for a donut and OFF elsewhere, so "off-default"
       // is a comparison against the kind, not a constant.
@@ -1302,6 +1335,46 @@ function ChartPage({
           width="100%"
         />
       </div>
+      {/* The axis is the first question a chart answers, so its picker sits
+          above the measure. The sentinel keeps the M16.27 default honest:
+          "View grouping" IS where the axis comes from until xField says
+          otherwise (M44.3). */}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">X axis</span>
+          <Select
+            size="sm"
+            value={chart.xField ?? NONE}
+            options={[
+              { value: NONE, label: 'View grouping' },
+              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, xField: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+        </div>
+      )}
+      {/* Bar and line only: a donut ignores groupBy and a number chart reads
+          no axis at all — a picker there would write a key nothing reads. */}
+      {(kind === 'bar' || kind === 'line') && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Group by</span>
+          <Select
+            size="sm"
+            value={chart.groupBy ?? NONE}
+            options={[
+              { value: NONE, label: 'None' },
+              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, groupBy: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+        </div>
+      )}
       <div>
         <span className="mb-1 block text-xs font-medium text-n-600">Measure</span>
         <Select
@@ -1465,7 +1538,10 @@ function ChartPage({
               ariaLabel="Smooth line"
             />
           )}
-          {kind === 'line' && (
+          {/* Single-series lines only: under groupBy LineChart never reads
+              `area`, and a switch that changes nothing is the calendar's
+              M16.3 bug. */}
+          {kind === 'line' && chart.groupBy === undefined && (
             <Switch
               checked={chart.area === true}
               onChange={(area) => patch({ ...chart, area })}
@@ -1489,16 +1565,19 @@ function ChartPage({
           />
         </div>
       )}
-      {/* M16.29: the shape is named from the chart kind. This said "bars"
-          whatever was selected, so the one sentence explaining where a chart's
-          X axis comes from described a bar chart to someone looking at a
-          donut. */}
+      {/* The footnote names the LIVE axis source (M44.3): xField when set,
+          the view's grouping otherwise. And the shape comes from the chart
+          kind (M16.29): this said "bars" whatever was selected, so the one
+          sentence explaining the axis described a bar chart to someone
+          looking at a donut. */}
       <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
         {kind === 'number'
           ? 'A number chart totals every visible row — grouping does not apply.'
-          : band === undefined
-            ? `The ${CHART_PARTS[kind]} come from the view’s grouping, and this view has none yet — pick a property under Group.`
-            : `The ${CHART_PARTS[kind]} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+          : chart.xField !== undefined
+            ? `The ${CHART_PARTS[kind]} come from ${humanize(chart.xField)}, the X axis set here.`
+            : band === undefined
+              ? `The ${CHART_PARTS[kind]} come from the view’s grouping, and this view has none yet — pick an X axis above, or a property under Group.`
+              : `The ${CHART_PARTS[kind]} come from the view’s grouping, currently ${humanize(band.field)}. Pick an X axis above to override it.`}
       </p>
     </div>
   );

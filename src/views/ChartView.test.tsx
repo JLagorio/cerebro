@@ -237,7 +237,9 @@ describe('ChartView', () => {
       />,
     );
     expect(screen.getByTestId('chart-empty').getAttribute('data-reason')).toBe('no-group');
-    expect(screen.getByText(/under Group in view settings/)).toBeTruthy();
+    // Both controls fix it now (M44.3): an xField in chart settings, or the
+    // view grouping the axis defaults to.
+    expect(screen.getByText(/Pick an X axis in chart settings, or group the view/)).toBeTruthy();
     unmount();
 
     render(
@@ -925,10 +927,12 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
     expect(total).toBeCloseTo(2 * Math.PI * 92, 6);
   });
 
-  // Decision C (M44.3): the caption reads "Average of X", but under groupBy
-  // each segment is its sub-band's average and the bar is their SUM — the
-  // clause names the deviation.
-  it('the caption says "stacked averages" when avg meets groupBy', () => {
+  // Decision C (M44.3): the caption reads "Average of X", but a stacked BAR
+  // under groupBy draws each segment as its sub-band's average and the bar as
+  // their SUM — the clause names that deviation. Bars only: a multi-series
+  // line draws each series' own averages and stacks nothing (the summed value
+  // appears nowhere), and a donut ignores groupBy entirely.
+  it('the caption says "stacked averages" only where a stack is drawn — avg + groupBy on a bar', () => {
     const entries = stacked();
     const schema = buildSchema(entries);
     render(
@@ -941,7 +945,18 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
     );
     expect(screen.getByTestId('chart-caption').textContent).toContain('stacked averages');
     cleanup();
-    // A donut ignores groupBy, so its caption must not claim the stacking.
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'line', agg: 'avg', value: 'estimate', groupBy: 'priority' },
+        })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).not.toContain('stacked averages');
+    cleanup();
     render(
       <ChartView
         entries={records(entries)}

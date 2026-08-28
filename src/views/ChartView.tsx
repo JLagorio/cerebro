@@ -12,8 +12,8 @@ import type {
 } from '@/engine/types';
 
 /**
- * Chart (M16.27) — bar, line or donut over an aggregation of the same rows
- * every other layout shows.
+ * Chart (M16.27) — bar, line, donut or one big number (M44.2) over an
+ * aggregation of the same rows every other layout shows.
  *
  * The SVG is written here rather than pulled in. A charting library would be a
  * runtime dependency, a bundle, and a CSP surface for three shapes the browser
@@ -146,11 +146,12 @@ function clip(label: string, band: number): string {
 function captionNotes(chart: ChartSpec | undefined, kind: ChartKind): string[] {
   const notes: string[] = [];
   if (chart?.cumulative === true && kind !== 'donut') notes.push('cumulative');
-  // An avg chart under groupBy: each segment is its sub-band's average and
-  // the bar is their SUM. The caption reads "Average of X", so this clause
-  // names the deviation (M44.3) — and a donut ignores groupBy, so it must
-  // not claim the stacking either.
-  if (chart?.agg === 'avg' && chart.groupBy !== undefined && kind !== 'donut')
+  // An avg BAR under groupBy: each segment is its sub-band's average and the
+  // bar's height is their SUM. The caption reads "Average of X", so this
+  // clause names the deviation (M44.3). Bars only — a multi-series LINE
+  // draws each series' own averages and stacks nothing, so the summed value
+  // appears nowhere, and a donut ignores groupBy entirely.
+  if (chart?.agg === 'avg' && chart.groupBy !== undefined && kind === 'bar')
     notes.push('stacked averages');
   if (chart?.sort === 'value-desc') notes.push('biggest first');
   if (chart?.sort === 'value-asc') notes.push('smallest first');
@@ -808,8 +809,7 @@ const BLOCKED: Record<
   'no-group': {
     icon: 'chart-column',
     title: 'Nothing to chart yet',
-    description:
-      'A chart’s X axis is the view’s grouping. Pick a property under Group in view settings.',
+    description: 'Pick an X axis in chart settings, or group the view.',
   },
   'no-rows': {
     icon: 'chart-column',
