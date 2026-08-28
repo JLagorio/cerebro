@@ -283,6 +283,24 @@ describe('DocPage', () => {
     expect(labels).toContain('Rename…');
   });
 
+  // M45.2 — the third door: a record's Page options opens the layout editor
+  // through the same uiStore signal the ⋯ menu and PropertyMenu fire.
+  it('Page options offers Customize layout to records only, firing the signal', async () => {
+    useUiStore.setState({ layoutEditor: null });
+    const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+    if (record === undefined) throw new Error('fixture vault has no Work item');
+    render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Customize layout…' }));
+    expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Work item' });
+    cleanup();
+
+    // An untyped page has no type whose layout could be customized.
+    render(<DocPage selection={{ kind: 'doc', path: 'inbox/welcome.md' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    expect(screen.queryByRole('menuitem', { name: 'Customize layout…' })).toBeNull();
+  });
+
   it('renames the doc by rewriting its H1, not its filename', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Page options' }));

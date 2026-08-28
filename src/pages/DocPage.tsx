@@ -185,6 +185,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const panelOpen = useUiStore((s) => s.docPanelOpen);
   const setPanelOpen = useUiStore((s) => s.setDocPanelOpen);
   const pagesOpen = useUiStore((s) => s.docPagesOpen);
+  const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
@@ -494,12 +495,25 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     }
   };
 
+  // M45.2 — records only: an untyped page has no type whose layout could be
+  // customized. A const, so the guard's narrowing survives into the closure.
+  const layoutType = record && entry.type !== null ? entry.type : null;
+
   const menuItems: ContextMenuItem[] = [
     {
       icon: fullWidth ? 'minimize-2' : 'maximize-2',
       label: fullWidth ? 'Center content' : 'Full width',
       onSelect: () => void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
     },
+    ...(layoutType !== null
+      ? [
+          {
+            icon: 'layout',
+            label: 'Customize layout…',
+            onSelect: () => openLayoutEditor(layoutType),
+          },
+        ]
+      : []),
     { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
     { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
     {

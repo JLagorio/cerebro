@@ -12,6 +12,7 @@ import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { isLockedField } from '@/engine/typeCatalog';
 import type { FieldDef, FieldVisibility, Schema } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 import { ConfirmDeleteProperty, PropertyEditor } from '@/views/PropertyEditor';
 
 /**
@@ -26,9 +27,11 @@ import { ConfirmDeleteProperty, PropertyEditor } from '@/views/PropertyEditor';
  *
  * Notion's order, verbatim: Rename · Edit property › · Comment · ─ · Property
  * visibility › · Duplicate property · Delete property · ─ · Customize layout.
- * Two are deliberately absent. **Comment** has no subsystem anywhere in this
+ * One is deliberately absent. **Comment** has no subsystem anywhere in this
  * app — no type, no store, no IPC, no Rust command — so a menu row for it
- * would be a button that cannot work. **Customize layout** is M16.11's stretch.
+ * would be a button that cannot work. **Customize layout** landed in M45.2:
+ * the verbatim-order last item, opening the TYPE's layout editor through the
+ * one uiStore signal rather than editing this property.
  *
  * Every action here rewrites the TYPE, not this record: the name, kind and
  * options of a property are the type's, and every record of that type sees
@@ -56,6 +59,7 @@ export function PropertyMenu({
   recordCount: number;
   onClose: () => void;
 }) {
+  const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
   const [step, setStep] = useState<'menu' | 'edit' | 'visibility'>('menu');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(humanize(def.name));
@@ -185,6 +189,19 @@ export function PropertyMenu({
             />
           </>
         )}
+        <MenuSeparator />
+        {/* M45.2 — the docblock's held-open slot: Notion's verbatim-order
+            last item. It edits the TYPE's layout, not this property, so it
+            fires the one uiStore signal the App-level dialog listens to. */}
+        <MenuItem
+          icon="layout"
+          label="Customize layout"
+          testId="property-menu-customize-layout"
+          onSelect={() => {
+            openLayoutEditor(sourceType);
+            onClose();
+          }}
+        />
         <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-2xs leading-[1.35] text-n-400">
           Changes {sourceType} — {recordCount === 1 ? '1 record' : `${recordCount} records`}
         </div>
