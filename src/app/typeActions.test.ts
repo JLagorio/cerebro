@@ -473,6 +473,15 @@ describe('applyTypeLayout (M45.1)', () => {
         },
       },
     ]);
+    // Declaration order is a locked Decision, and toEqual is key-order-blind:
+    // a clone that reordered the mapping would pass it. Pin the order itself —
+    // untouched and grown slots keep their place, appends land last.
+    expect(Object.keys(patches[0].patch.fields as Record<string, unknown>)).toEqual([
+      'status',
+      'due',
+      'notes',
+      'estimate',
+    ]);
   });
 
   it('omits fields when the draft stages no field deltas; defaults spell null', async () => {
@@ -497,6 +506,16 @@ describe('applyTypeLayout (M45.1)', () => {
     expect(toasts[0]).toMatch(/reserved/);
   });
 
+  it('refuses an added name that normalizes to nothing, before any write', async () => {
+    const draft = blank();
+    draft.display = { showEmpty: true, showFile: false, showBody: true };
+    draft.added = [{ name: '   ', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([]);
+    expect(toasts[0]).toMatch(/name/i);
+  });
+
   it('refuses duplicate added names case-insensitively — existing and staged alike', async () => {
     const draft = blank();
     draft.added = [{ name: 'Status', kind: 'text' }];
@@ -516,6 +535,29 @@ describe('applyTypeLayout (M45.1)', () => {
     draft.visibility = { ghost: 'hide' };
     expect(await applyTypeLayout(listing, draft)).toBe(true);
     expect(patches).toEqual([]);
+  });
+
+  // visibility: null means "back to show", which absence already spells — so
+  // aimed at a bare shorthand (`notes: 'text'`) or at a mapping that never
+  // carried the key (`status`), it is a true no-op: no growth into a mapping,
+  // and no write at all when nothing else changed.
+  it('visibility null on a shorthand or an unset mapping is a no-op — no growth, no write', async () => {
+    const draft = blank();
+    draft.visibility = { notes: null, status: null };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([]);
+    // ...and staged beside a real change, it still counts as no field delta:
+    // the landed patch carries no `fields` key, so the shorthand stays bare.
+    const withDisplay = blank();
+    withDisplay.display = { showEmpty: true, showFile: false, showBody: true };
+    withDisplay.visibility = { notes: null };
+    expect(await applyTypeLayout(listing, withDisplay)).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: { show_empty: true }, layout: null, tabs: null },
+      },
+    ]);
   });
 
   // M44.1-family contract: patchFrontmatter toasts and reverts itself — the
