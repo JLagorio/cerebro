@@ -5,12 +5,13 @@ import userEvent from '@testing-library/user-event';
 import {
   LayoutEditorDialog,
   draftDirty,
+  overlayVisibility,
   seedDraft,
   updateDraft,
 } from '@/detail/LayoutEditorDialog';
 import type { TypeLayoutDraft } from '@/app/typeActions';
 import { resetLayers } from '@/components/ui/layers';
-import { DISPLAY_DEFAULTS, type TypeDef } from '@/engine/types';
+import { DISPLAY_DEFAULTS, type FieldDef, type TypeDef } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -176,6 +177,30 @@ describe('draftDirty', () => {
   });
 });
 
+describe('overlayVisibility', () => {
+  it('overlays staged visibility, clears on null, and keeps untouched defs by reference', () => {
+    const fields: FieldDef[] = [
+      { name: 'status', kind: 'text', visibility: 'hide' },
+      { name: 'priority', kind: 'text' },
+      { name: 'notes', kind: 'text' },
+    ];
+    const out = overlayVisibility(fields, { status: null, priority: 'hide' });
+    // A staged null clears back to show — the key deletes on Apply, so the
+    // overlay drops the def's own visibility the same way.
+    expect(out[0].visibility).toBeUndefined();
+    expect(out[1].visibility).toBe('hide');
+    expect(out[2]).toBe(fields[2]);
+    // Pure: the input defs never mutate.
+    expect(fields[0].visibility).toBe('hide');
+    expect(fields[1].visibility).toBeUndefined();
+  });
+
+  it('an empty stage returns the same array', () => {
+    const fields: FieldDef[] = [{ name: 'status', kind: 'text' }];
+    expect(overlayVisibility(fields, {})).toBe(fields);
+  });
+});
+
 describe('LayoutEditorDialog', () => {
   beforeEach(() => {
     resetLayers();
@@ -185,14 +210,54 @@ describe('LayoutEditorDialog', () => {
     useUiStore.setState({ layoutEditor: null });
   });
 
-  it('opens from the signal with the type named in the title strip', () => {
+  it('opens from the signal with ONE header naming the type', () => {
     setup();
     expect(screen.getByTestId('layout-editor')).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'Customize Work item layout' })).toBeTruthy();
-    // The body header row carries the type icon + name (spec §3.2).
-    expect(screen.getByText('Work item')).toBeTruthy();
+    // One-header anatomy (spec §3.2): the Dialog's title bar names the type;
+    // the toolbar carries only the icon — no duplicate name span.
+    expect(screen.queryByText('Work item')).toBeNull();
     expect(screen.getByTestId('layout-preview')).toBeTruthy();
     expect(screen.getByTestId('layout-rail')).toBeTruthy();
+  });
+
+  it('a retargeted signal reseeds the draft — no confirm, no carried edits', async () => {
+    const user = userEvent.setup();
+    const bugDoc = makeEntry({
+      path: 'types/bug.md',
+      title: 'Bug',
+      type: 'Type',
+      properties: {
+        fields: { severity: 'text' },
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+    setup({ entries: [typeDoc(), bugDoc] });
+    // Dirty Work item's draft: Show body flips its default true → false.
+    await user.click(screen.getByRole('switch', { name: 'Show body' }));
+    expect((screen.getByRole('switch', { name: 'Show body' }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+
+    // Retarget the SIGNAL under the open editor — key={signal.type} must
+    // remount the card, not edit Work item's draft under Bug's name.
+    act(() => {
+      useUiStore.setState({ layoutEditor: { type: 'Bug' } });
+    });
+    expect(screen.getByRole('dialog', { name: 'Customize Bug layout' })).toBeTruthy();
+    // No confirm fired: the old card unmounted; it did not "close dirty".
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    // Bug's CLEAN seed, not Work item's edited draft: Show body back at its
+    // default, and Show file at Bug's false where the fixture deviated true.
+    expect((screen.getByRole('switch', { name: 'Show body' }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole('switch', { name: 'Show file path' }) as HTMLInputElement).checked,
+    ).toBe(false);
+    // And the reseeded draft IS clean: Cancel closes without a confirm.
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
   });
 
   it('renders nothing and puts the signal down when the type vanished', async () => {
@@ -588,5 +653,88 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     // The synthetic entry lives in memory only — never written, never stored.
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(useVaultStore.getState().entries).toHaveLength(1);
+  });
+});
+
+describe('the canvas folds what the page folds (M45.3 Task 1)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  it('a visibility:hide field is absent from the canvas — its emptied group renders nothing', () => {
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: {
+              status: 'text',
+              priority: { kind: 'text', visibility: 'hide' },
+              notes: 'text',
+            },
+            layout: {
+              heading: ['status'],
+              groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        makeEntry({
+          path: 'items/alpha.md',
+          title: 'Alpha record',
+          type: 'Work item',
+          properties: { status: 'todo', priority: 'high', notes: 'keep' },
+        }),
+      ],
+    });
+    const preview = within(screen.getByTestId('layout-preview'));
+    // The page folds `hide` behind its expander; the canvas has no expander —
+    // the row renders nothing, and the emptied group takes its header along.
+    expect(preview.queryByText('Priority')).toBeNull();
+    expect(preview.queryByText('high')).toBeNull();
+    expect(preview.queryByTestId('property-group')).toBeNull();
+    expect(preview.queryByText('Planning')).toBeNull();
+    // The rest field still renders — folding is per-row, not per-canvas.
+    expect(preview.getByText('Notes')).toBeTruthy();
+  });
+
+  it("the rail's show-empty switch reveals a hide_when_empty rest field live", async () => {
+    const user = userEvent.setup();
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: {
+              status: 'text',
+              notes: { kind: 'text', visibility: 'hide_when_empty' },
+            },
+            layout: { heading: ['status'], groups: [] },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        makeEntry({
+          path: 'items/alpha.md',
+          title: 'Alpha record',
+          type: 'Work item',
+          properties: { status: 'todo' },
+        }),
+      ],
+    });
+    const preview = () => within(screen.getByTestId('layout-preview'));
+    // Draft showEmpty is false: the valueless field folds out of the canvas.
+    expect(preview().queryByText('Notes')).toBeNull();
+    // The rail switch edits the DRAFT's showEmpty — the live type still says
+    // false, so a live-display read would keep the row folded here.
+    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
+    expect(preview().getByText('Notes')).toBeTruthy();
+    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
+    expect(preview().queryByText('Notes')).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { EscapeToClose } from '@/detail/FieldPopover';
+import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
 import {
@@ -328,9 +329,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                   data-group={g.id}
                   className="flex flex-col gap-[7px]"
                 >
-                  <div className="px-1 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-                    {g.name}
-                  </div>
+                  <GroupLabel name={g.name} />
                   {rows.map(groupedRow)}
                 </div>
               );

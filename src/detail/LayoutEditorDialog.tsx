@@ -6,10 +6,12 @@ import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { GroupLabel } from '@/detail/GroupLabel';
 import { HeadingProperties } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { resolveLayout } from '@/engine/layout';
+import { isEmptyForVisibility, splitByVisibility } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldDef, TypeDef } from '@/engine/types';
 import { isTemplate } from '@/lib/templates';
@@ -42,6 +44,30 @@ export function seedDraft(typeDef: TypeDef): TypeLayoutDraft {
     visibility: {},
     added: [],
   };
+}
+
+/**
+ * Overlay the draft's staged per-field visibility onto resolved FieldDefs so
+ * the canvas folds what the page WILL fold after Apply (M45.3). A staged
+ * `null` clears back to show — the key deletes on Apply, so the overlay drops
+ * the def's own visibility the same way. Untouched defs pass through by
+ * reference and an empty stage returns the same array. Exported for the group
+ * editor (M45.3 later tasks), which resolves the same overlaid roster.
+ */
+export function overlayVisibility(
+  fields: FieldDef[],
+  visibility: TypeLayoutDraft['visibility'],
+): FieldDef[] {
+  if (Object.keys(visibility).length === 0) return fields;
+  return fields.map((f) => {
+    if (!(f.name in visibility)) return f;
+    const v = visibility[f.name];
+    if (v === null) {
+      const { visibility: _cleared, ...rest } = f;
+      return rest;
+    }
+    return { ...f, visibility: v };
+  });
 }
 
 /** The one door every draft edit walks through — the rail's controls all
@@ -192,6 +218,19 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   // the LIVE typeDef's `layout:`/`display` and would keep previewing the
   // vault while the user edits the stage. Same visual grammar, draft-driven.
   const previewLayout = resolveLayout(draft.layout, typeDef.fields);
+  // The canvas folds what the page folds (M45.3): the panels' predicate with
+  // the DRAFT overlaid — staged visibility on each def, staged showEmpty in
+  // the isEmpty lambda. Folded rows render NOTHING (the page's collapsed
+  // default; the canvas has no expander) — the group EDITOR is where hidden
+  // things stay visible.
+  const canvasRows = (fields: FieldDef[]) =>
+    splitByVisibility(
+      overlayVisibility(fields, draft.visibility),
+      (f) =>
+        !draft.display.showEmpty &&
+        isEmptyForVisibility(f, schema.resolveField(previewEntry, f.name).display),
+    ).shown;
+  const restRows = canvasRows(previewLayout.rest);
   const previewRow = (f: FieldDef) => (
     <PropertyRow
       key={f.name}
@@ -208,13 +247,10 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
       <Dialog open fullscreen onClose={maybeClose} title={`Customize ${typeDef.name} layout`}>
         <div data-testid="layout-editor" className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex flex-none items-center gap-2 border-b border-n-100 px-4 py-2">
-            <span
-              className="flex items-center gap-1.5 text-sm font-medium text-n-800"
-              style={{ color: style.color ?? undefined }}
-            >
-              <Icon name={style.icon} size={14} />
-            </span>
-            <span className="text-sm font-medium text-n-800">{typeDef.name}</span>
+            {/* The icon alone: the fullscreen Dialog's title bar already
+                names the type — one-header anatomy (spec §3.2). CreateMenu's
+                direct-color idiom, n-800 when the type declares none. */}
+            <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-800)'} />
             {roster.length > 0 && (
               <span className="ml-3 flex items-center gap-1.5 text-xs text-n-400">
                 Preview:
@@ -262,30 +298,33 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
                 <HeadingProperties
                   entry={previewEntry}
                   schema={schema}
-                  fields={previewLayout.heading}
-                  // The strip folds by the DRAFT's show-empty, not the live
-                  // type's — the canvas's one rule, everywhere.
+                  // The strip folds by the DRAFT too — staged visibility
+                  // overlaid on its cells, staged show-empty for the fold.
+                  fields={overlayVisibility(previewLayout.heading, draft.visibility)}
                   showEmpty={draft.display.showEmpty}
                 />
                 <div className="flex flex-col gap-[7px]">
-                  {previewLayout.groups.map((g) => (
-                    <div
-                      key={g.id}
-                      data-testid="property-group"
-                      data-group={g.id}
-                      className="flex flex-col gap-[7px]"
-                    >
-                      <div className="px-1 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-                        {g.name}
+                  {previewLayout.groups.map((g) => {
+                    const rows = canvasRows(g.fields);
+                    // Empty after folding renders nothing — the panels' own
+                    // rule: a header over no rows would claim the group holds
+                    // something it does not.
+                    if (rows.length === 0) return null;
+                    return (
+                      <div
+                        key={g.id}
+                        data-testid="property-group"
+                        data-group={g.id}
+                        className="flex flex-col gap-[7px]"
+                      >
+                        <GroupLabel name={g.name} />
+                        {rows.map(previewRow)}
                       </div>
-                      {g.fields.map(previewRow)}
-                    </div>
-                  ))}
+                    );
+                  })}
                   {/* Rest LAST and headerless, RecordProperties' own order. */}
-                  {previewLayout.rest.length > 0 && (
-                    <div className="flex flex-col gap-[7px]">
-                      {previewLayout.rest.map(previewRow)}
-                    </div>
+                  {restRows.length > 0 && (
+                    <div className="flex flex-col gap-[7px]">{restRows.map(previewRow)}</div>
                   )}
                 </div>
                 {draft.display.showBody && (
