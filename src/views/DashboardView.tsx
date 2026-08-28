@@ -25,6 +25,8 @@ import {
   moveWidget,
   moveWithinRow,
   removeWidget,
+  setRowHeight,
+  setWidgetWeight,
   updateWidget,
   widgetCount,
   widgetEntries,
@@ -44,11 +46,18 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { MAX_DASHBOARD_WIDGETS, MAX_ROW_WIDGETS, ROW_HEIGHT_DEFAULT } from '@/engine/types';
+import {
+  MAX_DASHBOARD_WIDGETS,
+  MAX_ROW_WIDGETS,
+  ROW_HEIGHT_DEFAULT,
+  ROW_HEIGHT_MAX,
+  ROW_HEIGHT_MIN,
+} from '@/engine/types';
 import type { DragEndEvent } from '@dnd-kit/core';
 import type { ContextMenuItem } from '@/components/ui/ContextMenu';
 import type { DashboardEdit } from '@/engine/dashboard';
 import type {
+  DashboardRow,
   DashboardSpec,
   DashboardWidget,
   Entry,
@@ -442,8 +451,8 @@ function WidgetShell({
   const edit = useContext(EditContext);
   const hasCustom = widget.title !== undefined && widget.title !== '';
   // Registered even outside Edit mode (a hook cannot be conditional) but
-  // disabled then — and dnd-kit's default context makes the hook a no-op when
-  // no DndContext is mounted, so a read-only host pays nothing. The GRIP is
+  // disabled then — and with Edit off the grip never renders, so setNodeRef
+  // stays unattached and the registration costs nothing. The GRIP is
   // the draggable node, not the whole tile: its small rect tracks the pointer
   // into the thin slot strips, and the menu button and rename input keep
   // their clicks — the listeners never touch them.
@@ -511,6 +520,222 @@ function WidgetShell({
         {children}
       </div>
     </section>
+  );
+}
+
+/** Chains a second pure edit onto the first's result, so a two-widget write
+ * stays ONE commit — the door opens once per gesture, never twice. A refusal
+ * anywhere is the whole gesture's refusal. */
+function chainEdits(
+  first: DashboardEdit,
+  next: (spec: DashboardSpec) => DashboardEdit,
+): DashboardEdit {
+  return first.ok ? next(first.spec) : first;
+}
+
+/** What a resize handle's aria-label can call a widget without measuring it —
+ * the stored override, else the cheap computed name. (The full computed
+ * titles need entries or the vault; a seam does not.) */
+function widgetName(w: DashboardWidget): string {
+  if (w.title !== undefined && w.title !== '') return w.title;
+  if (w.kind === 'view') return w.list;
+  if (w.kind === 'number') return 'Number';
+  return defaultWidgetTitle(w);
+}
+
+/**
+ * The seam between two adjacent widgets (Edit mode only) — ColumnResizer's
+ * paint-on-drag / persist-on-commit split, never ResizeHandle's
+ * fire-every-move: a weight lands in YAML, and a write per pixel is the exact
+ * failure the column resizer was rewritten to kill. Moves paint `flexGrow`
+ * straight onto the two shells (React renders nothing mid-gesture, so nothing
+ * fights the drag); the release converts the pair's px split back into their
+ * combined weight and commits BOTH weights through one chained edit — one
+ * write per gesture.
+ */
+function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
+  const edit = useContext(EditContext);
+  const ref = useRef<HTMLSpanElement>(null);
+  const [active, setActive] = useState(false);
+  if (edit === null) return null;
+  const wA = a.w ?? 1;
+  const wB = b.w ?? 1;
+
+  const begin = (startX: number) => {
+    const rowEl = ref.current?.parentElement;
+    if (rowEl === null || rowEl === undefined) return;
+    const shell = (id: string) =>
+      Array.from(rowEl.children).find((el) => el.getAttribute('data-testid') === `widget-${id}`);
+    const elA = shell(a.id);
+    const elB = shell(b.id);
+    if (!(elA instanceof HTMLElement) || !(elB instanceof HTMLElement)) return;
+    // Measured ONCE, at gesture start: the seam lives inside the row's
+    // overflow-x-auto wrapper, so a mid-gesture scroll leaves these px stale
+    // until the next gesture — accepted, the same trade the drag slots make
+    // (dnd-kit measures droppable rects at drag start).
+    const pxA0 = elA.getBoundingClientRect().width;
+    const total = pxA0 + elB.getBoundingClientRect().width;
+    if (total <= 0) return;
+    const sum = wA + wB;
+    // Compared against where the drag STARTED, never accumulated per event —
+    // and floored/rounded exactly as setWidgetWeight will, so the drag never
+    // paints a split the commit would then refuse.
+    const at = (x: number): { a: number; b: number } => {
+      const pxA = Math.min(total, Math.max(0, pxA0 + (x - startX)));
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      return {
+        a: Math.max(1, round2((pxA / total) * sum)),
+        b: Math.max(1, round2(((total - pxA) / total) * sum)),
+      };
+    };
+    const paint = (w: { a: number; b: number }) => {
+      elA.style.flexGrow = String(w.a);
+      elB.style.flexGrow = String(w.b);
+    };
+    let moved = false;
+    const move = (e: PointerEvent) => {
+      moved = true;
+      paint(at(e.clientX));
+    };
+    const up = (e: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      document.body.classList.remove('cb-resizing');
+      setActive(false);
+      // A press that never moved restores the rendered weights and writes
+      // nothing: the px ratio rarely equals the weight ratio exactly (each
+      // shell's minWidth clamps), and a click is not an edit.
+      if (!moved) {
+        paint({ a: wA, b: wB });
+        return;
+      }
+      const next = at(e.clientX);
+      // Painted, THEN committed: React only rewrites flexGrow where the
+      // weight changed, so the DOM must already hold the final pair.
+      paint(next);
+      if (next.a === wA && next.b === wB) return;
+      edit.commit(
+        chainEdits(setWidgetWeight(edit.spec, a.id, next.a), (s) =>
+          setWidgetWeight(s, b.id, next.b),
+        ),
+      );
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    // Kills text selection and keeps the col-resize cursor while the pointer
+    // is outside the 7px strip, which is most of any real drag.
+    document.body.classList.add('cb-resizing');
+    setActive(true);
+  };
+
+  return (
+    <span
+      ref={ref}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${widgetName(a)} and ${widgetName(b)}`}
+      data-testid="dashboard-seam"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        begin(e.clientX);
+      }}
+      className="flex w-[7px] flex-none cursor-col-resize touch-none items-stretch justify-center self-stretch"
+    >
+      <span
+        className={[
+          'w-[2px] rounded-full transition-colors',
+          active ? 'bg-cortex-500' : 'bg-transparent hover:bg-cortex-300',
+        ].join(' ')}
+      />
+    </span>
+  );
+}
+
+/**
+ * The row's bottom edge (Edit mode only) — the same paint/commit split,
+ * rotated. Its own tiny component rather than a reuse: ResizeHandle is
+ * hard-coded vertical, and fires on every move besides. Moves paint `height`
+ * straight onto the row element, clamped exactly as setRowHeight will clamp,
+ * and the release commits once.
+ */
+function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
+  const edit = useContext(EditContext);
+  const ref = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(false);
+  if (edit === null) return null;
+  const h0 = row.h ?? ROW_HEIGHT_DEFAULT;
+  const clamp = (h: number) => Math.round(Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, h)));
+
+  const begin = (startY: number) => {
+    const el = ref.current?.parentElement?.querySelector<HTMLElement>(
+      '[data-testid="dashboard-row"]',
+    );
+    if (el === null || el === undefined) return;
+    const at = (y: number) => clamp(h0 + (y - startY));
+    let moved = false;
+    const move = (e: PointerEvent) => {
+      moved = true;
+      el.style.height = `${at(e.clientY)}px`;
+    };
+    const up = (e: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      document.body.classList.remove('cb-resizing');
+      setActive(false);
+      if (!moved) {
+        el.style.height = `${h0}px`;
+        return;
+      }
+      const h = at(e.clientY);
+      el.style.height = `${h}px`;
+      if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    document.body.classList.add('cb-resizing');
+    setActive(true);
+  };
+
+  return (
+    <div
+      ref={ref}
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={`Resize row ${index + 1}`}
+      tabIndex={0}
+      data-testid="dashboard-row-edge"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        begin(e.clientY);
+      }}
+      onKeyDown={(e) => {
+        // Commit-per-press — deliberately simpler than ColumnResizer's
+        // pending-ref batching, which the plan allows here: that idiom earns
+        // its keep against key-repeat floods on a handle people lean on,
+        // while a row nudge is one write per press by nature.
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const step = e.shiftKey ? 48 : 12;
+          const h = clamp(h0 + (e.key === 'ArrowDown' ? step : -step));
+          if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
+        }
+        if (e.key === 'Escape') e.currentTarget.blur();
+      }}
+      className="flex h-[7px] w-full cursor-row-resize touch-none items-center justify-center"
+    >
+      <span
+        className={[
+          'h-[2px] w-16 rounded-full transition-colors',
+          active ? 'bg-cortex-500' : 'bg-transparent hover:bg-cortex-300',
+        ].join(' ')}
+      />
+    </div>
   );
 }
 
@@ -1183,67 +1408,75 @@ export function DashboardView({
             onDragEnd={(event) => handleWidgetDragEnd(event, { spec, commit: write, toast })}
           >
             <div className="flex flex-col gap-3">
-              {spec.rows.map((row) => (
+              {spec.rows.map((row, rowIndex) => (
                 // One over-wide row scrolls alone inside its own wrapper —
                 // wide content never drags the whole dashboard sideways
                 // (AGENTS.md). The height stays on the inner flex row, which
-                // keeps the `dashboard-row` testid; the wrapper only scrolls.
+                // keeps the `dashboard-row` testid; the wrapper only scrolls,
+                // and the row edge sits BELOW it so the resize handle never
+                // scrolls out from under the pointer.
                 // dnd-kit measures droppable rects at drag START, so
                 // scrolling this wrapper MID-drag leaves the row's slot rects
                 // stale until the next drag — accepted; the alternative is
                 // continuous re-measure for a gesture most rows never need.
-                <div key={row.id} className="min-w-0 overflow-x-auto">
-                  <div
-                    data-testid="dashboard-row"
-                    className="flex gap-3"
-                    style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
-                  >
-                    {live && <WidgetSlot id={`slot:${row.id}:0`} />}
-                    {row.widgets.map((widget, i) => (
-                      <React.Fragment key={widget.id}>
-                        {widget.kind === 'number' ? (
-                          <NumberBlock
-                            widget={widget}
-                            entries={entries}
-                            spec={spec}
-                            schema={schema}
-                          />
-                        ) : widget.kind === 'view' ? (
-                          <ViewBlock widget={widget} spec={spec} />
-                        ) : widget.kind === 'table' ? (
-                          <TableWidget
-                            widget={widget}
-                            entries={entries}
-                            spec={spec}
-                            schema={schema}
-                            sort={presentation.sort}
-                          />
-                        ) : widget.kind === 'board' ? (
-                          <BoardWidget
-                            widget={widget}
-                            entries={entries}
-                            spec={spec}
-                            schema={schema}
-                          />
-                        ) : widget.kind === 'timeline' ? (
-                          <TimelineWidget
-                            widget={widget}
-                            entries={entries}
-                            spec={spec}
-                            schema={schema}
-                          />
-                        ) : (
-                          <ChartWidget
-                            widget={widget}
-                            entries={entries}
-                            spec={spec}
-                            schema={schema}
-                          />
-                        )}
-                        {live && <WidgetSlot id={`slot:${row.id}:${i + 1}`} />}
-                      </React.Fragment>
-                    ))}
+                <div key={row.id} className="min-w-0">
+                  <div className="min-w-0 overflow-x-auto">
+                    <div
+                      data-testid="dashboard-row"
+                      className="flex gap-3"
+                      style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
+                    >
+                      {live && <WidgetSlot id={`slot:${row.id}:0`} />}
+                      {row.widgets.map((widget, i) => (
+                        <React.Fragment key={widget.id}>
+                          {widget.kind === 'number' ? (
+                            <NumberBlock
+                              widget={widget}
+                              entries={entries}
+                              spec={spec}
+                              schema={schema}
+                            />
+                          ) : widget.kind === 'view' ? (
+                            <ViewBlock widget={widget} spec={spec} />
+                          ) : widget.kind === 'table' ? (
+                            <TableWidget
+                              widget={widget}
+                              entries={entries}
+                              spec={spec}
+                              schema={schema}
+                              sort={presentation.sort}
+                            />
+                          ) : widget.kind === 'board' ? (
+                            <BoardWidget
+                              widget={widget}
+                              entries={entries}
+                              spec={spec}
+                              schema={schema}
+                            />
+                          ) : widget.kind === 'timeline' ? (
+                            <TimelineWidget
+                              widget={widget}
+                              entries={entries}
+                              spec={spec}
+                              schema={schema}
+                            />
+                          ) : (
+                            <ChartWidget
+                              widget={widget}
+                              entries={entries}
+                              spec={spec}
+                              schema={schema}
+                            />
+                          )}
+                          {live && <WidgetSlot id={`slot:${row.id}:${i + 1}`} />}
+                          {live && i < row.widgets.length - 1 && (
+                            <WidgetSeam a={widget} b={row.widgets[i + 1]} />
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </div>
                   </div>
+                  {live && <RowResizeHandle row={row} index={rowIndex} />}
                 </div>
               ))}
               {live && <WidgetSlot id="slot:new-row" wide />}

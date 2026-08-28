@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DashboardView, handleWidgetDragEnd } from '@/views/DashboardView';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { buildSchema } from '@/engine/schema';
@@ -1012,5 +1012,164 @@ describe('DashboardView drag chrome (M44.4)', () => {
     );
     expect(screen.queryAllByTestId('widget-grip')).toHaveLength(0);
     expect(screen.queryAllByTestId('dashboard-slot')).toHaveLength(0);
+  });
+});
+
+/**
+ * Resize (M44.4 Task 7) — the ColumnResizer split, never ResizeHandle's
+ * fire-every-move: pointermoves PAINT (direct style on the shells / the row)
+ * and the release COMMITS exactly once. A resize writes YAML, and the repo
+ * already learned what a write per pixel does to a drag (TableView's own
+ * docstring: it "barely worked").
+ *
+ * The gestures follow the useSortableList jsdom recipe: fake per-element
+ * getBoundingClientRect, then real MouseEvents — jsdom implements no
+ * PointerEvent, and testing-library's synthetic one carries no coordinates,
+ * while the handlers only ever read clientX/clientY off the native event.
+ */
+describe('DashboardView resize (M44.4)', () => {
+  const resizeSetup = (presentation: Presentation) => {
+    const entries = editVault();
+    const onChange = vi.fn();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={presentation}
+        schema={buildSchema(entries)}
+        onPresentationChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    return onChange;
+  };
+
+  const dash = (onChange: ReturnType<typeof vi.fn>): DashboardSpec => {
+    const next = onChange.mock.calls.at(-1)?.[0] as Presentation;
+    if (next.dashboard === undefined) throw new Error('expected a dashboard on the presentation');
+    return next.dashboard;
+  };
+
+  // jsdom has no layout, so the px widths the seam measures at gesture start
+  // come from here.
+  const rect = (el: HTMLElement, left: number, width: number) => {
+    el.getBoundingClientRect = () => ({ left, width, top: 0, height: 300 }) as DOMRect;
+  };
+
+  it('a seam drag paints between moves and persists both weights exactly once on release', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({
+        rows: [
+          {
+            id: 'r1',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count', w: 1 },
+              { id: 'b', kind: 'number', agg: 'count', w: 2 },
+            ],
+          },
+        ],
+      }),
+    );
+    // 200 + 400px, matching the 1:2 weights.
+    rect(screen.getByTestId('widget-a'), 0, 200);
+    rect(screen.getByTestId('widget-b'), 212, 400);
+
+    act(() => {
+      screen
+        .getByTestId('dashboard-seam')
+        .dispatchEvent(new MouseEvent('pointerdown', { clientX: 200, bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 250 }));
+    });
+    // Mid-gesture the shells repaint — +50px of a 600px pair holding weight 3
+    // is 250/600·3 = 1.25 — but the door has not opened: paint is not persist.
+    expect(screen.getByTestId('widget-a').style.flexGrow).toBe('1.25');
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 }));
+    });
+    expect(screen.getByTestId('widget-a').style.flexGrow).toBe('1.5');
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { clientX: 300 }));
+    });
+    // ONE write carries both: the px-proportional split of the pair's summed
+    // weight — 300/600·3 = 1.5 each — each floored at 1.
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const weights = dash(onChange).rows[0].widgets.map((w) => w.w);
+    expect(weights).toEqual([1.5, 1.5]);
+    for (const w of weights) expect(w).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a seam drag floors both weights at one', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({
+        rows: [
+          {
+            id: 'r1',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count' },
+              { id: 'b', kind: 'number', agg: 'count' },
+            ],
+          },
+        ],
+      }),
+    );
+    rect(screen.getByTestId('widget-a'), 0, 300);
+    rect(screen.getByTestId('widget-b'), 312, 300);
+    act(() => {
+      screen
+        .getByTestId('dashboard-seam')
+        .dispatchEvent(new MouseEvent('pointerdown', { clientX: 300, bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 20 }));
+      window.dispatchEvent(new MouseEvent('pointerup', { clientX: 20 }));
+    });
+    // 20/600 of weight 2 is 0.07, floored to 1; the other side keeps its share.
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(dash(onChange).rows[0].widgets.map((w) => w.w)).toEqual([1, 1.93]);
+  });
+
+  it('a row-edge drag paints the clamp and persists h = 640 once', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({ rows: [{ id: 'r1', widgets: [countWidget('a')] }] }),
+    );
+    act(() => {
+      screen
+        .getByTestId('dashboard-row-edge')
+        .dispatchEvent(new MouseEvent('pointerdown', { clientY: 300, bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 900 }));
+    });
+    // Painted AT the clamp — the drag never draws a height the commit would
+    // then refuse — and not yet persisted.
+    expect(screen.getByTestId('dashboard-row').style.height).toBe('640px');
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 900 }));
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(dash(onChange).rows[0].h).toBe(640);
+  });
+
+  it('seams and row edges render only in Edit mode', () => {
+    const entries = editVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a'), countWidget('b')])}
+        schema={buildSchema(entries)}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryAllByTestId('dashboard-seam')).toHaveLength(0);
+    expect(screen.queryAllByTestId('dashboard-row-edge')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    // Two widgets share one seam; each row owns one edge.
+    expect(screen.getAllByTestId('dashboard-seam')).toHaveLength(1);
+    expect(screen.getAllByTestId('dashboard-row-edge')).toHaveLength(1);
   });
 });
