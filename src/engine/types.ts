@@ -239,7 +239,15 @@ export type Selection =
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
-  | { kind: 'doc'; path: string } // full-page markdown document (M2 Task 10)
+  | {
+      kind: 'doc';
+      path: string; // full-page markdown document (M2 Task 10)
+      /** Which record tab is open (M44.5). Rides on the selection rather than
+       * in component state so "the Spec tab of DOC-14" is a place the back
+       * button returns to — the same contract `list.view` follows. Absent =
+       * the type's first tab. */
+      tab?: string;
+    }
   // M29.21 — a standalone .mmd file. Raw diagram source has no frontmatter
   // and no record shape, so it gets its own full-page editor surface rather
   // than being forced through the doc canvas.

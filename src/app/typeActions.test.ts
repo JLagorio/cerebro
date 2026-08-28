@@ -11,6 +11,7 @@ import {
   setFieldOptions,
   setTypeDisplay,
   setTypeStatuses,
+  setTypeTabs,
   setTypeViews,
 } from '@/app/typeActions';
 import { makeEntry } from '@/test/factories';
@@ -324,6 +325,59 @@ describe('setTypeDisplay (M44.1)', () => {
     expect(ok).toBe(true);
     expect(created).toEqual([]);
     expect(patches).toEqual([]);
+  });
+});
+
+describe('setTypeTabs (M44.5)', () => {
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: { fields: {} } as unknown as typeof typeDoc.properties,
+  };
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes the whole serialized list', async () => {
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, [
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+      { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+    ]);
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: {
+          tabs: [
+            { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+            { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('an empty list deletes the key — back to the synthesized default', async () => {
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, []);
+    expect(ok).toBe(true);
+    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { tabs: null } }]);
+  });
+
+  // M44.1-family follow-up: patchFrontmatter never rejects on a real disk
+  // failure — it catches internally, toasts, and returns false. The action
+  // has to READ that boolean instead of assuming the write landed whenever
+  // nothing threw.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, [
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
   });
 });
 

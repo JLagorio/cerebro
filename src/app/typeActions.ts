@@ -14,13 +14,14 @@ import { kindMeta } from '@/engine/properties';
 import { humanize, serializeDisplayConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
-import { serializeViewList } from '@/engine/views';
+import { serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
   Entry,
   FieldKind,
   FieldOption,
   StatusDef,
+  TabDef,
   ViewDefinition,
 } from '@/engine/types';
 import { slugify } from '@/lib/slug';
@@ -596,6 +597,35 @@ export async function setTypeDisplay(
     }
   } catch {
     toast(`Couldn't update ${listing.name} display`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Persist a type's record-page tabs onto its Type doc (M44.5). The whole
+ * array is written each time, same contract as `setTypeViews`; an empty
+ * list deletes the key so the synthesized Overview default returns.
+ */
+export async function setTypeTabs(
+  listing: { name: string; docPath: string | null },
+  tabs: TabDef[],
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = tabs.length === 0 ? null : serializeTabList(tabs);
+  try {
+    if (doc === null) {
+      if (serialized === null) return true;
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { tabs: serialized });
+    } else if (!(await patchFrontmatter(doc.path, { tabs: serialized }))) {
+      // patchFrontmatter toasts and reverts itself — read its answer, add nothing.
+      return false;
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} tabs`);
     return false;
   }
   return true;
