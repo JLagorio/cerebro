@@ -280,6 +280,12 @@ function BarChart({
               // Under groupBy the segments ARE the bar: they stack to exactly
               // the band value, so no whole-band rect sits underneath.
               stackLayout(s.parts).map(({ part, start }) =>
+                // Two skips live in this `<= 0`. A measured-ZERO segment is
+                // fine to drop: inside a stack it has no geometry to claim —
+                // unlike the whole-bar 1px rule, where an empty axis slot
+                // would read as "no band here". A NEGATIVE part is a real
+                // limitation: a stack cannot draw one honestly, so it is
+                // discarded rather than drawn as a lie.
                 part.value <= 0 ? null : (
                   <rect
                     key={part.key || part.label}
@@ -378,7 +384,10 @@ function HBarChart({
             </text>
             {s.parts !== undefined && s.parts.length > 0 ? (
               // The vertical chart's rule, laid sideways: segments stack
-              // along x and no whole-band rect sits underneath.
+              // along x and no whole-band rect sits underneath. The `<= 0`
+              // skip is BarChart's — zero has no geometry to claim inside a
+              // stack, negative cannot be drawn honestly — see the full
+              // argument on the vertical segments.
               stackLayout(s.parts).map(({ part, start }) =>
                 part.value <= 0 ? null : (
                   <rect
@@ -431,6 +440,10 @@ function HBarChart({
   );
 }
 
+/** One drawn point of one series' line: its geometry plus the band and part
+ * that put it there, for the point's data attributes and title. */
+type SeriesPoint = { x: number; y: number; s: ChartSlice; part: ChartSlicePart };
+
 function LineChart({
   data,
   chart,
@@ -448,16 +461,24 @@ function LineChart({
   });
   // The multi-series pivot (M44.3): one path per VISIBLE series, points read
   // from each band's matching part. Two rules govern a band that lacks the
-  // series: under plain rendering it gets NO point — a gap; the path connects
-  // the points that exist — and under cumulative the engine's synthesized
-  // plateau parts carry every begun series into every band, so the lines are
-  // continuous. `area` stays single-series only: overlapping washes at one
-  // opacity read as mud, not as data.
+  // series: under plain rendering it gets NO point and the path BREAKS — one
+  // subpath per run of consecutive present bands, because a straight
+  // connector across the missing band would be an interpolated value nobody
+  // measured — and under cumulative the engine's synthesized plateau parts
+  // carry every begun series into every band, so the lines are continuous.
+  // `area` stays single-series only: overlapping washes at one opacity read
+  // as mud, not as data.
   if (data.series.length > 0) {
+    // The Y extent is the tallest DRAWN value. `data.max` is the band's
+    // stack sum, but a line draws part values — against a stack ceiling no
+    // series could ever reach the top of its own chart.
+    const seriesTop = niceCeiling(
+      data.slices.reduce((m, s) => (s.parts ?? []).reduce((mm, p) => Math.max(mm, p.value), m), 0),
+    );
     return (
       <>
         <Axes
-          top={top}
+          top={seriesTop}
           label={data.measure}
           plotH={plotH}
           hideGrid={chart?.hideGrid === true}
@@ -466,18 +487,27 @@ function LineChart({
         {data.series
           .filter((item) => !item.hidden)
           .map((item) => {
-            const pts = data.slices.flatMap((s, i) => {
+            // Runs of consecutive present bands — each becomes its own
+            // `M…` subpath, so a missing band stays a visible gap.
+            const runs: SeriesPoint[][] = [];
+            let current: SeriesPoint[] = [];
+            for (let i = 0; i < data.slices.length; i++) {
+              const s = data.slices[i];
               const part = s.parts?.find((p) => p.key === item.key);
-              if (part === undefined) return [];
-              return [
-                {
-                  x: PAD.left + band * i + band / 2,
-                  y: PAD.top + plotH - (part.value / top) * plotH,
-                  s,
-                  part,
-                },
-              ];
-            });
+              if (part === undefined) {
+                if (current.length > 0) runs.push(current);
+                current = [];
+                continue;
+              }
+              current.push({
+                x: PAD.left + band * i + band / 2,
+                y: PAD.top + plotH - (part.value / seriesTop) * plotH,
+                s,
+                part,
+              });
+            }
+            if (current.length > 0) runs.push(current);
+            const pts = runs.flat();
             if (pts.length === 0) return null;
             const seriesStroke = sliceColor(item, item.hue, { palette: chart?.palette });
             return (
@@ -485,7 +515,7 @@ function LineChart({
                 <path
                   data-testid="chart-line"
                   data-series={item.label}
-                  d={linePath(pts, chart?.smooth === true)}
+                  d={runs.map((run) => linePath(run, chart?.smooth === true)).join(' ')}
                   fill="none"
                   stroke={seriesStroke}
                   strokeWidth={2}
@@ -800,7 +830,7 @@ const BLOCKED: Record<
   'all-hidden': {
     icon: 'chart-column',
     title: 'Everything is hidden',
-    description: 'Every band is switched off in the legend — click one to bring it back.',
+    description: 'Every band or series is switched off in the legend — click one to bring it back.',
   },
 };
 

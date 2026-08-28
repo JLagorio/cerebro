@@ -681,8 +681,33 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
     expect(new Set(lines.map((l) => l.getAttribute('stroke'))).size).toBe(2);
   });
 
+  // The stack sum is not the Y extent: a line draws PART values, and against
+  // a ceiling built from `data.max` (the band stack) no series could ever
+  // reach the top of its own chart.
+  it('a multi-series line scales to the tallest part, not the stack sum', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'line', groupBy: 'priority', agg: 'sum', value: 'estimate' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    // Parts: Todo high 3 / low 5, Doing high 2. The Todo stack is 8, so a
+    // stack ceiling (10) would pin every point to the bottom half; the part
+    // ceiling is niceCeiling(5) = 5, and the max part touches the top pad.
+    const top = [...container.querySelectorAll('[data-testid="chart-point"]')].find(
+      (p) => p.getAttribute('data-value') === '5',
+    );
+    expect(Number(top?.getAttribute('cy'))).toBe(16);
+  });
+
   // Decision B (M44.3), plain half: a band without the series gets NO point —
-  // the path connects the points that exist. Doing has no `low` row.
+  // and no bridge either; the path breaks into one subpath per run of
+  // consecutive present bands. Doing has no `low` row.
   it('a band without the series is a gap: no point drawn there', () => {
     const entries = stacked();
     const { container } = render(
@@ -696,6 +721,40 @@ describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
     const points = [...container.querySelectorAll('[data-testid="chart-point"]')];
     expect(points.filter((p) => p.getAttribute('data-series') === 'High')).toHaveLength(2);
     expect(points.filter((p) => p.getAttribute('data-series') === 'Low')).toHaveLength(1);
+  });
+
+  // A straight connector across the missing band would be an interpolated
+  // value nobody measured — the path must break, not bridge.
+  it('a missing middle band breaks the path: a gap is a gap, not a bridge', () => {
+    const entries = stacked();
+    (
+      entries[0].properties as unknown as {
+        statuses: { id: string; group: string; color: string }[];
+      }
+    ).statuses.push({ id: 'done', group: 'done', color: 'green' });
+    // `low` lives in Todo and Done but not Doing; `high` runs Todo→Doing.
+    entries.push(
+      makeEntry({
+        path: 'items/d.md',
+        title: 'D',
+        type: 'Work item',
+        properties: { status: 'done', priority: 'low', estimate: 1 },
+      }),
+    );
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const d = (label: string) =>
+      container
+        .querySelector(`[data-testid="chart-line"][data-series="${label}"]`)
+        ?.getAttribute('d');
+    expect(d('Low')?.match(/M/g)).toHaveLength(2);
+    expect(d('High')?.match(/M/g)).toHaveLength(1);
   });
 
   // Decision B, cumulative half: the engine's plateau parts make every band
