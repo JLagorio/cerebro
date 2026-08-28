@@ -1108,6 +1108,93 @@ describe('ChartView hover tooltip (M44.3)', () => {
     expect(container.querySelector('svg')).toBeNull();
     expect(screen.queryByTestId('chart-tooltip')).toBeNull();
   });
+
+  /** The card grows a row per series, so a fixed-size clamp escapes the
+   * bottom edge exactly when a tall stack is hovered near it. The card
+   * measures its rendered self (offsetWidth/offsetHeight in a layout effect)
+   * and clamps with the REAL size — pinned here with five series in one band
+   * and a hover in the figure's bottom-right corner. */
+  it('the card measures itself and never escapes the figure box', () => {
+    // Five priorities, every record in the last band — the tall card.
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            status: { kind: 'status' },
+            priority: {
+              kind: 'select',
+              options: [
+                { id: 'p1', color: 'red' },
+                { id: 'p2', color: 'blue' },
+                { id: 'p3', color: 'green' },
+                { id: 'p4', color: 'yellow' },
+                { id: 'p5', color: 'purple' },
+              ],
+            },
+          },
+          statuses: [
+            { id: 'todo', group: 'active', color: 'blue' },
+            { id: 'doing', group: 'active', color: 'orange' },
+          ],
+        } as unknown as Entry['properties'],
+      }),
+      ...['p1', 'p2', 'p3', 'p4', 'p5'].map((p) =>
+        makeEntry({
+          path: `items/${p}.md`,
+          title: p,
+          type: 'Work item',
+          properties: { status: 'doing', priority: p },
+        }),
+      ),
+    ];
+    // jsdom gives every element zero geometry; the card and the figure get
+    // real numbers so the clamp has something to push against.
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    const forCard = (el: HTMLElement, n: number) =>
+      el.getAttribute('data-testid') === 'chart-tooltip' ? n : 0;
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return forCard(this, 200);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return forCard(this, 120);
+      },
+    });
+    try {
+      const { container } = render(
+        <ChartView
+          entries={records(entries)}
+          presentation={view({ chart: { groupBy: 'priority' } })}
+          schema={buildSchema(entries)}
+          filtered={false}
+        />,
+      );
+      const figure = container.querySelector('figure')!;
+      figure.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 640, height: 300 }) as DOMRect;
+      const segments = container.querySelectorAll(
+        '[data-testid="chart-bar-segment"][data-label="Doing"]',
+      );
+      expect(segments).toHaveLength(5);
+      fireEvent.mouseEnter(segments[segments.length - 1], { clientX: 620, clientY: 290 });
+      const tip = screen.getByTestId('chart-tooltip');
+      expect(tip.querySelectorAll('span.rounded-sm')).toHaveLength(5);
+      // Unclamped the card would sit at (632, 302) — outside a 640×300 box.
+      expect(parseFloat(tip.style.top) + 120).toBeLessThanOrEqual(300);
+      expect(parseFloat(tip.style.left) + 200).toBeLessThanOrEqual(640);
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', width!);
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height!);
+    }
+  });
 });
 
 describe('sliceColor', () => {

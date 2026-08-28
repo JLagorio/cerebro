@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { computeChart, niceCeiling } from '@/engine/chart';
@@ -836,6 +836,8 @@ function Legend({
  * records line always uses `count` — the band's true rows — never `value`,
  * which cumulative mutates.
  */
+const MONO = '[font-family:var(--font-mono)] text-n-500';
+
 function ChartTooltip({
   slice: s,
   x,
@@ -843,7 +845,7 @@ function ChartTooltip({
   data,
   chart,
   running,
-  bounds,
+  figure,
 }: {
   slice: ChartSlice;
   x: number;
@@ -852,19 +854,30 @@ function ChartTooltip({
   chart: ChartSpec | undefined;
   /** True when the drawn values are running totals (cumulative, non-donut). */
   running: boolean;
-  bounds: { width: number; height: number } | null;
+  figure: RefObject<HTMLElement | null>;
 }) {
-  // Clamped into the figure box with an assumed card size — measuring the
-  // card for exact clamping is more machinery than a tooltip is worth.
-  const left = Math.max(0, Math.min(x + 12, (bounds?.width ?? W) - 190));
-  const top = Math.max(0, Math.min(y + 12, Math.max(0, (bounds?.height ?? 0) - 48)));
+  // Clamped into the figure box with the card's REAL rendered size — the
+  // card grows a row per series, so an assumed height escapes the bottom
+  // edge exactly when a tall stack is hovered near it. The layout effect
+  // runs after every render (each hover updates x/y, and the hovered band
+  // changes what the card holds), reads offsetWidth/offsetHeight, and writes
+  // the clamped position straight onto the element — before paint, so the
+  // unclamped style prop below never shows.
+  const cardRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (el === null) return;
+    const box = figure.current?.getBoundingClientRect();
+    el.style.left = `${Math.max(0, Math.min(x + 12, (box?.width ?? W) - el.offsetWidth))}px`;
+    el.style.top = `${Math.max(0, Math.min(y + 12, (box?.height ?? 0) - el.offsetHeight))}px`;
+  });
   const share = !running && data.total > 0 ? Math.round((s.value / data.total) * 100) : null;
-  const mono = '[font-family:var(--font-mono)] text-n-500';
   return (
     <div
+      ref={cardRef}
       data-testid="chart-tooltip"
       className="pointer-events-none absolute z-10 min-w-32 rounded-lg border border-n-200 bg-n-0 px-2.5 py-1.5 text-xs shadow-[var(--shadow-lg)]"
-      style={{ left, top }}
+      style={{ left: x + 12, top: y + 12 }}
     >
       <div className="font-semibold text-n-800">{s.label}</div>
       {s.parts !== undefined && s.parts.length > 0 && (
@@ -875,8 +888,8 @@ function ChartTooltip({
                 className="inline-block h-2 w-2 flex-none rounded-sm"
                 style={{ background: sliceColor(part, part.hue, colorOpts(chart, data, s)) }}
               />
-              <span className="flex-1 text-n-600">{part.label}</span>
-              <span className={mono}>{part.display}</span>
+              <span className="max-w-[240px] flex-1 truncate text-n-600">{part.label}</span>
+              <span className={MONO}>{part.display}</span>
             </div>
           ))}
         </div>
@@ -884,12 +897,12 @@ function ChartTooltip({
       <div className="mt-1 flex flex-col gap-0.5 border-t border-n-100 pt-1">
         <div className="flex items-center justify-between gap-3">
           <span className="text-n-600">Total</span>
-          <span className={mono}>{s.display}</span>
+          <span className={MONO}>{s.display}</span>
         </div>
         {share !== null && (
           <div className="flex items-center justify-between gap-3">
             <span className="text-n-600">Share</span>
-            <span className={mono}>{share}%</span>
+            <span className={MONO}>{share}%</span>
           </div>
         )}
         <div className="text-n-500">
@@ -1050,11 +1063,7 @@ export function ChartView({
               // computeChart ignores `cumulative` for a donut, so the tooltip
               // must not treat the donut's plain values as running totals.
               running={chart?.cumulative === true && kind !== 'donut'}
-              bounds={
-                figureRef.current !== null
-                  ? { width: figureRef.current.clientWidth, height: figureRef.current.clientHeight }
-                  : null
-              }
+              figure={figureRef}
             />
           )}
         </figure>
