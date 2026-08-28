@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -40,6 +40,7 @@ import type {
   DashboardSpec,
   DashboardWidget,
   Entry,
+  FieldDef,
   ListSource,
   Presentation,
   Schema,
@@ -58,7 +59,10 @@ import type {
  *   dashboard is for: several sources on one screen. It stores a REFERENCE,
  *   never a copy, so editing the List updates every dashboard showing it, and
  *   a deleted List produces one honest missing-block tile rather than a stale
- *   duplicate of a query that no longer exists.
+ *   duplicate of a query that no longer exists. The dashboard's two filter
+ *   layers (Global, then the widget's own) apply OVER the saved view's rows —
+ *   so the Global popover's "every widget's rows pass it" is literally true,
+ *   view embeds included.
  * - EVERY OTHER KIND reads this dashboard's own rows through `widgetEntries`,
  *   so the view's filters, the Global filter, and the widget's own filter all
  *   scope it. A number that ignored them would be a constant; the own-scope
@@ -78,12 +82,12 @@ const OWN_SCOPE_SOURCE: ListSource = { type: null, project: null };
 
 type OwnScopeWidget = Extract<DashboardWidget, { kind: 'table' | 'board' | 'timeline' | 'chart' }>;
 
-/** The widget header's name: the stored title when there is one, else a
- * computed default per kind — the chart's is its measure, the same words
- * ChartView itself uses. (`view` and `number` widgets compute theirs from the
- * embedded List and the aggregation label respectively.) */
-function widgetTitle(widget: OwnScopeWidget): string {
-  if (widget.title !== undefined && widget.title !== '') return widget.title;
+/** The widget header's COMPUTED default name per kind — never the stored
+ * override; callers display `widget.title ?? defaultWidgetTitle(widget)` and
+ * the rename input needs both halves separately. The chart's is its measure,
+ * the same words ChartView itself uses. (`view` and `number` widgets compute
+ * theirs from the embedded List and the aggregation label respectively.) */
+function defaultWidgetTitle(widget: OwnScopeWidget): string {
   switch (widget.kind) {
     case 'table':
       return 'Table';
@@ -130,13 +134,26 @@ interface DashboardEditApi {
 
 const EditContext = createContext<DashboardEditApi | null>(null);
 
-/** The ViewTabs rename idiom: commit on blur/Enter, Escape cancels via ''. */
-function RenameWidget({ name, onCommit }: { name: string; onCommit: (name: string) => void }) {
+/** The ViewTabs rename idiom, minus one rule (see WidgetShell): commit on
+ * blur/Enter; Escape is a separate CANCEL signal, because here an empty
+ * commit means "clear the override" and Escape must never mean that. */
+function RenameWidget({
+  name,
+  placeholder,
+  onCommit,
+  onCancel,
+}: {
+  name: string;
+  placeholder: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+}) {
   const [draft, setDraft] = useState(name);
   return (
     <input
       autoFocus
       aria-label="Widget title"
+      placeholder={placeholder}
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => onCommit(draft.trim())}
@@ -144,7 +161,7 @@ function RenameWidget({ name, onCommit }: { name: string; onCommit: (name: strin
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         if (e.key === 'Escape') {
           e.stopPropagation();
-          onCommit('');
+          onCancel();
         }
       }}
       className="h-6 min-w-0 flex-1 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
@@ -162,10 +179,15 @@ function WidgetMenuButton({
   widget,
   title,
   edit,
+  filterFields,
 }: {
   widget: DashboardWidget;
   title: string;
   edit: DashboardEditApi;
+  /** A roster override for widgets whose rows are NOT the dashboard's own —
+   * the view embed passes its List's universe, since a filter authored from
+   * the wrong roster would be unread YAML. Absent = own-scope universe. */
+  filterFields?: FieldDef[];
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -185,6 +207,11 @@ function WidgetMenuButton({
     [edit.entries, edit.spec, edit.schema, widget],
   );
   const groupable = fields.filter((f) => GROUPABLE_KINDS.has(f.kind));
+  const filterDefs =
+    filterFields ?? filterFieldDefs(fields, filterStatusSet(edit.schema, OWN_SCOPE_SOURCE.type));
+  // What the board bands by when no override is stored — named in the roster
+  // so "back to default" is a choice, not a mystery.
+  const defaultBand = fields.find((f) => f.kind === 'status')?.name;
 
   const items: ContextMenuItem[] = [
     { icon: 'pencil', label: 'Rename…', onSelect: () => edit.setRenamingId(widget.id) },
@@ -251,7 +278,7 @@ function WidgetMenuButton({
             </div>
             <FilterBuilder
               filters={widget.filter ?? null}
-              fields={filterFieldDefs(fields, filterStatusSet(edit.schema, OWN_SCOPE_SOURCE.type))}
+              fields={filterDefs}
               // `undefined` DELETES the key through updateWidget — an emptied
               // filter leaves the YAML, matching the Global chip's rule.
               onChange={(g) =>
@@ -270,6 +297,16 @@ function WidgetMenuButton({
         >
           <MenuSurface width={200}>
             <MenuLabel>Band by</MenuLabel>
+            {/* The way back: clearing the override returns the board to its
+                resolved default rather than leaving `group:` stuck forever. */}
+            <MenuItem
+              label={defaultBand !== undefined ? `Default (${humanize(defaultBand)})` : 'Default'}
+              checked={widget.kind === 'board' && widget.group === undefined}
+              onSelect={() => {
+                setSurface(null);
+                edit.commit(updateWidget(edit.spec, widget.id, { group: undefined }));
+              }}
+            />
             {groupable.map((f) => (
               <MenuItem
                 key={f.name}
@@ -296,17 +333,26 @@ function WidgetMenuButton({
 function WidgetShell({
   widget,
   title,
+  defaultTitle = title,
   subtitle,
   testId,
+  filterFields,
   children,
 }: {
   widget: DashboardWidget;
   title: string;
+  /** The computed per-kind name — the rename input's placeholder, and what
+   * the header returns to when an override is cleared. Defaults to `title`
+   * for the shells whose display name IS the computed one. */
+  defaultTitle?: string;
   subtitle?: string;
   testId: string;
+  /** See WidgetMenuButton — the view embed's roster override. */
+  filterFields?: FieldDef[];
   children: React.ReactNode;
 }) {
   const edit = useContext(EditContext);
+  const hasCustom = widget.title !== undefined && widget.title !== '';
   return (
     <section
       data-testid={`widget-${widget.id}`}
@@ -317,10 +363,20 @@ function WidgetShell({
         {edit !== null && edit.renamingId === widget.id ? (
           <RenameWidget
             name={title}
+            placeholder={defaultTitle}
+            onCancel={() => edit.setRenamingId(null)}
             onCommit={(name) => {
               edit.setRenamingId(null);
-              // Empty = cancel (ViewTabs' rule); unchanged = nothing to write.
-              if (name !== '' && name !== title) {
+              // Deviates from ViewTabs' empty=cancel, deliberately: there an
+              // empty commit would leave a view with no name at all, while
+              // here it CLEARS the override and the computed default still
+              // shows — so empty is the way back, and Escape is the cancel.
+              if (name === '') {
+                if (hasCustom)
+                  edit.commit(updateWidget(edit.spec, widget.id, { title: undefined }));
+                return;
+              }
+              if (name !== title) {
                 edit.commit(updateWidget(edit.spec, widget.id, { title: name }));
               }
             }}
@@ -331,7 +387,9 @@ function WidgetShell({
         {subtitle !== undefined && subtitle !== '' && (
           <span className="flex-none text-2xs text-n-400">{subtitle}</span>
         )}
-        {edit !== null && <WidgetMenuButton widget={widget} title={title} edit={edit} />}
+        {edit !== null && (
+          <WidgetMenuButton widget={widget} title={title} edit={edit} filterFields={filterFields} />
+        )}
       </header>
       <div data-testid={testId} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {children}
@@ -345,16 +403,18 @@ function WidgetShell({
 function BrokenBlock({
   widget,
   title,
+  defaultTitle,
   icon,
   message,
 }: {
   widget: DashboardWidget;
   title: string;
+  defaultTitle?: string;
   icon: string;
   message: string;
 }) {
   return (
-    <WidgetShell widget={widget} title={title} testId="dashboard-block">
+    <WidgetShell widget={widget} title={title} defaultTitle={defaultTitle} testId="dashboard-block">
       <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
         <Icon name={icon} size={14} color="var(--n-400)" />
         {message}
@@ -374,11 +434,18 @@ function NumberBlock({
   spec: DashboardSpec;
   schema: Schema;
 }) {
-  const measured = dashboardNumber(widgetEntries(entries, spec, widget, schema), widget, schema);
+  // Measured sans the override so `measured.label` is always the COMPUTED
+  // name — the display prefers `widget.title`, the rename input needs both.
+  const measured = dashboardNumber(
+    widgetEntries(entries, spec, widget, schema),
+    { ...widget, title: undefined },
+    schema,
+  );
   return (
     <WidgetShell
       widget={widget}
-      title={measured.label}
+      title={widget.title ?? measured.label}
+      defaultTitle={measured.label}
       subtitle={`${measured.count} ${measured.count === 1 ? 'record' : 'records'}`}
       testId="dashboard-block"
     >
@@ -420,7 +487,12 @@ function TableWidget({
   const scoped = widgetEntries(entries, spec, widget, schema);
   const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
   return (
-    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+    <WidgetShell
+      widget={widget}
+      title={widget.title ?? defaultWidgetTitle(widget)}
+      defaultTitle={defaultWidgetTitle(widget)}
+      testId="dashboard-block"
+    >
       <TableView
         entries={scoped}
         presentation={{ type: 'table', group: [], sort, columns: [] }}
@@ -444,14 +516,19 @@ function BoardWidget({ widget, entries, spec, schema }: OwnScopeProps<'board'>) 
     return (
       <BrokenBlock
         widget={widget}
-        title={widgetTitle(widget)}
+        title={widget.title ?? defaultWidgetTitle(widget)}
         icon="square-kanban"
-        message="Pick a property to band by in the widget's settings."
+        message="Toggle Edit and pick Band by… in the widget menu."
       />
     );
   }
   return (
-    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+    <WidgetShell
+      widget={widget}
+      title={widget.title ?? defaultWidgetTitle(widget)}
+      defaultTitle={defaultWidgetTitle(widget)}
+      testId="dashboard-block"
+    >
       <BoardView
         entries={scoped}
         presentation={{ type: 'board', group: [{ field: band }], sort: [], columns: [] }}
@@ -467,7 +544,12 @@ function TimelineWidget({ widget, entries, spec, schema }: OwnScopeProps<'timeli
   const scoped = widgetEntries(entries, spec, widget, schema);
   const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
   return (
-    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+    <WidgetShell
+      widget={widget}
+      title={widget.title ?? defaultWidgetTitle(widget)}
+      defaultTitle={defaultWidgetTitle(widget)}
+      testId="dashboard-block"
+    >
       <TimelineView
         entries={scoped}
         presentation={{ type: 'timeline', group: [], sort: [], columns: [] }}
@@ -483,7 +565,12 @@ function TimelineWidget({ widget, entries, spec, schema }: OwnScopeProps<'timeli
 function ChartWidget({ widget, entries, spec, schema }: OwnScopeProps<'chart'>) {
   const scoped = widgetEntries(entries, spec, widget, schema);
   return (
-    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+    <WidgetShell
+      widget={widget}
+      title={widget.title ?? defaultWidgetTitle(widget)}
+      defaultTitle={defaultWidgetTitle(widget)}
+      testId="dashboard-block"
+    >
       {/* No `onChartChange`/`onSaveView`: an embedded chart is static by
           decision. The chart's own typed empty states answer misconfiguration
           — a group-less widget gets its no-group refusal, not a new one. */}
@@ -503,7 +590,13 @@ function ChartWidget({ widget, entries, spec, schema }: OwnScopeProps<'chart'>) 
   );
 }
 
-function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view' }> }) {
+function ViewBlock({
+  widget,
+  spec,
+}: {
+  widget: Extract<DashboardWidget, { kind: 'view' }>;
+  spec: DashboardSpec;
+}) {
   const vault = useVaultStore((s) => s.entries);
   const lists = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -517,6 +610,7 @@ function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view'
       <BrokenBlock
         widget={widget}
         title={widget.title ?? widget.list}
+        defaultTitle={widget.list}
         icon="unlink"
         message={`This block points at a list called “${widget.list}” that is no longer in the vault.`}
       />
@@ -524,13 +618,15 @@ function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view'
   }
 
   const active = resolveView(list.definition, widget.view);
-  const title = widget.title ?? `${list.definition.name} · ${active.name}`;
+  const defaultTitle = `${list.definition.name} · ${active.name}`;
+  const title = widget.title ?? defaultTitle;
 
   if (hasBlocks(active.presentation.type)) {
     return (
       <BrokenBlock
         widget={widget}
         title={title}
+        defaultTitle={defaultTitle}
         icon="circle-slash"
         message="A dashboard cannot show another dashboard — pick one of its own views instead."
       />
@@ -549,13 +645,27 @@ function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view'
     schema,
     active.presentation.group,
   );
+  // The dashboard's two layers apply over the embed too: the Global filter
+  // and the widget's own, on top of the saved view's already-filtered rows —
+  // so the Global popover's "every widget's rows pass it" is literally true.
+  const scoped = widgetEntries(surface.entries, spec, widget, schema);
+  // The Filter… roster comes from the EMBED's universe (its List's source and
+  // rows, pre-widget-filter) — a rule authored from the dashboard's own
+  // roster would be unread YAML against these entries. The embed knows its
+  // source type, so status fields get their real option set.
+  const filterFields = filterFieldDefs(
+    fields,
+    filterStatusSet(schema, list.definition.source.type),
+  );
 
   return (
     <WidgetShell
       widget={widget}
       title={title}
+      defaultTitle={defaultTitle}
       subtitle={viewKind(active.presentation.type).label}
       testId="dashboard-block"
+      filterFields={filterFields}
     >
       {/* The row owns the height now — this wrapper only bounds the scroll,
           it no longer sets one: the layouts all expand to fill a page, and a
@@ -563,14 +673,14 @@ function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view'
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ViewCanvas
           embedded
-          entries={surface.entries}
+          entries={scoped}
           allEntries={vault}
           presentation={surface.presentation}
           schema={schema}
           fields={fields}
           scope={`dashboard:${widget.id}`}
           createType={list.definition.source.type ?? undefined}
-          filtered={active.filters !== null}
+          filtered={active.filters !== null || widgetFiltered(spec, widget)}
         />
       </div>
     </WidgetShell>
@@ -617,8 +727,9 @@ function AddWidgetMenu({
   const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
 
   const mint = (seed: WidgetSeed) => {
-    // The last row with room, else a fresh trailing row — a new widget lands
-    // where the eye is already looking, never in a hole further up.
+    // Scanning bottom-up: the widget joins the LOWEST row that still has
+    // room — which can be a row above a full last one — else a fresh
+    // trailing row.
     const target =
       [...spec.rows].reverse().find((r) => r.widgets.length < MAX_ROW_WIDGETS)?.id ?? 'new-row';
     // The cast restores what the distributive Omit proves: any seed member
@@ -770,13 +881,17 @@ function AddWidgetMenu({
   );
 }
 
+/** Stable fallback for a presentation with no dashboard yet — a fresh object
+ * here would churn every memo and context consumer downstream per render. */
+const EMPTY_SPEC: DashboardSpec = { rows: [] };
+
 export function DashboardView({
   entries,
   presentation,
   schema,
   onPresentationChange,
 }: DashboardViewProps) {
-  const spec: DashboardSpec = presentation.dashboard ?? { rows: [] };
+  const spec: DashboardSpec = presentation.dashboard ?? EMPTY_SPEC;
   const toast = useUiStore((s) => s.toast);
 
   // A lens, not a place: local, resets on remount, persisted nowhere.
@@ -789,16 +904,21 @@ export function DashboardView({
 
   const canEdit = onPresentationChange !== undefined;
 
-  const write = (next: DashboardSpec) =>
-    onPresentationChange?.({ ...presentation, dashboard: next });
+  const write = useCallback(
+    (next: DashboardSpec) => onPresentationChange?.({ ...presentation, dashboard: next }),
+    [onPresentationChange, presentation],
+  );
   /** One door for every structural edit: an ok writes, a refusal speaks. */
-  const commit = (edit: DashboardEdit) => {
-    if (!edit.ok) {
-      toast(edit.reason);
-      return;
-    }
-    write(edit.spec);
-  };
+  const commit = useCallback(
+    (edit: DashboardEdit) => {
+      if (!edit.ok) {
+        toast(edit.reason);
+        return;
+      }
+      write(edit.spec);
+    },
+    [toast, write],
+  );
 
   const globalDefs = useMemo(
     () =>
@@ -811,7 +931,12 @@ export function DashboardView({
     [entries, schema],
   );
 
-  const api: DashboardEditApi = { spec, schema, entries, commit, renamingId, setRenamingId };
+  // Memoized so the context identity only moves when an input does — without
+  // it every render re-rendered every shell's chrome for nothing.
+  const api = useMemo<DashboardEditApi>(
+    () => ({ spec, schema, entries, commit, renamingId, setRenamingId }),
+    [spec, schema, entries, commit, renamingId],
+  );
 
   return (
     <EditContext.Provider value={editing && canEdit ? api : null}>
@@ -916,7 +1041,11 @@ export function DashboardView({
           <EmptyState
             icon="layout-dashboard"
             title="No widgets yet"
-            description="Add a widget to start — toggle Edit in the corner."
+            // A read-only host has no Edit corner — promising one would send
+            // the reader hunting for a control that does not exist.
+            description={
+              canEdit ? 'Add a widget to start — toggle Edit in the corner.' : 'Nothing here yet.'
+            }
           />
         ) : (
           <div className="flex flex-col gap-3">
@@ -941,7 +1070,7 @@ export function DashboardView({
                         schema={schema}
                       />
                     ) : widget.kind === 'view' ? (
-                      <ViewBlock key={widget.id} widget={widget} />
+                      <ViewBlock key={widget.id} widget={widget} spec={spec} />
                     ) : widget.kind === 'table' ? (
                       <TableWidget
                         key={widget.id}

@@ -96,6 +96,8 @@ describe('DashboardView', () => {
       />,
     );
     expect(screen.getByText('No widgets yet')).toBeTruthy();
+    // No writer, no Edit corner — the description must not promise one.
+    expect(screen.getByText('Nothing here yet.')).toBeTruthy();
     expect(screen.getByTestId('dashboard-view').getAttribute('data-blocks')).toBe('0');
   });
 
@@ -421,7 +423,7 @@ describe('DashboardView own-scope widgets (M44.4)', () => {
     const widget = screen.getByTestId('widget-bd');
     expect(widget.querySelector('[data-testid="board-view"]')).toBeNull();
     expect(
-      within(widget).getByText("Pick a property to band by in the widget's settings."),
+      within(widget).getByText('Toggle Edit and pick Band by… in the widget menu.'),
     ).toBeTruthy();
   });
 
@@ -737,6 +739,32 @@ describe('DashboardView edit mode (M44.4)', () => {
     );
   });
 
+  it('Band by… offers a way back — Default clears the override', () => {
+    const onChange = editSetup(oneRow([{ id: 'bd', kind: 'board', group: 'priority' }]));
+    fireEvent.click(within(screen.getByTestId('widget-bd')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Band by…' }));
+    // The item names the band the board returns to.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Default (Status)' }));
+    const widget = lastDashboard(onChange).rows[0].widgets[0];
+    expect('group' in widget).toBe(false);
+  });
+
+  it('renaming a custom-titled widget shows the default as placeholder, and empty clears', () => {
+    const onChange = editSetup(
+      oneRow([{ id: 'a', kind: 'number', agg: 'count', title: 'Custom' }]),
+    );
+    fireEvent.click(within(screen.getByTestId('widget-a')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
+    const input = screen.getByLabelText('Widget title') as HTMLInputElement;
+    expect(input.value).toBe('Custom');
+    expect(input.placeholder).toBe('Records');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    // The override is GONE — the header returns to the computed default —
+    // rather than the empty commit being swallowed as a cancel.
+    expect('title' in lastDashboard(onChange).rows[0].widgets[0]).toBe(false);
+  });
+
   it('a global filter rule lands in spec.global, and an emptied group deletes the key', () => {
     const onChange = editSetup(oneRow([countWidget('a')]));
     fireEvent.click(screen.getByTestId('dashboard-global-filter'));
@@ -757,5 +785,104 @@ describe('DashboardView edit mode (M44.4)', () => {
     const next = lastDashboard(onChange2);
     expect('global' in next).toBe(false);
     expect(next.rows).toHaveLength(1);
+  });
+
+  /**
+   * View embeds pass the same two layers (review round): the Global filter
+   * and the widget's own apply over the saved view's rows, so the Global
+   * popover's "every widget's rows pass it" is literally true — and a
+   * widget filter on an embed is read, never unread YAML.
+   */
+  const embedVault = (): Entry[] => [
+    makeEntry({
+      path: 'types/work-item.md',
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: { kind: 'status' }, estimate: { kind: 'number' } },
+        statuses: [
+          { id: 'todo', group: 'active', color: 'blue' },
+          { id: 'doing', group: 'active', color: 'green' },
+        ],
+      } as unknown as Entry['properties'],
+    }),
+    makeEntry({
+      path: 'items/a.md',
+      title: 'Alpha',
+      type: 'Work item',
+      properties: { status: 'todo', estimate: 3 },
+    }),
+    makeEntry({
+      path: 'items/b.md',
+      title: 'Beta',
+      type: 'Work item',
+      properties: { status: 'doing', estimate: 5 },
+    }),
+  ];
+
+  it("a view widget's own filter narrows the embedded rows", () => {
+    const entries = embedVault();
+    useVaultStore.setState({ entries, views: lists() });
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([
+          {
+            id: 'v',
+            kind: 'view',
+            list: 'delivery',
+            filter: { all: [{ field: 'status', op: 'equals', value: 'doing' }] },
+          },
+        ])}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-v');
+    expect(within(widget).getByText('Beta')).toBeTruthy();
+    expect(within(widget).queryByText('Alpha')).toBeNull();
+  });
+
+  it('the Global filter narrows a view embed too', () => {
+    const entries = embedVault();
+    useVaultStore.setState({ entries, views: lists() });
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={rowsPresentation({
+          rows: [{ id: 'r1', widgets: [{ id: 'v', kind: 'view', list: 'delivery' }] }],
+          global: { all: [{ field: 'status', op: 'equals', value: 'todo' }] },
+        })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-v');
+    expect(within(widget).getByText('Alpha')).toBeTruthy();
+    expect(within(widget).queryByText('Beta')).toBeNull();
+  });
+
+  it("a view widget's Filter… roster comes from the embed, not the dashboard's own rows", () => {
+    const entries = embedVault();
+    useVaultStore.setState({ entries, views: lists() });
+    // The dashboard's own rows carry a DIFFERENT universe on purpose — if
+    // the roster leaked from them, the seeded rule would name `zzz`.
+    const own = [
+      makeEntry({ path: 'items/z.md', title: 'Zed', type: null, properties: { zzz: 'x' } }),
+    ];
+    const onChange = vi.fn();
+    render(
+      <DashboardView
+        entries={own}
+        presentation={oneRow([{ id: 'v', kind: 'view', list: 'delivery' }])}
+        schema={buildSchema(own)}
+        onPresentationChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    fireEvent.click(within(screen.getByTestId('widget-v')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Filter…' }));
+    fireEvent.click(screen.getByText('Add filter'));
+    const widget = lastDashboard(onChange).rows[0].widgets[0];
+    // Seeded from the embed's List: its first declared field, not `zzz`.
+    expect(widget.filter).toMatchObject({ all: [{ field: 'status' }] });
   });
 });
