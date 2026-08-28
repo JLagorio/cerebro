@@ -549,6 +549,50 @@ describe('computeChart stacks and hides (M44.3)', () => {
     expect(done?.parts?.map((p) => [p.key, p.hue])).toEqual([['cara', 2]]);
   });
 
+  // A text-field groupBy alphabetizes sub-bands PER BAND, while hues are
+  // first-seen ACROSS bands — when a later-alphabet name arrives first, the
+  // two orders disagree and a series would change stack level between bands.
+  // Parts therefore order by hue always, not just under cumulative.
+  it('parts order by hue, so a series keeps one stack level in every band', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', owner: 'zoe' },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'doing', owner: 'amy' },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', owner: 'zoe' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'owner' } }),
+      buildSchema(entries),
+    );
+    expect(data.series.map((s) => [s.key, s.hue])).toEqual([
+      ['zoe', 0],
+      ['amy', 1],
+    ]);
+    // Doing's rows alphabetize to [amy, zoe]; the stack still draws zoe at
+    // the level hue 0 gave her in Todo.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.hue])).toEqual([
+      ['zoe', 0],
+      ['amy', 1],
+    ]);
+  });
+
   it('hiding every series is all-hidden too — zero bars would claim a measured zero', () => {
     const entries = vault();
     const data = computeChart(
@@ -664,6 +708,52 @@ describe('computeChart stacks and hides (M44.3)', () => {
     expect(data.slices.map((s) => s.value)).toEqual([2, 2, 3]);
     // A plateau's display is formatted from the run, like any other segment.
     expect(done?.parts?.find((p) => p.key === 'low')?.display).toBe('1');
+  });
+
+  // The plateau guard is PRESENCE in the run map, not the run's value: a
+  // series whose first band measured zero has begun — its zero is a value to
+  // carry, and dropping it would break the line's continuity.
+  it('a run that began at measured zero still plateaus', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high', estimate: 3 },
+      }),
+      // The low series begins in Todo at a measured zero.
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'low', estimate: 0 },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'high', estimate: 2 },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({
+        chart: {
+          xField: 'status',
+          groupBy: 'priority',
+          agg: 'sum',
+          value: 'estimate',
+          cumulative: true,
+        },
+      }),
+      buildSchema(entries),
+    );
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 5, 1],
+      ['low', 0, 0],
+    ]);
   });
 
   it('no plateau before a series first appears — a zero run is absence, not zero', () => {

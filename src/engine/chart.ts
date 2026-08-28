@@ -336,6 +336,11 @@ export function computeChart(
           hue,
         });
       }
+      // Parts order by hue, always: a text-field groupBy alphabetizes
+      // sub-bands PER BAND while hues are first-seen ACROSS bands, and where
+      // the two orders disagree a series would change stack level between
+      // bands. Hue order pins each series to one level everywhere.
+      parts.sort((a, b) => a.hue - b.hue);
       s.parts = parts;
       // Under groupBy the band draws its visible stack, so the segments and
       // the total agree — while `count` stays the band's true row count.
@@ -369,13 +374,16 @@ export function computeChart(
         // A band that lacks a series must not dip the stack: the run is
         // carried forward as a synthesized plateau part — `count: 0`, because
         // no rows arrived here; the height is the run persisting — so every
-        // band's stack is the sum of all visible series' runs, monotonic
-        // non-decreasing. Only a series already begun gets one: before its
-        // first value a zero run is absence, and absent is never zero.
+        // band's stack is the sum of all begun series' runs, monotonic
+        // non-decreasing. Only a series already begun gets one, and "begun"
+        // is PRESENCE in the run map, not the run's value: a run that began
+        // at measured zero is a zero to carry, while before the first value
+        // there is nothing to carry — absent is never zero, in either
+        // direction.
         for (const item of series) {
           if (item.hidden) continue;
-          const r = seriesRun.get(item.key) ?? 0;
-          if (r === 0) continue;
+          if (!seriesRun.has(item.key)) continue;
+          const r = seriesRun.get(item.key)!;
           if (s.parts.some((p) => p.key === item.key)) continue;
           s.parts.push({
             key: item.key,
@@ -388,9 +396,8 @@ export function computeChart(
             hue: item.hue,
           });
         }
-        // A plateau must sit at its series' own stack level, so under
-        // cumulative the parts order by hue — for declared options that IS
-        // the per-band order they already had.
+        // Plateaus append at the end; restore the hue order the build pass
+        // established, so each sits at its series' own stack level.
         s.parts.sort((a, b) => a.hue - b.hue);
         s.value = s.parts.reduce((sum, p) => sum + p.value, 0);
         s.display = def === null ? String(s.value) : formatNumber(s.value, def);
