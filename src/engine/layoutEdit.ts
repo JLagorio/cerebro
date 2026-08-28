@@ -17,7 +17,9 @@ import type { LayoutConfig } from './types';
 
 /** Where a field can be addressed: the heading strip, the derived rest
  * stack, or a group by id. (The literals are documentation — the type is
- * `string` — because a group id is an open vocabulary.) */
+ * `string` — because a group id is an open vocabulary.) parseLayoutConfig
+ * guarantees the sentinels never name a group: a declared `id: heading` or
+ * `id: rest` re-mints at the parse door, exactly like a duplicate. */
 export type LayoutContainer = 'heading' | 'rest' | string;
 
 /**
@@ -42,7 +44,9 @@ export function mintGroupId(taken: string[]): string {
  * (dashboard.ts's moveWidget shape). Targeting `rest` is deletion alone; its
  * index is ignored because rest orders by roster declaration, not by the
  * config. A group id that names nothing, a name already at the landing
- * position, and a to-rest move of an unplaced name are all no-ops.
+ * position, and a to-rest move of an unplaced name are all no-ops. `to.index`
+ * counts CONFIG slots — a drag caller translating a visual drop slot owns the
+ * decrement, DashboardView's moveToSlot precedent (M44.4).
  */
 export function moveField(
   layout: LayoutConfig,

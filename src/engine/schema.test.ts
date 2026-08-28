@@ -502,6 +502,15 @@ describe('layout config (M45.1)', () => {
     ).toEqual(['g', 'group-2']);
   });
 
+  it('re-mints the container sentinels — heading and rest can never name a group', () => {
+    // layoutEdit's container-address grammar spells 'heading' | 'rest' | groupId,
+    // and Task 6's droppable ids extend it; a group wearing a sentinel would
+    // swallow drops meant for the real container (id: rest = silent deletion).
+    expect(
+      parseLayoutConfig({ groups: [{ id: 'heading' }, { id: 'rest' }] }).groups.map((g) => g.id),
+    ).toEqual(['group-1', 'group-2']);
+  });
+
   it('falls back group names and drops later claims across containers', () => {
     const l = parseLayoutConfig({
       heading: ['status'],

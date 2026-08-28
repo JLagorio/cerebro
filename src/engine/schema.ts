@@ -228,7 +228,12 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
   );
   const taken = new Set<string>();
   const owns = declaredIds.map((id) => {
-    if (id === '' || taken.has(id)) return false;
+    // 'heading' and 'rest' are container ADDRESSES, not ids a group may wear:
+    // layoutEdit's grammar is 'heading' | 'rest' | groupId, and the editor's
+    // droppable ids extend it — a group declaring a sentinel would swallow
+    // drops meant for the real container (id: rest = silent deletion). A
+    // hand-written sentinel re-mints, exactly like a duplicate.
+    if (id === '' || id === 'heading' || id === 'rest' || taken.has(id)) return false;
     taken.add(id);
     return true;
   });

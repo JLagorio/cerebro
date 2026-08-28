@@ -101,6 +101,11 @@ describe('moveField', () => {
   it('clamps a negative index to the front', () => {
     const next = moveField(base(), 'budget', { container: 'group-1', index: -5 });
     expect(next.groups[0].fields).toEqual(['budget', 'due', 'estimate']);
+    // -1 is the probe that catches raw slice arithmetic: unclamped it would
+    // land BEFORE the last member (['due', 'budget', 'estimate']), while -5
+    // happens to coincide with clamp-to-0 on a two-member array.
+    const probe = moveField(base(), 'budget', { container: 'group-1', index: -1 });
+    expect(probe.groups[0].fields).toEqual(['budget', 'due', 'estimate']);
   });
 
   it('counts a within-container slot with the moving name already out', () => {
@@ -220,6 +225,20 @@ describe('moveGroup', () => {
       'group-3',
       'group-1',
     ]);
+  });
+
+  it('clamps -1 to the front — three groups, where raw splice would land second-to-last', () => {
+    const wide = freezeLayout({
+      heading: [],
+      groups: [
+        { id: 'g-a', name: 'A', fields: [] },
+        { id: 'g-b', name: 'B', fields: [] },
+        { id: 'g-c', name: 'C', fields: [] },
+      ],
+    });
+    // Unclamped, splice(-1) would produce ['g-a', 'g-c', 'g-b']; a two-group
+    // fixture cannot tell the difference, so this one carries three.
+    expect(moveGroup(wide, 'g-c', -1).groups.map((g) => g.id)).toEqual(['g-c', 'g-a', 'g-b']);
   });
 
   it('is a no-op at the current position, clamped or not', () => {
