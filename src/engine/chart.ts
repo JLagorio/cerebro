@@ -7,6 +7,7 @@ import type {
   ChartSpec,
   Entry,
   FieldDef,
+  Group,
   GroupSpec,
   Presentation,
   Schema,
@@ -147,9 +148,13 @@ export function computeChart(
   const agg: ChartAgg = chart?.agg ?? 'count';
   const band: GroupSpec | undefined =
     chart?.xField !== undefined ? { field: chart.xField } : bandLevels(presentation.group)[0];
-  // `all-hidden` is the one blocked state with a roster: the legend must
+  // `all-hidden` is the one blocked state with rosters: the legend must
   // still list what was hidden, or there is no way back.
-  const empty = (blocked: ChartBlocked, bands: ChartRosterItem[] = []): ChartData => ({
+  const empty = (
+    blocked: ChartBlocked,
+    bands: ChartRosterItem[] = [],
+    series: ChartRosterItem[] = [],
+  ): ChartData => ({
     slices: [],
     total: 0,
     totalDisplay: '',
@@ -157,7 +162,7 @@ export function computeChart(
     axis: band === undefined ? '' : humanize(band.field),
     measure: measureLabel(chart),
     bands,
-    series: [],
+    series,
     blocked,
   });
 
@@ -270,27 +275,43 @@ export function computeChart(
   if (groupBy !== undefined && kind !== 'donut') {
     const hiddenSeries = new Set(chart?.hiddenG ?? []);
     const seriesHue = new Map<string, number>();
+    // The roster pass runs over EVERY band, hidden ones included. Undeclared
+    // values (text fields, ghosts, `__none__`) exist only where some band's
+    // rows put them, so a roster read off the visible bands would erase a
+    // series the moment its sole holder hid — renumbering every later hue and
+    // orphaning its hiddenG key. The roster lists what exists; hiding is
+    // state. Order is first-seen across bands — declared option order per
+    // band, empty declared options included, the way the band axis keeps
+    // empty bands — and the hue a series gets here is the hue it keeps.
+    const subsFor = new Map<string, Group[]>();
+    for (const s of slices) {
+      const subs = groupEntries(s.entries, groupBy, schema);
+      subsFor.set(s.key, subs);
+      for (const sub of subs) {
+        if (seriesHue.has(sub.key)) continue;
+        const hue = series.length;
+        seriesHue.set(sub.key, hue);
+        series.push({
+          key: sub.key,
+          label: sub.label,
+          color: sub.color,
+          hue,
+          hidden: hiddenSeries.has(sub.key),
+        });
+      }
+    }
+    // Hiding every series blanks the chart the same way hiding every band
+    // does. All-zero bars would claim a measured zero — absent is never zero —
+    // so this is the same typed state, carrying both rosters as the way back.
+    if (series.length > 0 && series.every((x) => x.hidden)) {
+      return empty('all-hidden', bands, series);
+    }
     for (const s of visible) {
       const parts: ChartSlicePart[] = [];
-      for (const sub of groupEntries(s.entries, groupBy, schema)) {
-        // The roster accumulates first-seen across bands — declared option
-        // order per band, empty declared options included, the way the band
-        // axis keeps empty bands. The hue a series gets here is the hue it
-        // keeps: filtering below never renumbers.
-        let hue = seriesHue.get(sub.key);
-        if (hue === undefined) {
-          hue = series.length;
-          seriesHue.set(sub.key, hue);
-          series.push({
-            key: sub.key,
-            label: sub.label,
-            color: sub.color,
-            hue,
-            hidden: hiddenSeries.has(sub.key),
-          });
-        }
+      for (const sub of subsFor.get(s.key) ?? []) {
         // An empty sub-band is no segment, and a hidden series draws nothing.
         if (sub.entries.length === 0 || hiddenSeries.has(sub.key)) continue;
+        const hue = seriesHue.get(sub.key)!;
         const partValue =
           agg === 'count'
             ? sub.entries.length
@@ -326,13 +347,29 @@ export function computeChart(
   const total = visible.reduce((sum, s) => sum + s.value, 0);
   // Running totals only where bands have an order to run along — never a
   // donut, whose whole is the sum and would double-count. The run covers the
-  // visible bands only: what the eye adds up is what the line draws.
+  // visible bands only: what the eye adds up is what the line draws. A
+  // stacked run cumulates PER SERIES — each segment becomes its own series'
+  // running total at that band, so the stack's height is the cumulated band
+  // total and every segment stays honest. A series absent from a band draws
+  // no segment there; its run resumes where it next appears.
   if (chart?.cumulative === true && kind !== 'donut') {
     let run = 0;
+    const seriesRun = new Map<string, number>();
     for (const s of visible) {
-      run += s.value;
-      s.value = run;
-      s.display = def === null ? String(run) : formatNumber(run, def);
+      if (s.parts !== undefined) {
+        for (const p of s.parts) {
+          const r = (seriesRun.get(p.key) ?? 0) + p.value;
+          seriesRun.set(p.key, r);
+          p.value = r;
+          p.display = def === null ? String(r) : formatNumber(r, def);
+        }
+        s.value = s.parts.reduce((sum, p) => sum + p.value, 0);
+        s.display = def === null ? String(s.value) : formatNumber(s.value, def);
+      } else {
+        run += s.value;
+        s.value = run;
+        s.display = def === null ? String(run) : formatNumber(run, def);
+      }
     }
   }
 

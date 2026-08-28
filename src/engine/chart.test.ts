@@ -34,6 +34,7 @@ const vault = (): Entry[] => [
         estimate: { kind: 'number' },
         cost: { kind: 'number', format: 'currency', precision: 0 },
         note: { kind: 'text' },
+        owner: { kind: 'text' },
       },
       statuses: [
         { id: 'todo', group: 'active', color: 'blue' },
@@ -46,19 +47,33 @@ const vault = (): Entry[] => [
     path: 'items/a.md',
     title: 'A',
     type: 'Work item',
-    properties: { status: 'todo', priority: 'high', estimate: 3, cost: 1200, note: 'x' },
+    properties: {
+      status: 'todo',
+      priority: 'high',
+      estimate: 3,
+      cost: 1200,
+      note: 'x',
+      owner: 'ann',
+    },
   }),
   makeEntry({
     path: 'items/b.md',
     title: 'B',
     type: 'Work item',
-    properties: { status: 'todo', priority: 'low', estimate: 5, cost: 800, note: 'y' },
+    properties: {
+      status: 'todo',
+      priority: 'low',
+      estimate: 5,
+      cost: 800,
+      note: 'y',
+      owner: 'ann',
+    },
   }),
   makeEntry({
     path: 'items/c.md',
     title: 'C',
     type: 'Work item',
-    properties: { status: 'doing', priority: 'high', estimate: 2, cost: 300 },
+    properties: { status: 'doing', priority: 'high', estimate: 2, cost: 300, owner: 'bob' },
   }),
 ];
 
@@ -500,6 +515,103 @@ describe('computeChart stacks and hides (M44.3)', () => {
     ]);
     expect(data.total).toBe(2);
     expect(data.max).toBe(2);
+  });
+
+  // Undeclared groupBy values (text, ghosts, __none__) exist only where a
+  // band's rows put them — so a roster built from the VISIBLE bands would
+  // erase a series when its sole holder is hidden, renumbering every later
+  // hue and orphaning its hiddenG key. The roster lists what EXISTS; hiding
+  // is state.
+  it('a hidden band does not erase its series from the roster or shift the hues', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/f.md',
+        title: 'F',
+        type: 'Work item',
+        properties: { status: 'done', owner: 'cara' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'owner', hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    // ann's only rows sit in the hidden Todo band, and she is still listed.
+    expect(data.series.map((s) => [s.key, s.hue])).toEqual([
+      ['ann', 0],
+      ['bob', 1],
+      ['cara', 2],
+    ]);
+    const doing = data.slices.find((s) => s.key === 'doing');
+    const done = data.slices.find((s) => s.key === 'done');
+    expect(doing?.parts?.map((p) => [p.key, p.hue])).toEqual([['bob', 1]]);
+    expect(done?.parts?.map((p) => [p.key, p.hue])).toEqual([['cara', 2]]);
+  });
+
+  it('hiding every series is all-hidden too — zero bars would claim a measured zero', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['high', 'low'] } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBe('all-hidden');
+    expect(data.slices).toEqual([]);
+    // Both rosters survive: the legend is the only way back, twice over.
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', false],
+      ['doing', false],
+      ['done', false],
+    ]);
+    expect(data.series.map((s) => [s.key, s.hidden])).toEqual([
+      ['high', true],
+      ['low', true],
+    ]);
+  });
+
+  it('stacked cumulative cumulates per series, and the stack is the sum of the runs', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/f.md',
+        title: 'F',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'low', estimate: 4 },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({
+        chart: {
+          xField: 'status',
+          groupBy: 'priority',
+          agg: 'sum',
+          value: 'estimate',
+          cumulative: true,
+          // Done holds no rows; omit it so every band carries both series.
+          omitZero: true,
+        },
+      }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    const doing = data.slices.find((s) => s.key === 'doing');
+    // Each segment is its own series' running total…
+    expect(todo?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 3],
+      ['low', 5],
+    ]);
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 5],
+      ['low', 9],
+    ]);
+    // …so every band's height is exactly its stack.
+    expect(todo?.value).toBe(8);
+    expect(doing?.value).toBe(14);
+    expect(data.max).toBe(14);
+    // And total stays the real (pre-cumulative) sum, as it always has.
+    expect(data.total).toBe(14);
   });
 });
 

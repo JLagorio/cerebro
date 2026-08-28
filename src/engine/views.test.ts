@@ -1049,7 +1049,7 @@ describe('serializeList', () => {
     it('drops a blank xField and malformed hidden lists', () => {
       expect(
         parse(
-          "presentation:\n  type: chart\n  chart:\n    xField: ''\n    hidden: todo\n    hiddenG: ['', 3]\n",
+          "presentation:\n  type: chart\n  chart:\n    xField: ''\n    hidden: todo\n    hiddenG: ['', 3, '  ']\n",
         ).chart,
       ).toBeUndefined();
       expect(
