@@ -181,6 +181,73 @@ function BarChart({ data, plotH }: { data: ChartData; plotH: number }) {
   );
 }
 
+const HPAD = { top: 16, right: 44, bottom: 16, left: 120 };
+
+/** Horizontal bars: categories run down the page, values run along x. Used
+ * when `chart.horizontal` is set — the same slices a vertical BarChart would
+ * draw, laid out sideways so long labels get room to breathe. */
+function HBarChart({
+  data,
+  chart,
+  h,
+}: {
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  h: number;
+}) {
+  const plotW = W - HPAD.left - HPAD.right;
+  const plotH = h - HPAD.top - HPAD.bottom;
+  const top = niceCeiling(data.max);
+  const band = plotH / data.slices.length;
+  const barH = Math.min(28, band * 0.62);
+  return (
+    <>
+      {data.slices.map((s, i) => {
+        const width = top === 0 ? 0 : (s.value / top) * plotW;
+        const y = HPAD.top + band * i + (band - barH) / 2;
+        return (
+          <g key={s.key || s.label}>
+            <text
+              x={HPAD.left - 8}
+              y={y + barH / 2}
+              textAnchor="end"
+              dominantBaseline="central"
+              fontSize={11}
+              fill="var(--n-500)"
+            >
+              {clip(s.label, HPAD.left)}
+            </text>
+            <rect
+              data-testid="chart-bar"
+              data-label={s.label}
+              data-value={s.value}
+              x={HPAD.left}
+              y={y}
+              width={s.value > 0 ? Math.max(1, width) : width}
+              height={barH}
+              rx={3}
+              fill={sliceColor(s, i)}
+            >
+              <title>{`${s.label}: ${s.display}`}</title>
+            </rect>
+            {chart?.hideLabels !== true && (
+              <text
+                x={HPAD.left + width + 6}
+                y={y + barH / 2}
+                dominantBaseline="central"
+                fontSize={11}
+                fill="var(--n-500)"
+              >
+                {s.display}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
 function LineChart({ data, plotH }: { data: ChartData; plotH: number }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
@@ -354,17 +421,21 @@ const BLOCKED: Record<
   },
 };
 
+const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4';
+
 export function ChartView({ entries, presentation, schema, filtered }: ChartViewProps) {
   const data = computeChart(entries, presentation, schema);
-  const kind: ChartKind = presentation.chart?.kind ?? 'bar';
-  const { H, PLOT_H } = plotDims(presentation.chart);
+  const chart = presentation.chart;
+  const kind: ChartKind = chart?.kind ?? 'bar';
+  const { H, PLOT_H } = plotDims(chart);
+  const horizontal = kind === 'bar' && chart?.horizontal === true;
 
   return (
     <div
       data-testid="chart-view"
       data-chart-kind={kind}
       data-chart-measure={data.measure}
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
+      className={ROOT_CLASSES}
     >
       {data.blocked !== null ? (
         <div data-testid="chart-empty" data-reason={data.blocked}>
@@ -378,6 +449,17 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
             description={BLOCKED[data.blocked].description}
           />
         </div>
+      ) : kind === 'number' ? (
+        // A number chart totals every visible row into one stat — there is no
+        // axis to caption, so it skips the figcaption every other kind gets.
+        <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
+          <div data-testid="chart-number" className="flex flex-col items-start gap-1 px-2 py-6">
+            <span className="text-[40px] font-semibold leading-none text-n-900">
+              {data.totalDisplay}
+            </span>
+            <span className="text-sm text-n-500">{data.measure}</span>
+          </div>
+        </figure>
       ) : (
         <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
           <figcaption className="pb-3 text-sm font-semibold text-n-800">
@@ -403,7 +485,9 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
               role="img"
               aria-label={`${data.measure} by ${data.axis}`}
             >
-              {kind === 'line' ? (
+              {horizontal ? (
+                <HBarChart data={data} chart={chart} h={H} />
+              ) : kind === 'line' ? (
                 <LineChart data={data} plotH={PLOT_H} />
               ) : (
                 <BarChart data={data} plotH={PLOT_H} />

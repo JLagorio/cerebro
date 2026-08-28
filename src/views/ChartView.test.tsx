@@ -191,6 +191,37 @@ describe('ChartView', () => {
     expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
   });
 
+  it('renders a number chart as one big stat, no axes', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [], chart: { kind: 'number' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const stat = screen.getByTestId('chart-number');
+    expect(stat.textContent).toContain('3');
+    expect(stat.textContent).toContain('Count');
+    expect(container.querySelector('svg')).toBeNull();
+  });
+
+  it('horizontal bars grow along x, one per band', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const bars = screen.getAllByTestId('chart-bar');
+    expect(bars.length).toBeGreaterThan(0);
+    for (const bar of bars) expect(Number(bar.getAttribute('height'))).toBeLessThanOrEqual(40);
+  });
+
   // Every colour must come from the token layer, so the chart follows the
   // theme instead of shipping its own palette.
   it('paints only in tokens — no literal hex anywhere in the svg', () => {
