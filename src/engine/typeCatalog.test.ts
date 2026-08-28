@@ -103,6 +103,23 @@ describe('serializeFields', () => {
     const entries = [typeDoc('Ticket', { properties: { fields: serializeFields(fields) } })];
     expect(buildSchema(entries).types.get('Ticket')?.fields).toEqual(fields);
   });
+
+  // M45.1: parseFieldDef reads all three of these; a serializer that drops
+  // them loses data on any def that round-trips (applyTypeLayout's ADDED path).
+  it('keeps visibility, dateFormat, and timeFormat on the spec', () => {
+    const fields: FieldDef[] = [
+      { name: 'due', kind: 'date', dateFormat: 'full', timeFormat: '24', visibility: 'hide' },
+    ];
+    const spec = serializeFields(fields).due as Record<string, unknown>;
+    expect(spec).toMatchObject({ dateFormat: 'full', timeFormat: '24', visibility: 'hide' });
+    const entries = [typeDoc('Ticket', { properties: { fields: serializeFields(fields) } })];
+    expect(buildSchema(entries).types.get('Ticket')?.fields).toEqual(fields);
+  });
+
+  it('emits none of the three keys when the def carries none (deviations only)', () => {
+    const spec = serializeFields([{ name: 'due', kind: 'date' }]).due as Record<string, unknown>;
+    expect(spec).toEqual({ kind: 'date' });
+  });
 });
 
 describe('typeStyle', () => {

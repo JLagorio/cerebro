@@ -222,6 +222,12 @@ function fieldToSpec(def: FieldDef): unknown {
   if (def.calculate !== undefined) spec.calculate = def.calculate;
   if (def.format !== undefined && def.format !== 'plain') spec.format = def.format;
   if (def.precision !== undefined) spec.precision = def.precision;
+  // Deviations only, like parseFieldDef's defaults: absent visibility = show,
+  // absent formats = 'short' / '12'. Dropping a set one here loses data on
+  // every round-trip (M45.1: applyTypeLayout serializes ADDED fields with this).
+  if (def.dateFormat !== undefined) spec.dateFormat = def.dateFormat;
+  if (def.timeFormat !== undefined) spec.timeFormat = def.timeFormat;
+  if (def.visibility !== undefined) spec.visibility = def.visibility;
   return spec;
 }
 
