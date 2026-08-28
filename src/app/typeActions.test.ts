@@ -379,6 +379,31 @@ describe('setTypeTabs (M44.5)', () => {
     expect(ok).toBe(false);
     expect(toasts).toEqual([]);
   });
+
+  it('doc-null and a saved list creates the Type doc via ensureTypeDoc', async () => {
+    const ok = await setTypeTabs({ name: 'Ghost Type', docPath: null }, [
+      { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+    ]);
+    expect(ok).toBe(true);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: {
+          type: 'Type',
+          tabs: [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }],
+        },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and an empty list returns true and writes nothing', async () => {
+    const ok = await setTypeTabs({ name: 'Ghost Type', docPath: null }, []);
+    expect(ok).toBe(true);
+    expect(created).toEqual([]);
+    expect(patches).toEqual([]);
+  });
 });
 
 describe('addPropertyToEntry', () => {
