@@ -218,6 +218,7 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
               draft={draft}
               previewEntry={previewEntry}
               schema={schema}
+              update={update}
             />
             <div
               data-testid="layout-rail"

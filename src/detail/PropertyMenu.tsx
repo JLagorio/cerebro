@@ -37,8 +37,10 @@ import { ConfirmDeleteProperty, PropertyEditor } from '@/views/PropertyEditor';
  * options of a property are the type's, and every record of that type sees
  * the change. The footer says so rather than leaving it to be discovered.
  */
-/** Notion's three, verbatim and in its order. */
-const VISIBILITIES: { value: FieldVisibility; label: string; icon: string }[] = [
+/** Notion's three, verbatim and in its order. Exported for the layout
+ * editor's group rows (M45.3), whose ⋯ carries the same vocabulary —
+ * shared so "verbatim" is enforced by construction, not by review. */
+export const VISIBILITIES: { value: FieldVisibility; label: string; icon: string }[] = [
   { value: 'show', label: 'Always show', icon: 'eye' },
   { value: 'hide_when_empty', label: 'Hide when empty', icon: 'eye-off' },
   { value: 'hide', label: 'Always hide', icon: 'ban' },

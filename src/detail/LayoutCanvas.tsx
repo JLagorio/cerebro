@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TypeLayoutDraft } from '@/app/typeActions';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
 import { GroupLabel } from '@/detail/GroupLabel';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
@@ -70,12 +71,37 @@ export function LayoutCanvas({
   draft,
   previewEntry,
   schema,
+  update,
 }: {
   typeDef: TypeDef;
   draft: TypeLayoutDraft;
   previewEntry: Entry;
   schema: Schema;
+  /** The draft's one door — handed through to the group editor (M45.3). */
+  update: (patch: Partial<TypeLayoutDraft>) => void;
 }) {
+  // Which container's group editor is open. The shells register their DOM
+  // nodes in a map read LAZILY by the popover's anchor, so an editor opened
+  // on a container whose shell mounts in the same commit (Add section)
+  // still measures against the real node.
+  const [editing, setEditing] = useState<string | null>(null);
+  const shells = useRef(new Map<string, HTMLDivElement>());
+  const anchorRef = useMemo(
+    () => ({
+      get current() {
+        return editing === null ? null : (shells.current.get(editing) ?? null);
+      },
+    }),
+    [editing],
+  );
+  // A container the draft no longer holds (Delete section) has nothing to
+  // edit — heading and rest are structural and always valid.
+  const editingValid =
+    editing !== null &&
+    (editing === 'heading' ||
+      editing === 'rest' ||
+      draft.layout.groups.some((g) => g.id === editing));
+
   const previewLayout = resolveLayout(draft.layout, draftRoster(typeDef.fields, draft.added));
   // The canvas folds what the page folds (M45.3): the panels' predicate with
   // the DRAFT overlaid — staged visibility on each def, staged showEmpty into
@@ -105,6 +131,12 @@ export function LayoutCanvas({
     </PropertyRow>
   );
 
+  const openEditor = (container: string) => () => setEditing(container);
+  const registerShell = (container: string) => (el: HTMLDivElement | null) => {
+    if (el === null) shells.current.delete(container);
+    else shells.current.set(container, el);
+  };
+
   return (
     /* The canvas container is LIVE (M45.3): interactivity belongs to the
        BlockShells inside it, and the `inert` that used to sit here moved
@@ -129,7 +161,12 @@ export function LayoutCanvas({
             only door to un-hiding its fields would fold away with them. The
             heading's shell is unconditional for the same reason: it is
             "Move to heading"'s target even while nothing shows there. */}
-        <BlockShell container="heading" label="Heading" interactive>
+        <BlockShell
+          container="heading"
+          label="Heading"
+          onOpen={openEditor('heading')}
+          shellRef={registerShell('heading')}
+        >
           {headingShown ? (
             <HeadingProperties
               entry={previewEntry}
@@ -146,33 +183,42 @@ export function LayoutCanvas({
         <div className="flex flex-col gap-[7px]">
           {previewLayout.groups.map((g) => {
             const rows = canvasRows(g.fields);
-            if (rows.length === 0) {
-              // Structurally empty (the editor's drop target) and emptied by
-              // FOLDING both keep the shell; the hint tells them apart,
-              // because "hidden" and "absent" are different sentences.
-              return (
-                <BlockShell key={g.id} container={g.id} label={g.name} interactive>
-                  <ShellEmptyHint label={g.name} structural={g.fields.length === 0} />
-                </BlockShell>
-              );
-            }
             return (
-              <BlockShell key={g.id} container={g.id} label={g.name} interactive>
-                <div
-                  data-testid="property-group"
-                  data-group={g.id}
-                  className="flex flex-col gap-[7px]"
-                >
-                  <GroupLabel name={g.name} />
-                  {rows.map(previewRow)}
-                </div>
+              <BlockShell
+                key={g.id}
+                container={g.id}
+                label={g.name}
+                onOpen={openEditor(g.id)}
+                shellRef={registerShell(g.id)}
+              >
+                {rows.length === 0 ? (
+                  // Structurally empty (the editor's drop target) and emptied
+                  // by FOLDING both keep the shell; the hint tells them
+                  // apart, because "hidden" and "absent" are different
+                  // sentences.
+                  <ShellEmptyHint label={g.name} structural={g.fields.length === 0} />
+                ) : (
+                  <div
+                    data-testid="property-group"
+                    data-group={g.id}
+                    className="flex flex-col gap-[7px]"
+                  >
+                    <GroupLabel name={g.name} />
+                    {rows.map(previewRow)}
+                  </div>
+                )}
               </BlockShell>
             );
           })}
           {/* Rest LAST and headerless, RecordProperties' own order.
               Its shell says "Properties" — the block's Notion name,
               since headerless content has no label of its own. */}
-          <BlockShell container="rest" label="Properties" interactive>
+          <BlockShell
+            container="rest"
+            label="Properties"
+            onOpen={openEditor('rest')}
+            shellRef={registerShell('rest')}
+          >
             {restRows.length > 0 ? (
               <div className="flex flex-col gap-[7px]">{restRows.map(previewRow)}</div>
             ) : (
@@ -209,6 +255,20 @@ export function LayoutCanvas({
           </div>
         )}
       </div>
+      {editing !== null && editingValid && (
+        // Keyed by container: retargeting the editor (Add section opens the
+        // fresh group's) must reseed its steps and name draft, the same
+        // remount rule the dialog applies per type.
+        <GroupEditorPopover
+          key={editing}
+          container={editing}
+          typeDef={typeDef}
+          draft={draft}
+          update={update}
+          anchorRef={anchorRef}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }
@@ -254,27 +314,41 @@ function ShellEmptyHint({ label, structural }: { label: string; structural: bool
 function BlockShell({
   container,
   label,
-  interactive = false,
+  onOpen,
+  shellRef,
   children,
 }: {
   /** 'heading' | groupId | 'rest' | 'content' | 'tabs' — Task 5/6's address. */
   container: string;
   label: string;
-  /** Marks a container the group editor can open on (Task 5). */
-  interactive?: boolean;
+  /** Opens this container's group editor; absent on the demoted chrome. */
+  onOpen?: () => void;
+  /** Registers the shell node as the group editor's popover anchor. */
+  shellRef?: (el: HTMLDivElement | null) => void;
   children: ReactNode;
 }) {
+  const interactive = onOpen !== undefined;
   return (
     <div
+      ref={shellRef}
       {...(interactive ? { role: 'button', tabIndex: 0, 'aria-label': label } : {})}
       data-testid="layout-block"
       data-block={container}
-      // TODO(M45.3 Task 5): onClick opens this container's group editor. The
-      // attributes land here so tests and e2e can address blocks; the handler
-      // lands with the popover so no dead no-op ships in between.
+      onClick={onOpen}
+      // Enter AND Space on keydown — role=button's activation contract, the
+      // same editor the click opens.
+      onKeyDown={
+        onOpen === undefined
+          ? undefined
+          : (e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onOpen();
+            }
+      }
       className={[
         'group/block relative rounded-md ring-cortex-500 hover:ring-1',
-        interactive ? 'focus-visible:outline-none focus-visible:ring-1' : '',
+        interactive ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-1' : '',
       ].join(' ')}
     >
       <span className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700 opacity-0 group-hover/block:opacity-100 group-focus-visible/block:opacity-100">
