@@ -55,13 +55,17 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   const allDeclared = typeDef?.fields ?? [];
   const declaredNames = new Set(allDeclared.map((f) => f.name));
 
+  const showEmpty = typeDef?.display.showEmpty === true;
+
   // M16.10. Revealing folds the hidden rows back into the same list, which
-  // also makes the reorder mapping below the identity case.
+  // also makes the reorder mapping below the identity case. M44.1: when the
+  // type says empty properties are load-bearing there is nothing to fold and
+  // no toggle to draw — `declared` is `allDeclared` outright.
   const [revealed, setRevealed] = useState(false);
   const { shown, hidden } = splitByVisibility(allDeclared, (f) =>
     isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
   );
-  const declared = revealed ? allDeclared : shown;
+  const declared = showEmpty || revealed ? allDeclared : shown;
   const undeclared = visibleProperties([
     ...Object.keys(entry.properties),
     ...Object.keys(entry.relationships),
@@ -131,7 +135,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           </PropertyRow>
         ))}
       </div>
-      {hidden.length > 0 && (
+      {!showEmpty && hidden.length > 0 && (
         // Notion's expander. Hidden properties are still ON the record — they
         // are folded, not dropped — so the panel says how many and opens them
         // in place rather than sending anyone to a settings screen.
