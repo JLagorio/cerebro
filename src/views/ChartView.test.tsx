@@ -470,6 +470,23 @@ describe('ChartView', () => {
     expect(label?.getAttribute('fill')).toBe('var(--n-0)');
   });
 
+  it('the caption names the deviations: cumulative and sort', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { agg: 'sum', value: 'estimate', cumulative: true, sort: 'value-desc' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const caption = screen.getByTestId('chart-caption');
+    expect(caption.textContent).toContain('cumulative');
+    expect(caption.textContent).toContain('biggest first');
+  });
+
   // Every colour must come from the token layer, so the chart follows the
   // theme instead of shipping its own palette.
   it('paints only in tokens — no literal hex anywhere in the svg', () => {

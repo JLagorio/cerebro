@@ -49,6 +49,13 @@ function plotDims(chart: ChartSpec | undefined): { H: number; PLOT_H: number } {
   return { H, PLOT_H: H - PAD.top - PAD.bottom };
 }
 
+/** The palette's base hue: the swatch the word names, or the first pickable
+ * hue when it resolves to `default` — neutral grey draws every band alike. */
+function paletteBase(palette: string): string {
+  const swatch = resolveOptionColor(palette);
+  return swatch.name !== 'default' ? swatch.solid : `var(--opt-${PICKABLE_OPTION_COLORS[0]})`;
+}
+
 /**
  * A band's colour: its own when it declares one, otherwise the next hue in the
  * option palette.
@@ -58,13 +65,6 @@ function plotDims(chart: ChartSpec | undefined): { H: number; PLOT_H: number } {
  * no-value bucket stays neutral on purpose: "no status" is an absence, and
  * giving it a hue makes it look like one more status.
  */
-/** The palette's base hue: the swatch the word names, or the first pickable
- * hue when it resolves to `default` — neutral grey draws every band alike. */
-function paletteBase(palette: string): string {
-  const swatch = resolveOptionColor(palette);
-  return swatch.name !== 'default' ? swatch.solid : `var(--opt-${PICKABLE_OPTION_COLORS[0]})`;
-}
-
 export function sliceColor(
   slice: ChartSlice,
   index: number,
@@ -131,6 +131,17 @@ const tick = (n: number) => String(Number(n.toFixed(2)));
 function clip(label: string, band: number): string {
   const max = Math.max(4, Math.floor(band / 7));
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
+}
+
+/** The caption's trailing clauses — only DEVIATIONS are worth a word. */
+function captionNotes(chart: ChartSpec | undefined): string[] {
+  const notes: string[] = [];
+  if (chart?.cumulative === true) notes.push('cumulative');
+  if (chart?.sort === 'value-desc') notes.push('biggest first');
+  if (chart?.sort === 'value-asc') notes.push('smallest first');
+  if (chart?.sort === 'label') notes.push('A to Z');
+  if (chart?.omitZero === true) notes.push('zeroes omitted');
+  return notes;
 }
 
 function Axes({
@@ -564,6 +575,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
   // The donut defaults its legend on — the ring has no other labels; the
   // axis kinds default off and can opt in.
   const showLegend = chart?.legend ?? kind === 'donut';
+  const notes = captionNotes(chart);
 
   return (
     <div
@@ -597,9 +609,12 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
         </figure>
       ) : (
         <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
-          <figcaption className="pb-3 text-sm font-semibold text-n-800">
+          <figcaption data-testid="chart-caption" className="pb-3 text-sm font-semibold text-n-800">
             {data.measure}
             <span className="pl-1.5 font-normal text-n-500">by {data.axis}</span>
+            {notes.length > 0 && (
+              <span className="pl-1.5 font-normal text-n-400">· {notes.join(' · ')}</span>
+            )}
           </figcaption>
           {kind === 'donut' ? (
             data.total <= 0 ? (
