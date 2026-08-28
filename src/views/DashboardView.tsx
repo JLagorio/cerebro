@@ -309,12 +309,20 @@ function WidgetMenuButton({
   // What the board bands by when no override is stored — named in the roster
   // so "back to default" is a choice, not a mystery.
   const defaultBand = fields.find((f) => f.kind === 'status')?.name;
+  // The two kinds that read `widget.group` (engine/dashboard.ts's
+  // WidgetPatch docstring) — same picker, different word for what it means:
+  // a board BANDS, a chart's group is its X AXIS.
+  const isChart = widget.kind === 'chart';
+  const bandsBy = widget.kind === 'board' || isChart;
+  const bandTitle = isChart ? 'X axis' : 'Band by';
+  const currentGroup =
+    widget.kind === 'board' || widget.kind === 'chart' ? widget.group : undefined;
 
   const items: ContextMenuItem[] = [
     { icon: 'pencil', label: 'Rename…', onSelect: () => edit.setRenamingId(widget.id) },
     { icon: 'list-filter', label: 'Filter…', onSelect: () => setSurface('filter') },
-    ...(widget.kind === 'board'
-      ? [{ icon: 'columns-3', label: 'Band by…', onSelect: () => setSurface('band') }]
+    ...(bandsBy
+      ? [{ icon: 'columns-3', label: `${bandTitle}…`, onSelect: () => setSurface('band') }]
       : []),
     {
       icon: 'copy',
@@ -390,15 +398,15 @@ function WidgetMenuButton({
           anchorRef={ref}
           onClose={() => setSurface(null)}
           role="menu"
-          ariaLabel={`Band by: ${title}`}
+          ariaLabel={`${bandTitle}: ${title}`}
         >
           <MenuSurface width={200}>
-            <MenuLabel>Band by</MenuLabel>
-            {/* The way back: clearing the override returns the board to its
+            <MenuLabel>{bandTitle}</MenuLabel>
+            {/* The way back: clearing the override returns the widget to its
                 resolved default rather than leaving `group:` stuck forever. */}
             <MenuItem
               label={defaultBand !== undefined ? `Default (${humanize(defaultBand)})` : 'Default'}
-              checked={widget.kind === 'board' && widget.group === undefined}
+              checked={currentGroup === undefined}
               onSelect={() => {
                 setSurface(null);
                 edit.commit(updateWidget(edit.spec, widget.id, { group: undefined }));
@@ -408,7 +416,7 @@ function WidgetMenuButton({
               <MenuItem
                 key={f.name}
                 label={humanize(f.name)}
-                checked={widget.kind === 'board' && widget.group === f.name}
+                checked={currentGroup === f.name}
                 onSelect={() => {
                   setSurface(null);
                   edit.commit(updateWidget(edit.spec, widget.id, { group: f.name }));
@@ -417,7 +425,9 @@ function WidgetMenuButton({
             ))}
             {groupable.length === 0 && (
               <p className="m-0 px-2 py-1 text-2xs leading-[15px] text-n-400">
-                No property in these rows can band a board.
+                {isChart
+                  ? 'No property in these rows can set an axis.'
+                  : 'No property in these rows can band a board.'}
               </p>
             )}
           </MenuSurface>
@@ -885,7 +895,19 @@ function TableWidget({
   );
 }
 
-function BoardWidget({ widget, entries, spec, schema }: OwnScopeProps<'board'>) {
+function BoardWidget({
+  widget,
+  entries,
+  spec,
+  schema,
+  canEdit,
+}: OwnScopeProps<'board'> & {
+  /** Whether this host has an Edit corner at all — a read-only host (no
+   * `onPresentationChange`) has no toggle to send the reader to, so the
+   * no-band note can't point at one. Same split as the dashboard-level
+   * `EmptyState` above. */
+  canEdit: boolean;
+}) {
   const scoped = widgetEntries(entries, spec, widget, schema);
   const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
   // The stored band, else the first status-kind field of the scoped rows —
@@ -899,7 +921,11 @@ function BoardWidget({ widget, entries, spec, schema }: OwnScopeProps<'board'>) 
         widget={widget}
         title={widget.title ?? defaultWidgetTitle(widget)}
         icon="square-kanban"
-        message="Toggle Edit and pick Band by… in the widget menu."
+        message={
+          canEdit
+            ? 'Toggle Edit and pick Band by… in the widget menu.'
+            : 'No status property to band by.'
+        }
       />
     );
   }
@@ -1299,16 +1325,20 @@ export function DashboardView({
     (next: DashboardSpec) => onPresentationChange?.({ ...presentation, dashboard: next }),
     [onPresentationChange, presentation],
   );
-  /** One door for every structural edit: an ok writes, a refusal speaks. */
+  /** One door for every structural edit: an ok writes, a refusal speaks, and
+   * an editor that clamped back to the exact spec it was handed (Move left
+   * at a row's edge, and the like) is an identity edit — nothing changed, so
+   * there is nothing to persist. */
   const commit = useCallback(
     (edit: DashboardEdit) => {
       if (!edit.ok) {
         toast(edit.reason);
         return;
       }
+      if (edit.spec === spec) return;
       write(edit.spec);
     },
-    [toast, write],
+    [toast, write, spec],
   );
 
   const globalDefs = useMemo(
@@ -1492,6 +1522,7 @@ export function DashboardView({
                               entries={entries}
                               spec={spec}
                               schema={schema}
+                              canEdit={canEdit}
                             />
                           ) : widget.kind === 'timeline' ? (
                             <TimelineWidget

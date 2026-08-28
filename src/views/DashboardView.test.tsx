@@ -408,9 +408,30 @@ describe('DashboardView own-scope widgets (M44.4)', () => {
     ).toBeTruthy();
   });
 
-  it('a board widget with no resolvable band asks for configuration, not "no data"', () => {
+  it('a board widget with no resolvable band asks for configuration, not "no data" — on a host that can edit', () => {
     // No status-kind field anywhere: the vault() fixture's Type is absent and
     // the records carry only plain text properties.
+    const entries: Entry[] = [
+      makeEntry({ path: 'items/a.md', title: 'Alpha', type: null, properties: { note: 'x' } }),
+    ];
+    render(
+      <DashboardView
+        entries={entries}
+        presentation={oneWidget({ id: 'bd', kind: 'board' })}
+        schema={buildSchema(entries)}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    const widget = screen.getByTestId('widget-bd');
+    expect(widget.querySelector('[data-testid="board-view"]')).toBeNull();
+    expect(
+      within(widget).getByText('Toggle Edit and pick Band by… in the widget menu.'),
+    ).toBeTruthy();
+  });
+
+  // Same no-band gap, a read-only host: no `onPresentationChange` means no
+  // Edit corner exists at all, so the note cannot send the reader to one.
+  it('a board widget with no resolvable band on a read-only host names the gap, not a toggle', () => {
     const entries: Entry[] = [
       makeEntry({ path: 'items/a.md', title: 'Alpha', type: null, properties: { note: 'x' } }),
     ];
@@ -423,9 +444,8 @@ describe('DashboardView own-scope widgets (M44.4)', () => {
     );
     const widget = screen.getByTestId('widget-bd');
     expect(widget.querySelector('[data-testid="board-view"]')).toBeNull();
-    expect(
-      within(widget).getByText('Toggle Edit and pick Band by… in the widget menu.'),
-    ).toBeTruthy();
+    expect(within(widget).getByText('No status property to band by.')).toBeTruthy();
+    expect(within(widget).queryByText(/Toggle Edit/)).toBeNull();
   });
 
   it('a timeline widget renders read-only', () => {
@@ -688,6 +708,17 @@ describe('DashboardView edit mode (M44.4)', () => {
     expect(ids(lastDashboard(onChange))).toEqual([['b']]);
   });
 
+  // moveWithinRow clamps at the row's own ends rather than wrapping — Move
+  // left on the leftmost widget returns the SAME spec reference it was
+  // handed (engine/dashboard.test.ts's own "clamped" case). Without an
+  // identity check, `commit` wrote that no-op straight to disk anyway.
+  it('Move left on the leftmost widget is a no-op — nothing commits', () => {
+    const onChange = editSetup(oneRow([countWidget('a'), countWidget('b')]));
+    fireEvent.click(within(screen.getByTestId('widget-a')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move left' }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('a cap refusal toasts the exact rule sentence and commits nothing', () => {
     const toast = vi.fn();
     useUiStore.setState({ toast });
@@ -748,6 +779,26 @@ describe('DashboardView edit mode (M44.4)', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Default (Status)' }));
     const widget = lastDashboard(onChange).rows[0].widgets[0];
     expect('group' in widget).toBe(false);
+  });
+
+  // A minted chart widget has no `group` — engine/dashboard.ts's
+  // WidgetPatch docstring says the menu only offers the key on the kinds
+  // that read it, and ChartWidget reads `widget.group` for its X axis the
+  // same way BoardWidget reads it for its band. Without this item a
+  // group-less chart was a permanent dead end: no control on the tile could
+  // ever set the one property its own no-group refusal demands.
+  it("a chart widget's menu offers X axis…, not Band by…, and writes widget.group", () => {
+    const onChange = editSetup(oneRow([{ id: 'ch', kind: 'chart' }]));
+    fireEvent.click(within(screen.getByTestId('widget-ch')).getByTestId('widget-menu'));
+    expect(screen.queryByRole('menuitem', { name: 'Band by…' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'X axis…' }));
+    // The same groupable roster as a board's Band by… — status and select.
+    expect(screen.queryByRole('menuitem', { name: 'Estimate' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Priority' }));
+    expect(lastDashboard(onChange).rows[0].widgets[0]).toMatchObject({
+      kind: 'chart',
+      group: 'priority',
+    });
   });
 
   it('renaming a custom-titled widget shows the default as placeholder, and empty clears', () => {
