@@ -457,13 +457,12 @@ export const CHART_HEIGHTS = ['s', 'm', 'l', 'xl'] as const;
 export type ChartHeight = (typeof CHART_HEIGHTS)[number];
 
 /**
- * The chart's own settings (M16.27).
+ * The chart's own settings (M16.27; the axis decoupled in M44.3).
  *
- * Its X AXIS IS NOT HERE — that is `group`, the same grouping chain every
- * other layout reads, and its first band level is the axis. The chart is
- * therefore configured by the Group control the toolbar already has, a saved
- * board re-opened as a chart charts what the board was banded by, and there is
- * no second "group by" for the two to drift apart on.
+ * The X axis lives here when `xField` names it. Absent, the axis is `group`'s
+ * first band level — the same grouping chain every other layout reads — so a
+ * saved board re-opened as a chart still charts what the board was banded by,
+ * and every chart saved before `xField` existed renders unchanged.
  */
 export interface ChartSpec {
   /** Absent = 'bar'. */
@@ -498,6 +497,16 @@ export interface ChartSpec {
   hideDonutCenter?: boolean;
   /** Absent = the kind's own default: a donut shows one, the rest don't. */
   legend?: boolean;
+  /** The X axis property (M44.3). Absent = the view's grouping chain's first
+   * band — the M16.27 default, kept so every saved chart renders unchanged. */
+  xField?: string;
+  /** Second dimension: splits each band into stacked/series parts (M44.3).
+   * Unread by donut and number. */
+  groupBy?: string;
+  /** Band keys the legend has hidden. Totals and the ring reflect the rest. */
+  hidden?: string[];
+  /** Series keys the legend has hidden. */
+  hiddenG?: string[];
 }
 
 /**

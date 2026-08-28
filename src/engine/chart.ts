@@ -2,17 +2,24 @@ import { groupTree } from './grouping';
 import { aggregateNumbers, formatNumber } from './properties';
 import { humanize } from './schema';
 import { bandLevels } from './types';
-import type { ChartAgg, ChartSpec, Entry, FieldDef, Presentation, Schema } from './types';
+import type {
+  ChartAgg,
+  ChartSpec,
+  Entry,
+  FieldDef,
+  GroupSpec,
+  Presentation,
+  Schema,
+} from './types';
 
 /**
- * What a chart draws (M16.27).
+ * What a chart draws (M16.27; the axis decoupled in M44.3).
  *
- * The chart owns no grouping of its own. Its X axis IS the view's grouping
- * chain — `groupTree` with the first band level — so a board re-opened as a
- * chart charts what the board was banded by, the declared option order and the
- * "No <field>" bucket carry over unchanged (unless `chart.sort` reorders the
- * bands — M44.2), and there is no second grouping control for the two to
- * drift apart on.
+ * The X axis is `chart.xField` when set. Absent, it is the view's grouping
+ * chain's first band level — the M16.27 default, kept so a board re-opened as
+ * a chart still charts what the board was banded by, declared option order and
+ * "No <field>" bucket included, and every chart saved before `xField` existed
+ * renders identically.
  *
  * The Y axis reuses `aggregateNumbers`, the same arithmetic a rollup column
  * runs. A chart that summed its own way would disagree with the number in the
@@ -100,7 +107,8 @@ export function computeChart(
   const chart = presentation.chart;
   const kind = chart?.kind ?? 'bar';
   const agg: ChartAgg = chart?.agg ?? 'count';
-  const band = bandLevels(presentation.group)[0];
+  const band: GroupSpec | undefined =
+    chart?.xField !== undefined ? { field: chart.xField } : bandLevels(presentation.group)[0];
   const empty = (blocked: ChartBlocked): ChartData => ({
     slices: [],
     total: 0,
@@ -153,8 +161,6 @@ export function computeChart(
   }
 
   if (band === undefined) return empty('no-group');
-  // One band level only: a chart has one X axis, and levels beyond the first
-  // would have to become a stacked series, which is not this commit.
   const nodes = groupTree(entries, [band], schema);
 
   let measured = 0;

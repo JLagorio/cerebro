@@ -71,7 +71,15 @@ export function clonePresentation(p: Presentation): Presentation {
     // hand two views the same one — editing the gallery's card size in a
     // duplicated tab would change it in the tab it was duplicated from.
     ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
-    ...(p.chart !== undefined ? { chart: { ...p.chart } } : {}),
+    ...(p.chart !== undefined
+      ? {
+          chart: {
+            ...p.chart,
+            ...(p.chart.hidden !== undefined ? { hidden: [...p.chart.hidden] } : {}),
+            ...(p.chart.hiddenG !== undefined ? { hiddenG: [...p.chart.hiddenG] } : {}),
+          },
+        }
+      : {}),
     ...(p.dashboard !== undefined
       ? { dashboard: { blocks: p.dashboard.blocks.map((b) => ({ ...b })) } }
       : {}),
@@ -342,6 +350,19 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (obj.hideDonutCenter === true) spec.hideDonutCenter = true;
   // legend is a real boolean either way: donuts store `legend: false`, bars `legend: true`.
   if (typeof obj.legend === 'boolean') spec.legend = obj.legend;
+  if (typeof obj.xField === 'string' && obj.xField.trim() !== '') spec.xField = obj.xField.trim();
+  if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '')
+    spec.groupBy = obj.groupBy.trim();
+  // The hidden lists hold band/series KEYS. Only non-empty strings are keys;
+  // a list that filters to nothing stores nothing (M44.3).
+  if (Array.isArray(obj.hidden)) {
+    const keys = obj.hidden.filter((k): k is string => typeof k === 'string' && k !== '');
+    if (keys.length > 0) spec.hidden = keys;
+  }
+  if (Array.isArray(obj.hiddenG)) {
+    const keys = obj.hiddenG.filter((k): k is string => typeof k === 'string' && k !== '');
+    if (keys.length > 0) spec.hiddenG = keys;
+  }
   return Object.keys(spec).length === 0 ? undefined : spec;
 }
 

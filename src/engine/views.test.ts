@@ -448,6 +448,23 @@ describe('views', () => {
     expect(copy.whiteboard).not.toBe(p.whiteboard);
   });
 
+  it('clonePresentation deep-copies the chart legend arrays', () => {
+    const p: Presentation = {
+      type: 'chart',
+      group: [{ field: 'status' }],
+      sort: [],
+      columns: [],
+      chart: { xField: 'priority', hidden: ['todo'], hiddenG: ['low'] },
+    };
+    const copy = clonePresentation(p);
+    // Toggling a legend row in a duplicated tab must not toggle it in the
+    // tab it was duplicated from.
+    copy.chart?.hidden?.push('doing');
+    expect(p.chart?.hidden).toEqual(['todo']);
+    expect(copy.chart?.hiddenG).toEqual(p.chart?.hiddenG);
+    expect(copy.chart?.hiddenG).not.toBe(p.chart?.hiddenG);
+  });
+
   it('drops a nonsense frozen count rather than pinning by a fraction', () => {
     const def = parseListYaml(
       'bad',
@@ -941,9 +958,9 @@ describe('serializeList', () => {
     });
 
     /**
-     * The chart's settings (M16.27). Note what is NOT here: the X axis, which
-     * is the grouping chain and round-trips as `group` like every other
-     * layout's.
+     * The chart's settings (M16.27; the X axis joined them as `xField` in
+     * M44.3 — absent, the axis still derives from `group`, which round-trips
+     * like every other layout's).
      */
     it('round-trips the chart block', () => {
       const def = oneView(
@@ -1004,6 +1021,40 @@ describe('serializeList', () => {
         },
       );
       expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('round-trips the M44.3 axis and legend keys', () => {
+      const def = oneView(
+        {
+          name: 'Burndown',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'chart',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [],
+          chart: { xField: 'priority', groupBy: 'status', hidden: ['todo'], hiddenG: ['low'] },
+        },
+      );
+      expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    // A blank axis field is no axis, a hidden list that is not an array names
+    // nothing, and an array that filters to nothing stores nothing — the same
+    // "only real values are stored" rule every other chart key follows.
+    it('drops a blank xField and malformed hidden lists', () => {
+      expect(
+        parse(
+          "presentation:\n  type: chart\n  chart:\n    xField: ''\n    hidden: todo\n    hiddenG: ['', 3]\n",
+        ).chart,
+      ).toBeUndefined();
+      expect(
+        parse("presentation:\n  type: chart\n  chart:\n    hidden: ['ok', 7, '']\n").chart,
+      ).toEqual({ hidden: ['ok'] });
     });
 
     it('drops a chart sort and height nothing implements', () => {

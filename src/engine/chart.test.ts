@@ -6,13 +6,14 @@ import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation } from '@/engine/types';
 
 /**
- * The chart engine (M16.27).
+ * The chart engine (M16.27; the axis decoupled in M44.3).
  *
- * Two rules it exists to keep. Its X axis is the view's GROUPING CHAIN, not a
- * setting of its own — so a saved board re-opened as a chart charts what the
- * board was banded by, declared option order and all. And its arithmetic is
- * `aggregateNumbers`, the same function a rollup column runs, so the bar and
- * the number in the table beside it cannot disagree.
+ * Two rules it exists to keep. Its X axis is `chart.xField` when set, and the
+ * view's grouping chain's first band otherwise — so a saved board re-opened as
+ * a chart still charts what the board was banded by, declared option order and
+ * all. And its arithmetic is `aggregateNumbers`, the same function a rollup
+ * column runs, so the bar and the number in the table beside it cannot
+ * disagree.
  */
 
 const vault = (): Entry[] => [
@@ -23,6 +24,13 @@ const vault = (): Entry[] => [
     properties: {
       fields: {
         status: { kind: 'status' },
+        priority: {
+          kind: 'select',
+          options: [
+            { id: 'high', color: 'red' },
+            { id: 'low', color: 'gray' },
+          ],
+        },
         estimate: { kind: 'number' },
         cost: { kind: 'number', format: 'currency', precision: 0 },
         note: { kind: 'text' },
@@ -38,19 +46,19 @@ const vault = (): Entry[] => [
     path: 'items/a.md',
     title: 'A',
     type: 'Work item',
-    properties: { status: 'todo', estimate: 3, cost: 1200, note: 'x' },
+    properties: { status: 'todo', priority: 'high', estimate: 3, cost: 1200, note: 'x' },
   }),
   makeEntry({
     path: 'items/b.md',
     title: 'B',
     type: 'Work item',
-    properties: { status: 'todo', estimate: 5, cost: 800, note: 'y' },
+    properties: { status: 'todo', priority: 'low', estimate: 5, cost: 800, note: 'y' },
   }),
   makeEntry({
     path: 'items/c.md',
     title: 'C',
     type: 'Work item',
-    properties: { status: 'doing', estimate: 2, cost: 300 },
+    properties: { status: 'doing', priority: 'high', estimate: 2, cost: 300 },
   }),
 ];
 
@@ -167,6 +175,44 @@ describe('computeChart', () => {
       buildSchema(entries),
     );
     expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+  });
+
+  it('xField overrides the view grouping as the axis (M44.3)', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [{ field: 'status' }], chart: { xField: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.axis).toBe('Priority');
+    expect(data.slices.map((s) => [s.label, s.value])).toEqual([
+      ['High', 2],
+      ['Low', 1],
+    ]);
+  });
+
+  it('absent xField keeps the grouping-derived axis — zero migration', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { kind: 'bar' } }),
+      buildSchema(entries),
+    );
+    expect(data.axis).toBe('Status');
+    expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+  });
+
+  it('xField with no grouping at all still draws', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { xField: 'status' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.axis).toBe('Status');
+    expect(data.slices.map((s) => s.value)).toEqual([2, 1, 0]);
   });
 
   it('a number chart totals every row and needs no grouping', () => {
