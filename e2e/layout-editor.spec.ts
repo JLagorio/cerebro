@@ -78,6 +78,9 @@ test('layout editor: strip to vault bytes, and the preview stays inert', async (
     .getByTestId('heading-strip')
     .locator('[data-field="status"]')
     .getByRole('button', { includeHidden: true });
+  // Vacuity guard (review): a below-the-fold chip would hand mouse.click an
+  // off-viewport point and the inert claim would pass over empty pixels.
+  await chip.scrollIntoViewIfNeeded();
   const box = await chip.boundingBox();
   if (box === null) throw new Error('preview status cell has no geometry');
   // page.mouse, not locator.click(): the point is the browser's own
