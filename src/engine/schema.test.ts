@@ -496,20 +496,35 @@ describe('layout config (M45.1)', () => {
     ).toEqual(['group-2', 'group-1']);
   });
 
+  it('re-mints a duplicate declared id — the first occurrence keeps it', () => {
+    expect(
+      parseLayoutConfig({ groups: [{ id: 'g' }, { id: 'g' }] }).groups.map((g) => g.id),
+    ).toEqual(['g', 'group-2']);
+  });
+
   it('falls back group names and drops later claims across containers', () => {
     const l = parseLayoutConfig({
       heading: ['status'],
       groups: [{ name: 'Main', fields: ['status', 'due', 'x'] }, { fields: ['due', 'team'] }],
     });
+    // The contested name STAYS where it was claimed first — a later claim
+    // evicting the earlier one would pass the group assertions alone.
+    expect(l.heading).toEqual(['status']);
     expect(l.groups[0]).toEqual({ id: 'group-1', name: 'Main', fields: ['due', 'x'] });
     expect(l.groups[1]).toEqual({ id: 'group-2', name: 'Group 2', fields: ['team'] });
   });
 
   it('serializes deviations only — defaults delete the key, empty heading is omitted', () => {
     expect(serializeLayoutConfig({ heading: [], groups: [] })).toBeNull();
-    expect(serializeLayoutConfig({ heading: ['status'], groups: [] })).toEqual({
+    expect(serializeLayoutConfig({ heading: ['status'], groups: [] })).toStrictEqual({
       heading: ['status'],
     });
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }] });
   });
 
   it('round-trips a parsed layout through the serializer', () => {

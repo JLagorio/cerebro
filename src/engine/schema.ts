@@ -11,7 +11,7 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
-import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES, LAYOUT_DEFAULTS } from './types';
 import {
   DATE_DISPLAY_FORMATS,
   DEFAULT_TIME_FORMAT,
@@ -180,7 +180,7 @@ export function serializeDisplayConfig(d: DisplayConfig): Record<string, unknown
   return Object.keys(out).length === 0 ? null : out;
 }
 
-function asLayoutRecord(raw: unknown): Record<string, unknown> {
+function asRecord(raw: unknown): Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
@@ -214,13 +214,15 @@ function claimFieldNames(raw: unknown, claimed: Set<string>): string[] {
   return out;
 }
 
-/** `layout:` is advisory, like every Type-doc block: malformed → defaults. */
+/** `layout:` is advisory, like every Type-doc block: malformed → defaults.
+ * Exported — unlike parseDisplayConfig — for the M45.2 layout editor's
+ * draft seeding: this parser has a consumer beyond buildSchema coming. */
 export function parseLayoutConfig(raw: unknown): LayoutConfig {
-  const obj = asLayoutRecord(raw);
+  const obj = asRecord(raw);
   const claimed = new Set<string>();
   const heading = claimFieldNames(obj.heading, claimed);
 
-  const items = Array.isArray(obj.groups) ? obj.groups.map((g) => asLayoutRecord(g)) : [];
+  const items = Array.isArray(obj.groups) ? obj.groups.map((g) => asRecord(g)) : [];
   const declaredIds = items.map((g) =>
     typeof g.id === 'string' && g.id.trim() !== '' ? g.id.trim() : '',
   );
@@ -249,13 +251,12 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
  * omitted, groups always serialize whole — an empty group is a real drop
  * target the editor keeps. */
 export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> | null {
-  if (l.heading.length === 0 && l.groups.length === 0) return null;
   const out: Record<string, unknown> = {};
-  if (l.heading.length > 0) out.heading = [...l.heading];
-  if (l.groups.length > 0) {
+  if (l.heading.length !== LAYOUT_DEFAULTS.heading.length) out.heading = [...l.heading];
+  if (l.groups.length !== LAYOUT_DEFAULTS.groups.length) {
     out.groups = l.groups.map((g) => ({ id: g.id, name: g.name, fields: [...g.fields] }));
   }
-  return out;
+  return Object.keys(out).length === 0 ? null : out;
 }
 
 function isEmptyValue(raw: unknown): boolean {
