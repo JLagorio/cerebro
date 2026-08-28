@@ -331,6 +331,19 @@ describe('dashboard structure editors (M44.4)', () => {
     ]);
   });
 
+  it('moveToEnd rebuilds only the source row — untouched rows keep their reference', () => {
+    const spec = threeRowSpec();
+    const next = moveToEnd(spec, 'a');
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([
+      ['b'],
+      ['c'],
+      ['d'],
+      ['a'],
+    ]);
+    expect(next.ok && next.spec.rows[1]).toBe(spec.rows[1]);
+    expect(next.ok && next.spec.rows[2]).toBe(spec.rows[2]);
+  });
+
   it('moveWithinRow shifts left/right, clamped at the row ends', () => {
     const right = moveWithinRow(twoRowSpec(), 'a', 1);
     expect(right.ok && right.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b', 'a']);

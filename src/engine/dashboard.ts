@@ -131,14 +131,6 @@ export function widgetCount(spec: DashboardSpec): number {
   return spec.rows.reduce((n, r) => n + r.widgets.length, 0);
 }
 
-function findWidget(spec: DashboardSpec, id: string): DashboardWidget | null {
-  for (const row of spec.rows) {
-    const widget = row.widgets.find((w) => w.id === id);
-    if (widget !== undefined) return widget;
-  }
-  return null;
-}
-
 function findRowIndex(spec: DashboardSpec, widgetId: string): number {
   return spec.rows.findIndex((r) => r.widgets.some((w) => w.id === widgetId));
 }
@@ -246,10 +238,16 @@ export function moveToOwnRow(spec: DashboardSpec, id: string): DashboardEdit {
  * `slot:new-row` target (Task 6), and the same shape `moveToOwnRow` builds,
  * just appended instead of spliced beside the source. */
 export function moveToEnd(spec: DashboardSpec, id: string): DashboardEdit {
-  const widget = findWidget(spec, id);
-  if (widget === null) return { ok: true, spec };
+  const sourceIdx = findRowIndex(spec, id);
+  if (sourceIdx === -1) return { ok: true, spec };
+  const widget = spec.rows[sourceIdx].widgets.find((w) => w.id === id);
+  if (widget === undefined) return { ok: true, spec };
+  // Only the source row is rebuilt — the same touched-rows-only discipline
+  // moveWidget and removeWidget follow; every other row keeps its identity.
   const rows = withoutEmptyRows(
-    spec.rows.map((r) => ({ ...r, widgets: r.widgets.filter((w) => w.id !== id) })),
+    spec.rows.map((r, i) =>
+      i === sourceIdx ? { ...r, widgets: r.widgets.filter((w) => w.id !== id) } : r,
+    ),
   );
   return {
     ok: true,
