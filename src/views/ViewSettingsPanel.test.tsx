@@ -304,6 +304,135 @@ describe('chart settings (M16.29)', () => {
   });
 });
 
+/**
+ * Every M44.2 chart setting gets a panel control, and `patch` stores only
+ * DEVIATIONS: a value equal to its default is a deleted key, and a key the
+ * current kind cannot read is deleted too — so switching kinds sheds the
+ * settings the new kind has no use for, and the YAML never claims a setting
+ * the chart is not drawing.
+ */
+describe('chart controls (M44.2)', () => {
+  const openChart = () => fireEvent.click(screen.getByTestId('view-settings-chart'));
+  const NONE = '__none__';
+  const chartSetup = (chart?: Presentation['chart']) =>
+    setup({ type: 'chart', group: [{ field: 'status' }], chart });
+
+  it('stores horizontal only while true, and deletes it when switched back', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Horizontal' }));
+    expect(first.nextPresentation().chart).toEqual({ horizontal: true });
+    cleanup();
+    const second = chartSetup({ horizontal: true });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Horizontal' }));
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('a height preset off m is stored, and m is deleted', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('tab', { name: 'XL' }));
+    expect(first.nextPresentation().chart).toEqual({ height: 'xl' });
+    cleanup();
+    const second = chartSetup({ height: 'xl' });
+    openChart();
+    fireEvent.click(screen.getByRole('tab', { name: 'M' }));
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('legend is stored only off the kind default — a donut stores false, a bar stores true', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Legend' }));
+    expect(first.nextPresentation().chart).toEqual({ legend: true });
+    cleanup();
+    const second = chartSetup({ kind: 'donut' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Legend' }));
+    expect(second.nextPresentation().chart).toEqual({ kind: 'donut', legend: false });
+  });
+
+  it('switching to the number kind keeps the measure and drops the axis-only settings', () => {
+    const { nextPresentation } = chartSetup({
+      sort: 'value-desc',
+      horizontal: true,
+      height: 'l',
+      legend: true,
+    });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'number' } });
+    expect(nextPresentation().chart).toEqual({ kind: 'number' });
+  });
+
+  it('stores a band sort, and Declared order deletes it', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Declared order'), {
+      target: { value: 'value-desc' },
+    });
+    expect(first.nextPresentation().chart).toEqual({ sort: 'value-desc' });
+    cleanup();
+    const second = chartSetup({ sort: 'value-desc' });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Biggest first'), { target: { value: NONE } });
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('a palette stores its hue, and Shade by value appears only once there is one', () => {
+    const first = chartSetup();
+    openChart();
+    expect(screen.queryByRole('switch', { name: 'Shade by value' })).toBeNull();
+    fireEvent.change(screen.getByDisplayValue('By option colour'), { target: { value: 'blue' } });
+    expect(first.nextPresentation().chart).toEqual({ palette: 'blue' });
+    cleanup();
+    const second = chartSetup({ palette: 'blue' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Shade by value' }));
+    expect(second.nextPresentation().chart).toEqual({ palette: 'blue', colorByValue: true });
+  });
+
+  /** The hide-flavoured keys invert at the control: the switch says what the
+   * user sees ("Grid lines on"), the spec stores the deviation. */
+  it('turning Grid lines off stores hideGrid, and the line and donut extras store true', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Grid lines' }));
+    expect(first.nextPresentation().chart).toEqual({ hideGrid: true });
+    cleanup();
+    const second = chartSetup({ kind: 'line' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Smooth line' }));
+    expect(second.nextPresentation().chart).toEqual({ kind: 'line', smooth: true });
+    cleanup();
+    const third = chartSetup({ kind: 'donut' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Centre total' }));
+    expect(third.nextPresentation().chart).toEqual({ kind: 'donut', hideDonutCenter: true });
+  });
+
+  /** `HBarChart` draws no grid and no axis by design — it labels its own
+   * bands — so on a horizontal bar those two switches would change nothing,
+   * and a stored `hideGrid`/`hideAxis` would be a key nothing reads. */
+  it('a horizontal bar hides the grid and axis switches, and patch drops their keys', () => {
+    const { nextPresentation } = chartSetup({ horizontal: true, hideGrid: true, hideAxis: true });
+    openChart();
+    expect(screen.queryByRole('switch', { name: 'Grid lines' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Axis labels' })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Value labels' }));
+    expect(nextPresentation().chart).toEqual({ horizontal: true, hideLabels: true });
+  });
+
+  /** The old patch rebuilt from a four-key allowlist, so a hand-edited
+   * `sort:`/`height:` was DROPPED the next time any control was touched. */
+  it('touching an unrelated control preserves every stored M44.2 key', () => {
+    const { nextPresentation } = chartSetup({ sort: 'value-desc', height: 'xl' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Omit zero values' }));
+    expect(nextPresentation().chart).toEqual({ sort: 'value-desc', height: 'xl', omitZero: true });
+  });
+});
+
 describe('sort page (M16.26)', () => {
   const twoKeys = {
     sort: [

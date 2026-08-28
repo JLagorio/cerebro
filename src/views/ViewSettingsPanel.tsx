@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -25,7 +26,9 @@ import {
   CARD_PREVIEWS,
   CARD_SIZES,
   CHART_AGGS,
+  CHART_HEIGHTS,
   CHART_KINDS,
+  CHART_SORTS,
   ROW_HEIGHTS,
   bandLevels,
   nestLevels,
@@ -34,7 +37,9 @@ import type {
   CardPreview,
   CardSize,
   ChartAgg,
+  ChartHeight,
   ChartKind,
+  ChartSort,
   ChartSpec,
   ChipStyle,
   ColumnSpec,
@@ -57,6 +62,7 @@ import {
   nextDashboardBlockId,
 } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
+import { PICKABLE_OPTION_COLORS } from '@/lib/swatch';
 import { useVaultStore } from '@/stores/vaultStore';
 import {
   VIEW_KINDS,
@@ -144,6 +150,12 @@ const CHART_AGG_LABEL: Record<ChartAgg, string> = {
   count: 'Count of records',
   sum: 'Sum',
   avg: 'Average',
+};
+
+const CHART_SORT_LABEL: Record<ChartSort, string> = {
+  'value-desc': 'Biggest first',
+  'value-asc': 'Smallest first',
+  label: 'A to Z',
 };
 
 const META_SORTS = [
@@ -1194,8 +1206,9 @@ function CardsPage({
  * the reader hunting for it.
  *
  * The properties offered for sum/average come from the `numeric` flag on
- * KIND_META, not a `kind === 'number'` compare — the rule M16.4 established
- * and M16.13 applied to grouping and sorting.
+ * KIND_META, not a field-kind `=== 'number'` compare — the rule M16.4
+ * established and M16.13 applied to grouping and sorting. (The CHART kind
+ * named `number` is unrelated: it is the big-stat layout, M44.2.)
  */
 function ChartPage({
   presentation,
@@ -1209,10 +1222,26 @@ function ChartPage({
   const NONE = '__none__';
   const chart = presentation.chart ?? {};
   const agg: ChartAgg = chart.agg ?? 'count';
+  const kind: ChartKind = chart.kind ?? 'bar';
+  const axisKind = kind === 'bar' || kind === 'line' || kind === 'donut';
+  const horizontal = kind === 'bar' && chart.horizontal === true;
   const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
   const band = bandLevels(presentation.group)[0];
 
+  /**
+   * Stores only DEVIATIONS (M44.2): a value equal to its default is a deleted
+   * key, a key the chosen kind cannot read is deleted too — so switching
+   * kinds sheds the settings the new kind has no use for, and a `number`
+   * chart keeps only kind/agg/value — and the whole `chart` block goes when
+   * nothing is off-default.
+   */
   const patch = (next: ChartSpec) => {
+    const nextKind = next.kind ?? 'bar';
+    const nextAxisKind = nextKind === 'bar' || nextKind === 'line' || nextKind === 'donut';
+    // `HBarChart` draws no grid and no axis by design — it labels its own
+    // bands — so on a horizontal bar those two keys would be stored words
+    // nothing reads.
+    const nextHorizontal = nextKind === 'bar' && next.horizontal === true;
     const cleaned: ChartSpec = {
       ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
       ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
@@ -1221,7 +1250,30 @@ function ChartPage({
       ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
         ? { value: next.value }
         : {}),
-      ...(next.omitZero === true ? { omitZero: true } : {}),
+      ...(next.omitZero === true && nextAxisKind ? { omitZero: true } : {}),
+      ...(nextHorizontal ? { horizontal: true } : {}),
+      ...(next.sort !== undefined && nextAxisKind ? { sort: next.sort } : {}),
+      ...(next.cumulative === true && (nextKind === 'bar' || nextKind === 'line')
+        ? { cumulative: true }
+        : {}),
+      ...(next.height !== undefined && next.height !== 'm' && nextAxisKind
+        ? { height: next.height }
+        : {}),
+      ...(next.palette !== undefined && nextAxisKind ? { palette: next.palette } : {}),
+      ...(next.colorByValue === true && next.palette !== undefined && nextAxisKind
+        ? { colorByValue: true }
+        : {}),
+      ...(next.hideGrid === true && nextAxisKind && !nextHorizontal ? { hideGrid: true } : {}),
+      ...(next.hideAxis === true && nextAxisKind && !nextHorizontal ? { hideAxis: true } : {}),
+      ...(next.hideLabels === true && nextAxisKind ? { hideLabels: true } : {}),
+      ...(next.smooth === true && nextKind === 'line' ? { smooth: true } : {}),
+      ...(next.area === true && nextKind === 'line' ? { area: true } : {}),
+      ...(next.hideDonutCenter === true && nextKind === 'donut' ? { hideDonutCenter: true } : {}),
+      // The legend defaults ON for a donut and OFF elsewhere, so "off-default"
+      // is a comparison against the kind, not a constant.
+      ...(next.legend !== undefined && nextAxisKind && next.legend !== (nextKind === 'donut')
+        ? { legend: next.legend }
+        : {}),
     };
     const { chart: _drop, ...rest } = presentation;
     onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, chart: cleaned });
@@ -1271,22 +1323,164 @@ function ChartPage({
           )}
         </div>
       )}
-      <div className="border-t border-n-100 pt-2">
-        <Switch
-          checked={chart.omitZero === true}
-          onChange={(omitZero) => patch({ ...chart, omitZero })}
-          label="Omit zero values"
-          ariaLabel="Omit zero values"
-        />
-      </div>
+      {axisKind && (
+        <div className="border-t border-n-100 pt-2">
+          <Switch
+            checked={chart.omitZero === true}
+            onChange={(omitZero) => patch({ ...chart, omitZero })}
+            label="Omit zero values"
+            ariaLabel="Omit zero values"
+          />
+        </div>
+      )}
+      {kind === 'bar' && (
+        <div>
+          <Switch
+            checked={chart.horizontal === true}
+            onChange={(on) => patch({ ...chart, horizontal: on })}
+            label="Horizontal"
+            ariaLabel="Horizontal"
+          />
+        </div>
+      )}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Sort</span>
+          <Select
+            size="sm"
+            value={chart.sort ?? NONE}
+            options={[
+              { value: NONE, label: 'Declared order' },
+              ...CHART_SORTS.map((s) => ({ value: s, label: CHART_SORT_LABEL[s] })),
+            ]}
+            onChange={(e) =>
+              patch({
+                ...chart,
+                sort: e.target.value === NONE ? undefined : (e.target.value as ChartSort),
+              })
+            }
+            width="100%"
+          />
+        </div>
+      )}
+      {(kind === 'bar' || kind === 'line') && (
+        <div>
+          <Switch
+            checked={chart.cumulative === true}
+            onChange={(cumulative) => patch({ ...chart, cumulative })}
+            label="Cumulative"
+            ariaLabel="Cumulative"
+          />
+        </div>
+      )}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Height</span>
+          <SegmentedControl
+            ariaLabel="Height"
+            options={CHART_HEIGHTS.map((h) => ({ value: h, label: h.toUpperCase() }))}
+            value={chart.height ?? 'm'}
+            onChange={(h) => patch({ ...chart, height: h as ChartHeight })}
+          />
+        </div>
+      )}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Palette</span>
+          <Select
+            size="sm"
+            value={chart.palette ?? NONE}
+            options={[
+              { value: NONE, label: 'By option colour' },
+              ...PICKABLE_OPTION_COLORS.map((c) => ({ value: c, label: humanize(c) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, palette: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+          {chart.palette !== undefined && (
+            <div className="pt-2">
+              <Switch
+                checked={chart.colorByValue === true}
+                onChange={(colorByValue) => patch({ ...chart, colorByValue })}
+                label="Shade by value"
+                ariaLabel="Shade by value"
+              />
+            </div>
+          )}
+        </div>
+      )}
+      {/* The hide-flavoured specs invert at the control: the SWITCH says what
+          the user sees ("Grid lines on"), the SPEC stores the deviation. Grid
+          and axis leave on a horizontal bar — HBarChart draws neither, and a
+          switch that changes nothing is a lie. */}
+      {axisKind && (
+        <div className="flex flex-col gap-2 border-t border-n-100 pt-2">
+          {!horizontal && (
+            <Switch
+              checked={chart.hideGrid !== true}
+              onChange={(on) => patch({ ...chart, hideGrid: !on })}
+              label="Grid lines"
+              ariaLabel="Grid lines"
+            />
+          )}
+          {!horizontal && (
+            <Switch
+              checked={chart.hideAxis !== true}
+              onChange={(on) => patch({ ...chart, hideAxis: !on })}
+              label="Axis labels"
+              ariaLabel="Axis labels"
+            />
+          )}
+          <Switch
+            checked={chart.hideLabels !== true}
+            onChange={(on) => patch({ ...chart, hideLabels: !on })}
+            label="Value labels"
+            ariaLabel="Value labels"
+          />
+          {kind === 'line' && (
+            <Switch
+              checked={chart.smooth === true}
+              onChange={(smooth) => patch({ ...chart, smooth })}
+              label="Smooth line"
+              ariaLabel="Smooth line"
+            />
+          )}
+          {kind === 'line' && (
+            <Switch
+              checked={chart.area === true}
+              onChange={(area) => patch({ ...chart, area })}
+              label="Area fill"
+              ariaLabel="Area fill"
+            />
+          )}
+          {kind === 'donut' && (
+            <Switch
+              checked={chart.hideDonutCenter !== true}
+              onChange={(on) => patch({ ...chart, hideDonutCenter: !on })}
+              label="Centre total"
+              ariaLabel="Centre total"
+            />
+          )}
+          <Switch
+            checked={chart.legend ?? kind === 'donut'}
+            onChange={(legend) => patch({ ...chart, legend })}
+            label="Legend"
+            ariaLabel="Legend"
+          />
+        </div>
+      )}
       {/* M16.29: the shape is named from the chart kind. This said "bars"
           whatever was selected, so the one sentence explaining where a chart's
           X axis comes from described a bar chart to someone looking at a
           donut. */}
       <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
-        {band === undefined
-          ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
-          : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+        {kind === 'number'
+          ? 'A number chart totals every visible row — grouping does not apply.'
+          : band === undefined
+            ? `The ${CHART_PARTS[kind]} come from the view’s grouping, and this view has none yet — pick a property under Group.`
+            : `The ${CHART_PARTS[kind]} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
       </p>
     </div>
   );
