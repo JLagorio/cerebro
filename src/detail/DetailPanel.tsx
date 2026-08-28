@@ -4,12 +4,14 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
+import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { sourceFreshness } from '@/engine/ingest';
+import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
@@ -174,6 +176,12 @@ export function DetailPanel() {
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
   // load/save). The handle is only needed for the rename splice below.
   const editorRef = useRef<CerebroEditor | null>(null);
+  // M45.1 — whether the full property stack is open under the heading strip.
+  // Sticky per record PATH (switching records resets it), and the untouched
+  // default is derived per render below rather than stored: it must track
+  // whether the strip actually SHOWS, which can change without the path
+  // changing (clearing the strip's last hide_when_empty field folds it away).
+  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
 
   // M44.1: per-type presentation. Untyped records and types the schema
   // doesn't know about fall back to the pre-M44.1 defaults. Computed ahead
@@ -196,6 +204,20 @@ export function DetailPanel() {
   if (!detailPath || !entry) return null;
 
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
+
+  // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
+  // property strip between the title and the stack. `stripShows` is derived
+  // per render with the strip's own fold predicate (amended Task 7 ruling):
+  // the strip renders null when every cell folds, and the stack must never
+  // stay hidden behind a strip that is not on screen — it renders whenever
+  // `!stripShows || detailsShown`, and the untouched default for
+  // `detailsShown` is `!stripShows` (per path) rather than a stored false.
+  const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  const headingFields =
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+  const stripShows =
+    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
+  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
   // The containing Collection (M12.5: the folder a legacy project.md marks),
   // unless you are already looking at it — a crumb back to the page you are
@@ -326,10 +348,25 @@ export function DetailPanel() {
           // the app uses that halo and suppresses it on plain mouse clicks.
           className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
         />
+        {/* M45.1 — the key-property strip, with the expander that opens the
+            full stack. Keyed per record like the stack below, so field
+            popovers close on switch. */}
+        {headingFields.length > 0 && (
+          <HeadingProperties
+            key={`strip:${entry.path}`}
+            entry={entry}
+            schema={schema}
+            fields={headingFields}
+            detailsShown={detailsShown}
+            onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
+          />
+        )}
         {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
             on the path) so the add-property flyout closes on switch. */}
-        <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+        {(!stripShows || detailsShown) && (
+          <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+        )}
         {/* M34.5.3 — a cached copy says its own freshness. Null for every
             record without fetch bookkeeping. */}
         <SourceFreshnessLine entry={entry} />

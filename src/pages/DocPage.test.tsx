@@ -147,6 +147,88 @@ describe('DocPage', () => {
     });
   });
 
+  // M45.1 — the type's `layout.heading` renders as the key-property strip on
+  // every tab of the record page; the Overview tab opens on the strip alone
+  // and the expander reveals the full stack.
+  describe('heading strip (M45.1)', () => {
+    const TYPE_DOC = 'types/work-item.md';
+
+    // The record-tabs idiom above: splice frontmatter into the Type doc at the
+    // closing fence, rescan, pick a Work item. The splice lands right after
+    // the `fields:` mapping, so a two-space-indented first line can grow the
+    // roster before the top-level keys start.
+    const setTypeFrontmatter = async (frontmatter: string) => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      fs().set(TYPE_DOC, typeDoc.replace('\n---\n', `\n${frontmatter}---\n`));
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      return record;
+    };
+
+    it('the overview tab opens on the strip; the toggle reveals and hides the stack', async () => {
+      const record = await setTypeFrontmatter('layout:\n  heading: [status, priority]\n');
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+    });
+
+    it('a properties tab always shows the stack, and no toggle renders', async () => {
+      const record = await setTypeFrontmatter(
+        'layout:\n  heading: [status]\n' +
+          'tabs:\n' +
+          '  - { id: overview, name: Overview, content: overview }\n' +
+          '  - { id: props, name: Properties, content: properties }\n',
+      );
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'props' }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+    });
+
+    it('a sections tab renders the strip only — no stack conjured for it', async () => {
+      const record = await setTypeFrontmatter(
+        'layout:\n  heading: [status]\n' +
+          'tabs:\n' +
+          '  - { id: overview, name: Overview, content: overview }\n' +
+          '  - { id: spec, name: Spec, content: sections }\n',
+      );
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+    });
+
+    it('no layout → no strip, and the stack renders exactly as today', () => {
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+    });
+
+    // The Task 5 ruling's trap: a heading whose one field is empty under
+    // hide_when_empty folds the strip to NOTHING — so the stack must render
+    // despite `detailsShown` never being touched, or the record's properties
+    // are stranded behind a strip that is not on screen.
+    it('a strip that folds to nothing shows the stack untoggled', async () => {
+      const record = await setTypeFrontmatter(
+        '  probe: { kind: text, visibility: hide_when_empty }\nlayout:\n  heading: [probe]\n',
+      );
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+    });
+  });
+
   it('the panel toggle hides and shows the side panel', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     expect(screen.getByTestId('doc-side-panel')).toBeTruthy();

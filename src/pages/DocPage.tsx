@@ -15,11 +15,13 @@ import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
+import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
+import { resolveLayout } from '@/engine/layout';
 import { isRecordEntry, typeTabs } from '@/engine/typeCatalog';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
@@ -241,6 +243,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     return () => unsubscribe?.();
   }, [editor]);
 
+  // M45.1 — whether the Overview tab's full property stack is open under the
+  // heading strip. Sticky per record PATH (a new record resets it), and the
+  // untouched default is derived per render below rather than stored: it must
+  // track whether the strip actually SHOWS, which can change without the path
+  // changing (clearing the strip's last hide_when_empty field folds it away).
+  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
+
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [moving, setMoving] = useState(false);
   const [addingPage, setAddingPage] = useState(false);
@@ -269,6 +278,20 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const docPages = docPagesFor(entry, entries);
   const fullWidth = entry.properties.full_width === true;
+
+  // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
+  // property strip on EVERY tab of the record page. `stripShows` is derived
+  // per render with the strip's own fold predicate (amended Task 7 ruling):
+  // the strip renders null when every cell folds, and the stack must never
+  // stay hidden behind a strip that is not on screen — so the stack renders
+  // whenever `!stripShows || detailsShown`, and the untouched default for
+  // `detailsShown` is `!stripShows` (per path) rather than a stored false.
+  const typeDef = record && entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  const headingFields =
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+  const stripShows =
+    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
+  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
@@ -666,6 +689,24 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       onCommit={(next) => void adoptTitle(next)}
                     />
                   )}
+                  {/* M45.1 — the key-property strip, on every tab. Only the
+                      Overview tab gets the expander: Properties always shows
+                      the stack, and Sections shows no stack at all — a toggle
+                      there would expand nothing. */}
+                  {headingFields.length > 0 && (
+                    <HeadingProperties
+                      key={`strip:${entry.path}`}
+                      entry={entry}
+                      schema={schema}
+                      fields={headingFields}
+                      detailsShown={detailsShown}
+                      onToggleDetails={
+                        activeTab !== null && activeTab.content === 'overview'
+                          ? () => setDetails({ path: entry.path, shown: !detailsShown })
+                          : undefined
+                      }
+                    />
+                  )}
                   {/* M44.5 — the record canvas swaps by the open tab: Overview
                       is today's layout verbatim, Properties is the surface
                       alone, Sections is the tab's free text. An untyped doc
@@ -676,15 +717,16 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           page. The SAME component: one property editor, two
                           geometries, so a field added here is a field added
                           there. */}
-                      {activeTab.content !== 'sections' && (
-                        <div data-testid="page-properties" className="mb-4">
-                          <RecordProperties
-                            key={`props:${entry.path}`}
-                            entry={entry}
-                            schema={schema}
-                          />
-                        </div>
-                      )}
+                      {activeTab.content !== 'sections' &&
+                        (activeTab.content === 'properties' || !stripShows || detailsShown) && (
+                          <div data-testid="page-properties" className="mb-4">
+                            <RecordProperties
+                              key={`props:${entry.path}`}
+                              entry={entry}
+                              schema={schema}
+                            />
+                          </div>
+                        )}
                       {activeTab.content === 'overview' && editorBlock}
                       {activeTab.content === 'sections' && (
                         <TabSections

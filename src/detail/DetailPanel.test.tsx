@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -435,6 +435,73 @@ describe('DetailPanel', () => {
     expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
     // Still distinct from the write-side act it used to sit alone beside.
     expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
+  });
+
+  // M45.1 — the type's `layout.heading` renders as the key-property strip
+  // between the title and the property stack; the stack starts collapsed
+  // behind the strip and the expander reveals it.
+  describe('heading strip (M45.1)', () => {
+    const withLayout = (
+      layout: Record<string, unknown>,
+      mutateFields?: (fields: Record<string, unknown>) => void,
+    ) => {
+      const entries = fixtureVault();
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+      mutateFields?.(typeProps.fields as Record<string, unknown>);
+      typeProps.layout = layout;
+      useVaultStore.setState({ entries, vaultPath: '/vault' });
+      useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
+    };
+
+    it('mounts the strip after the title; the toggle expands and collapses the stack', () => {
+      withLayout({ heading: ['status', 'priority'] });
+      render(<DetailPanel />);
+      const strip = screen.getByTestId('heading-strip');
+      // Between title and properties: the strip FOLLOWS the title input.
+      const title = screen.getByTestId('detail-title');
+      expect(title.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The stack starts collapsed behind the strip…
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      // …while the body section is untouched by the collapse (M44.1 display
+      // config still owns it).
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+    });
+
+    it('resets to the collapsed strip when the panel switches records', () => {
+      withLayout({ heading: ['status'] });
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // act: a store write outside any event needs its re-render flushed
+      // before the DOM assertion sees it.
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+    });
+
+    it('no layout → no strip, and the stack renders exactly as today', () => {
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+
+    // The Task 5 ruling's trap: a heading whose one field is empty under
+    // hide_when_empty folds the strip to NOTHING — the stack must render
+    // despite `detailsShown` never being touched, or the record's properties
+    // are stranded behind a strip that is not on screen.
+    it('a strip that folds to nothing shows the stack untoggled', () => {
+      withLayout({ heading: ['due'] }, (fields) => {
+        fields.due = { kind: 'date', visibility: 'hide_when_empty' };
+      });
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
   });
 
   describe('display config (M44.1)', () => {

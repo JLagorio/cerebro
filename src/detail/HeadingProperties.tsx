@@ -4,6 +4,21 @@ import { isEmptyForVisibility, kindMeta, splitByVisibility } from '@/engine/prop
 import type { Entry, FieldDef, Schema } from '@/engine/types';
 
 /**
+ * The strip's post-fold cells: which of the resolved heading fields actually
+ * render. Exported so the HOSTS gate on the strip actually SHOWING — they
+ * render the full stack whenever this comes back empty (the amended Task 7
+ * ruling), and sharing the predicate here is what keeps the host's gate and
+ * the strip's own fold from drifting apart.
+ */
+export function stripCells(entry: Entry, schema: Schema, fields: FieldDef[]): FieldDef[] {
+  const showEmpty = entry.type ? schema.types.get(entry.type)?.display.showEmpty === true : false;
+  return splitByVisibility(
+    fields,
+    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+  ).shown;
+}
+
+/**
  * The key-property strip under a record's title (M45.1, spec §3.4): the
  * type's `layout.heading` fields as a horizontal wrap of labeled editors,
  * with the View details / Hide details expander that reveals the full
@@ -30,11 +45,7 @@ export function HeadingProperties({
   detailsShown?: boolean;
   onToggleDetails?: () => void;
 }) {
-  const showEmpty = entry.type ? schema.types.get(entry.type)?.display.showEmpty === true : false;
-  const { shown } = splitByVisibility(
-    fields,
-    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
-  );
+  const shown = stripCells(entry, schema, fields);
   if (shown.length === 0) return null;
 
   const expanded = detailsShown === true;
