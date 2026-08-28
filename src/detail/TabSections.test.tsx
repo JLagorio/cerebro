@@ -107,6 +107,22 @@ describe('TabSections (M44.5)', () => {
     });
   });
 
+  // The exact bug class that burned FieldEditor and UntitledDocHeading:
+  // Escape clears the draft, but the input still blurs afterwards, and a
+  // blur handler that re-reads the DOM value would commit the abandoned text.
+  it('Escape abandons the draft, so the blur that follows writes nothing', () => {
+    render(<TabSections entry={entry} tabId="spec" />);
+    const heading = screen.getByDisplayValue('Goal');
+    fireEvent.change(heading, { target: { value: 'Mission' } });
+    fireEvent.keyDown(heading, { key: 'Escape' });
+    fireEvent.blur(heading);
+    const textarea = screen.getByDisplayValue('Ship it');
+    fireEvent.change(textarea, { target: { value: 'Ship it never' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    fireEvent.blur(textarea);
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+
   it('an unchanged blur writes nothing', () => {
     render(<TabSections entry={entry} tabId="spec" />);
     fireEvent.blur(screen.getByDisplayValue('Ship it'));

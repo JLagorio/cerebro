@@ -16,8 +16,11 @@ import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { RecordTabs } from '@/detail/RecordTabs';
+import { TabSections } from '@/detail/TabSections';
+import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
-import { isRecordEntry } from '@/engine/typeCatalog';
+import { isRecordEntry, typeTabs } from '@/engine/typeCatalog';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
@@ -192,9 +195,25 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Bumped to force a reload after out-of-editor writes (template apply).
   const [reloadGen, setReloadGen] = useState(0);
+
+  // M38.2 — a record is a page too. Same canvas, plus the property surface
+  // the panel shows, minus nothing.
+  const record = entry !== null && isRecordEntry(entry);
+  // M44.5 — the record page's tabs come from its TYPE (`typeTabs` synthesizes
+  // Overview when none are saved) and the open one rides the selection, so
+  // "the Spec tab of DOC-14" is a place the back button returns to. A stale
+  // `selection.tab` — a tab deleted while history still names it — falls back
+  // to the first tab rather than rendering nothing.
+  const tabs = record && entry !== null && entry.type !== null ? typeTabs(entry.type, schema) : [];
+  const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
+
   useEffect(() => {
-    setEditor(null); // the keyed editor remounts per doc; wait for onReady
-  }, [selection.path, reloadGen]);
+    // The keyed editor remounts per doc; wait for onReady. The active tab is
+    // a dependency because a non-overview tab unmounts the editor entirely —
+    // holding the stale instance would keep feeding the outline (and the
+    // blank-page bar) a body the canvas no longer shows.
+    setEditor(null);
+  }, [selection.path, reloadGen, activeTab?.id]);
 
   // Blank-page detection drives the floating template bar. Title detection
   // drives the heading below: a doc whose body has no H1 has its title only in
@@ -244,9 +263,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const docPages = docPagesFor(entry, entries);
   const fullWidth = entry.properties.full_width === true;
-  // M38.2 — a record is a page too. Same canvas, plus the property surface
-  // the panel shows, minus nothing.
-  const record = isRecordEntry(entry);
 
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
@@ -493,6 +509,24 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const separator = <Icon name="chevron-right" size={12} color="var(--n-300)" />;
 
+  // The body editor + this document's history (M9.4 — silent when it has
+  // none): ONE block, shared by the untyped page and a record's Overview tab
+  // so an edit to one cannot silently miss the other.
+  const editorBlock = (
+    <>
+      <NoteBodyEditor
+        key={`${entry.path}#${reloadGen}`}
+        path={entry.path}
+        onSaveState={setSaveState}
+        onReady={(info) => {
+          editorControls.current = info;
+          setEditor(info.editor);
+        }}
+      />
+      <GitHistoryPanel path={entry.path} />
+    </>
+  );
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
       <div className="flex h-11 flex-none items-center gap-0.5 border-b border-n-200 px-3">
@@ -588,9 +622,23 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             onAddPage={() => setAddingPage(true)}
           />
         )}
-        <div className="relative min-h-0 min-w-0 flex-1">
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
-          <div ref={scrollRef} className="h-full overflow-y-auto pb-10 pt-6">
+          {/* M44.5 — the tab strip is a flex-none sibling ABOVE the scroll
+              container: it survives the diffOpen canvas swap and stays out of
+              the 820px content measure. */}
+          {tabs.length > 0 && (
+            <RecordTabs
+              tabs={tabs}
+              activeId={activeTab?.id ?? tabs[0].id}
+              onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+              onChange={(next) => {
+                if (entry.type !== null)
+                  void setTypeTabs({ name: entry.type, docPath: null }, next);
+              }}
+            />
+          )}
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div
               data-testid="doc-content"
               className={fullWidth ? 'px-6' : 'mx-auto w-full max-w-[820px] px-6'}
@@ -612,26 +660,37 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       onCommit={(next) => void adoptTitle(next)}
                     />
                   )}
-                  {/* M38.2 — the property surface the peek shows, on the
-                      page. The SAME component: one property editor, two
-                      geometries, so a field added here is a field added
-                      there. */}
-                  {record && (
-                    <div data-testid="page-properties" className="mb-4">
-                      <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
-                    </div>
+                  {/* M44.5 — the record canvas swaps by the open tab: Overview
+                      is today's layout verbatim, Properties is the surface
+                      alone, Sections is the tab's free text. An untyped doc
+                      knows nothing of tabs and keeps its document form. */}
+                  {record && activeTab !== null ? (
+                    <>
+                      {/* M38.2 — the property surface the peek shows, on the
+                          page. The SAME component: one property editor, two
+                          geometries, so a field added here is a field added
+                          there. */}
+                      {activeTab.content !== 'sections' && (
+                        <div data-testid="page-properties" className="mb-4">
+                          <RecordProperties
+                            key={`props:${entry.path}`}
+                            entry={entry}
+                            schema={schema}
+                          />
+                        </div>
+                      )}
+                      {activeTab.content === 'overview' && editorBlock}
+                      {activeTab.content === 'sections' && (
+                        <TabSections
+                          key={`${entry.path}#${activeTab.id}`}
+                          entry={entry}
+                          tabId={activeTab.id}
+                        />
+                      )}
+                    </>
+                  ) : (
+                    editorBlock
                   )}
-                  <NoteBodyEditor
-                    key={`${entry.path}#${reloadGen}`}
-                    path={entry.path}
-                    onSaveState={setSaveState}
-                    onReady={(info) => {
-                      editorControls.current = info;
-                      setEditor(info.editor);
-                    }}
-                  />
-                  {/* M9.4 — this document's history, silent when it has none. */}
-                  <GitHistoryPanel path={entry.path} />
                 </>
               )}
             </div>

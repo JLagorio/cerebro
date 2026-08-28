@@ -48,6 +48,9 @@ export function TabSections({ entry, tabId }: { entry: Entry; tabId: string }) {
     else all[tabId] = next;
     // The last section of the last tab deletes the key — a record with no
     // section content carries no _sections at all.
+    // No FieldEditor-style await-gate on the result: `_sections` is undeclared,
+    // so validatePatch skips it — only disk failure remains, and
+    // patchFrontmatter self-handles that (toast + revert).
     void patchFrontmatter(entry.path, { _sections: Object.keys(all).length === 0 ? null : all });
   };
 
