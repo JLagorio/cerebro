@@ -57,4 +57,19 @@ describe('RecordProperties display config (M44.1)', () => {
     expect(screen.queryByText('Internal')).toBeNull();
     expect(screen.getByTestId('hidden-properties-toggle')).toBeTruthy();
   });
+
+  it('_sections never renders as a property row — the _ namespace hides it (M44.5)', () => {
+    const entries = fixtureVault();
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    (entry.properties as Record<string, unknown>)._sections = {
+      spec: [{ heading: 'Goal', text: 'Ship it' }],
+    };
+    useVaultStore.setState({ entries, vaultPath: '/vault' });
+    render(<RecordProperties entry={entry} schema={buildSchema(entries)} />);
+    const rows = screen.getAllByTestId('property-row');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.textContent?.toLowerCase() ?? '').not.toContain('section');
+    }
+  });
 });
