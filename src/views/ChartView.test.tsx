@@ -78,6 +78,19 @@ describe('ChartView', () => {
     expect(screen.getByTestId('chart-view').getAttribute('data-chart-measure')).toBe('Count');
   });
 
+  it('height preset drives the svg viewBox', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { height: 'xl' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 640 560');
+  });
+
   it('draws a line with a point per band when asked for one', () => {
     const entries = vault();
     render(

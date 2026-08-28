@@ -2,7 +2,14 @@ import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { computeChart, niceCeiling } from '@/engine/chart';
 import type { ChartData, ChartSlice } from '@/engine/chart';
-import type { ChartKind, Presentation, Schema, Entry } from '@/engine/types';
+import type {
+  ChartHeight,
+  ChartKind,
+  ChartSpec,
+  Presentation,
+  Schema,
+  Entry,
+} from '@/engine/types';
 
 /**
  * Chart (M16.27) — bar, line or donut over an aggregation of the same rows
@@ -30,11 +37,17 @@ export interface ChartViewProps {
 }
 
 const W = 640;
-const H = 320;
 const PAD = { top: 16, right: 16, bottom: 52, left: 56 };
 const PLOT_W = W - PAD.left - PAD.right;
-const PLOT_H = H - PAD.top - PAD.bottom;
 const TICKS = 4;
+
+const HEIGHT_PX: Record<ChartHeight, number> = { s: 220, m: 320, l: 440, xl: 560 };
+
+/** Vertical geometry, from the spec's height preset. 'm' is the pre-M44.2 320. */
+function plotDims(chart: ChartSpec | undefined): { H: number; PLOT_H: number } {
+  const H = HEIGHT_PX[chart?.height ?? 'm'];
+  return { H, PLOT_H: H - PAD.top - PAD.bottom };
+}
 
 /**
  * A band's colour: its own when it declares one, otherwise the next hue in the
@@ -66,12 +79,12 @@ function clip(label: string, band: number): string {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
 
-function Axes({ top, label }: { top: number; label: string }) {
+function Axes({ top, label, plotH }: { top: number; label: string; plotH: number }) {
   return (
     <g>
       {Array.from({ length: TICKS + 1 }, (_, i) => {
         const value = (top * (TICKS - i)) / TICKS;
-        const y = PAD.top + (PLOT_H * i) / TICKS;
+        const y = PAD.top + (plotH * i) / TICKS;
         return (
           <g key={i}>
             <line
@@ -102,14 +115,14 @@ function Axes({ top, label }: { top: number; label: string }) {
   );
 }
 
-function XLabels({ slices, band }: { slices: ChartSlice[]; band: number }) {
+function XLabels({ slices, band, plotH }: { slices: ChartSlice[]; band: number; plotH: number }) {
   return (
     <g>
       {slices.map((s, i) => (
         <text
           key={s.key || s.label}
           x={PAD.left + band * i + band / 2}
-          y={PAD.top + PLOT_H + 16}
+          y={PAD.top + plotH + 16}
           textAnchor="middle"
           fontSize={10.5}
           fill="var(--n-500)"
@@ -122,15 +135,15 @@ function XLabels({ slices, band }: { slices: ChartSlice[]; band: number }) {
   );
 }
 
-function BarChart({ data }: { data: ChartData }) {
+function BarChart({ data, plotH }: { data: ChartData; plotH: number }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
   const width = Math.min(56, band * 0.62);
   return (
     <>
-      <Axes top={top} label={data.measure} />
+      <Axes top={top} label={data.measure} plotH={plotH} />
       {data.slices.map((s, i) => {
-        const height = (s.value / top) * PLOT_H;
+        const height = (s.value / top) * plotH;
         return (
           <g key={s.key || s.label}>
             <rect
@@ -140,7 +153,7 @@ function BarChart({ data }: { data: ChartData }) {
               x={PAD.left + band * i + (band - width) / 2}
               // A zero-height rect is invisible; 1px says "measured, and it
               // is zero" rather than "no band here".
-              y={PAD.top + PLOT_H - Math.max(height, s.value > 0 ? 1 : 0)}
+              y={PAD.top + plotH - Math.max(height, s.value > 0 ? 1 : 0)}
               width={width}
               height={Math.max(height, s.value > 0 ? 1 : 0)}
               rx={3}
@@ -151,7 +164,7 @@ function BarChart({ data }: { data: ChartData }) {
             {band > 34 && (
               <text
                 x={PAD.left + band * i + band / 2}
-                y={PAD.top + PLOT_H - height - 5}
+                y={PAD.top + plotH - height - 5}
                 textAnchor="middle"
                 fontSize={10}
                 fill="var(--n-500)"
@@ -163,22 +176,22 @@ function BarChart({ data }: { data: ChartData }) {
           </g>
         );
       })}
-      <XLabels slices={data.slices} band={band} />
+      <XLabels slices={data.slices} band={band} plotH={plotH} />
     </>
   );
 }
 
-function LineChart({ data }: { data: ChartData }) {
+function LineChart({ data, plotH }: { data: ChartData; plotH: number }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
   const at = (s: ChartSlice, i: number) => ({
     x: PAD.left + band * i + band / 2,
-    y: PAD.top + PLOT_H - (s.value / top) * PLOT_H,
+    y: PAD.top + plotH - (s.value / top) * plotH,
   });
   const points = data.slices.map((s, i) => at(s, i));
   return (
     <>
-      <Axes top={top} label={data.measure} />
+      <Axes top={top} label={data.measure} plotH={plotH} />
       <polyline
         data-testid="chart-line"
         points={points.map((p) => `${p.x},${p.y}`).join(' ')}
@@ -204,7 +217,7 @@ function LineChart({ data }: { data: ChartData }) {
           <title>{`${s.label}: ${s.display}`}</title>
         </circle>
       ))}
-      <XLabels slices={data.slices} band={band} />
+      <XLabels slices={data.slices} band={band} plotH={plotH} />
     </>
   );
 }
@@ -344,6 +357,7 @@ const BLOCKED: Record<
 export function ChartView({ entries, presentation, schema, filtered }: ChartViewProps) {
   const data = computeChart(entries, presentation, schema);
   const kind: ChartKind = presentation.chart?.kind ?? 'bar';
+  const { H, PLOT_H } = plotDims(presentation.chart);
 
   return (
     <div
@@ -389,7 +403,11 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
               role="img"
               aria-label={`${data.measure} by ${data.axis}`}
             >
-              {kind === 'line' ? <LineChart data={data} /> : <BarChart data={data} />}
+              {kind === 'line' ? (
+                <LineChart data={data} plotH={PLOT_H} />
+              ) : (
+                <BarChart data={data} plotH={PLOT_H} />
+              )}
             </svg>
           )}
         </figure>
