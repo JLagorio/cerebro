@@ -168,6 +168,93 @@ describe('computeChart', () => {
     );
     expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
   });
+
+  it('a number chart totals every row and needs no grouping', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.total).toBe(3);
+    expect(data.totalDisplay).toBe('3');
+    expect(data.slices).toEqual([]);
+  });
+
+  it('a number chart still refuses when the measure has no property', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', agg: 'sum' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBe('no-value-field');
+  });
+
+  it('a number chart formats its total with the field def', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', agg: 'sum', value: 'cost' } }),
+      buildSchema(entries),
+    );
+    expect(data.totalDisplay).toMatch(/^\$/);
+  });
+
+  it('sorts bands by value when asked, biggest first', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', sort: 'value-desc' } }),
+      buildSchema(entries),
+    );
+    const values = data.slices.map((s) => s.value);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+  });
+
+  it('sorts bands A→Z when asked', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { sort: 'label' } }),
+      buildSchema(entries),
+    );
+    const labels = data.slices.map((s) => s.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it('cumulative bands carry a running total and max becomes the last band', () => {
+    const entries = vault();
+    const plain = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', cumulative: true } }),
+      buildSchema(entries),
+    );
+    expect(data.slices.at(-1)?.value).toBe(plain.total);
+    expect(data.max).toBe(plain.total);
+    expect(data.total).toBe(plain.total); // total stays the real sum, not a double-count
+  });
+
+  it('cumulative is ignored for donuts — a ring of running totals lies', () => {
+    const entries = vault();
+    const donut = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', agg: 'sum', value: 'estimate', cumulative: true } }),
+      buildSchema(entries),
+    );
+    const plain = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    expect(donut.slices.map((s) => s.value)).toEqual(plain.slices.map((s) => s.value));
+  });
 });
 
 /**

@@ -42,6 +42,8 @@ export interface ChartData {
   slices: ChartSlice[];
   /** Sum of every slice — the donut's whole, and its centre label. */
   total: number;
+  /** `total` through the value field's formatting — what a big stat prints. */
+  totalDisplay: string;
   /** Largest slice value; 0 when there are none. The bar/line Y extent. */
   max: number;
   /** The field the X axis bands by, humanized; '' when there is none. */
@@ -95,18 +97,19 @@ export function computeChart(
   schema: Schema,
 ): ChartData {
   const chart = presentation.chart;
+  const kind = chart?.kind ?? 'bar';
   const agg: ChartAgg = chart?.agg ?? 'count';
   const band = bandLevels(presentation.group)[0];
   const empty = (blocked: ChartBlocked): ChartData => ({
     slices: [],
     total: 0,
+    totalDisplay: '',
     max: 0,
     axis: band === undefined ? '' : humanize(band.field),
     measure: measureLabel(chart),
     blocked,
   });
 
-  if (band === undefined) return empty('no-group');
   if (entries.length === 0) return empty('no-rows');
   // Sum and average need something to add up. Saying so beats charting a row
   // of zeroes that looks like a real answer about the data.
@@ -116,6 +119,39 @@ export function computeChart(
 
   const valueField = chart?.value ?? '';
   const def = agg === 'count' ? null : defFor(entries, valueField, schema);
+
+  // A number chart totals every visible row. It has no axis at all, so it
+  // never reaches the no-group gate below (M44.2).
+  if (kind === 'number') {
+    if (agg === 'count') {
+      const n = entries.length;
+      return {
+        slices: [],
+        total: n,
+        totalDisplay: def === null ? String(n) : formatNumber(n, def),
+        max: n,
+        axis: '',
+        measure: measureLabel(chart),
+        blocked: null,
+      };
+    }
+    const values = entries
+      .map((e) => e.properties[valueField])
+      .filter((v) => v !== undefined && v !== null && v !== '');
+    const n = aggregateNumbers(values, agg);
+    if (n === null) return empty('no-numbers');
+    return {
+      slices: [],
+      total: n,
+      totalDisplay: def === null ? String(n) : formatNumber(n, def),
+      max: n,
+      axis: '',
+      measure: measureLabel(chart),
+      blocked: null,
+    };
+  }
+
+  if (band === undefined) return empty('no-group');
   // One band level only: a chart has one X axis, and levels beyond the first
   // would have to become a stacked series, which is not this commit.
   const nodes = groupTree(entries, [band], schema);
@@ -153,9 +189,26 @@ export function computeChart(
   if (agg !== 'count' && slices.length > 0 && measured === 0) return empty('no-numbers');
   if (slices.length === 0) return empty('no-rows');
 
+  if (chart?.sort === 'value-desc') slices.sort((a, b) => b.value - a.value);
+  else if (chart?.sort === 'value-asc') slices.sort((a, b) => a.value - b.value);
+  else if (chart?.sort === 'label') slices.sort((a, b) => a.label.localeCompare(b.label));
+
+  const total = slices.reduce((sum, s) => sum + s.value, 0);
+  // Running totals only where bands have an order to run along — never a
+  // donut, whose whole is the sum and would double-count.
+  if (chart?.cumulative === true && kind !== 'donut') {
+    let run = 0;
+    for (const s of slices) {
+      run += s.value;
+      s.value = run;
+      s.display = def === null ? String(run) : formatNumber(run, def);
+    }
+  }
+
   return {
     slices,
-    total: slices.reduce((sum, s) => sum + s.value, 0),
+    total,
+    totalDisplay: def === null ? String(total) : formatNumber(total, def),
     max: slices.reduce((top, s) => Math.max(top, s.value), 0),
     axis: humanize(band.field),
     measure: measureLabel(chart),

@@ -1014,6 +1014,17 @@ describe('serializeList', () => {
       ).toEqual({ kind: 'bar' });
     });
 
+    // The boolean arms accept only the literal `true` (or, for `legend`,
+    // either literal boolean) — a truthy STRING is not a boolean, and a
+    // hand-edited `smooth: 'yes'` must not survive as `smooth: true`.
+    it('drops a chart boolean that arrives as a truthy string, not a boolean', () => {
+      expect(
+        parse(
+          "presentation:\n  type: chart\n  chart:\n    kind: bar\n    smooth: 'yes'\n    legend: 'no'\n",
+        ).chart,
+      ).toEqual({ kind: 'bar' });
+    });
+
     it('drops a chart type nothing draws', () => {
       expect(
         parse('presentation:\n  type: chart\n  chart:\n    kind: sankey\n').chart,
