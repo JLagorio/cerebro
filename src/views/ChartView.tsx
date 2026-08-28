@@ -58,15 +58,20 @@ function plotDims(chart: ChartSpec | undefined): { H: number; PLOT_H: number } {
  * no-value bucket stays neutral on purpose: "no status" is an absence, and
  * giving it a hue makes it look like one more status.
  */
+/** The palette's base hue: the swatch the word names, or the first pickable
+ * hue when it resolves to `default` — neutral grey draws every band alike. */
+function paletteBase(palette: string): string {
+  const swatch = resolveOptionColor(palette);
+  return swatch.name !== 'default' ? swatch.solid : `var(--opt-${PICKABLE_OPTION_COLORS[0]})`;
+}
+
 export function sliceColor(
   slice: ChartSlice,
   index: number,
   opts?: { palette?: string; share?: number },
 ): string {
   if (opts?.palette !== undefined) {
-    const swatch = resolveOptionColor(opts.palette);
-    const base =
-      swatch.name !== 'default' ? swatch.solid : `var(--opt-${PICKABLE_OPTION_COLORS[0]})`;
+    const base = paletteBase(opts.palette);
     if (opts.share === undefined) return base;
     // 35%–100% of the hue against the app surface: the smallest band stays visible.
     const pct = Math.round(35 + 65 * Math.max(0, Math.min(1, opts.share)));
@@ -357,10 +362,7 @@ function LineChart({
   const points = data.slices.map((s, i) => at(s, i));
   // One line, one hue: the palette when the spec declares one, cortex
   // otherwise. Per-band colours would claim the line is several series.
-  const stroke =
-    chart?.palette !== undefined
-      ? sliceColor(data.slices[0], 0, { palette: chart.palette })
-      : 'var(--cortex-500)';
+  const stroke = chart?.palette !== undefined ? paletteBase(chart.palette) : 'var(--cortex-500)';
   return (
     <>
       <Axes
@@ -513,6 +515,7 @@ function Legend({ data, chart }: { data: ChartData; chart: ChartSpec | undefined
             style={{ background: sliceColor(s, i, colorOpts(chart, data, s)) }}
           />
           {s.label}
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{s.display}</span>
         </li>
       ))}
     </ul>

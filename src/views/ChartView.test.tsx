@@ -136,7 +136,11 @@ describe('ChartView', () => {
     // Two bands hold records; a third declared status would contribute an arc
     // of length zero, which paints a hairline at twelve o'clock.
     expect(screen.getAllByTestId('chart-arc')).toHaveLength(2);
-    expect(screen.getAllByTestId('chart-legend-item')).toHaveLength(2);
+    // Each legend row carries its band's value, not just its name.
+    expect(screen.getAllByTestId('chart-legend-item').map((r) => r.textContent)).toEqual([
+      'Todo2',
+      'Doing1',
+    ]);
   });
 
   it('sums a numeric property when the measure says so', () => {
@@ -320,6 +324,21 @@ describe('ChartView', () => {
       />,
     );
     expect(container.querySelector('[data-testid="chart-line"]')?.getAttribute('d')).toContain('C');
+  });
+
+  it('smooth degrades to straight segments when there are fewer than three points', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', smooth: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const d = container.querySelector('[data-testid="chart-line"]')?.getAttribute('d');
+    expect(d).toMatch(/^M/);
+    expect(d).not.toContain('C');
   });
 
   it('area fill draws a closed wash under the line', () => {
