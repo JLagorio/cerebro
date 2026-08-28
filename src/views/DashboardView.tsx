@@ -659,21 +659,50 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
  * rotated. Its own tiny component rather than a reuse: ResizeHandle is
  * hard-coded vertical, and fires on every move besides. Moves paint `height`
  * straight onto the row element, clamped exactly as setRowHeight will clamp,
- * and the release commits once.
+ * and the release commits once. The keyboard path holds the same line: see
+ * `pending` below.
  */
 function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
   const edit = useContext(EditContext);
   const ref = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(false);
+  /**
+   * The height the arrows are building, before it is persisted —
+   * ColumnResizer's pending-ref idiom (M20.5), adopted here for the same
+   * reason it exists there: a held arrow REPEATS, and commit-per-press would
+   * run one YAML write and vault rescan per repeat tick, the exact failure
+   * the column resizer's docstring records fixing. Arrows paint and
+   * accumulate; blur or Enter settles ONE write; Escape abandons.
+   * `null` means "nothing pending".
+   */
+  const pending = useRef<number | null>(null);
   if (edit === null) return null;
   const h0 = row.h ?? ROW_HEIGHT_DEFAULT;
   const clamp = (h: number) => Math.round(Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, h)));
+  const rowEl = () =>
+    ref.current?.parentElement?.querySelector<HTMLElement>('[data-testid="dashboard-row"]') ?? null;
+  const paintH = (h: number) => {
+    const el = rowEl();
+    if (el !== null) el.style.height = `${h}px`;
+  };
+  const nudge = (h: number) => {
+    pending.current = h;
+    paintH(h);
+  };
+  const settle = () => {
+    if (pending.current === null) return;
+    const h = pending.current;
+    pending.current = null;
+    if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
+  };
 
   const begin = (startY: number) => {
-    const el = ref.current?.parentElement?.querySelector<HTMLElement>(
-      '[data-testid="dashboard-row"]',
-    );
-    if (el === null || el === undefined) return;
+    const el = rowEl();
+    if (el === null) return;
+    // A pointer grab supersedes a half-built keyboard nudge — without this,
+    // the blur after the drag would settle the stale pending as a second
+    // write on top of the drag's own.
+    pending.current = null;
     const at = (y: number) => clamp(h0 + (y - startY));
     let moved = false;
     const move = (e: PointerEvent) => {
@@ -714,18 +743,29 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
         e.stopPropagation();
         begin(e.clientY);
       }}
+      // Blur is the keyboard's pointerup: the arrows paint, leaving the
+      // handle persists — the ColumnResizer contract.
+      onBlur={settle}
       onKeyDown={(e) => {
-        // Commit-per-press — deliberately simpler than ColumnResizer's
-        // pending-ref batching, which the plan allows here: that idiom earns
-        // its keep against key-repeat floods on a handle people lean on,
-        // while a row nudge is one write per press by nature.
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           e.preventDefault();
           const step = e.shiftKey ? 48 : 12;
-          const h = clamp(h0 + (e.key === 'ArrowDown' ? step : -step));
-          if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
+          const from = pending.current ?? h0;
+          nudge(clamp(from + (e.key === 'ArrowDown' ? step : -step)));
         }
-        if (e.key === 'Escape') e.currentTarget.blur();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          settle();
+        }
+        if (e.key === 'Escape') {
+          // Abandons what the arrows built — committing on Escape would be
+          // the opposite of what it means everywhere else in this app. The
+          // blur then finds nothing pending, so it writes nothing.
+          e.preventDefault();
+          pending.current = null;
+          paintH(h0);
+          e.currentTarget.blur();
+        }
       }}
       className="flex h-[7px] w-full cursor-row-resize touch-none items-center justify-center"
     >

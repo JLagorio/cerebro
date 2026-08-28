@@ -1155,6 +1155,111 @@ describe('DashboardView resize (M44.4)', () => {
     expect(dash(onChange).rows[0].h).toBe(640);
   });
 
+  it('held arrow presses accumulate and settle ONE commit on blur', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({ rows: [{ id: 'r1', widgets: [countWidget('a')] }] }),
+    );
+    const edge = screen.getByTestId('dashboard-row-edge');
+    // A held key: one press, then repeat ticks. Commit-per-press here would
+    // be one YAML write and vault rescan per tick — the failure ColumnResizer's
+    // docstring records fixing; the pending ref accumulates instead.
+    fireEvent.keyDown(edge, { key: 'ArrowDown' });
+    for (let i = 0; i < 4; i += 1) fireEvent.keyDown(edge, { key: 'ArrowDown', repeat: true });
+    // Five presses painted (300 + 5·12 = 360)…
+    expect(screen.getByTestId('dashboard-row').style.height).toBe('360px');
+    // …but nothing persisted until the handle is left.
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(edge);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(dash(onChange).rows[0].h).toBe(360);
+  });
+
+  it('Escape abandons what the arrows built — no write, height restored', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({ rows: [{ id: 'r1', widgets: [countWidget('a')] }] }),
+    );
+    const edge = screen.getByTestId('dashboard-row-edge');
+    fireEvent.keyDown(edge, { key: 'ArrowDown' });
+    expect(screen.getByTestId('dashboard-row').style.height).toBe('312px');
+    fireEvent.keyDown(edge, { key: 'Escape' });
+    expect(screen.getByTestId('dashboard-row').style.height).toBe('300px');
+    // The Escape-triggered blur finds nothing pending, so it writes nothing.
+    fireEvent.blur(edge);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('a cancelled seam drag cleans up and commits once at the cancel coords', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({
+        rows: [
+          {
+            id: 'r1',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count', w: 1 },
+              { id: 'b', kind: 'number', agg: 'count', w: 2 },
+            ],
+          },
+        ],
+      }),
+    );
+    rect(screen.getByTestId('widget-a'), 0, 200);
+    rect(screen.getByTestId('widget-b'), 212, 400);
+    act(() => {
+      screen
+        .getByTestId('dashboard-seam')
+        .dispatchEvent(new MouseEvent('pointerdown', { clientX: 200, bubbles: true }));
+    });
+    expect(document.body.classList.contains('cb-resizing')).toBe(true);
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 300 }));
+      window.dispatchEvent(new MouseEvent('pointercancel', { clientX: 300 }));
+    });
+    // The cancel is the ColumnResizer contract: same handler as pointerup —
+    // listeners off, body class off, one commit at the cancel's coords.
+    expect(document.body.classList.contains('cb-resizing')).toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(dash(onChange).rows[0].widgets.map((w) => w.w)).toEqual([1.5, 1.5]);
+    // The listeners really are gone: a stray move after the cancel neither
+    // paints nor writes again.
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 500 }));
+    });
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('a seam press that never moves writes nothing and restores the weights', () => {
+    const onChange = resizeSetup(
+      rowsPresentation({
+        rows: [
+          {
+            id: 'r1',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count', w: 1 },
+              { id: 'b', kind: 'number', agg: 'count', w: 2 },
+            ],
+          },
+        ],
+      }),
+    );
+    // Px deliberately OFF the 1:2 weight ratio (minWidth clamps do this in
+    // real layout): had the release committed the px split of a mere click,
+    // it would have written [1.4, 1.6] out of nowhere.
+    rect(screen.getByTestId('widget-a'), 0, 280);
+    rect(screen.getByTestId('widget-b'), 292, 320);
+    act(() => {
+      screen
+        .getByTestId('dashboard-seam')
+        .dispatchEvent(new MouseEvent('pointerdown', { clientX: 280, bubbles: true }));
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { clientX: 280 }));
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('widget-a').style.flexGrow).toBe('1');
+    expect(screen.getByTestId('widget-b').style.flexGrow).toBe('2');
+    expect(document.body.classList.contains('cb-resizing')).toBe(false);
+  });
+
   it('seams and row edges render only in Edit mode', () => {
     const entries = editVault();
     render(
