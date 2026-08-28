@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DashboardView } from '@/views/DashboardView';
 import { buildSchema } from '@/engine/schema';
 import { parseListYaml } from '@/engine/views';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import type { DashboardWidget, Entry, ListFile, Presentation } from '@/engine/types';
+import type { DashboardSpec, DashboardWidget, Entry, ListFile, Presentation } from '@/engine/types';
 
 /**
  * The dashboard (M16.28).
@@ -94,7 +95,7 @@ describe('DashboardView', () => {
         schema={buildSchema(entries)}
       />,
     );
-    expect(screen.getByText('No blocks yet')).toBeTruthy();
+    expect(screen.getByText('No widgets yet')).toBeTruthy();
     expect(screen.getByTestId('dashboard-view').getAttribute('data-blocks')).toBe('0');
   });
 
@@ -265,6 +266,25 @@ describe('DashboardView rows (M44.4)', () => {
     const rows = screen.getAllByTestId('dashboard-row');
     expect(rows[0].style.height).toBe('360px');
     expect(rows[1].style.height).toBe('300px');
+  });
+
+  // AGENTS.md: wide content scrolls inside its own container. One over-wide
+  // row must scroll alone — the whole dashboard dragging sideways would take
+  // every other row with it.
+  it('each row scrolls inside its own wrapper, and the height stays on the row', () => {
+    const entries = vault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={twoRows()}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const rows = screen.getAllByTestId('dashboard-row');
+    for (const row of rows) {
+      expect(row.parentElement?.className).toContain('overflow-x-auto');
+    }
+    expect(rows[0].style.height).toBe('360px');
   });
 
   // The number widget must measure through `widgetEntries` — the dashboard's
@@ -492,5 +512,250 @@ describe('DashboardView own-scope widgets (M44.4)', () => {
     expect(chartHeader?.textContent).toContain('Sum of Estimate');
     expect(within(screen.getByTestId('widget-bd')).getByText('My board')).toBeTruthy();
     expect(within(screen.getByTestId('widget-bd')).queryByText('Board')).toBeNull();
+  });
+});
+
+/**
+ * Edit mode (M44.4 Task 5). Every structural change flows through the pure
+ * editors in engine/dashboard.ts and lands in `onPresentationChange`; a
+ * refusal comes back as the editor's own rule sentence, toasted — never a
+ * silent no-op and never a second wording of the cap.
+ */
+const editVault = (): Entry[] => [
+  makeEntry({
+    path: 'types/work-item.md',
+    title: 'Work item',
+    type: 'Type',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        priority: { kind: 'select' },
+        estimate: { kind: 'number' },
+      },
+      statuses: [{ id: 'todo', group: 'active', color: 'blue' }],
+    } as unknown as Entry['properties'],
+  }),
+  makeEntry({
+    path: 'items/a.md',
+    title: 'Alpha',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'high', estimate: 3 },
+  }),
+];
+
+const countWidget = (id: string): DashboardWidget => ({ id, kind: 'number', agg: 'count' });
+
+const oneRow = (widgets: DashboardWidget[]): Presentation =>
+  rowsPresentation({ rows: [{ id: 'r1', widgets }] });
+
+describe('DashboardView edit mode (M44.4)', () => {
+  const realToast = useUiStore.getState().toast;
+  afterEach(() => {
+    // Unmount BEFORE restoring the store: afterEach hooks run LIFO, so this
+    // one fires ahead of the file-level cleanup — and a setState against a
+    // still-mounted tree is an update React rightly flags as un-acted.
+    cleanup();
+    useUiStore.setState({ toast: realToast, toasts: [] });
+  });
+
+  /** Renders with a persisting host and toggles Edit on. */
+  const editSetup = (presentation: Presentation, entries: Entry[] = editVault()) => {
+    const onChange = vi.fn();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={presentation}
+        schema={buildSchema(entries)}
+        onPresentationChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    return onChange;
+  };
+
+  const lastDashboard = (onChange: ReturnType<typeof vi.fn>): DashboardSpec => {
+    const next = onChange.mock.calls.at(-1)?.[0] as Presentation;
+    if (next.dashboard === undefined) throw new Error('expected a dashboard on the presentation');
+    return next.dashboard;
+  };
+
+  const ids = (spec: DashboardSpec) => spec.rows.map((r) => r.widgets.map((w) => w.id));
+
+  it('shows the edit affordances only when the host can persist', () => {
+    const entries = editVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a')])}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.queryByTestId('dashboard-edit-toggle')).toBeNull();
+    expect(screen.queryByTestId('dashboard-global-filter')).toBeNull();
+    expect(screen.queryByTestId('add-widget')).toBeNull();
+    expect(screen.queryByTestId('widget-menu')).toBeNull();
+
+    cleanup();
+    // With a writer but Edit off: the toggle and the global chip stand, the
+    // structural affordances wait for the lens.
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a')])}
+        schema={buildSchema(entries)}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('dashboard-edit-toggle')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-global-filter')).toBeTruthy();
+    expect(screen.queryByTestId('add-widget')).toBeNull();
+    expect(screen.queryByTestId('widget-menu')).toBeNull();
+  });
+
+  it('adding a metric preset appends a configured number widget to the last row with room', () => {
+    const onChange = editSetup(oneRow([countWidget('a')]));
+    fireEvent.click(screen.getByTestId('add-widget'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Count of records' }));
+    const next = lastDashboard(onChange);
+    expect(next.rows).toHaveLength(1);
+    const added = next.rows[0].widgets.at(-1);
+    expect(added).toMatchObject({ kind: 'number', agg: 'count' });
+    expect(added?.id).not.toBe('a');
+  });
+
+  it("Sum of… drills into the dashboard's own numeric fields", () => {
+    const onChange = editSetup(oneRow([countWidget('a')]));
+    fireEvent.click(screen.getByTestId('add-widget'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Sum of…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Estimate' }));
+    expect(lastDashboard(onChange).rows[0].widgets.at(-1)).toMatchObject({
+      kind: 'number',
+      agg: 'sum',
+      value: 'estimate',
+    });
+  });
+
+  it('Saved view… drills into the vault’s Lists and mints a view widget', () => {
+    const entries = editVault();
+    useVaultStore.setState({ entries, views: lists() });
+    const onChange = editSetup(oneRow([countWidget('a')]), entries);
+    fireEvent.click(screen.getByTestId('add-widget'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Saved view…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delivery' }));
+    expect(lastDashboard(onChange).rows[0].widgets.at(-1)).toMatchObject({
+      kind: 'view',
+      list: 'delivery',
+    });
+  });
+
+  it('the add popover names the cap when the dashboard is full', () => {
+    const full = rowsPresentation({
+      rows: [1, 2, 3].map((n) => ({
+        id: `r${n}`,
+        widgets: [1, 2, 3, 4].map((m) => countWidget(`w${n}-${m}`)),
+      })),
+    });
+    editSetup(full);
+    fireEvent.click(screen.getByTestId('add-widget'));
+    // The exact sentence the pure editor refuses with — one rule, one wording.
+    expect(screen.getByText('A dashboard holds at most twelve widgets')).toBeTruthy();
+    const count = screen.getByRole('menuitem', { name: 'Count of records' });
+    expect((count as HTMLButtonElement).disabled).toBe(true);
+    const bar = screen.getByRole('menuitem', { name: 'Bar chart' });
+    expect((bar as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the widget menu moves, duplicates and deletes through the pure editors', () => {
+    const onChange = editSetup(oneRow([countWidget('a'), countWidget('b')]));
+    const menuOnA = () =>
+      fireEvent.click(within(screen.getByTestId('widget-a')).getByTestId('widget-menu'));
+
+    menuOnA();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to own row' }));
+    expect(ids(lastDashboard(onChange))).toEqual([['b'], ['a']]);
+
+    // The prop never updates under a mock, so each edit starts from the same
+    // two-widget row — which is exactly what makes the shapes assertable.
+    menuOnA();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+    expect(ids(lastDashboard(onChange))).toEqual([['a', 'widget-3', 'b']]);
+
+    menuOnA();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    expect(ids(lastDashboard(onChange))).toEqual([['b']]);
+  });
+
+  it('a cap refusal toasts the exact rule sentence and commits nothing', () => {
+    const toast = vi.fn();
+    useUiStore.setState({ toast });
+    const full = rowsPresentation({
+      rows: [
+        { id: 'r1', widgets: ['a', 'b', 'c', 'd'].map(countWidget) },
+        { id: 'r2', widgets: [countWidget('e')] },
+      ],
+    });
+    const onChange = editSetup(full);
+    fireEvent.click(within(screen.getByTestId('widget-a')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+    expect(toast).toHaveBeenCalledWith('A row holds at most four widgets');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('Rename… swaps the header title for an input and writes through updateWidget', () => {
+    const onChange = editSetup(oneRow([countWidget('a')]));
+    fireEvent.click(within(screen.getByTestId('widget-a')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
+    const input = screen.getByLabelText('Widget title');
+    fireEvent.change(input, { target: { value: 'Sprint pulse' } });
+    fireEvent.blur(input);
+    expect(lastDashboard(onChange).rows[0].widgets[0]).toMatchObject({ title: 'Sprint pulse' });
+  });
+
+  it("the board's Band by… lists groupable fields and writes widget.group", () => {
+    const onChange = editSetup(oneRow([{ id: 'bd', kind: 'board' }]));
+    fireEvent.click(within(screen.getByTestId('widget-bd')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Band by…' }));
+    // The groupable roster (GROUPABLE_KINDS): status and select — never the
+    // number field.
+    expect(screen.queryByRole('menuitem', { name: 'Estimate' })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Priority' }));
+    expect(lastDashboard(onChange).rows[0].widgets[0]).toMatchObject({
+      kind: 'board',
+      group: 'priority',
+    });
+  });
+
+  it("a widget's Filter… writes widget.filter through updateWidget", () => {
+    const onChange = editSetup(oneRow([{ id: 't', kind: 'table' }]));
+    fireEvent.click(within(screen.getByTestId('widget-t')).getByTestId('widget-menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Filter…' }));
+    fireEvent.click(screen.getByText('Add filter'));
+    const widget = lastDashboard(onChange).rows[0].widgets[0];
+    expect(widget.filter).toBeDefined();
+    expect(widget.filter !== undefined && 'all' in widget.filter && widget.filter.all).toHaveLength(
+      1,
+    );
+  });
+
+  it('a global filter rule lands in spec.global, and an emptied group deletes the key', () => {
+    const onChange = editSetup(oneRow([countWidget('a')]));
+    fireEvent.click(screen.getByTestId('dashboard-global-filter'));
+    fireEvent.click(screen.getByText('Add filter'));
+    const withRule = lastDashboard(onChange);
+    expect(
+      withRule.global !== undefined && 'all' in withRule.global && withRule.global.all,
+    ).toHaveLength(1);
+
+    cleanup();
+    const seeded = rowsPresentation({
+      rows: [{ id: 'r1', widgets: [countWidget('a')] }],
+      global: { all: [{ field: 'status', op: 'equals', value: 'todo' }] },
+    });
+    const onChange2 = editSetup(seeded);
+    fireEvent.click(screen.getByTestId('dashboard-global-filter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove filter' }));
+    const next = lastDashboard(onChange2);
+    expect('global' in next).toBe(false);
+    expect(next.rows).toHaveLength(1);
   });
 });

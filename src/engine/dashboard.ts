@@ -123,7 +123,9 @@ export function widgetEntries(
 export type DashboardEdit = { ok: true; spec: DashboardSpec } | { ok: false; reason: string };
 
 const ROW_FULL = 'A row holds at most four widgets';
-const DASHBOARD_FULL = 'A dashboard holds at most twelve widgets';
+/** Exported so the add popover's inline capacity note quotes the SAME sentence
+ * `addWidget`/`duplicateWidget` refuse with — one rule, one wording. */
+export const DASHBOARD_FULL = 'A dashboard holds at most twelve widgets';
 
 /** Total widgets across every row — what the panel's nav-row count reads and
  * what `addWidget`/`duplicateWidget` cap against. */
@@ -285,6 +287,46 @@ export function duplicateWidget(spec: DashboardSpec, id: string): DashboardEdit 
   const at = row.widgets.findIndex((w) => w.id === id);
   const widgets = [...row.widgets.slice(0, at + 1), copy, ...row.widgets.slice(at + 1)];
   const rows = spec.rows.map((r, i) => (i === rowIdx ? { ...r, widgets } : r));
+  return { ok: true, spec: { ...spec, rows } };
+}
+
+/**
+ * What the widget menu's Rename, Filter and Band-by write with. The keys are
+ * the CONFIG a widget carries, never its identity or position — those belong
+ * to the structural editors above.
+ */
+export interface WidgetPatch {
+  title?: string;
+  filter?: FilterGroup;
+  /** The board's band / the chart's axis. The menu only offers it on the
+   * kinds that read it; a stray key on another kind is dropped by the parser
+   * on the next read, the same way any hand-edited stray is. */
+  group?: string;
+}
+
+/**
+ * Patches one widget in place. A key handed `undefined` is DELETED — an
+ * emptied filter must leave the YAML rather than linger as `filter: null`,
+ * which is a rule nobody wrote. Only the touched row is rebuilt, matching
+ * every sibling editor's discipline.
+ */
+export function updateWidget(spec: DashboardSpec, id: string, patch: WidgetPatch): DashboardEdit {
+  const rowIdx = findRowIndex(spec, id);
+  if (rowIdx === -1) return { ok: true, spec };
+  const apply = (w: DashboardWidget): DashboardWidget => {
+    const next: Record<string, unknown> = { ...w };
+    for (const key of Object.keys(patch) as (keyof WidgetPatch)[]) {
+      const value = patch[key];
+      if (value === undefined) delete next[key];
+      else next[key] = value;
+    }
+    // The cast is honest: every WidgetPatch key is optional on the widget
+    // shape, so add/replace/delete all stay inside the union member `w` is.
+    return next as unknown as DashboardWidget;
+  };
+  const rows = spec.rows.map((r, i) =>
+    i === rowIdx ? { ...r, widgets: r.widgets.map((w) => (w.id === id ? apply(w) : w)) } : r,
+  );
   return { ok: true, spec: { ...spec, rows } };
 }
 

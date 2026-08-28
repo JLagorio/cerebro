@@ -10,6 +10,7 @@ import {
   removeWidget,
   setRowHeight,
   setWidgetWeight,
+  updateWidget,
   widgetCount,
   widgetEntries,
 } from '@/engine/dashboard';
@@ -380,6 +381,40 @@ describe('dashboard structure editors (M44.4)', () => {
     }
     const sourceRule = source.filter.all[0];
     expect('field' in sourceRule && sourceRule.value).toBe('doing');
+  });
+
+  it('updateWidget patches in place, rebuilding only the touched row', () => {
+    const base = threeRowSpec();
+    const next = updateWidget(base, 'c', { title: 'Named' });
+    if (!next.ok) throw new Error('expected updateWidget to succeed');
+    expect(next.spec.rows[1].widgets[0]).toMatchObject({ id: 'c', title: 'Named' });
+    expect(next.spec.rows[0]).toBe(base.rows[0]);
+    expect(next.spec.rows[2]).toBe(base.rows[2]);
+  });
+
+  // An emptied filter must LEAVE the YAML — `filter: null` lingering in the
+  // file is a rule nobody wrote, and the parser would have to defend against
+  // it forever.
+  it('updateWidget deletes a key handed undefined', () => {
+    const base: DashboardSpec = {
+      rows: [
+        {
+          id: 'r1',
+          widgets: [
+            { id: 'a', kind: 'table', filter: { all: [{ field: 'x', op: 'is_not_empty' }] } },
+          ],
+        },
+      ],
+    };
+    const next = updateWidget(base, 'a', { filter: undefined });
+    if (!next.ok) throw new Error('expected updateWidget to succeed');
+    expect('filter' in next.spec.rows[0].widgets[0]).toBe(false);
+  });
+
+  it('updateWidget on an unknown id is a no-op — same spec reference', () => {
+    const base = twoRowSpec();
+    const next = updateWidget(base, 'ghost', { title: 'x' });
+    expect(next.ok && next.spec).toBe(base);
   });
 
   it('setRowHeight clamps into the sane band and rounds', () => {

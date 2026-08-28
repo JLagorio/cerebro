@@ -1,19 +1,41 @@
-import React from 'react';
+import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
+import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
+import { Popover } from '@/components/ui/Popover';
 import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
-import { dashboardNumber, widgetEntries } from '@/engine/dashboard';
+import {
+  addWidget,
+  DASHBOARD_FULL,
+  dashboardNumber,
+  duplicateWidget,
+  moveToOwnRow,
+  moveWithinRow,
+  removeWidget,
+  updateWidget,
+  widgetCount,
+  widgetEntries,
+} from '@/engine/dashboard';
+import { GROUPABLE_KINDS, NUMERIC_KINDS } from '@/engine/properties';
+import { humanize } from '@/engine/schema';
 import { resolveSurface } from '@/engine/surface';
-import { resolveView } from '@/engine/views';
+import { filterFieldDefs, filterStatusSet } from '@/engine/viewFilters';
+import { nextDashboardWidgetId, resolveView } from '@/engine/views';
 import { BoardView } from '@/views/BoardView';
 import { ChartView } from '@/views/ChartView';
+import { FilterBuilder } from '@/views/FilterBuilder';
+import { countRules } from '@/views/FilterChips';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
+import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { ROW_HEIGHT_DEFAULT } from '@/engine/types';
+import { MAX_DASHBOARD_WIDGETS, MAX_ROW_WIDGETS, ROW_HEIGHT_DEFAULT } from '@/engine/types';
+import type { ContextMenuItem } from '@/components/ui/ContextMenu';
+import type { DashboardEdit } from '@/engine/dashboard';
 import type {
   DashboardSpec,
   DashboardWidget,
@@ -86,9 +108,189 @@ export interface DashboardViewProps {
   presentation: Presentation;
   schema: Schema;
   /** Persists a structural or filter edit back to the view file. Absent (an
-   * embedded/read-only host) means no Edit affordances render at all — Task 5
-   * gates every editing control on this being defined. */
+   * embedded/read-only host) means no Edit affordances render at all. */
   onPresentationChange?: (next: Presentation) => void;
+}
+
+/**
+ * What the editing chrome inside a `WidgetShell` needs from the dashboard:
+ * the current spec to run the pure editors against, the commit that toasts a
+ * refusal, and the one-widget-at-a-time rename state. A context rather than
+ * six threaded prop sets — every widget component renders the same shell, and
+ * the provider's `null` when Edit is off is what makes the chrome disappear.
+ */
+interface DashboardEditApi {
+  spec: DashboardSpec;
+  schema: Schema;
+  entries: Entry[];
+  commit: (edit: DashboardEdit) => void;
+  renamingId: string | null;
+  setRenamingId: (id: string | null) => void;
+}
+
+const EditContext = createContext<DashboardEditApi | null>(null);
+
+/** The ViewTabs rename idiom: commit on blur/Enter, Escape cancels via ''. */
+function RenameWidget({ name, onCommit }: { name: string; onCommit: (name: string) => void }) {
+  const [draft, setDraft] = useState(name);
+  return (
+    <input
+      autoFocus
+      aria-label="Widget title"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(draft.trim())}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          onCommit('');
+        }
+      }}
+      className="h-6 min-w-0 flex-1 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
+    />
+  );
+}
+
+/**
+ * The per-widget ellipsis menu (Edit mode only). Every structural item runs a
+ * pure editor from engine/dashboard.ts and hands the result to `commit`, so a
+ * cap refusal here speaks the same sentence a drag or an add would. Filter…
+ * and Band by… open their own anchored surfaces after the menu closes.
+ */
+function WidgetMenuButton({
+  widget,
+  title,
+  edit,
+}: {
+  widget: DashboardWidget;
+  title: string;
+  edit: DashboardEditApi;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [surface, setSurface] = useState<'filter' | 'band' | null>(null);
+
+  // The widget's own filter must NOT narrow the universe it is edited with —
+  // a filter matching nothing would otherwise erase the very fields needed to
+  // fix it. The Global layer stays: those are the rows this widget can see.
+  const fields = useMemo(
+    () =>
+      columnUniverse(
+        OWN_SCOPE_SOURCE,
+        widgetEntries(edit.entries, edit.spec, { ...widget, filter: undefined }, edit.schema),
+        edit.schema,
+        [],
+      ),
+    [edit.entries, edit.spec, edit.schema, widget],
+  );
+  const groupable = fields.filter((f) => GROUPABLE_KINDS.has(f.kind));
+
+  const items: ContextMenuItem[] = [
+    { icon: 'pencil', label: 'Rename…', onSelect: () => edit.setRenamingId(widget.id) },
+    { icon: 'list-filter', label: 'Filter…', onSelect: () => setSurface('filter') },
+    ...(widget.kind === 'board'
+      ? [{ icon: 'columns-3', label: 'Band by…', onSelect: () => setSurface('band') }]
+      : []),
+    {
+      icon: 'copy',
+      label: 'Duplicate',
+      onSelect: () => edit.commit(duplicateWidget(edit.spec, widget.id)),
+    },
+    {
+      icon: 'arrow-left',
+      label: 'Move left',
+      onSelect: () => edit.commit(moveWithinRow(edit.spec, widget.id, -1)),
+    },
+    {
+      icon: 'arrow-right',
+      label: 'Move right',
+      onSelect: () => edit.commit(moveWithinRow(edit.spec, widget.id, 1)),
+    },
+    {
+      icon: 'rows-3',
+      label: 'Move to own row',
+      onSelect: () => edit.commit(moveToOwnRow(edit.spec, widget.id)),
+    },
+    {
+      icon: 'trash-2',
+      label: 'Delete',
+      danger: true,
+      onSelect: () => edit.commit(removeWidget(edit.spec, widget.id)),
+    },
+  ];
+
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        data-testid="widget-menu"
+        aria-label={`Widget menu: ${title}`}
+        onClick={() => {
+          const r = ref.current?.getBoundingClientRect();
+          setMenuAt({ x: r?.left ?? 0, y: (r?.bottom ?? 0) + 4 });
+        }}
+        className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-100 hover:text-n-800"
+      >
+        <Icon name="ellipsis" size={14} />
+      </button>
+      {menuAt !== null && (
+        <ContextMenu x={menuAt.x} y={menuAt.y} items={items} onClose={() => setMenuAt(null)} />
+      )}
+      {surface === 'filter' && (
+        <Popover
+          anchorRef={ref}
+          onClose={() => setSurface(null)}
+          role="dialog"
+          ariaLabel={`Filter: ${title}`}
+        >
+          <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]">
+            <div className="px-0.5 pb-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+              Filter this widget
+            </div>
+            <FilterBuilder
+              filters={widget.filter ?? null}
+              fields={filterFieldDefs(fields, filterStatusSet(edit.schema, OWN_SCOPE_SOURCE.type))}
+              // `undefined` DELETES the key through updateWidget — an emptied
+              // filter leaves the YAML, matching the Global chip's rule.
+              onChange={(g) =>
+                edit.commit(updateWidget(edit.spec, widget.id, { filter: g ?? undefined }))
+              }
+            />
+          </div>
+        </Popover>
+      )}
+      {surface === 'band' && (
+        <Popover
+          anchorRef={ref}
+          onClose={() => setSurface(null)}
+          role="menu"
+          ariaLabel={`Band by: ${title}`}
+        >
+          <MenuSurface width={200}>
+            <MenuLabel>Band by</MenuLabel>
+            {groupable.map((f) => (
+              <MenuItem
+                key={f.name}
+                label={humanize(f.name)}
+                checked={widget.kind === 'board' && widget.group === f.name}
+                onSelect={() => {
+                  setSurface(null);
+                  edit.commit(updateWidget(edit.spec, widget.id, { group: f.name }));
+                }}
+              />
+            ))}
+            {groupable.length === 0 && (
+              <p className="m-0 px-2 py-1 text-2xs leading-[15px] text-n-400">
+                No property in these rows can band a board.
+              </p>
+            )}
+          </MenuSurface>
+        </Popover>
+      )}
+    </>
+  );
 }
 
 function WidgetShell({
@@ -104,17 +306,32 @@ function WidgetShell({
   testId: string;
   children: React.ReactNode;
 }) {
+  const edit = useContext(EditContext);
   return (
     <section
       data-testid={`widget-${widget.id}`}
       style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
       className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
-      <header className="flex flex-none items-baseline gap-2 border-b border-n-100 px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-n-800">{title}</span>
+      <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
+        {edit !== null && edit.renamingId === widget.id ? (
+          <RenameWidget
+            name={title}
+            onCommit={(name) => {
+              edit.setRenamingId(null);
+              // Empty = cancel (ViewTabs' rule); unchanged = nothing to write.
+              if (name !== '' && name !== title) {
+                edit.commit(updateWidget(edit.spec, widget.id, { title: name }));
+              }
+            }}
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-n-800">{title}</span>
+        )}
         {subtitle !== undefined && subtitle !== '' && (
           <span className="flex-none text-2xs text-n-400">{subtitle}</span>
         )}
+        {edit !== null && <WidgetMenuButton widget={widget} title={title} edit={edit} />}
       </header>
       <div data-testid={testId} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {children}
@@ -360,83 +577,412 @@ function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view'
   );
 }
 
-// `onPresentationChange` isn't read yet — Task 5 gates every Edit affordance
-// on it being defined. Declared on the props now so ViewCanvas can forward it
-// and callers can pass it without a compile error, per M44.4 Task 3.
-export function DashboardView({ entries, presentation, schema }: DashboardViewProps) {
-  const spec: DashboardSpec = presentation.dashboard ?? { rows: [] };
+/** A widget before its id — what the add popover's presets mint. Distributed
+ * over the union so each preset stays the member it names. */
+type WidgetSeed = DashboardWidget extends infer W
+  ? W extends DashboardWidget
+    ? Omit<W, 'id'>
+    : never
+  : never;
+
+/**
+ * The add-widget popover: MenuLabel groups over one widget vocabulary. The
+ * metric presets are NOT kinds — Count/Sum/Average mint configured `number`
+ * widgets, and Horizontal bar is a `chart` whose spec says so. At capacity
+ * every item disables and the inline note quotes the editors' own refusal
+ * sentence, so the popover and the toast can never disagree on the rule.
+ */
+function AddWidgetMenu({
+  spec,
+  entries,
+  schema,
+  commit,
+  anchorRef,
+  onClose,
+}: {
+  spec: DashboardSpec;
+  entries: Entry[];
+  schema: Schema;
+  commit: (edit: DashboardEdit) => void;
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}) {
+  const lists = useVaultStore((s) => s.views);
+  const [step, setStep] = useState<'root' | 'saved-view' | 'sum' | 'avg'>('root');
+  const full = widgetCount(spec) >= MAX_DASHBOARD_WIDGETS;
+  const fields = useMemo(
+    () => columnUniverse(OWN_SCOPE_SOURCE, entries, schema, []),
+    [entries, schema],
+  );
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+
+  const mint = (seed: WidgetSeed) => {
+    // The last row with room, else a fresh trailing row — a new widget lands
+    // where the eye is already looking, never in a hole further up.
+    const target =
+      [...spec.rows].reverse().find((r) => r.widgets.length < MAX_ROW_WIDGETS)?.id ?? 'new-row';
+    // The cast restores what the distributive Omit proves: any seed member
+    // plus an id is exactly the union member it came from.
+    const widget = { ...seed, id: nextDashboardWidgetId(spec) } as DashboardWidget;
+    commit(addWidget(spec, target, widget));
+    onClose();
+  };
 
   return (
-    <div
-      data-testid="dashboard-view"
-      data-blocks={spec.rows.reduce((n, r) => n + r.widgets.length, 0)}
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
+    <Popover
+      anchorRef={anchorRef}
+      onClose={onClose}
+      onEscape={step === 'root' ? onClose : () => setStep('root')}
+      role="menu"
+      ariaLabel="Add widget"
     >
-      {spec.rows.length === 0 ? (
-        <EmptyState
-          icon="layout-dashboard"
-          title="No blocks yet"
-          description="Add a widget to start — toggle Edit in the corner."
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {spec.rows.map((row) => (
-            <div
-              key={row.id}
-              data-testid="dashboard-row"
-              className="flex min-w-0 gap-3"
-              style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
+      <MenuSurface width={236}>
+        {step === 'root' && (
+          <>
+            <MenuLabel>Charts</MenuLabel>
+            <MenuItem
+              icon="chart-column"
+              label="Bar chart"
+              disabled={full}
+              onSelect={() => mint({ kind: 'chart', chart: { kind: 'bar' } })}
+            />
+            <MenuItem
+              icon="chart-bar"
+              label="Horizontal bar"
+              disabled={full}
+              onSelect={() => mint({ kind: 'chart', chart: { kind: 'bar', horizontal: true } })}
+            />
+            <MenuItem
+              icon="chart-line"
+              label="Line chart"
+              disabled={full}
+              onSelect={() => mint({ kind: 'chart', chart: { kind: 'line' } })}
+            />
+            <MenuItem
+              icon="chart-pie"
+              label="Donut"
+              disabled={full}
+              onSelect={() => mint({ kind: 'chart', chart: { kind: 'donut' } })}
+            />
+            <MenuLabel>Views</MenuLabel>
+            <MenuItem
+              icon="table-2"
+              label="Table"
+              disabled={full}
+              onSelect={() => mint({ kind: 'table' })}
+            />
+            <MenuItem
+              icon="columns-3"
+              label="Board"
+              disabled={full}
+              onSelect={() => mint({ kind: 'board' })}
+            />
+            <MenuItem
+              icon="chart-no-axes-gantt"
+              label="Timeline"
+              disabled={full}
+              onSelect={() => mint({ kind: 'timeline' })}
+            />
+            <MenuItem
+              icon="bookmark"
+              label="Saved view…"
+              submenu
+              disabled={full}
+              onSelect={() => setStep('saved-view')}
+            />
+            <MenuLabel>Metrics</MenuLabel>
+            <MenuItem
+              icon="hash"
+              label="Count of records"
+              disabled={full}
+              onSelect={() => mint({ kind: 'number', agg: 'count' })}
+            />
+            <MenuItem
+              icon="sigma"
+              label="Sum of…"
+              submenu
+              disabled={full}
+              onSelect={() => setStep('sum')}
+            />
+            <MenuItem
+              icon="divide"
+              label="Average of…"
+              submenu
+              disabled={full}
+              onSelect={() => setStep('avg')}
+            />
+            {full && (
+              <p className="m-0 mt-1.5 border-t border-n-100 px-2 pt-2 text-2xs leading-[15px] text-n-400">
+                {DASHBOARD_FULL}
+              </p>
+            )}
+          </>
+        )}
+        {step === 'saved-view' && (
+          <>
+            <MenuBack title="Saved view" onBack={() => setStep('root')} />
+            {lists.map((l) => (
+              <MenuItem
+                key={`${l.collection ?? ''}::${l.id}`}
+                icon="table-2"
+                label={l.definition.name}
+                onSelect={() =>
+                  mint({
+                    kind: 'view',
+                    list: l.id,
+                    ...(l.collection !== null ? { collection: l.collection } : {}),
+                  })
+                }
+              />
+            ))}
+            {lists.length === 0 && (
+              <p className="m-0 px-2 py-1 text-2xs leading-[15px] text-n-400">
+                There are no saved lists in the vault to embed yet.
+              </p>
+            )}
+          </>
+        )}
+        {(step === 'sum' || step === 'avg') && (
+          <>
+            <MenuBack
+              title={step === 'sum' ? 'Sum of' : 'Average of'}
+              onBack={() => setStep('root')}
+            />
+            {numeric.map((f) => (
+              <MenuItem
+                key={f.name}
+                icon="hash"
+                label={humanize(f.name)}
+                onSelect={() =>
+                  mint({ kind: 'number', agg: step === 'sum' ? 'sum' : 'avg', value: f.name })
+                }
+              />
+            ))}
+            {numeric.length === 0 && (
+              <p className="m-0 px-2 py-1 text-2xs leading-[15px] text-n-400">
+                This view has no number property to add up.
+              </p>
+            )}
+          </>
+        )}
+      </MenuSurface>
+    </Popover>
+  );
+}
+
+export function DashboardView({
+  entries,
+  presentation,
+  schema,
+  onPresentationChange,
+}: DashboardViewProps) {
+  const spec: DashboardSpec = presentation.dashboard ?? { rows: [] };
+  const toast = useUiStore((s) => s.toast);
+
+  // A lens, not a place: local, resets on remount, persisted nowhere.
+  const [editing, setEditing] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [globalOpen, setGlobalOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const globalRef = useRef<HTMLButtonElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+
+  const canEdit = onPresentationChange !== undefined;
+
+  const write = (next: DashboardSpec) =>
+    onPresentationChange?.({ ...presentation, dashboard: next });
+  /** One door for every structural edit: an ok writes, a refusal speaks. */
+  const commit = (edit: DashboardEdit) => {
+    if (!edit.ok) {
+      toast(edit.reason);
+      return;
+    }
+    write(edit.spec);
+  };
+
+  const globalDefs = useMemo(
+    () =>
+      filterFieldDefs(
+        columnUniverse(OWN_SCOPE_SOURCE, entries, schema, []),
+        // Typeless by construction (OWN_SCOPE_SOURCE), so today this merges
+        // nothing — but the seam is where a future typed scope would enter.
+        filterStatusSet(schema, OWN_SCOPE_SOURCE.type),
+      ),
+    [entries, schema],
+  );
+
+  const api: DashboardEditApi = { spec, schema, entries, commit, renamingId, setRenamingId };
+
+  return (
+    <EditContext.Provider value={editing && canEdit ? api : null}>
+      <div
+        data-testid="dashboard-view"
+        data-blocks={spec.rows.reduce((n, r) => n + r.widgets.length, 0)}
+        className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
+      >
+        {canEdit && (
+          <div className="mb-3 flex items-center justify-end gap-1.5">
+            {editing && (
+              <button
+                ref={addRef}
+                type="button"
+                data-testid="add-widget"
+                aria-expanded={adding}
+                onClick={() => setAdding((v) => !v)}
+                className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-n-300 bg-transparent px-2 text-xs text-n-500 hover:border-n-400 hover:text-n-800"
+              >
+                <Icon name="plus" size={12} />
+                Add widget
+              </button>
+            )}
+            <button
+              ref={globalRef}
+              type="button"
+              data-testid="dashboard-global-filter"
+              aria-expanded={globalOpen}
+              onClick={() => setGlobalOpen((v) => !v)}
+              className={[
+                'inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-xs',
+                spec.global !== undefined
+                  ? 'border-cortex-300 bg-cortex-50 text-cortex-700 hover:bg-cortex-100'
+                  : 'border-transparent bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
+              ].join(' ')}
             >
-              {row.widgets.map((widget) =>
-                widget.kind === 'number' ? (
-                  <NumberBlock
-                    key={widget.id}
-                    widget={widget}
-                    entries={entries}
-                    spec={spec}
-                    schema={schema}
+              <Icon name="list-filter" size={12} />
+              Global filter
+              {spec.global !== undefined ? ` · ${countRules(spec.global)}` : ''}
+            </button>
+            <button
+              type="button"
+              data-testid="dashboard-edit-toggle"
+              aria-label={editing ? 'Done editing' : 'Edit widgets'}
+              aria-pressed={editing}
+              onClick={() => {
+                setEditing((v) => !v);
+                setRenamingId(null);
+                setAdding(false);
+              }}
+              className={[
+                'flex h-7 w-7 items-center justify-center rounded-md border-0',
+                editing
+                  ? 'bg-[var(--surface-selected)] text-cortex-600'
+                  : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
+              ].join(' ')}
+            >
+              <Icon name={editing ? 'check' : 'pencil'} size={13} />
+            </button>
+            {adding && (
+              <AddWidgetMenu
+                spec={spec}
+                entries={entries}
+                schema={schema}
+                commit={commit}
+                anchorRef={addRef}
+                onClose={() => setAdding(false)}
+              />
+            )}
+            {globalOpen && (
+              <Popover
+                anchorRef={globalRef}
+                onClose={() => setGlobalOpen(false)}
+                role="dialog"
+                ariaLabel="Global filter"
+              >
+                <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]">
+                  <div className="px-0.5 pb-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+                    Global filter — every widget&rsquo;s rows pass it
+                  </div>
+                  <FilterBuilder
+                    filters={spec.global ?? null}
+                    fields={globalDefs}
+                    onChange={(g) => {
+                      // An emptied group DELETES the key (FilterChips' null
+                      // rule): `global:` lingering in the YAML would be a
+                      // filter nobody wrote.
+                      if (g === null) {
+                        const { global: _drop, ...rest } = spec;
+                        write(rest);
+                      } else {
+                        write({ ...spec, global: g });
+                      }
+                    }}
                   />
-                ) : widget.kind === 'view' ? (
-                  <ViewBlock key={widget.id} widget={widget} />
-                ) : widget.kind === 'table' ? (
-                  <TableWidget
-                    key={widget.id}
-                    widget={widget}
-                    entries={entries}
-                    spec={spec}
-                    schema={schema}
-                    sort={presentation.sort}
-                  />
-                ) : widget.kind === 'board' ? (
-                  <BoardWidget
-                    key={widget.id}
-                    widget={widget}
-                    entries={entries}
-                    spec={spec}
-                    schema={schema}
-                  />
-                ) : widget.kind === 'timeline' ? (
-                  <TimelineWidget
-                    key={widget.id}
-                    widget={widget}
-                    entries={entries}
-                    spec={spec}
-                    schema={schema}
-                  />
-                ) : (
-                  <ChartWidget
-                    key={widget.id}
-                    widget={widget}
-                    entries={entries}
-                    spec={spec}
-                    schema={schema}
-                  />
-                ),
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+                </div>
+              </Popover>
+            )}
+          </div>
+        )}
+        {spec.rows.length === 0 ? (
+          <EmptyState
+            icon="layout-dashboard"
+            title="No widgets yet"
+            description="Add a widget to start — toggle Edit in the corner."
+          />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {spec.rows.map((row) => (
+              // One over-wide row scrolls alone inside its own wrapper — wide
+              // content never drags the whole dashboard sideways (AGENTS.md).
+              // The height stays on the inner flex row, which keeps the
+              // `dashboard-row` testid; the wrapper only scrolls.
+              <div key={row.id} className="min-w-0 overflow-x-auto">
+                <div
+                  data-testid="dashboard-row"
+                  className="flex gap-3"
+                  style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
+                >
+                  {row.widgets.map((widget) =>
+                    widget.kind === 'number' ? (
+                      <NumberBlock
+                        key={widget.id}
+                        widget={widget}
+                        entries={entries}
+                        spec={spec}
+                        schema={schema}
+                      />
+                    ) : widget.kind === 'view' ? (
+                      <ViewBlock key={widget.id} widget={widget} />
+                    ) : widget.kind === 'table' ? (
+                      <TableWidget
+                        key={widget.id}
+                        widget={widget}
+                        entries={entries}
+                        spec={spec}
+                        schema={schema}
+                        sort={presentation.sort}
+                      />
+                    ) : widget.kind === 'board' ? (
+                      <BoardWidget
+                        key={widget.id}
+                        widget={widget}
+                        entries={entries}
+                        spec={spec}
+                        schema={schema}
+                      />
+                    ) : widget.kind === 'timeline' ? (
+                      <TimelineWidget
+                        key={widget.id}
+                        widget={widget}
+                        entries={entries}
+                        spec={spec}
+                        schema={schema}
+                      />
+                    ) : (
+                      <ChartWidget
+                        key={widget.id}
+                        widget={widget}
+                        entries={entries}
+                        spec={spec}
+                        schema={schema}
+                      />
+                    ),
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </EditContext.Provider>
   );
 }
