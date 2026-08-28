@@ -1482,6 +1482,63 @@ describe('ChartView drilldown (M44.3)', () => {
     expect(saved.filters).toEqual({ all: [{ field: 'tags', op: 'any_of', value: ['infra'] }] });
   });
 
+  it('a person band saves — any_of on the bare stem, the ops its family really has', () => {
+    // Person/relation file under the `multi` filter family, which offers NO
+    // `equals` — so the rule is membership on the scanner's bracket-stripped
+    // stem, the value evaluateFilters actually compares (M44.3 review fix:
+    // gating this on `equals` disabled Save for the mainstream group-by-
+    // assignee case, with an untrue explanation).
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: { assignee: { kind: 'person' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        relationships: { assignee: ['ana-marte'] },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        relationships: { assignee: ['ana-marte'] },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        relationships: { assignee: ['bo-riis'] },
+      }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'assignee' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    // Person bands sort by label; ana-marte's is first either as stem or as
+    // resolved title. The two-record row count pins that this IS her band.
+    fireEvent.click(screen.getAllByTestId('chart-bar')[0]);
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(2);
+    const save = screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({
+      all: [{ field: 'assignee', op: 'any_of', value: ['ana-marte'] }],
+    });
+  });
+
   it('an undeclared field disables Save with the reason — a quiet refusal, not a missing button', () => {
     // No Type doc declares `flavor`, so its kind — and therefore which filter
     // op could restate the band — is unknowable.

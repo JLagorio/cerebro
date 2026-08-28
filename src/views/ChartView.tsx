@@ -984,13 +984,16 @@ const DRILL_CAP = 9;
  *
  * The choices lean on the same M20.1 pair the board's create path uses:
  * `bandKind` resolves the field the way grouping resolved it, and
- * `bandValueFor` says what value the band stands for — with two deviations,
- * both because a FILTER matches what the scanner READS, not what a write
- * would put on disk. Person/relation bands filter by the bare stem (the
- * scanner strips brackets into `entry.relationships`, and that is what
- * `evaluateFilters` compares); a multiselect band is `any_of [key]` — exact
- * membership — because its family offers no `equals`, and `contains` is
- * substring matching that would also catch 'darkred' in a 'red' band.
+ * `bandValueFor` says what value the band stands for — deviating where a
+ * FILTER matches what the scanner READS rather than what a write would put
+ * on disk. The whole multi family — multiselect, person, relation — files
+ * under membership, because `filterOpsFor` gives that family no `equals` at
+ * all: `any_of [key]` is the op it has, and the right one. The key IS the
+ * comparable value: person/relation bands key by the bare wikilink stem,
+ * which is exactly what `evaluateFilters` reads out of the scanner's
+ * bracket-stripped `entry.relationships` (never `bandValueFor`'s `[[…]]`
+ * write-form). `contains` would be wrong for all three — substring matching
+ * catches 'darkred' in a 'red' band.
  */
 function bandRule(field: string, key: string, kind: FieldKind | undefined): FilterRule | null {
   // "No <field>" is a band a filter CAN name, whatever the kind — `is_empty`
@@ -1000,14 +1003,15 @@ function bandRule(field: string, key: string, kind: FieldKind | undefined): Filt
   // restate the band: the quiet-refusal path.
   if (kind === undefined) return null;
   const ops = filterOpsFor(kind);
-  if (kind === 'multiselect') {
-    // Grouping bands a multi-value record by its FIRST value, so membership
-    // catches every record the band holds (first implies member) — plus any
-    // record holding the value later in its list. The one direction a saved
-    // view must not err in is LOSING a drilled record, and this one cannot.
+  if (kind === 'multiselect' || kind === 'person' || kind === 'relation') {
+    // Membership never LOSES a drilled record — the one direction a saved
+    // view must not err in. A multi-value record bands by its FIRST value
+    // (first implies member), and a single-target relation's stem is its
+    // membership; the rule may additionally catch a record holding the value
+    // later in its list, which is over-inclusion, not loss.
     return ops.includes('any_of') ? { field, op: 'any_of', value: [key] } : null;
   }
-  const value = kind === 'person' || kind === 'relation' ? key : bandValueFor(key, kind);
+  const value = bandValueFor(key, kind);
   if (value === undefined || value === null) return null;
   return ops.includes('equals') ? { field, op: 'equals', value } : null;
 }
