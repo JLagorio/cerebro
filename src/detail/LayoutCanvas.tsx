@@ -88,10 +88,9 @@ export function LayoutCanvas({
       foldsWhenUnset(previewEntry, schema, draft.display.showEmpty),
     ).shown;
   const restRows = canvasRows(previewLayout.rest);
-  // The heading shell gates on the strip's OWN fold predicate (stripCells is
-  // exported for exactly this — hosts gate on the strip actually showing), so
-  // a fully folded strip leaves no empty shell behind, and the gate can never
-  // drift from the fold.
+  // The strip's OWN fold predicate decides whether cells render (stripCells
+  // is exported for exactly this), but it no longer gates the SHELL — see the
+  // persistent-shell rule at the render below.
   const headingFields = overlayVisibility(previewLayout.heading, draft.visibility);
   const headingShown =
     stripCells(previewEntry, schema, headingFields, draft.display.showEmpty).length > 0;
@@ -124,8 +123,14 @@ export function LayoutCanvas({
             />
           </BlockShell>
         )}
-        {headingShown && (
-          <BlockShell container="heading" label="Heading">
+        {/* Every property container keeps its shell even when folding empties
+            it (Task 4 review ruling: "the editor is where hidden things stay
+            visible") — a fold-emptied container must stay clickable, or the
+            only door to un-hiding its fields would fold away with them. The
+            heading's shell is unconditional for the same reason: it is
+            "Move to heading"'s target even while nothing shows there. */}
+        <BlockShell container="heading" label="Heading" interactive>
+          {headingShown ? (
             <HeadingProperties
               entry={previewEntry}
               schema={schema}
@@ -134,28 +139,25 @@ export function LayoutCanvas({
               fields={headingFields}
               showEmpty={draft.display.showEmpty}
             />
-          </BlockShell>
-        )}
+          ) : (
+            <ShellEmptyHint label="Heading" structural={previewLayout.heading.length === 0} />
+          )}
+        </BlockShell>
         <div className="flex flex-col gap-[7px]">
           {previewLayout.groups.map((g) => {
-            // A STRUCTURALLY empty group keeps its shell (plan Decision): it
-            // is the editor's drop target, and erasing it would strand a
-            // fresh Add-section group off screen.
-            if (g.fields.length === 0) {
+            const rows = canvasRows(g.fields);
+            if (rows.length === 0) {
+              // Structurally empty (the editor's drop target) and emptied by
+              // FOLDING both keep the shell; the hint tells them apart,
+              // because "hidden" and "absent" are different sentences.
               return (
-                <BlockShell key={g.id} container={g.id} label={g.name}>
-                  <GroupLabel name={g.name} />
-                  <div className="px-1 pb-1.5 text-xs text-n-400">No properties yet</div>
+                <BlockShell key={g.id} container={g.id} label={g.name} interactive>
+                  <ShellEmptyHint label={g.name} structural={g.fields.length === 0} />
                 </BlockShell>
               );
             }
-            const rows = canvasRows(g.fields);
-            // Empty after FOLDING renders nothing — the panels' own rule: a
-            // header over no rows would claim the group holds something it
-            // does not.
-            if (rows.length === 0) return null;
             return (
-              <BlockShell key={g.id} container={g.id} label={g.name}>
+              <BlockShell key={g.id} container={g.id} label={g.name} interactive>
                 <div
                   data-testid="property-group"
                   data-group={g.id}
@@ -170,11 +172,13 @@ export function LayoutCanvas({
           {/* Rest LAST and headerless, RecordProperties' own order.
               Its shell says "Properties" — the block's Notion name,
               since headerless content has no label of its own. */}
-          {restRows.length > 0 && (
-            <BlockShell container="rest" label="Properties">
+          <BlockShell container="rest" label="Properties" interactive>
+            {restRows.length > 0 ? (
               <div className="flex flex-col gap-[7px]">{restRows.map(previewRow)}</div>
-            </BlockShell>
-          )}
+            ) : (
+              <ShellEmptyHint label="Properties" structural={previewLayout.rest.length === 0} />
+            )}
+          </BlockShell>
         </div>
         {draft.display.showBody && (
           <BlockShell container="content" label="Content">
@@ -209,6 +213,21 @@ export function LayoutCanvas({
   );
 }
 
+/** The persistent shell's stand-in content when no row renders: the block's
+ * quiet caps label plus which KIND of empty this is — structurally empty
+ * ("No properties yet") or emptied by folding ("All properties hidden").
+ * Two hints because "hidden" and "absent" are different sentences. */
+function ShellEmptyHint({ label, structural }: { label: string; structural: boolean }) {
+  return (
+    <>
+      <GroupLabel name={label} />
+      <div className="px-1 pb-1.5 text-xs text-n-400">
+        {structural ? 'No properties yet' : 'All properties hidden'}
+      </div>
+    </>
+  );
+}
+
 /**
  * One canvas block: an interactive SHELL around inert content (M45.3, plan
  * Decision "block chrome is the shell's"). The chrome idiom is WidgetShell's
@@ -222,31 +241,41 @@ export function LayoutCanvas({
  * attribute, and it blanks every pointer, key and focus path in the subtree,
  * so the draft — not the vault — stays on stage. No aria-hidden alongside
  * it: inert already removes the subtree from the a11y tree, and a second
- * claim could only drift from the first. The shell itself stays live: a
+ * claim could only drift from the first. An `interactive` shell stays live: a
  * focusable role'd div (a real <button> cannot legally contain the block's
  * form controls), labeled for the a11y tree its inert content left.
+ *
+ * `tabs` and `content` pass no `interactive` and are DEMOTED to plain chrome
+ * (Task 5 review ruling): no group editor exists for either, and a
+ * role=button that Enter cannot activate is a promise the a11y tree has no
+ * way to keep. They keep the hover ring, the name chip and `data-block`, so
+ * the canvas grammar — and the tests' addressing — stay uniform.
  */
 function BlockShell({
   container,
   label,
+  interactive = false,
   children,
 }: {
   /** 'heading' | groupId | 'rest' | 'content' | 'tabs' — Task 5/6's address. */
   container: string;
   label: string;
+  /** Marks a container the group editor can open on (Task 5). */
+  interactive?: boolean;
   children: ReactNode;
 }) {
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={label}
+      {...(interactive ? { role: 'button', tabIndex: 0, 'aria-label': label } : {})}
       data-testid="layout-block"
       data-block={container}
       // TODO(M45.3 Task 5): onClick opens this container's group editor. The
       // attributes land here so tests and e2e can address blocks; the handler
       // lands with the popover so no dead no-op ships in between.
-      className="group/block relative rounded-md ring-cortex-500 hover:ring-1 focus-visible:outline-none focus-visible:ring-1"
+      className={[
+        'group/block relative rounded-md ring-cortex-500 hover:ring-1',
+        interactive ? 'focus-visible:outline-none focus-visible:ring-1' : '',
+      ].join(' ')}
     >
       <span className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700 opacity-0 group-hover/block:opacity-100 group-focus-visible/block:opacity-100">
         {label}

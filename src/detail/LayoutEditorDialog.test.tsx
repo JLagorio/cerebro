@@ -698,7 +698,7 @@ describe('the canvas folds what the page folds (M45.3 Task 1)', () => {
     useUiStore.setState({ layoutEditor: null });
   });
 
-  it('a visibility:hide field is absent from the canvas — its emptied group renders nothing', () => {
+  it('a visibility:hide field folds out, but its emptied group KEEPS its shell', () => {
     setup({
       entries: [
         makeEntry({
@@ -727,13 +727,92 @@ describe('the canvas folds what the page folds (M45.3 Task 1)', () => {
     });
     const preview = within(screen.getByTestId('layout-preview'));
     // The page folds `hide` behind its expander; the canvas has no expander —
-    // the row renders nothing, and the emptied group takes its header along.
+    // the ROW renders nothing. But the group's SHELL persists (the Task 4
+    // review ruling: "the editor is where hidden things stay visible") — a
+    // fold-emptied container must stay clickable, or the only door to
+    // un-hiding its fields would fold away with them.
     expect(preview.queryByText('Priority')).toBeNull();
     expect(preview.queryByText('high')).toBeNull();
     expect(preview.queryByTestId('property-group')).toBeNull();
-    expect(preview.queryByText('Planning')).toBeNull();
+    const shell = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'g1');
+    if (shell === undefined) throw new Error('fold-emptied group shell missing');
+    expect(shell.textContent).toContain('Planning');
+    // Fold-emptied says so — DISTINCT from the structurally-empty hint,
+    // because "hidden" and "absent" are different sentences.
+    expect(shell.textContent).toContain('All properties hidden');
+    expect(shell.textContent).not.toContain('No properties yet');
     // The rest field still renders — folding is per-row, not per-canvas.
     expect(preview.getByText('Notes')).toBeTruthy();
+  });
+
+  it('the heading shell persists when the strip folds empty — it is the promote target', () => {
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: { status: { kind: 'text', visibility: 'hide_when_empty' }, priority: 'text' },
+            layout: {
+              heading: ['status'],
+              groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        makeEntry({
+          path: 'items/bare.md',
+          title: 'Bare record',
+          type: 'Work item',
+          properties: { priority: 'high' },
+        }),
+      ],
+    });
+    // The strip itself folds away (stripCells' own rule, asserted in the
+    // M45.2 suite) — but the SHELL stays: "Move to heading" needs somewhere
+    // to point even while nothing currently shows there.
+    expect(within(screen.getByTestId('layout-preview')).queryByTestId('heading-strip')).toBeNull();
+    const shell = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'heading');
+    if (shell === undefined) throw new Error('heading shell missing');
+    expect(shell.textContent).toContain('All properties hidden');
+  });
+
+  it('a structurally empty heading and rest keep shells with the empty hint', () => {
+    // Every field claimed by the group: heading and rest both resolve empty.
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: { status: 'text', priority: 'text' },
+            layout: {
+              heading: [],
+              groups: [{ id: 'g1', name: 'Planning', fields: ['status', 'priority'] }],
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        makeEntry({
+          path: 'items/alpha.md',
+          title: 'Alpha record',
+          type: 'Work item',
+          properties: { status: 'todo', priority: 'high' },
+        }),
+      ],
+    });
+    const shellOf = (container: string) =>
+      screen.getAllByTestId('layout-block').find((b) => b.getAttribute('data-block') === container);
+    const heading = shellOf('heading');
+    const rest = shellOf('rest');
+    if (heading === undefined || rest === undefined) throw new Error('persistent shell missing');
+    // Structurally empty — nothing is hidden here, there is just nothing yet.
+    expect(heading.textContent).toContain('No properties yet');
+    expect(rest.textContent).toContain('No properties yet');
   });
 
   it("the rail's show-empty switch reveals a hide_when_empty rest field live", async () => {
@@ -793,18 +872,26 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
   const blockIds = () =>
     screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
 
-  it('every block wears a focusable shell addressed by container', () => {
+  it('property containers wear focusable shells; tabs and content are demoted chrome', async () => {
+    const user = userEvent.setup();
     shellSetup();
-    // Fixture order: heading strip, the Planning group, headerless rest,
-    // the body (show_body defaults true). No tabs, no tabs shell.
-    expect(blockIds()).toEqual(['heading', 'g1', 'rest', 'content']);
+    await user.click(screen.getByTestId('layout-structure-tabbed'));
+    expect(blockIds()).toEqual(['tabs', 'heading', 'g1', 'rest', 'content']);
     for (const shell of screen.getAllByTestId('layout-block')) {
-      // Prepared for Task 5's click-to-edit: in the tab order, button role,
-      // no handler yet — the popover lands with its wiring.
-      expect(shell.getAttribute('role')).toBe('button');
-      expect(shell.tabIndex).toBe(0);
-      // Exactly one inert content div inside each shell.
+      const container = shell.getAttribute('data-block');
+      // Exactly one inert content div inside each shell, editor or chrome.
       expect(within(shell).getAllByTestId('layout-preview-content')).toHaveLength(1);
+      if (container === 'tabs' || container === 'content') {
+        // No group editor exists for these two, so they are DEMOTED to plain
+        // chrome (Task 5 review ruling): a role=button that Enter cannot
+        // activate is a promise the a11y tree has no way to keep.
+        expect(shell.getAttribute('role')).toBeNull();
+        expect(shell.hasAttribute('tabindex')).toBe(false);
+        expect(shell.hasAttribute('aria-label')).toBe(false);
+      } else {
+        expect(shell.getAttribute('role')).toBe('button');
+        expect(shell.tabIndex).toBe(0);
+      }
     }
   });
 
@@ -842,7 +929,9 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     // the content (GroupLabel), so the filter is what isolates the chrome.
     expect(chipOf('g1', 'Planning').getAttribute('aria-label')).toBe('Planning');
     expect(chipOf('rest', 'Properties').getAttribute('aria-label')).toBe('Properties');
-    expect(chipOf('content', 'Content').getAttribute('aria-label')).toBe('Content');
+    // Content keeps its chip but no aria-label: a label with no role labels
+    // nothing (the demoted shells are plain chrome).
+    expect(chipOf('content', 'Content').hasAttribute('aria-label')).toBe(false);
   });
 
   it('an EMPTY group regains a visible shell — its label and an empty hint', () => {
