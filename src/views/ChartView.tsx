@@ -133,10 +133,14 @@ function clip(label: string, band: number): string {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
 
-/** The caption's trailing clauses — only DEVIATIONS are worth a word. */
-function captionNotes(chart: ChartSpec | undefined): string[] {
+/** The caption's trailing clauses — only DEVIATIONS are worth a word.
+ * `kind` matters here too: computeChart ignores `cumulative` for a donut (a
+ * ring of running totals would lie), so the caption must not claim one
+ * either — a hand-edited `kind: donut` + `cumulative: true` is reachable via
+ * the vault even though the panel never produces that combination. */
+function captionNotes(chart: ChartSpec | undefined, kind: ChartKind): string[] {
   const notes: string[] = [];
-  if (chart?.cumulative === true) notes.push('cumulative');
+  if (chart?.cumulative === true && kind !== 'donut') notes.push('cumulative');
   if (chart?.sort === 'value-desc') notes.push('biggest first');
   if (chart?.sort === 'value-asc') notes.push('smallest first');
   if (chart?.sort === 'label') notes.push('A to Z');
@@ -575,7 +579,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
   // The donut defaults its legend on — the ring has no other labels; the
   // axis kinds default off and can opt in.
   const showLegend = chart?.legend ?? kind === 'donut';
-  const notes = captionNotes(chart);
+  const notes = captionNotes(chart, kind);
 
   return (
     <div

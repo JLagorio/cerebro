@@ -487,6 +487,27 @@ describe('ChartView', () => {
     expect(caption.textContent).toContain('biggest first');
   });
 
+  /** computeChart ignores `cumulative` for a donut (a ring of running
+   * totals lies), so the caption must not claim one either — even for a
+   * hand-edited spec the panel itself would never produce (parseChart
+   * allows the key on any kind; the vault, not the panel, is the source of
+   * truth). */
+  it('a donut never claims cumulative, even when the spec says so', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'donut', agg: 'sum', value: 'estimate', cumulative: true },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const caption = screen.getByTestId('chart-caption');
+    expect(caption.textContent).not.toContain('cumulative');
+  });
+
   // Every colour must come from the token layer, so the chart follows the
   // theme instead of shipping its own palette.
   it('paints only in tokens — no literal hex anywhere in the svg', () => {
