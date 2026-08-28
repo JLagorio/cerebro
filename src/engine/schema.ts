@@ -1,4 +1,5 @@
 import type {
+  DisplayConfig,
   Entry,
   FieldDef,
   FieldKind,
@@ -158,6 +159,16 @@ function parseStatuses(raw: unknown): StatusDef[] {
   return out;
 }
 
+/** `display:` is advisory, like every Type-doc block: malformed → defaults. */
+function parseDisplayConfig(raw: unknown): DisplayConfig {
+  const obj = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    showEmpty: obj.show_empty === true,
+    showFile: obj.show_file === true,
+    showBody: obj.show_body !== false,
+  };
+}
+
 function isEmptyValue(raw: unknown): boolean {
   return (
     raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
@@ -179,6 +190,7 @@ export function buildSchema(entries: Entry[]): Schema {
           ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
           : null,
       views: parseViewList((e.properties as Record<string, unknown>).views),
+      display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
     });
   }
 

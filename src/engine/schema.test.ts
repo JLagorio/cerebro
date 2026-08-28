@@ -400,3 +400,42 @@ describe('derived two-way relations', () => {
     expect(owning.target).toBe('Objective');
   });
 });
+
+describe('display config (M44.1)', () => {
+  const typeDoc = (display: unknown) =>
+    makeEntry({
+      path: 'types/work-item.md',
+      type: 'Type',
+      title: 'Work item',
+      properties: { type: 'Type', display } as unknown as ReturnType<
+        typeof makeEntry
+      >['properties'],
+    });
+
+  it('absent display means the defaults — the panel behaves as before M44.1', () => {
+    const schema = buildSchema([typeDoc(undefined)]);
+    expect(schema.types.get('Work item')?.display).toEqual({
+      showEmpty: false,
+      showFile: false,
+      showBody: true,
+    });
+  });
+
+  it('reads snake_case deviations and defaults the rest', () => {
+    const schema = buildSchema([typeDoc({ show_empty: true, show_body: false })]);
+    expect(schema.types.get('Work item')?.display).toEqual({
+      showEmpty: true,
+      showFile: false,
+      showBody: false,
+    });
+  });
+
+  it('tolerates garbage — a hand-edited display never breaks the schema', () => {
+    const schema = buildSchema([typeDoc('sideways')]);
+    expect(schema.types.get('Work item')?.display).toEqual({
+      showEmpty: false,
+      showFile: false,
+      showBody: true,
+    });
+  });
+});

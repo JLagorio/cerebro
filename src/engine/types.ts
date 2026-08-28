@@ -127,6 +127,23 @@ export interface FieldDef {
 export const FIELD_VISIBILITIES = ['show', 'hide_when_empty', 'hide'] as const;
 export type FieldVisibility = (typeof FIELD_VISIBILITIES)[number];
 
+/** The record panel's per-type presentation (M44.1). Defaults are the
+ * pre-M44.1 behaviour: empty properties fold, no file row, body shown. */
+export interface DisplayConfig {
+  /** Empty declared properties render unfolded instead of behind the count. */
+  showEmpty: boolean;
+  /** A muted file-path row above the timestamps. */
+  showFile: boolean;
+  /** The Description section and its editor. */
+  showBody: boolean;
+}
+
+export const DISPLAY_DEFAULTS: DisplayConfig = {
+  showEmpty: false,
+  showFile: false,
+  showBody: true,
+};
+
 export interface TypeDef {
   name: string;
   icon: string | null;
@@ -140,6 +157,10 @@ export interface TypeDef {
   /** Saved views of the type screen (M12.3), stored under `views:` on the
    * Type doc — the same shape a List keeps. [] means none saved yet. */
   views: ViewDefinition[];
+  /** `display:` on the Type doc (M44.1) — how the record panel presents this
+   * type. Always resolved: absent frontmatter yields the defaults, so no
+   * consumer null-checks. */
+  display: DisplayConfig;
 }
 
 export interface ResolvedField {
