@@ -7,6 +7,7 @@ import {
   findTypeDoc,
   normalizeFieldName,
   removeFieldFromType,
+  renameFieldOnType,
   setFieldOptions,
   setTypeDisplay,
   setTypeStatuses,
@@ -143,6 +144,40 @@ describe('removeFieldFromType', () => {
     });
     expect(await removeFieldFromType('Work item', 'status')).toBe(true);
     expect(patches).toEqual([{ path: 'types/work-item.md', patch: { fields: {} } }]);
+  });
+});
+
+describe('renameFieldOnType', () => {
+  // M44.1 follow-up: the per-record migration loop used to count failures
+  // inside a try/catch waiting for a rejection patchFrontmatter never
+  // produces — the `failed` counter, and the aggregate toast it gates, were
+  // dead code. This pins the now-live path: a record write that comes back
+  // `false` is counted, and the toast fires with the real count.
+  it('counts records whose value write reports false, and toasts the aggregate', async () => {
+    useVaultStore.setState({
+      entries: [
+        typeDoc,
+        makeEntry({
+          path: 'recipes/a.md',
+          title: 'A',
+          type: 'Recipe',
+          properties: { cuisine: 'thai' },
+        }),
+        makeEntry({
+          path: 'recipes/b.md',
+          title: 'B',
+          type: 'Recipe',
+          properties: { cuisine: 'oaxacan' },
+        }),
+      ],
+      patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
+        patches.push({ path, patch });
+        return path !== 'recipes/b.md';
+      }),
+    });
+    const ok = await renameFieldOnType('Recipe', 'cuisine', 'flavor');
+    expect(ok).toBe(true);
+    expect(toasts).toEqual(['Renamed, but 1 record(s) kept the old value']);
   });
 });
 

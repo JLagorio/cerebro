@@ -257,6 +257,10 @@ export async function changeFieldKind(
   // value writes run — so a schema write that didn't land must stop the
   // conversions rather than run them against a schema that never changed.
   if (!(await patchFrontmatter(doc.path, { fields }))) return false;
+  // Accepted asymmetry: the schema change is what this function's return
+  // value answers for. Each conversion's own patchFrontmatter call already
+  // self-toasts on failure (vaultStore's contract), so an individual record
+  // keeping its old value doesn't turn a landed kind change into a `false`.
   for (const c of conversions) {
     await patchFrontmatter(c.path, { [actual]: c.value });
   }
@@ -291,6 +295,10 @@ export async function duplicateFieldOnType(
     }
   }
   if (!(await patchFrontmatter(doc.path, { fields: rebuilt }))) return null;
+  // Accepted asymmetry: the schema declaration is what this function's
+  // return value answers for. Each copy's own patchFrontmatter call already
+  // self-toasts on failure (vaultStore's contract), so a record that doesn't
+  // get the copied value doesn't turn a landed duplicate into a `null`.
   for (const record of entries) {
     if (record.type !== typeName || record.path === doc.path) continue;
     const stored =
@@ -400,8 +408,10 @@ export async function renameFieldOnType(
     Object.entries(fields).map(([k, v]) => (k === actual ? [next, v] : [k, v])),
   );
   if (!(await patchFrontmatter(doc.path, { fields: renamed }))) return false;
-  // Move stored values on every record of this type. A record whose write
-  // fails keeps its old key — the schema rename already landed, so the value
+  // Move stored values on every record of this type. patchFrontmatter never
+  // throws — a record whose write fails reports it by returning false, not
+  // by rejecting — so failure is counted from that boolean. A record that
+  // fails keeps its old key: the schema rename already landed, so the value
   // still resolves as an undeclared property rather than vanishing.
   const records = entries.filter(
     (e) => e.type === typeName && (actual in e.properties || actual in e.relationships),
@@ -411,11 +421,7 @@ export async function renameFieldOnType(
     const targets = record.relationships[actual];
     const value =
       targets !== undefined ? targets.map((t) => `[[${t}]]`) : record.properties[actual];
-    try {
-      await patchFrontmatter(record.path, { [next]: value, [actual]: null });
-    } catch {
-      failed += 1;
-    }
+    if (!(await patchFrontmatter(record.path, { [next]: value, [actual]: null }))) failed += 1;
   }
   if (failed > 0) toast(`Renamed, but ${failed} record(s) kept the old value`);
   return true;
