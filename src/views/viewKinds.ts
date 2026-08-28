@@ -146,7 +146,8 @@ const CAPABILITIES = {
     label: 'Chart',
     icon: 'chart-column',
     // The grouping chain IS the X axis, so the Group control configures the
-    // chart and there is no second "group by" to drift from it.
+    // chart and there is no second "group by" to drift from it (a `number`
+    // chart totals every row and reads no grouping — M44.2).
     groupable: true,
     charted: true,
   },

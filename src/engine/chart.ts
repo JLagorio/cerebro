@@ -10,8 +10,9 @@ import type { ChartAgg, ChartSpec, Entry, FieldDef, Presentation, Schema } from 
  * The chart owns no grouping of its own. Its X axis IS the view's grouping
  * chain — `groupTree` with the first band level — so a board re-opened as a
  * chart charts what the board was banded by, the declared option order and the
- * "No <field>" bucket carry over unchanged, and there is no second grouping
- * control for the two to drift apart on.
+ * "No <field>" bucket carry over unchanged (unless `chart.sort` reorders the
+ * bands — M44.2), and there is no second grouping control for the two to
+ * drift apart on.
  *
  * The Y axis reuses `aggregateNumbers`, the same arithmetic a rollup column
  * runs. A chart that summed its own way would disagree with the number in the

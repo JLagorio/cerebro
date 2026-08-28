@@ -309,7 +309,9 @@ function HBarChart({
   return (
     <>
       {data.slices.map((s, i) => {
-        const width = top === 0 ? 0 : (s.value / top) * plotW;
+        // `top` is `niceCeiling(data.max)`, which clamps to >= 1 for any
+        // finite input — never 0, so there is no zero-division case here.
+        const width = (s.value / top) * plotW;
         const y = HPAD.top + band * i + (band - barH) / 2;
         // A maxed bar leaves a wide value label no room before the viewBox
         // edge (~6.6px per character at fontSize 11) — draw it inside the bar
@@ -515,8 +517,22 @@ function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undef
 }
 
 /** One legend for every kind, under the chart — the donut's old private list,
- * lifted out so a bar or line can ask for the same thing. */
-function Legend({ data, chart }: { data: ChartData; chart: ChartSpec | undefined }) {
+ * lifted out so a bar or line can ask for the same thing.
+ *
+ * A no-palette line draws every point in LineChart's one uniform
+ * `var(--cortex-500)` stroke — per-band option hues here would be swatches
+ * that match nothing actually drawn. A palette line already colours its
+ * points through `sliceColor`, so that path is untouched. */
+function Legend({
+  data,
+  chart,
+  kind,
+}: {
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  kind: ChartKind;
+}) {
+  const lineMono = kind === 'line' && chart?.palette === undefined;
   return (
     <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 pt-3">
       {data.slices.map((s, i) => (
@@ -527,7 +543,11 @@ function Legend({ data, chart }: { data: ChartData; chart: ChartSpec | undefined
         >
           <span
             className="inline-block h-2.5 w-2.5 rounded-sm"
-            style={{ background: sliceColor(s, i, colorOpts(chart, data, s)) }}
+            style={{
+              background: lineMono
+                ? 'var(--cortex-500)'
+                : sliceColor(s, i, colorOpts(chart, data, s)),
+            }}
           />
           {s.label}
           <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{s.display}</span>
@@ -648,7 +668,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
               )}
             </svg>
           )}
-          {showLegend && <Legend data={data} chart={chart} />}
+          {showLegend && <Legend data={data} chart={chart} kind={kind} />}
         </figure>
       )}
     </div>

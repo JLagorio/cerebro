@@ -312,6 +312,10 @@ function parseCardSize(raw: unknown): CardSize | undefined {
  * off their defaults, and an unrecognised one is dropped rather than trusted —
  * a hand-edited `kind: sankey` must not reach the renderer as a chart type
  * nothing draws.
+ *
+ * Keys are validated by VALUE, never by kind: a hand-switched `kind:` must
+ * not silently delete the settings the previous kind wrote — the panel's
+ * patch, not the parser, owns kind-scoping (M44.2).
  */
 function parseChart(raw: unknown): ChartSpec | undefined {
   if (raw === undefined || raw === null) return undefined;

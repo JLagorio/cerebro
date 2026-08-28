@@ -403,6 +403,47 @@ describe('ChartView', () => {
     expect(screen.queryAllByTestId('chart-legend-item').length).toBe(0);
   });
 
+  // A no-palette line draws every point in one uniform stroke (LineChart's
+  // `stroke = 'var(--cortex-500)'`); a legend that swatched per-band option
+  // hues here would show colours nothing on the chart actually uses.
+  it('a no-palette line legend swatches to the line colour, not per-band hues', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    // Each legend item renders two spans — the colour swatch, then the
+    // formatted value — so scope to the swatch by its rounded-sm class.
+    const swatches = [
+      ...container.querySelectorAll('[data-testid="chart-legend-item"] span.rounded-sm'),
+    ];
+    expect(swatches.length).toBeGreaterThan(0);
+    expect(
+      swatches.every((s) => (s as HTMLElement).style.background.includes('--cortex-500')),
+    ).toBe(true);
+  });
+
+  // A palette line already colours its points via sliceColor (LineChart's
+  // circle `stroke`), so the legend keeping the same per-slice call is
+  // correct as-is — the fix above must not touch this path.
+  it('a palette line legend keeps sliceColor’s per-slice colours', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true, palette: 'purple' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const swatch = container.querySelector('[data-testid="chart-legend-item"] span');
+    expect((swatch as HTMLElement).style.background).toContain('--opt-purple');
+  });
+
   it('a palette paints every band the one hue, tokens only', () => {
     const entries = vault();
     const { container } = render(
