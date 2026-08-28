@@ -263,6 +263,9 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
                   entry={previewEntry}
                   schema={schema}
                   fields={previewLayout.heading}
+                  // The strip folds by the DRAFT's show-empty, not the live
+                  // type's — the canvas's one rule, everywhere.
+                  showEmpty={draft.display.showEmpty}
                 />
                 <div className="flex flex-col gap-[7px]">
                   {previewLayout.groups.map((g) => (
@@ -297,6 +300,18 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
                       <div className="h-2.5 w-4/5 rounded-sm bg-n-100" />
                       <div className="h-2.5 w-3/5 rounded-sm bg-n-100" />
                     </div>
+                  </div>
+                )}
+                {draft.display.showFile && previewEntry.path !== '' && (
+                  // DetailPanel's muted file-path row (M44.1), staged: the
+                  // draft raises it. The synthetic stand-in has no path, and
+                  // absent is never faked — no path, no row.
+                  <div
+                    data-testid="layout-preview-file"
+                    className="mt-4 truncate font-mono text-2xs text-n-400"
+                    title={previewEntry.path}
+                  >
+                    {previewEntry.path}
                   </div>
                 )}
               </div>

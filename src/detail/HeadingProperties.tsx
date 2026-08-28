@@ -9,12 +9,22 @@ import type { Entry, FieldDef, Schema } from '@/engine/types';
  * render the full stack whenever this comes back empty (the amended Task 7
  * ruling), and sharing the predicate here is what keeps the host's gate and
  * the strip's own fold from drifting apart.
+ *
+ * `showEmpty` overrides the live type's display bit (M45.2): the layout
+ * editor's preview folds by its DRAFT, not the vault. Hosts omit it and keep
+ * the live lookup.
  */
-export function stripCells(entry: Entry, schema: Schema, fields: FieldDef[]): FieldDef[] {
-  const showEmpty = entry.type ? schema.types.get(entry.type)?.display.showEmpty === true : false;
+export function stripCells(
+  entry: Entry,
+  schema: Schema,
+  fields: FieldDef[],
+  showEmpty?: boolean,
+): FieldDef[] {
+  const show =
+    showEmpty ?? (entry.type ? schema.types.get(entry.type)?.display.showEmpty === true : false);
   return splitByVisibility(
     fields,
-    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+    (f) => !show && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
   ).shown;
 }
 
@@ -38,14 +48,18 @@ export function HeadingProperties({
   fields,
   detailsShown,
   onToggleDetails,
+  showEmpty,
 }: {
   entry: Entry;
   schema: Schema;
   fields: FieldDef[];
   detailsShown?: boolean;
   onToggleDetails?: () => void;
+  /** Overrides the live type's show-empty bit — the layout editor's preview
+   * passes its draft's; hosts omit it (see stripCells). */
+  showEmpty?: boolean;
 }) {
-  const shown = stripCells(entry, schema, fields);
+  const shown = stripCells(entry, schema, fields, showEmpty);
   if (shown.length === 0) return null;
 
   const expanded = detailsShown === true;

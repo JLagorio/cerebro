@@ -491,6 +491,86 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     expect(screen.queryByTestId('record-tabs')).toBeNull();
   });
 
+  it('Show file path gates the muted file row live', async () => {
+    const user = userEvent.setup();
+    recordSetup();
+    // The fixture's display deviates with show_file: true, so the row is up.
+    const row = screen.getByTestId('layout-preview-file');
+    expect(row.textContent).toBe('items/alpha.md');
+    await user.click(screen.getByRole('switch', { name: 'Show file path' }));
+    expect(screen.queryByTestId('layout-preview-file')).toBeNull();
+    await user.click(screen.getByRole('switch', { name: 'Show file path' }));
+    expect(screen.getByTestId('layout-preview-file')).toBeTruthy();
+  });
+
+  it('the synthetic record never shows a file row — it has no path, and absent is never faked', () => {
+    // Zero records; the fixture's show_file is ON, so only the missing path
+    // can be what keeps the row down.
+    setup();
+    expect(
+      (screen.getByRole('switch', { name: 'Show file path' }) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.queryByTestId('layout-preview-file')).toBeNull();
+  });
+
+  it('the heading strip folds an empty cell by the DRAFT showEmpty, not the live type', async () => {
+    const user = userEvent.setup();
+    // Folding is `hide_when_empty`'s job (a default `show` field renders an
+    // unfolded "Empty" cell — M16.10), so the fixture marks the heading field
+    // and the record leaves it valueless.
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: { status: { kind: 'text', visibility: 'hide_when_empty' }, priority: 'text' },
+            display: { show_file: true },
+            layout: {
+              heading: ['status'],
+              groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        makeEntry({
+          path: 'items/bare.md',
+          title: 'Bare record',
+          type: 'Work item',
+          properties: { priority: 'high' },
+        }),
+      ],
+    });
+    const preview = () => within(screen.getByTestId('layout-preview'));
+    // Draft showEmpty is false: the empty status cell folds, and with it the
+    // whole strip (its only cell).
+    expect(preview().queryByTestId('heading-strip')).toBeNull();
+    // The rail switch edits the DRAFT only — the live type still says false,
+    // so a live-display read would keep the strip folded here.
+    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
+    expect(
+      preview().getByTestId('heading-strip').querySelector('[data-field="status"]'),
+    ).toBeTruthy();
+    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
+    expect(preview().queryByTestId('heading-strip')).toBeNull();
+  });
+
+  it('a picked record deleted mid-session falls back to the first by title', async () => {
+    const user = userEvent.setup();
+    recordSetup();
+    await user.selectOptions(screen.getByTestId('layout-preview-picker'), 'items/beta.md');
+    const strip = () => within(screen.getByTestId('layout-preview')).getByTestId('heading-strip');
+    expect(strip().textContent).toContain('doing');
+
+    // Beta vanishes from the store under the open editor.
+    act(() => {
+      useVaultStore.setState({ entries: [typeDoc(), RECORDS[1], TEMPLATE] });
+    });
+    const picker = screen.getByTestId('layout-preview-picker') as HTMLSelectElement;
+    expect(picker.value).toBe('items/alpha.md');
+    expect(strip().textContent).toContain('todo');
+  });
+
   it('the canvas is inert, with no aria-hidden belt-and-suspenders', () => {
     recordSetup();
     const preview = screen.getByTestId('layout-preview');
