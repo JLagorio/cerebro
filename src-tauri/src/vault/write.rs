@@ -361,16 +361,30 @@ pub fn verify_frontmatter(
 /// `.mmd` files are RAW (M29.20): mermaid's own `---` config header is
 /// diagram syntax, so the body IS the whole file — no frontmatter compose.
 pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
+    let composed = saved_note(vault, rel, body)?;
+    write_file(&safe_join(vault, rel)?, &composed)?;
+    if !rel.ends_with(".mmd") {
+        shadow_write(vault, rel, &composed, "vault.write", None);
+    }
+    Ok(())
+}
+
+/// The exact bytes `save_note` will write for a new body.
+///
+/// Public for the same reason as `compose_new_note` and `patched_frontmatter`:
+/// a guard has to read what LANDS ON DISK. `save_note` keeps the note's
+/// existing frontmatter block and composes the body under it — so a note that
+/// has NO block has its body as the whole file, and a `---` fence the new body
+/// completes arrives at byte zero as the frontmatter the scanner will read
+/// (PR #17 security review).
+pub fn saved_note(vault: &Path, rel: &str, body: &str) -> Result<String, String> {
     if rel.ends_with(".mmd") {
         read_file(vault, rel)?; // same contract as .md: save only overwrites
-        return write_file(&safe_join(vault, rel)?, body);
+        return Ok(body.to_string());
     }
     let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
-    let composed = compose(block, body);
-    write_file(&safe_join(vault, rel)?, &composed)?;
-    shadow_write(vault, rel, &composed, "vault.write", None);
-    Ok(())
+    Ok(compose(block, body))
 }
 
 /// The `type` a note's frontmatter declares, if the file exists and parses.
