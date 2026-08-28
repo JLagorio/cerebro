@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentRef, listAgents } from './agents';
+import { agentRef, listAgents, narrowTools, readAddress } from './agents';
 import { makeEntry } from './testHelpers';
 
 const agent = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>
@@ -39,6 +39,33 @@ describe('listAgents', () => {
 
   it('skips unparseable records', () => {
     expect(listAgents([agent('Broken', { parseError: 'bad yaml' })])).toEqual([]);
+  });
+
+  it('parses read-scope on its own axis, with the null-vs-empty reading scope has (M34.4)', () => {
+    const refs = listAgents([
+      agent('Bounded', { properties: { 'read-scope': ['sources/', './knowledge'] } }),
+      agent('Blind', { properties: { 'read-scope': [] } }),
+      agent('Open', { properties: {} }),
+    ]);
+    const by = (t: string) => refs.find((r) => r.title === t);
+    expect(by('Bounded')?.readScope).toEqual(['sources', 'knowledge']);
+    // Declared-and-empty reads NOTHING; undeclared reads everywhere. Folding
+    // these would make the safest-looking declaration the most dangerous one.
+    expect(by('Blind')?.readScope).toEqual([]);
+    expect(by('Open')?.readScope).toBeNull();
+  });
+
+  it('parses capabilities, and an undeclared list is empty — not null, not knowledge', () => {
+    // M34.1.3: a capability selects prompt TEXT, never a code path. Empty by
+    // default because no agent is the knowledge agent unless it says so.
+    const refs = listAgents([
+      agent('Curator', { properties: { capabilities: ['knowledge'] } }),
+      agent('Release scout', { properties: {} }),
+    ]);
+    const curator = refs.find((r) => r.title === 'Curator');
+    const scout = refs.find((r) => r.title === 'Release scout');
+    expect(curator?.capabilities).toEqual(['knowledge']);
+    expect(scout?.capabilities).toEqual([]);
   });
 });
 
@@ -159,5 +186,118 @@ describe('memory tiers', () => {
 
   it('is empty rather than absent on a first run', () => {
     expect(withProps({}).memory).toEqual({ recent: '', preferences: '' });
+  });
+});
+
+/**
+ * M33b.6 — addressing an agent by name.
+ *
+ * The handle is not a new identity: it is the slug the actor is already built
+ * from, so the agent you address is by construction the agent whose name lands
+ * in `generated.by`. That is the whole reason this resolves through
+ * `declaredSlug`/`recordIdentity` rather than through a second rule.
+ */
+describe('readAddress', () => {
+  const scout = makeEntry({
+    path: 'records/agents/scout.md',
+    title: 'Release scout',
+    type: 'Agent',
+    properties: { slug: 'release-scout', scope: ['records/risks'] } as never,
+  });
+  const note = makeEntry({ path: 'work/ship.md', title: 'Ship the beta', type: 'Work item' });
+
+  it('addresses nobody when nobody was named', () => {
+    expect(readAddress('what is at risk?', [scout, note])).toBeNull();
+  });
+
+  it('resolves a handle to the agent whose writes carry it', () => {
+    const address = readAddress('@release-scout what is slipping?', [scout, note]);
+    expect(address?.handle).toBe('release-scout');
+    expect(address?.agent?.actor).toBe('process:release-scout');
+    expect(address?.agent?.scope).toEqual(['records/risks']);
+  });
+
+  it('finds the mention mid-sentence, on a word boundary', () => {
+    expect(readAddress('ask @release-scout about it', [scout])?.agent?.title).toBe('Release scout');
+  });
+
+  it('is not fooled by an email address', () => {
+    // The same boundary rule the composer's `@` menu uses, so a token that
+    // opens no menu there routes nothing here either.
+    expect(readAddress('mail josef@release-scout.com', [scout])).toBeNull();
+  });
+
+  it('follows a renamed record, because the declared slug is the identity', () => {
+    // The record was renamed and its file moved; the handle it answers to did
+    // not move, which is the same guarantee M17.8 gave the ledger and the
+    // actor. Resolving on the title would have retired `@release-scout` here.
+    const renamed = makeEntry({
+      path: 'records/agents/watcher.md',
+      title: 'Ship watcher',
+      type: 'Agent',
+      properties: { slug: 'release-scout' } as never,
+    });
+    const address = readAddress('@release-scout status?', [renamed]);
+    expect(address?.agent?.title).toBe('Ship watcher');
+    expect(address?.agent?.actor).toBe('process:release-scout');
+  });
+
+  it('falls back to the title when the record declares no slug', () => {
+    const plain = makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+    });
+    expect(readAddress('@release-scout hi', [plain])?.agent?.handle).toBe('release-scout');
+  });
+
+  it('carries the handle out when nothing matches, so the mention is not silent', () => {
+    // Not an error and not a no-op. The `@name` was only ever text — and the
+    // person still has to be able to find out that it did not route.
+    const address = readAddress('@nobody-here are you there?', [scout]);
+    expect(address).not.toBeNull();
+    expect(address?.handle).toBe('nobody-here');
+    expect(address?.agent).toBeNull();
+  });
+
+  it('names one recipient — a turn has one grant, so it has one', () => {
+    const other = makeEntry({
+      path: 'records/agents/librarian.md',
+      title: 'Librarian',
+      type: 'Agent',
+    });
+    expect(readAddress('@release-scout and @librarian', [scout, other])?.agent?.title).toBe(
+      'Release scout',
+    );
+  });
+
+  it('ignores a record that is not an agent', () => {
+    expect(readAddress('@ship-the-beta please', [note])?.agent).toBeNull();
+  });
+});
+
+/**
+ * Two narrowings can meet on one turn (M33b.6): a skill's `allowed-tools:` and
+ * the addressed agent's. The direction is the whole safety property — every
+ * layer subtracts, no layer adds.
+ */
+describe('narrowTools', () => {
+  it('yields to the other side when one declares nothing', () => {
+    expect(narrowTools(null, ['get_note'])).toEqual(['get_note']);
+    expect(narrowTools(['get_note'], null)).toEqual(['get_note']);
+    expect(narrowTools(null, null)).toBeNull();
+  });
+
+  it('intersects rather than unions — a recipient cannot widen a skill', () => {
+    expect(narrowTools(['get_note', 'search_notes'], ['search_notes', 'create_note'])).toEqual([
+      'search_notes',
+    ]);
+  });
+
+  it('keeps "narrowed to nothing" narrowed to nothing', () => {
+    // `[]` is a real declaration, and the opposite of null. A read-only skill
+    // that asked for no tools must not be widened by whoever it is addressed to.
+    expect(narrowTools([], ['get_note'])).toEqual([]);
+    expect(narrowTools(['get_note'], [])).toEqual([]);
   });
 });

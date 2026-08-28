@@ -153,7 +153,7 @@ describe('App boot flow', () => {
       act(() => useUiStore.getState().openDetail(BET));
       const slot = await screen.findByTestId('right-panel-slot');
       // Beside the canvas — NOT beside the whole main column, which is what
-      // let the assistant steal width from the Topbar and StatusBar as well.
+      // let the assistant steal width from the StatusBar as well.
       expect(slot.parentElement).toBe(main.parentElement);
       // Capped against the canvas ROW, so the cap actually engages — `50vw`
       // resolved against the viewport, a box the panel does not live in.
@@ -202,7 +202,7 @@ describe('App boot flow', () => {
       render(<App />);
       await screen.findByRole('navigation', { name: 'Sidebar' });
       act(() => useUiStore.getState().openDetail('records/bets/office-hours.md'));
-      act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+      act(() => useNavStore.getState().navigate({ kind: 'pulse' }));
       expect(useUiStore.getState().detailPath).toBeNull();
       expect(screen.queryByTestId('right-panel-slot')).toBeNull();
     });
@@ -228,22 +228,22 @@ describe('App boot flow', () => {
   it('walks nav history with cmd+[ and cmd+]', async () => {
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
-    act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+    act(() => useNavStore.getState().navigate({ kind: 'pulse' }));
     fireEvent.keyDown(window, { key: '[', metaKey: true });
     expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
     fireEvent.keyDown(window, { key: ']', metaKey: true });
-    expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'pulse' });
   });
 
   it('leaves cmd+[ to the editor while text is being edited', async () => {
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
-    act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+    act(() => useNavStore.getState().navigate({ kind: 'pulse' }));
     const field = document.createElement('input');
     document.body.appendChild(field);
     field.focus();
     fireEvent.keyDown(field, { key: '[', metaKey: true, bubbles: true });
-    expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'pulse' });
     field.remove();
   });
 

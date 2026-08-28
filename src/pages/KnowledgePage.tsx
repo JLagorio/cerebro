@@ -2,15 +2,34 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { listConcepts, listSubjects, needsReview, verifyPatch, type Concept } from '@/engine/okf';
+import {
+  defaultKnowledgeNav,
+  listConcepts,
+  listSubjects,
+  needsReview,
+  verifyPatch,
+  type Concept,
+} from '@/engine/okf';
+import { agentRef, isAgentEntry } from '@/engine/agents';
 import type { KnowledgeNav, Selection } from '@/engine/types';
+import { resolveTarget } from '@/engine/wikilink';
+import { NewRecordDialog } from '@/app/CreateMenu';
 import { useOpenPath } from '@/app/useOpenPath';
 import { reviewConceptPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
+import {
+  AgentWork,
+  Background,
+  DeferralGates,
+  WaitingOnYou,
+  WhatChanged,
+  WhatsContested,
+} from '@/knowledge/BaseItself';
 import { ConceptBody } from '@/knowledge/ConceptBody';
 import { KnowledgeLog } from '@/knowledge/KnowledgeLog';
 import { KnowledgePanel } from '@/knowledge/KnowledgePanel';
 import { ReviewChip } from '@/knowledge/ReviewChip';
+import { ThreadView } from '@/knowledge/ThreadView';
 import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import { readNote, verifyConcept } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -102,6 +121,39 @@ function ConceptRow({
   );
 }
 
+/**
+ * The tabs that describe the base ITSELF rather than list its concepts
+ * (M33a.2 — what used to be the Status hub).
+ *
+ * `null` for every tab that has a concept list. The six that do not carry no
+ * heading of their own here: each section already renders its `<h2>` and its
+ * blurb, exactly as it did on the hub, and repeating the same three words in
+ * an `<h1>` above it would be the merge inventing chrome rather than moving a
+ * surface.
+ */
+function baseItself(nav: KnowledgeNav, vaultPath: string | null): React.ReactNode {
+  switch (nav.tab) {
+    case 'changed':
+      return <WhatChanged vaultPath={vaultPath} />;
+    case 'contested':
+      return <WhatsContested vaultPath={vaultPath} />;
+    case 'waiting':
+      return <WaitingOnYou vaultPath={vaultPath} />;
+    case 'background':
+      return <Background vaultPath={vaultPath} />;
+    case 'runs':
+      // The vault IS needed now (M33b.3): agents are records in it, and the
+      // proposal queue and the pause are read against it. The run history
+      // below still spans vaults, and the run a link asked for still rides on
+      // the selection, which FleetSection reads itself.
+      return <AgentWork vaultPath={vaultPath} />;
+    case 'gates':
+      return <DeferralGates vaultPath={vaultPath} />;
+    default:
+      return null;
+  }
+}
+
 export function KnowledgePage({
   selection,
 }: {
@@ -119,6 +171,9 @@ export function KnowledgePage({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [body, setBody] = useState<string>('');
   const [verifying, setVerifying] = useState(false);
+  // The D1 boundary, as UI state: the agent never creates a workspace record,
+  // so this flag can only be raised by a click. See the header button.
+  const [promoting, setPromoting] = useState(false);
   // Loaded once for the page rather than once per concept: the axes are a
   // fold of the whole ledger either way, and asking again on every selection
   // would re-read it to answer about one row.
@@ -160,12 +215,29 @@ export function KnowledgePage({
     if (linkedPath !== null) setSelectedPath(linkedPath);
   }, [linkedPath]);
 
-  // Memoized so downstream useMemos key on the nav VALUE — `?? {tab:'all'}`
-  // inline would mint a fresh object every render and defeat them.
-  const nav: KnowledgeNav = useMemo(() => selection.nav ?? { tab: 'all' }, [selection.nav]);
+  // M35.3 — who maintains this. Resolved by CAPABILITY, never by slug or
+  // title: `capabilities: knowledge` is what hands an agent the bundle's
+  // conventions (M34.1.3), so it is also what earns the byline. No record →
+  // null, and the header keeps its anonymous label — the tab predates the
+  // agent and an absent record is not a failure.
+  const maintainer = useMemo(() => {
+    const record = entries.find(
+      (e) => isAgentEntry(e) && agentRef(e).capabilities.includes('knowledge'),
+    );
+    return record === undefined ? null : { path: record.path, title: record.title };
+  }, [entries]);
+
   const today = todayIso();
   const all = useMemo(() => listConcepts(entries, today), [entries, today]);
   const subjects = useMemo(() => listSubjects(all, entries), [all, entries]);
+  // Memoized so downstream useMemos key on the nav VALUE — an inline
+  // `?? defaultKnowledgeNav(subjects)` would mint a fresh object every render
+  // and defeat them. `subjects` is itself memoized, so the default is stable
+  // until the bundle actually changes.
+  const nav: KnowledgeNav = useMemo(
+    () => selection.nav ?? defaultKnowledgeNav(subjects),
+    [selection.nav, subjects],
+  );
 
   const subject = nav.tab === 'entity' ? (subjects.find((s) => s.key === nav.key) ?? null) : null;
   const concepts = useMemo(() => {
@@ -181,8 +253,21 @@ export function KnowledgePage({
     }
   }, [all, nav, subject]);
 
-  const selected = concepts.find((c) => c.entry.path === selectedPath) ?? concepts[0] ?? null;
+  /**
+   * A thread does not auto-select (M33a.4).
+   *
+   * Every other view here is a LIST of concepts and opening the head of it is
+   * a reasonable guess. A thread is one subject, and the answer to "what does
+   * the base believe about this" is the whole thread — so landing on whichever
+   * concept sorted first would answer a question nobody asked and hide the
+   * four that matter more. The other tabs keep the guess.
+   */
+  const selected =
+    concepts.find((c) => c.entry.path === selectedPath) ??
+    (nav.tab === 'entity' ? null : (concepts[0] ?? null));
   const selectedConceptPath = selected?.entry.path ?? null;
+  /** The thread reads as one thing until a concept is asked for by name. */
+  const showThread = nav.tab === 'entity' && subject !== null && selected === null;
 
   // A replaced concept carries no back-pointer of its own (M8.7: the
   // replacement is what holds `supersedes`), so the title of what replaced it
@@ -263,6 +348,46 @@ export function KnowledgePage({
     setSelectedPath(path);
   };
 
+  /**
+   * A `[[wikilink]]` in a concept body, followed (M33a.4).
+   *
+   * Resolution happens here rather than in the renderer because it needs the
+   * whole vault — and because only the page knows what to DO with a hit: a
+   * concept opens in this reading pane, anything else is the user's own
+   * record and opens wherever that record lives.
+   */
+  const openWikilink = (target: string) => {
+    const entry = resolveTarget(target, entries);
+    if (entry === null) {
+      // A dangling link is legitimate (OKF §6.1) and, per D7, an open thread:
+      // the base is tracking something the workspace has not written up. It is
+      // reported as an absence, never as damage.
+      toast(`Nothing in the vault is named "${target}" yet`);
+      return;
+    }
+    if (all.some((c) => c.entry.path === entry.path)) openConcept(entry.path);
+    else openPath(entry.path);
+  };
+
+  // M33a.2 — the six tabs that describe the base itself short-circuit for the
+  // same reason `log` does below: there is no concept list to put beside them,
+  // so the three-column layout has nothing to lay out. They sit ABOVE the
+  // empty-bundle guard as well, because what the base knows about itself does
+  // not stop being true when nobody has written a concept yet — a vault with
+  // no bundle still has runs, a budget and a proposal queue.
+  const itself = baseItself(nav, vaultPath);
+  if (itself !== null) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {/* Left-aligned and capped: these are sentences to read, not a
+              dashboard to spread. */}
+          <div className="flex w-full min-w-0 max-w-[860px] flex-col gap-6 px-6 py-4">{itself}</div>
+        </div>
+      </div>
+    );
+  }
+
   if (all.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center" data-testid="knowledge-page">
@@ -318,6 +443,29 @@ export function KnowledgePage({
             Open {subject.label}
           </Button>
         )}
+        {/* And where there is nothing to open, the offer to write it (D7/D1).
+            This is the ONE place a knowledge thread becomes a workspace
+            record, and it happens because a human clicked: the agent is
+            sovereign inside `knowledge/` and nowhere else, so a thread it has
+            been tracking for weeks stays a thread until somebody says
+            otherwise. The dialog is the New menu's own — same types, same
+            `createTarget` — pre-filled with the thread's name and editable,
+            and creating navigates to the new page. */}
+        {subject !== null && subject.entry === null && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              testId="promote-thread"
+              onClick={() => setPromoting(true)}
+            >
+              + Create page
+            </Button>
+            {promoting && (
+              <NewRecordDialog defaultTitle={subject.target} onClose={() => setPromoting(false)} />
+            )}
+          </>
+        )}
         <span className="flex-1" />
         {/* The only way to Verify or ask for a recheck once the provenance
             column has stepped out of the row. */}
@@ -331,15 +479,29 @@ export function KnowledgePage({
             {provenanceOpen ? 'Hide provenance' : 'Provenance'}
           </Button>
         )}
-        {!narrow && (
-          <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
-            <Icon name="lock" size={12} />
-            Maintained by the agent
-          </span>
-        )}
+        {/* M35.3 — the base's judgement has a face: the byline names the
+            knowledge-capable Agent record and opens it. Without one the
+            anonymous label stands, as it always has. */}
+        {!narrow &&
+          (maintainer !== null ? (
+            <button
+              type="button"
+              data-testid="knowledge-maintainer"
+              onClick={() => openPath(maintainer.path)}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:text-n-800"
+            >
+              <Icon name="lock" size={12} />
+              Maintained by {maintainer.title}
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
+              <Icon name="lock" size={12} />
+              Maintained by the agent
+            </span>
+          ))}
       </header>
 
-      {selected === null ? (
+      {selected === null && !showThread ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <EmptyState
             icon={nav.tab === 'review' ? 'shield-check' : 'brain'}
@@ -372,11 +534,32 @@ export function KnowledgePage({
               narrow ? 'w-[220px]' : 'w-[280px]',
             ].join(' ')}
           >
+            {/* The way back to the whole thread once a concept has been
+                opened. It leads the column because the thread is what the tab
+                landed on — without it, reading one concept is a one-way door
+                out of the only view that reads the subject as a subject. */}
+            {nav.tab === 'entity' && subject !== null && (
+              <button
+                type="button"
+                data-testid="thread-overview-row"
+                aria-selected={selected === null}
+                onClick={() => setSelectedPath(null)}
+                className={[
+                  'flex items-center gap-1.5 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left text-sm',
+                  selected === null
+                    ? 'bg-cortex-50 font-semibold text-n-900'
+                    : 'bg-transparent font-medium text-n-800 hover:bg-n-25',
+                ].join(' ')}
+              >
+                <Icon name="layers" size={13} color="var(--n-500)" />
+                Thread overview
+              </button>
+            )}
             {concepts.map((c) => (
               <ConceptRow
                 key={c.entry.path}
                 concept={c}
-                active={c.entry.path === selected.entry.path}
+                active={c.entry.path === selected?.entry.path}
                 onClick={() => setSelectedPath(c.entry.path)}
               />
             ))}
@@ -384,45 +567,64 @@ export function KnowledgePage({
 
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div className="mx-auto w-full max-w-[760px] px-6">
-              {/* M15: the reading pane gave no sign at all that the bundle no
-                  longer believes this — a retired claim read as current. */}
-              {selected.supersededBy !== null && (
-                <div
-                  data-testid="superseded-banner"
-                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
-                >
-                  <Icon name="archive" size={12} />
-                  <span>No longer believed. Replaced by</span>
-                  <button
-                    type="button"
-                    data-path={selected.supersededBy}
-                    onClick={() => openConcept(replacedBy)}
-                    className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
-                  >
-                    {replacement?.title ?? 'a newer concept'}
-                  </button>
-                </div>
+              {selected === null ? (
+                // The thread, read as one thing. `subject` is non-null
+                // whenever `selected` is not — see `showThread`.
+                subject !== null && (
+                  <ThreadView
+                    subject={subject}
+                    concepts={all}
+                    entries={entries}
+                    today={today}
+                    onOpenConcept={setSelectedPath}
+                  />
+                )
+              ) : (
+                <>
+                  {/* M15: the reading pane gave no sign at all that the bundle
+                      no longer believes this — a retired claim read as
+                      current. */}
+                  {selected.supersededBy !== null && (
+                    <div
+                      data-testid="superseded-banner"
+                      className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
+                    >
+                      <Icon name="archive" size={12} />
+                      <span>No longer believed. Replaced by</span>
+                      <button
+                        type="button"
+                        data-path={selected.supersededBy}
+                        onClick={() => openConcept(replacedBy)}
+                        className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
+                      >
+                        {replacement?.title ?? 'a newer concept'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
+                    <span className="[font-family:var(--font-mono)]">{selected.id}</span>
+                  </div>
+                  {/* h2: the concept is a section of the Knowledge page, not
+                      the page itself. Size is unchanged — the level is the
+                      fix. */}
+                  <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
+                    {selected.title}
+                  </h2>
+                  {selected.description !== null && (
+                    <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
+                      {selected.description}
+                    </p>
+                  )}
+                  <ConceptBody
+                    key={selected.entry.path}
+                    markdown={body}
+                    sources={selected.sources}
+                    fromPath={selected.entry.path}
+                    onOpenConcept={openConcept}
+                    onOpenWikilink={openWikilink}
+                  />
+                </>
               )}
-              <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
-                <span className="[font-family:var(--font-mono)]">{selected.id}</span>
-              </div>
-              {/* h2: the concept is a section of the Knowledge page, not the
-                  page itself. Size is unchanged — the level is the fix. */}
-              <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
-                {selected.title}
-              </h2>
-              {selected.description !== null && (
-                <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
-                  {selected.description}
-                </p>
-              )}
-              <ConceptBody
-                key={selected.entry.path}
-                markdown={body}
-                sources={selected.sources}
-                fromPath={selected.entry.path}
-                onOpenConcept={openConcept}
-              />
             </div>
           </div>
 
@@ -437,7 +639,9 @@ export function KnowledgePage({
               className="absolute inset-0 z-10 cursor-default border-0 bg-transparent"
             />
           )}
-          {(!narrow || provenanceOpen) && (
+          {/* No concept, no provenance ledger: the thread view is a read of
+              many concepts and there is no single one to attest to. */}
+          {(!narrow || provenanceOpen) && selected !== null && (
             <KnowledgePanel
               concept={selected}
               today={today}

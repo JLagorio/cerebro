@@ -2,8 +2,15 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
 import type { AgentDraft } from '@/engine/libraryDraft';
-import { matchedToolset, TOOLSETS, writesAnything } from '@/engine/tools';
+import {
+  holdsProposalTools,
+  matchedToolset,
+  proposalConsequence,
+  TOOLSETS,
+  writesAnything,
+} from '@/engine/tools';
 import { describeTrigger, type Trigger } from '@/engine/triggers';
+import { AgentDossier } from './AgentDossier';
 import { slugify } from '@/lib/slug';
 import { BodyField, EditorSection, Field, GuardRow, TextField } from './chrome';
 import { Picker, type PickerOption } from './Picker';
@@ -101,8 +108,23 @@ export function AgentEditor({
       }),
     );
 
+  // The actor this record's runs are booked under — the same string the run's
+  // bearer token stamps (`engine/agents.ts:145`), derived here from the same
+  // two inputs rather than stored a second time.
+  const actor = `process:${draft.slug.trim() === '' ? derived : slugify(draft.slug)}`;
+
   return (
     <>
+      {/* M33.6 — capability-gated, not type-gated: the dossier renders for a
+          record that CAN be on duty, which is a question about what it does
+          and never about what it is called. A record with no identity to book
+          runs under has no history to show, so it gets no strip. */}
+      {actor !== 'process:' && (
+        <EditorSection title="What it has done">
+          <AgentDossier draft={draft} actor={actor} />
+        </EditorSection>
+      )}
+
       <EditorSection title="What it is">
         <Field
           label="Description"
@@ -220,6 +242,34 @@ export function AgentEditor({
           </p>
         </GuardRow>
 
+        {/* M36.3 — the READ axis, its own row (enforced since M34.4; this is
+            the editor catching up to the enforcement). Deliberately not
+            folded into the write row: the normal agent reads broadly and
+            writes narrowly, so one switch for both would make the safest
+            write scope also the blindest reader. */}
+        <GuardRow
+          label="Limit where this agent can read"
+          hint="The same folder grammar as writing, on its own axis. Off means it may read the whole vault. Refused in cerebro before a note's body is served — searches say how many hits were withheld rather than pretending they do not exist."
+          tone="warn"
+          checked={draft.readScope !== null}
+          onChange={(on) => set('readScope', on ? [] : null)}
+        >
+          <Picker
+            testId="agent-read-scope"
+            ariaLabel="Folders this agent may read from"
+            addLabel="Add folder"
+            emptyLabel="Nothing — it can read no note in this vault."
+            options={folderOptions}
+            selected={draft.readScope ?? []}
+            onChange={(next) => set('readScope', next)}
+          />
+          <p className="m-0 mt-1.5 text-2xs text-n-500">
+            {draft.readScope !== null && draft.readScope.length === 0
+              ? 'It can still be handed material in its task — it just cannot go looking.'
+              : `Reads anywhere under ${(draft.readScope ?? []).join(' or ')} and nowhere else.`}
+          </p>
+        </GuardRow>
+
         <GuardRow
           label="Restrict this agent to specific tools"
           hint="A narrowing of the policy the run already has. Never a widening."
@@ -245,6 +295,33 @@ export function AgentEditor({
                 : 'Read-only: nothing in this selection changes a file.'}
             </p>
           )}
+          {/* M36.5 — consequence, not membership: what this agent's
+              proposals DO, with counts derived from the shared policy
+              artifact so this sentence and the channel's behavior cannot
+              drift. Armed agents only — an unarmed agent gets no table
+              about weapons it does not carry. */}
+          {holdsProposalTools(draft.allowedTools) &&
+            (() => {
+              const { applies, queues } = proposalConsequence();
+              return (
+                <div
+                  data-testid="agent-consequence"
+                  className="mt-2 flex flex-col gap-0.5 rounded border border-n-200 px-2.5 py-2 text-2xs text-n-600"
+                >
+                  <span>
+                    Applies on its own once committed — {applies} low- and medium-risk operations.
+                  </span>
+                  <span>Queues for you — {queues} high-risk operations, decided on a card.</span>
+                  <span>
+                    Locked — people only: no operation can mark a concept verified. Verification is
+                    your stamp.
+                  </span>
+                  <span>
+                    Revising a page a person has verified always queues, whatever the operation.
+                  </span>
+                </div>
+              );
+            })()}
         </GuardRow>
 
         <GuardRow

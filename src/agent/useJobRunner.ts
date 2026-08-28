@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp } from './agentIpc';
-import { buildSystemPrompt } from './AiPanel';
+import { buildSystemPrompt } from './systemPrompt';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { diffEntries, type VaultEvent } from '@/engine/events';
@@ -9,12 +9,22 @@ import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
-import { isSkillEntry, parseSchedule } from '@/engine/skills';
+import { fireKeyDate, isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
-import { readNote } from '@/lib/ipc';
+import {
+  fleetActorSummary,
+  jobLedgerClaim,
+  jobLedgerImport,
+  jobLedgerRead,
+  jobLedgerStamp,
+  jobLedgerUnclaim,
+  readNote,
+  reviewQueue,
+} from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
 import {
   agentRunPrompt,
+  currentStatePrompt,
   distillPrompt,
   refreshSourcePrompt,
   reviewConceptPrompt,
@@ -108,6 +118,70 @@ export function useJobRunner(): void {
   const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
   /**
+   * The durable ledgers, hydrated before the queue may fire (M34.2.3).
+   *
+   * False until the vault's `job_ledger` rows are in the store — an
+   * unhydrated map reads as "nothing ever ran", which is the launch storm the
+   * ledgers exist to prevent. A read that FAILS leaves the gate closed for
+   * the same reason: better a queue that waits than one that re-fires every
+   * schedule ever answered. The one-time import feeds the localStorage era
+   * into the table; the table has been the arbiter since it existed, so
+   * import never overwrites a key the database holds.
+   */
+  const [ledgersReady, setLedgersReady] = useState(false);
+  useEffect(() => {
+    if (vaultPath === null) return;
+    let cancelled = false;
+    setLedgersReady(false);
+    void (async () => {
+      try {
+        let read = await jobLedgerRead(vaultPath);
+        const empty =
+          Object.keys(read.attempts).length === 0 &&
+          Object.keys(read.skillRuns).length === 0 &&
+          Object.keys(read.triggerRuns).length === 0;
+        if (empty) {
+          const ui = useUiStore.getState();
+          const entries = [
+            // Flat across vaults in its localStorage era: a foreign vault's
+            // path lands here too, harmlessly — it suppresses nothing unless
+            // this vault holds the same path at the same recorded version.
+            ...Object.entries(ui.learnAttempts).map(([key, runKey]) => ({
+              ledger: 'attempts',
+              key,
+              runKey,
+            })),
+            ...Object.entries(ui.skillRuns[vaultPath] ?? {}).map(([key, runKey]) => ({
+              ledger: 'skillRuns',
+              key,
+              runKey,
+            })),
+            ...Object.entries(ui.triggerRuns[vaultPath] ?? {}).map(([key, runKey]) => ({
+              ledger: 'triggerRuns',
+              key,
+              runKey,
+            })),
+          ];
+          if (entries.length > 0) {
+            await jobLedgerImport(vaultPath, entries);
+            read = await jobLedgerRead(vaultPath);
+          }
+        }
+        if (cancelled) return;
+        useUiStore.getState().hydrateJobLedgers(vaultPath, read);
+        setLedgersReady(true);
+      } catch {
+        // Gated, not empty. "We could not read the ledgers" and "nothing
+        // ever ran" are opposite sentences; acting on the second when the
+        // first is true would double-spend every schedule.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultPath]);
+
+  /**
    * What changed since the last scan (M17.12) — the trigger event source.
    *
    * The runner's own memory of what it has already looked at, rather than
@@ -129,7 +203,7 @@ export function useJobRunner(): void {
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
-    if (!autoLearn || vaultPath === null) return null;
+    if (!autoLearn || vaultPath === null || !ledgersReady) return null;
     return (
       jobQueue(entries, listConcepts(entries, today), {
         attempts,
@@ -150,6 +224,7 @@ export function useJobRunner(): void {
     entries,
     failedReads,
     events,
+    ledgersReady,
     now,
     skillRuns,
     today,
@@ -237,12 +312,14 @@ export function useJobRunner(): void {
         run: null,
         startedAt: Date.now(),
       });
-      // Recorded first, on purpose — see the header. The job SAYS which
-      // ledger gates it (jobs.ts decides both sides); re-deriving that here
-      // is how agent runs briefly looped forever. Fire-key jobs are the one
-      // exception: they must read their record's body before anything else
-      // can fail, so their record sits after that read, below.
-      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.key, job.runKey);
+      // Recorded first, on purpose — see the header, and since M34.2.3 the
+      // record is a CLAIM in the durable table: the database arbitrates,
+      // so two windows deriving the same due job race for one insert and
+      // the loser spawns nothing. The claim moved inside the async block
+      // with the rest of the start-up; the ordering it pins is unchanged.
+      // Fire-key jobs stay the one exception: they must read their record's
+      // body before anything else can fail, so their claim sits after that
+      // read, below.
 
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
@@ -256,8 +333,20 @@ export function useJobRunner(): void {
           : null;
 
       void (async () => {
-        let recorded = job.ledger === 'attempts';
+        let recorded = false;
         try {
+          if (job.ledger === 'attempts') {
+            const fresh = await jobLedgerClaim(vaultPath, 'attempts', job.key, job.runKey);
+            useUiStore.getState().recordLearnAttempt(job.key, job.runKey);
+            recorded = true;
+            if (!fresh) {
+              // Another window or an earlier session already answered this
+              // exact version. Nothing to log: the run that DID happen owns
+              // the story.
+              finish();
+              return;
+            }
+          }
           // M17.12: an event run says what woke it and carries the trigger's
           // `ask:` — layer two, reached only because layer one already passed
           // deterministically, with no model consulted.
@@ -285,23 +374,50 @@ export function useJobRunner(): void {
                   ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
                   ...(trigger.do === undefined ? {} : { do: trigger.do }),
                 };
-          const message =
+          // M33.8 — push the state that goes stale, rather than trusting the
+          // agent's own notes about it. Both reads degrade to omitting their
+          // line: this is a human-action path in every sense that matters, and
+          // a run must never fail because a context fetch did.
+          const actorForState = agent?.actor ?? null;
+          const [lastOutcome, openReviews] = await Promise.all([
+            actorForState === null
+              ? Promise.resolve(null)
+              : fleetActorSummary(actorForState)
+                  .then((summary) => summary.last_outcome)
+                  .catch(() => null),
+            reviewQueue(vaultPath)
+              .then((cards) => cards.length)
+              // NOT 0. "We could not read the queue" and "the queue is empty"
+              // are different, and the block omits the line rather than
+              // telling an unattended agent that nothing is waiting.
+              .catch(() => null),
+          ]);
+          const state = currentStatePrompt({
+            vaultName: vaultPath.split('/').filter(Boolean).pop() ?? vaultPath,
+            // `todayIso` reads LOCAL date parts, which is the app's one
+            // convention for "today" and what the e2e clock is pinned against.
+            today: todayIso(),
+            lastOutcome,
+            openReviews,
+          });
+
+          const record =
+            job.kind === 'agent' || job.kind === 'scheduled'
+              ? splitFrontmatter(await readNote(vaultPath, job.path)).body.trim()
+              : '';
+          const body =
             job.kind === 'agent'
               ? agentRunPrompt(
                   job.path,
                   job.title,
                   agent?.actor ?? 'process:agent',
                   agent?.memory ?? { recent: '', preferences: '' },
-                  splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
                   woken,
                   agent?.scope ?? null,
+                  agent?.readScope ?? null,
                 )
               : job.kind === 'scheduled'
-                ? scheduledSkillPrompt(
-                    job.path,
-                    job.title,
-                    splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
-                  )
+                ? scheduledSkillPrompt(job.path, job.title, record)
                 : job.kind === 'refresh'
                   ? refreshSourcePrompt(job.path, job.title)
                   : job.kind === 'schema'
@@ -309,6 +425,10 @@ export function useJobRunner(): void {
                     : job.kind === 'stale'
                       ? reviewConceptPrompt(job.path, job.title)
                       : distillPrompt(job.path, job.title);
+          // The block leads. A superseding clause after the instructions
+          // would be read as a footnote to them rather than a correction of
+          // them.
+          const message = `${state}\n\n${body}`;
           mcp.current ??= await startMcp(vaultPath);
           // Ownership re-check (PR #5 review): while this start-up was
           // parked on readNote or startMcp, a chat preemption may have taken
@@ -321,18 +441,20 @@ export function useJobRunner(): void {
           // The body is in hand: NOW the fire key is consumed — still before
           // the run itself, so a run that dies waits for the next fire, but
           // after the read, so a read that dies surrenders the key instead
-          // of eating the whole period (PR #5 review).
+          // of eating the whole period (PR #5 review). Since M34.2.3 the
+          // consumption is a durable CLAIM, and the verdict is read: losing
+          // it means another window answered this fire, and this one spawns
+          // nothing.
           if (job.ledger === 'skillRuns') {
+            const fresh = await jobLedgerClaim(vaultPath, 'skillRuns', job.key, job.runKey);
             useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
-            // The cooldown clock starts at the RUN, not at its end: an agent
-            // that watches a folder it also writes to would otherwise re-fire
-            // on its own output the moment it finished (M17.12).
-            if (job.runKey.startsWith('event:')) {
-              useUiStore.getState().recordTriggerRun(vaultPath, job.key, new Date().toISOString());
-            }
             recorded = true;
+            if (!fresh) {
+              finish();
+              return;
+            }
           }
-          const runId = await runAgent(vaultPath, {
+          const start = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
@@ -340,7 +462,25 @@ export function useJobRunner(): void {
             // panel decoration. `selection` is 'none': a background reader is
             // not standing anywhere, and telling it otherwise would colour
             // what it takes from a note with wherever you happen to be.
-            systemPrompt: buildSystemPrompt({ kind: 'none' }, { connectors, issuePrefixes }),
+            systemPrompt:
+              buildSystemPrompt(
+                { kind: 'none' },
+                {
+                  connectors,
+                  issuePrefixes,
+                  // M34.1.3: the knowledge lanes ARE the knowledge agent in
+                  // all but name until M35 — they keep the fragment. An Agent
+                  // record gets it only by declaring the capability.
+                  capabilities: job.kind === 'agent' ? (agent?.capabilities ?? []) : ['knowledge'],
+                },
+              ) +
+              (job.kind === 'agent' && record !== ''
+                ? // M34.1.4: standing instructions are STANDING — they arrive
+                  // with the system prompt, not as something the user just
+                  // said. Delivered via --append-system-prompt; no wire
+                  // change.
+                  `\n\nYour standing instructions, from ${job.path}:\n\n${record}`
+                : ''),
             // A fresh session every time: a background turn that accumulated
             // context would carry one note's framing into the next one's.
             sessionId: null,
@@ -355,6 +495,7 @@ export function useJobRunner(): void {
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
             // Both are narrowings — neither can widen what Settings granted.
             scope: agent?.scope ?? null,
+            readScope: agent?.readScope ?? null,
             allowedTools: agent?.allowedTools ?? null,
             connectorNames: agent?.connectors ?? null,
             connectors,
@@ -365,9 +506,52 @@ export function useJobRunner(): void {
             // path to connectors on a schedule is the vault's own explicit
             // list, stdio entries machine-approved (PR #5 security review).
             attended: false,
+            // M34.2.4: the job's kind IS its budget lane — the run claims a
+            // dispatcher lease and faces the ambient gate, so schedules and
+            // ingest share one budget and one deferral record.
+            lane: job.kind,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });
+          if ('deferred' in start) {
+            // The gate said "not now" — over a ceiling, paused, accounting
+            // unknown. One honest row, and the claim is SURRENDERED so the
+            // deferral never eats the fire it refused: the next launch
+            // re-hydrates the open fire and retries it. The local record
+            // stays, as this session's suppression — re-asking the gate
+            // every tick would be sixty deferral rows an hour.
+            if (job.ledger === 'skillRuns' || job.ledger === 'attempts') {
+              void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
+                () => undefined,
+              );
+            }
+            appendRunLog({
+              id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              at: new Date().toISOString(),
+              owner: 'job',
+              label: job.title,
+              source: job.path,
+              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              scope: agent?.scope ?? null,
+              files: [],
+              status: 'deferred',
+              error: `deferred by the budget gate: ${start.deferred.join(', ')}`,
+            });
+            finish();
+            return;
+          }
+          const { run: runId, durableId } = start;
+          // The cooldown clock starts at the RUN, not at its end: an agent
+          // that watches a folder it also writes to would otherwise re-fire
+          // on its own output the moment it finished (M17.12). After the
+          // spawn, so a deferred run starts no cooldown. Fire and forget —
+          // a clock is not a claim, and a stamp that failed only costs one
+          // extra cooldown check on the next launch.
+          if (job.ledger === 'skillRuns' && job.runKey.startsWith('event:')) {
+            const at = new Date().toISOString();
+            useUiStore.getState().recordTriggerRun(vaultPath, job.key, at);
+            void jobLedgerStamp(vaultPath, job.key, at).catch(() => undefined);
+          }
           // Scoped to THIS job's run (M17.3). The old subscription saw every
           // event in the app and guessed with `running.current`, which is how
           // a chat turn's Done could end a background job — and vice versa.
@@ -383,6 +567,18 @@ export function useJobRunner(): void {
                   : job.kind
                 : `event: ${woken.because}`,
             scope: agent?.scope ?? null,
+            // Absent in the browser, where there is no row to point at.
+            ...(durableId === null ? {} : { durableId }),
+            // M34.2: a schedule-fired job's runKey IS its due stamp, so the
+            // log can say when this run was owed — and, on a catch-up after a
+            // closed weekend, how late it ran. Late is not failed.
+            ...(() => {
+              const due =
+                job.ledger === 'skillRuns' && !job.runKey.startsWith('event:')
+                  ? fireKeyDate(job.runKey)
+                  : null;
+              return due === null ? {} : { dueAt: due.toISOString() };
+            })(),
           };
           unsubscribe.current = onAgentEvent((event) => {
             if (event.kind === 'ToolStart') {
@@ -393,9 +589,26 @@ export function useJobRunner(): void {
             if (event.kind === 'Done' || event.kind === 'Error') finish();
           }, runId);
         } catch {
-          // Silent by construction. A background runner that could raise a
-          // toast would be a notification, which is the one thing this whole
-          // surface is not allowed to be.
+          // Silent by construction — no toast: a background runner that could
+          // raise one would be a notification, which is the one thing this
+          // whole surface is not allowed to be. But silent is not INVISIBLE
+          // (M34.2): a run that died before it started still gets a log row,
+          // because "found nothing to do" and "could not tell" are different
+          // sentences and an absent row reads as the first one.
+          if (logged.current === null) {
+            appendRunLog({
+              id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+              at: new Date().toISOString(),
+              owner: 'job',
+              label: job.title,
+              source: job.path,
+              trigger: job.runKey.startsWith('event:') ? 'event' : 'schedule',
+              scope: agent?.scope ?? null,
+              files: [],
+              status: 'failed',
+              error: `could not read ${job.path} — this run cannot say what it found`,
+            });
+          }
           if (!recorded) {
             setFailedReads((m) => ({
               ...m,

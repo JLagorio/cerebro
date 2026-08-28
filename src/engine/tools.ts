@@ -4,7 +4,7 @@
  * The tool names have only ever existed in `src-tauri/src/mcp.rs`, which is
  * correct — that is where they are served and where a narrowing is enforced.
  * But it left the UI with nothing to offer: `allowed-tools:` was a free-text
- * box, so choosing a policy meant knowing thirteen identifiers by heart and
+ * box, so choosing a policy meant knowing every identifier by heart and
  * getting each one exactly right. A typo did not error; it silently narrowed
  * the run to nothing, which looks identical to a model that decided not to act.
  *
@@ -14,8 +14,8 @@
  *
  * ## Toolsets
  *
- * Grouped the way ClickUp groups them, for the reason they do: nobody picks
- * thirteen checkboxes. They pick "reading" or "reading and writing", and the
+ * Grouped the way ClickUp groups them, for the reason they do: nobody picks a
+ * dozen checkboxes. They pick "reading" or "reading and writing", and the
  * individual tools are there for the one case that needs a scalpel. The groups
  * are drawn on the axis that matters here — what a run can CHANGE — so the
  * dangerous ones cannot hide in a bundle labelled after a workflow.
@@ -51,6 +51,11 @@ export const TOOLSETS: Toolset[] = [
       },
       { name: 'search_notes', summary: 'Search titles, bodies and frontmatter', writes: false },
       { name: 'get_note', summary: 'Read one note in full', writes: false },
+      {
+        name: 'knowledge_about',
+        summary: 'What the knowledge base already knows about one entity',
+        writes: false,
+      },
       { name: 'list_inbox', summary: 'Captures waiting to be filed', writes: false },
     ],
   },
@@ -82,6 +87,18 @@ export const TOOLSETS: Toolset[] = [
     label: 'Propose, don’t apply',
     hint: 'Shows the user an accept/reject card instead of writing.',
     tools: [{ name: 'propose_organize', summary: 'Suggest how to file a capture', writes: false }],
+  },
+  {
+    id: 'agents',
+    label: 'Hand work to agents',
+    hint: 'Starts another agent, which writes under its OWN scope — calling never lends the caller anything. Two hops, then it stops.',
+    tools: [
+      {
+        name: 'hand_to',
+        summary: 'Start a run of another agent with a task',
+        writes: false,
+      },
+    ],
   },
   {
     id: 'ui',
@@ -169,6 +186,30 @@ export const ALL_TOOLS: ToolSpec[] = [...TOOLSETS.flatMap((set) => set.tools), .
 
 export function toolSpec(name: string): ToolSpec | undefined {
   return ALL_TOOLS.find((t) => t.name === name);
+}
+
+/**
+ * What an armed agent's proposals DO (M36.5) — consequence, not membership.
+ *
+ * Derived from the SHARED policy artifact, never typed out: the counts are
+ * the same table Rust gates against, so the sentence on the agent's page and
+ * the behavior at the channel cannot drift. LOW and MEDIUM auto-apply once
+ * committed; HIGH waits on a card. The escalator sentence is rendered beside
+ * these but needs no derivation — `target_has_attestation → floor HIGH` has
+ * shipped in the artifact since M27.4.
+ */
+export function proposalConsequence(): { applies: number; queues: number } {
+  const ops = agentFacingOps(POLICY);
+  const queues = ops.filter((op) => POLICY.ops[op].base_risk === 'HIGH').length;
+  return { applies: ops.length - queues, queues };
+}
+
+/** True when this selection reaches the proposal channel at all — the
+ * consequence table is rendered for armed agents only; an unarmed agent
+ * gets no table about weapons it does not carry. */
+export function holdsProposalTools(names: readonly string[] | null): boolean {
+  if (names === null) return false;
+  return names.some((n) => PROPOSAL_TOOLS.some((t) => t.name === n));
 }
 
 /**

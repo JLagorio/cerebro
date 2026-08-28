@@ -325,6 +325,65 @@ export function lastFireKey(schedule: Schedule, now: Date): string {
 }
 
 /**
+ * The instant a fire key names (M34.2) — the run's DUE moment, parsed back
+ * from the ledger key `lastFireKey` minted. Lives beside the mint because the
+ * two formats are one contract: dated keys are local wall-clock, hourly keys
+ * are UTC (the DST reasoning above), and nothing outside this module may
+ * guess at either. Null for anything else — an event runKey has no due time,
+ * and inventing one would let a triggered run claim it was "late".
+ */
+export function fireKeyDate(key: string): Date | null {
+  const dated = key.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+  if (dated !== null) {
+    return new Date(
+      Number(dated[1]),
+      Number(dated[2]) - 1,
+      Number(dated[3]),
+      Number(dated[4]),
+      Number(dated[5]),
+    );
+  }
+  const hourly = key.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):00Z$/);
+  if (hourly !== null) {
+    return new Date(
+      Date.UTC(Number(hourly[1]), Number(hourly[2]) - 1, Number(hourly[3]), Number(hourly[4])),
+    );
+  }
+  return null;
+}
+
+/**
+ * When this schedule fires next (M33.6). The forward twin of `lastFireKey`,
+ * and it lives here for the same reason that one does: what "weekdays" or
+ * "weekly thu" MEANS is schedule arithmetic, and a dossier that worked it out
+ * itself would be a second place that knows — the twin-implementation defect
+ * in miniature.
+ *
+ * Strictly future: a schedule whose moment is exactly `now` has fired, and
+ * the next one is the following period. `now` is passed rather than read so
+ * the caller's pinned clock governs (the `VAULT_TODAY` discipline).
+ */
+export function nextFire(schedule: Schedule, now: Date): Date {
+  const at = new Date(now);
+  at.setSeconds(0, 0);
+  if (schedule.kind === 'hourly') {
+    at.setMinutes(0);
+    // Strictly after `now`, so the top of the current hour never counts.
+    while (at.getTime() <= now.getTime()) at.setHours(at.getHours() + 1);
+    return at;
+  }
+  at.setHours(schedule.hour, schedule.minute, 0, 0);
+  if (at.getTime() <= now.getTime()) at.setDate(at.getDate() + 1);
+  if (schedule.kind === 'weekdays') {
+    while (at.getDay() === 0 || at.getDay() === 6) at.setDate(at.getDate() + 1);
+  }
+  if (schedule.kind === 'weekly') {
+    while (at.getDay() !== schedule.day) at.setDate(at.getDate() + 1);
+  }
+  return at;
+}
+
+/**
  * Progressive disclosure, tier one (M17.8).
  *
  * The catalogue rides in EVERY system prompt, so it is the one part of the

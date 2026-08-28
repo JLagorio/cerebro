@@ -470,7 +470,7 @@ export function ViewSettingsPanel({
                   className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-danger-600 hover:bg-danger-50"
                 >
                   <Icon name="trash-2" size={13} />
-                  {surface === 'type' ? 'Delete type' : 'Delete list'}
+                  {surface === 'type' ? 'Delete database' : 'Delete list'}
                 </button>
               )}
             </div>

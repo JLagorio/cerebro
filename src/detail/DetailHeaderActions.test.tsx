@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { resetLayers } from '@/components/ui/layers';
+import { useNavStore } from '@/stores/navStore';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -88,6 +89,21 @@ describe('DetailHeaderActions', () => {
   it('offers no stepping when the record is on its own', () => {
     setup([B], B);
     expect(screen.queryByRole('button', { name: /record$/ })).toBeNull();
+  });
+
+  // M38.2 — the peek stopped being a wall: a record can be a full page.
+  it('opens the record in a full page and closes the peek', async () => {
+    const user = userEvent.setup();
+    setup();
+    useNavStore.setState({
+      selection: { kind: 'home' },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    await user.click(screen.getByRole('button', { name: 'Open in full page' }));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: B });
+    // The same record twice — peeked and paged — is one time too many.
+    expect(useUiStore.getState().detailPath).toBeNull();
   });
 
   // The panel is a COLUMN, not an overlay, so Notion's three peek modes

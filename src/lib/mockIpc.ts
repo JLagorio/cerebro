@@ -10,6 +10,17 @@ import type { Entry } from '@/engine/types';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 import { sha256Hex } from './sha256';
+import {
+  AMBIENT_CONCURRENCY_DEFAULT,
+  AMBIENT_CONCURRENCY_MAX,
+  demoChanges,
+  demoFleetDetails,
+  demoFleetRuns,
+  demoLanes,
+  demoPipelineOverview,
+  demoReviewCards,
+  demoRevertables,
+} from './demoOperational';
 import { loadRegistry } from './trigger/registry';
 import type { ParentRule, Variant as TriggerVariant } from './trigger/registry';
 
@@ -44,8 +55,30 @@ const times = new Map<string, { createdAt: string; modifiedAt: string }>();
 // represent an empty folder. Parity with real dirs on disk.
 const folders = new Set<string>();
 
-/** Re-seed the mock filesystem from demo-vault/. Exported for test isolation. */
-export function resetMockFs(): void {
+/**
+ * Restore the operational fixtures (M33.10). Exported for test isolation, and
+ * called by `resetMockFs` so one reset puts the whole mock back.
+ *
+ * The runs, the queue and the meter are as much part of the golden corpus as
+ * the notes are — they are simply kept here rather than in `demo-vault/`,
+ * because they live in SQLite rather than on disk.
+ */
+export function resetOperational(): void {
+  lanes = demoLanes();
+  changes = demoChanges();
+  review.cards = demoReviewCards();
+  review.applications = demoRevertables();
+  pipeline = demoPipelineOverview(LANES);
+  fleetRuns = demoFleetRuns();
+  fleetDetails = demoFleetDetails();
+  fleetAvailable = true;
+  resetAgentPauses();
+}
+
+/** Re-seed the file map alone. Split from `resetMockFs` because module init
+ * runs it BEFORE the operational fixtures below are initialized, and reaching
+ * them from here would be a temporal-dead-zone error at import time. */
+function seedFiles(): void {
   files.clear();
   times.clear();
   folders.clear();
@@ -60,7 +93,14 @@ export function resetMockFs(): void {
     times.set(rel, { createdAt: SEED_TIME, modifiedAt: SEED_TIME });
   }
 }
-resetMockFs();
+seedFiles();
+
+/** Re-seed the whole mock — files and the operational fixtures — for test
+ * isolation. Safe to call once the module has finished evaluating. */
+export function resetMockFs(): void {
+  seedFiles();
+  resetOperational();
+}
 
 /**
  * Vault format v2 containment (parity with the scan.rs post-pass): an
@@ -763,7 +803,16 @@ interface ReviewFixture {
   applications: RevertableApplication[];
 }
 
-const review: ReviewFixture = { cards: [], applications: [] };
+/**
+ * Seeded from the demo corpus (M33.10), not empty.
+ *
+ * The review queue lives in the vault ledger, which the browser does not
+ * have. Answering empty was fine while this surface was a door; M33.3 made it
+ * a body, and a body with nothing in it cannot be evaluated or designed
+ * against. `resetOperational()` restores these, so a spec that wants the
+ * empty case asks for it.
+ */
+const review: ReviewFixture = { cards: demoReviewCards(), applications: demoRevertables() };
 
 /** Test-only seam, mirroring `window.__cerebroMockFs`: a spec stages the
  * cards it wants to see and the surface renders them. */
@@ -1047,8 +1096,12 @@ export interface ChangesView {
 
 const NO_LANES: LanesView = { rule_version: 'lanes-v1', lanes: [], withheld: 0, incomplete: [] };
 
-let lanes: LanesView = NO_LANES;
-let changes: ChangesView | null = null;
+// Seeded from the demo corpus (M33.10), like the operational fixtures below.
+// A hub whose every section says "nothing" or "could not be read" cannot be
+// evaluated; `resetOperational()` restores these, and a spec that wants the
+// empty or refused case stages it.
+let lanes: LanesView = demoLanes();
+let changes: ChangesView | null = demoChanges();
 
 /** Test-only seam, mirroring `__cerebroSeedChips`. */
 export function __seedLanes(next: LanesView | null): void {
@@ -1149,6 +1202,11 @@ export interface PipelineHeld {
 
 export interface PipelineOverview {
   global_pause: boolean;
+  /** How many background runs may be live at once (M33b.2). 1 unless raised. */
+  ambient_concurrency: number;
+  /** The highest this build accepts, from Rust's `agent::MAX_CONCURRENT_RUNS`.
+   * Sent over the wire so no second copy of the number lives here. */
+  ambient_concurrency_max: number;
   runtime_status: string;
   meter: PipelineMeter;
   lanes: PipelineLane[];
@@ -1162,6 +1220,8 @@ const LANES = ['filed', 'scheduled', 'agent', 'behind', 'refresh', 'stale', 'sch
 function emptyOverview(): PipelineOverview {
   return {
     global_pause: false,
+    ambient_concurrency: AMBIENT_CONCURRENCY_DEFAULT,
+    ambient_concurrency_max: AMBIENT_CONCURRENCY_MAX,
     runtime_status: 'ready',
     meter: {
       window_start_utc: '2026-08-09T00:00:00.000Z',
@@ -1186,7 +1246,7 @@ function emptyOverview(): PipelineOverview {
   };
 }
 
-let pipeline: PipelineOverview = emptyOverview();
+let pipeline: PipelineOverview = demoPipelineOverview(LANES);
 
 /** Test-only seam, mirroring `window.__cerebroSeedReview`. */
 export function __seedPipeline(fixture: Partial<PipelineOverview>): void {
@@ -1270,6 +1330,304 @@ export async function pipelineOverview(_vault: string): Promise<PipelineOverview
 }
 
 /**
+ * One run as the fleet shows it (M33.2). The Rust shape verbatim.
+ *
+ * `actor` is null for a run written before M33.1 and for bare attended chat.
+ * That is a real category — "unattributed" — and nothing backfills it.
+ */
+export interface FleetRun {
+  run_id: string;
+  actor: string | null;
+  vault_id: string | null;
+  mode: string;
+  lane: string;
+  started_at: string;
+  ended_at: string | null;
+  outcome: string;
+  /** `pending` | `exact` | `unknown`. Read this BEFORE the token counts. */
+  usage_state: string;
+  input_tokens: number;
+  output_tokens: number;
+  proposals_submitted: number;
+  applied: number;
+  rejected: number;
+  /** M34.3's hop lineage (M41): the run this one was spawned FROM; null is
+   * a root. Mirrors fleet.rs — the parity the mock owes the wire. */
+  parent_run_id: string | null;
+}
+
+/** One `run_cost_components` row (M31.6). */
+export interface FleetCostComponent {
+  component: string;
+  unit: string;
+  model_id: string | null;
+  quantity: number;
+  observed_cost_micros: number | null;
+  /** Derived rather than measured. Showing an estimate as a measurement is
+   * worse than showing nothing. */
+  estimated: boolean;
+  pricing_snapshot_id: string | null;
+  recorded_at: string;
+}
+
+/** One `assembly_metrics` row (M31.6). */
+export interface FleetAssemblyMetrics {
+  manifest_id: string;
+  intended_stakes: string;
+  source_count: number;
+  evidence_item_count: number;
+  context_bytes: number;
+  retrieval_query_count: number;
+  blocked_intent_count: number;
+  answer_latency_micros: number | null;
+  recorded_at: string;
+}
+
+/**
+ * One run and its governance joins.
+ *
+ * `cost_components: null` means NOT RECORDED — pre-M31.6, or a path M31.6
+ * does not cover. An empty array would mean "measured, and it cost nothing",
+ * which is a different fact; the UI must not render either as $0.
+ */
+export interface FleetRunDetail {
+  run: FleetRun;
+  cost_components: FleetCostComponent[] | null;
+  assembly: FleetAssemblyMetrics | null;
+}
+
+/** What one actor's rows add up to (M33.2). */
+export interface FleetActorSummary {
+  actor: string;
+  run_count: number;
+  /** Summed across `usage_state === 'exact'` runs ONLY. */
+  input_tokens: number;
+  output_tokens: number;
+  /** Runs that happened but never said what they spent. Counted rather than
+   * added as zero, so a lifetime total reads as visibly partial. */
+  unknown_runs: number;
+  /** Rows still carrying `outcome: 'running'` (M33b.4) — the whole of what
+   * "working" means. A count, not a flag, because the row count is what the
+   * table holds. */
+  running_runs: number;
+  last_outcome: string | null;
+  last_started_at: string | null;
+}
+
+/** Which runs to return. Absent field means "any". */
+export interface FleetFilter {
+  vault_id?: string | null;
+  lane?: string | null;
+  mode?: string | null;
+  actor?: string | null;
+  limit?: number | null;
+}
+
+/** Mirrors `fleet.rs`'s two constants. */
+const FLEET_MAX_LIMIT = 200;
+const FLEET_DEFAULT_LIMIT = 50;
+
+let fleetRuns: FleetRun[] = demoFleetRuns();
+let fleetDetails: Record<string, FleetRunDetail> = demoFleetDetails();
+/** Null models a missing runtime DB: every fleet command refuses, which is
+ * how the section reaches `unavailable` rather than `empty`. */
+let fleetAvailable = true;
+
+/** Test-only seam, mirroring `__cerebroSeedPipeline`. */
+export function __seedFleet(
+  runs: FleetRun[] | null,
+  details: Record<string, FleetRunDetail> = {},
+): void {
+  fleetAvailable = runs !== null;
+  fleetRuns = runs ?? [];
+  fleetDetails = details;
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedFleet: typeof __seedFleet }).__cerebroSeedFleet =
+    __seedFleet;
+}
+
+function fleetUnavailable(): Error {
+  return new Error('no runtime database for this workspace');
+}
+
+export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[]> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const matches = fleetRuns.filter(
+    (run) =>
+      (filter.vault_id == null || run.vault_id === filter.vault_id) &&
+      (filter.lane == null || run.lane === filter.lane) &&
+      (filter.mode == null || run.mode === filter.mode) &&
+      (filter.actor == null || run.actor === filter.actor),
+  );
+  // Same ordering and the same server-side clamp as `fleet.rs`: a mock that
+  // trusted the caller's limit would let a test pass against a page the real
+  // backend would have truncated.
+  const ordered = [...matches].sort(
+    (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
+  );
+  return ordered.slice(0, Math.min(filter.limit ?? FLEET_DEFAULT_LIMIT, FLEET_MAX_LIMIT));
+}
+
+export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const detail = fleetDetails[runId];
+  // Refused, not null — the same way Rust refuses. A typo and a run that
+  // recorded nothing must not look the same.
+  if (detail === undefined) throw new Error(`no run with id ${runId}`);
+  return detail;
+}
+
+/** The one fold both summary reads share, mirroring `fleet.rs`'s `summaries`.
+ * Two copies of the sum-only-what-was-metered rule is two places for one to
+ * drift, on this side of the wire as much as on the other. */
+function summariseActor(actor: string, runs: FleetRun[]): FleetActorSummary {
+  const metered = runs.filter((run) => run.usage_state === 'exact');
+  const latest = [...runs].sort(
+    (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
+  )[0];
+  return {
+    actor,
+    run_count: runs.length,
+    input_tokens: metered.reduce((sum, run) => sum + run.input_tokens, 0),
+    output_tokens: metered.reduce((sum, run) => sum + run.output_tokens, 0),
+    unknown_runs: runs.length - metered.length,
+    running_runs: runs.filter((run) => run.outcome === 'running').length,
+    last_outcome: latest?.outcome ?? null,
+    last_started_at: latest?.started_at ?? null,
+  };
+}
+
+export async function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  return summariseActor(
+    actor,
+    fleetRuns.filter((run) => run.actor === actor),
+  );
+}
+
+/**
+ * Every attributed actor, summed (M33b.3).
+ *
+ * `actor: null` is not an actor and gets no row, exactly as the SQL's
+ * `WHERE r.actor IS NOT NULL` decides — the unattributed run stays visible in
+ * `fleetRunsPage`, which is where it belongs. Byte-sorted like the `ORDER BY
+ * r.actor` beside it, so a roster does not reshuffle between reads.
+ */
+export async function fleetActorSummaries(): Promise<FleetActorSummary[]> {
+  if (!fleetAvailable) throw fleetUnavailable();
+  const byActor = new Map<string, FleetRun[]>();
+  for (const run of fleetRuns) {
+    if (run.actor === null) continue;
+    const bucket = byActor.get(run.actor);
+    if (bucket === undefined) byActor.set(run.actor, [run]);
+    else bucket.push(run);
+  }
+  return [...byActor.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([actor, runs]) => summariseActor(actor, runs));
+}
+
+// --- Job ledgers (M34.2.2) — parity with runtime/job_ledger.rs -------------
+
+/** One vault's three scheduling ledgers, as the hydration read returns them. */
+export interface JobLedgers {
+  attempts: Record<string, string>;
+  skillRuns: Record<string, string>;
+  triggerRuns: Record<string, string>;
+}
+
+/** The schema's CHECK vocabulary, mirrored: a fourth name is a migration. */
+const JOB_LEDGER_NAMES = ['attempts', 'skillRuns', 'triggerRuns'] as const;
+
+/** vault → ledger → key → run_key. In-memory like the rest of the mock: the
+ * browser's persistence is uiStore's localStorage mirror, re-offered through
+ * the import path each session. */
+const jobLedgers = new Map<string, Map<string, Map<string, string>>>();
+
+function jobLedgerFor(vault: string, ledger: string): Map<string, string> {
+  if (!(JOB_LEDGER_NAMES as readonly string[]).includes(ledger)) {
+    // The schema refuses this with a CHECK; a mock that stored it would let
+    // a browser test invent a fourth ledger no database admits.
+    throw new Error(`job_ledger: CHECK failed — unknown ledger ${ledger}`);
+  }
+  let ledgers = jobLedgers.get(vault);
+  if (ledgers === undefined) {
+    ledgers = new Map();
+    jobLedgers.set(vault, ledgers);
+  }
+  let map = ledgers.get(ledger);
+  if (map === undefined) {
+    map = new Map();
+    ledgers.set(ledger, map);
+  }
+  return map;
+}
+
+export async function jobLedgerRead(vault: string): Promise<JobLedgers> {
+  const out: JobLedgers = { attempts: {}, skillRuns: {}, triggerRuns: {} };
+  for (const name of JOB_LEDGER_NAMES) {
+    for (const [key, runKey] of jobLedgerFor(vault, name)) out[name][key] = runKey;
+  }
+  return out;
+}
+
+export async function jobLedgerClaim(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  const map = jobLedgerFor(vault, ledger);
+  // The same conditional write as the Rust upsert: false iff this exact fire
+  // was already answered — the two-window double-run, refused in the store.
+  if (map.get(key) === runKey) return false;
+  map.set(key, runKey);
+  return true;
+}
+
+export async function jobLedgerStamp(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<void> {
+  jobLedgerFor(vault, ledger).set(key, runKey);
+}
+
+export async function jobLedgerUnclaim(
+  vault: string,
+  ledger: string,
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  const map = jobLedgerFor(vault, ledger);
+  // Conditional on the exact value, like the Rust DELETE: a claim another
+  // window has since re-won is never destroyed.
+  if (map.get(key) !== runKey) return false;
+  map.delete(key);
+  return true;
+}
+
+export async function jobLedgerImport(
+  vault: string,
+  entries: readonly { ledger: string; key: string; runKey: string }[],
+): Promise<number> {
+  let landed = 0;
+  for (const { ledger, key, runKey } of entries) {
+    // Malformed remnants are skipped, not fatal — dying on one would re-run
+    // the whole import forever. Same rule as the Rust side.
+    if (key === '' || runKey === '') continue;
+    const map = jobLedgerFor(vault, ledger);
+    if (map.has(key)) continue;
+    map.set(key, runKey);
+    landed += 1;
+  }
+  return landed;
+}
+
+/**
  * Where the scheduler holds one item (M26.4j).
  *
  * `null` for everything, and that is the honest mock rather than a gap. The
@@ -1286,6 +1644,33 @@ export async function ingestItemState(_vault: string, _path: string): Promise<It
 
 export async function setGlobalPause(paused: boolean): Promise<void> {
   pipeline = { ...pipeline, global_pause: paused };
+}
+
+/**
+ * The concurrency ceiling (M33b.2) — with both of Rust's guards, because a
+ * mock that accepted what the backend refuses would let a browser-only test
+ * prove a ceiling no database would ever hold.
+ *
+ * The refusal messages are the Rust ones' sense, not their bytes: what has to
+ * match is that both ends refuse, and that neither clamps. `mockIpc.test.ts`
+ * pins that parity; `settings.rs`'s
+ * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
+ * pins the same rule from the other language.
+ */
+export async function setAmbientConcurrency(ceiling: number): Promise<void> {
+  if (!Number.isInteger(ceiling) || ceiling < AMBIENT_CONCURRENCY_DEFAULT) {
+    throw new Error(
+      `a background concurrency of ${ceiling} is not a ceiling, it is a pause — ` +
+        'use the pause, which says so',
+    );
+  }
+  if (ceiling > AMBIENT_CONCURRENCY_MAX) {
+    throw new Error(
+      `${ceiling} background runs would exceed the ${AMBIENT_CONCURRENCY_MAX} this process ` +
+        'will ever have alive at once',
+    );
+  }
+  pipeline = { ...pipeline, ambient_concurrency: ceiling };
 }
 
 export async function setLaneEnabled(
@@ -1542,5 +1927,63 @@ export async function triggerRecordPack(
   // made-up evaluation id would be a governance record nobody can audit.
   throw new Error(
     'browser mock — recording an evidence pack needs the real runtime database and repository',
+  );
+}
+
+// --- One agent's own pause (M33b.5) -----------------------------------------
+//
+// Mirrors `runtime::settings`' three functions and, crucially, its REFUSAL:
+// AGENTS.md requires the browser mock to enforce every Rust-side guard, and a
+// per-agent pause the browser would let a run walk past is exactly the "the
+// pause is a lie" failure this phase exists to disprove. `mockIpc.test.ts`
+// pins the parity from this side; `settings.rs`'s
+// `the_refusal_names_the_agent_and_bare_chat_has_nothing_to_refuse` pins the
+// same rule from the other language.
+//
+// Vault-scoped, like Rust's key, because an agent is a record: two vaults may
+// each hold a `digest` without them being the same colleague.
+
+/** `vault` → the actors paused in it. Absent is NOT paused — that is the state
+ * every agent ships in, and it is a measurement rather than a gap. */
+const pausedByVault = new Map<string, Set<string>>();
+
+function resetAgentPauses(): void {
+  pausedByVault.clear();
+}
+
+/** Which agents are paused in this vault. Empty is measured-at-zero. */
+export async function pausedAgents(vault: string): Promise<string[]> {
+  return [...(pausedByVault.get(vault) ?? [])].sort();
+}
+
+/** Stop or restart one agent. Refused without an agent to be about, before
+ * anything is stored — Rust refuses the same blank for the same reason. */
+export async function setAgentPaused(vault: string, actor: string, paused: boolean): Promise<void> {
+  const named = actor.trim();
+  if (named === '') {
+    throw new Error('a pause needs an agent to be about, and no actor was named');
+  }
+  const set = pausedByVault.get(vault) ?? new Set<string>();
+  if (paused) set.add(named);
+  else set.delete(named);
+  pausedByVault.set(vault, set);
+}
+
+/**
+ * The guard `agentIpc.runAgent` must not get past in browser mode.
+ *
+ * `null` is bare chat — a run nobody launched on any agent's behalf — and has
+ * no pause to check. The sentence names the agent, because a person who paused
+ * one of several and then triggered another needs to know which one refused
+ * them. It is thrown rather than swallowed for the same reason Rust returns an
+ * `Err`: a pause that eats the trigger silently is indistinguishable from a
+ * broken button.
+ */
+export function refuseIfAgentPaused(vault: string, actor: string | null | undefined): void {
+  if (actor === null || actor === undefined) return;
+  if (pausedByVault.get(vault)?.has(actor) !== true) return;
+  throw new Error(
+    `${actor} is paused, so this run did not start. Resume it on the fleet — ` +
+      'a paused agent that still ran would make the pause a lie.',
   );
 }

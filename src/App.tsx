@@ -3,7 +3,6 @@ import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
 import { JobRunnerHost } from '@/agent/useJobRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
-import { Rail } from '@/app/Rail';
 import { ReconciliationBanner } from '@/app/ReconciliationBanner';
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
@@ -12,24 +11,22 @@ import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog'
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { AgentsPage } from '@/pages/AgentsPage';
 import { ChangesPage } from '@/pages/ChangesPage';
-import { EpistemicStatusPage } from '@/pages/EpistemicStatusPage';
-import { PipelinePage } from '@/pages/PipelinePage';
-import { ReviewPage } from '@/pages/ReviewPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
 import { DocPage } from '@/pages/DocPage';
-import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
+import { MyWorkPage } from '@/pages/MyWorkPage';
 import { PulsePage } from '@/pages/PulsePage';
 import { LibraryPage } from '@/library/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { StudioPage } from '@/pages/StudioPage';
 import { TypePage } from '@/pages/TypePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
-import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
 import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
@@ -70,27 +67,27 @@ function useMediaQuery(query: string): boolean {
 }
 
 /**
- * Below this the rail, a full-width sidebar, a right-hand panel and a readable
- * canvas cannot all fit: 56 (rail) + 264 (sidebar) + 400 (canvas floor) + 320
- * (panel floor) = 1040, with slack for the window chrome.
+ * Below this a full-width sidebar, a right-hand panel and a readable canvas
+ * cannot all fit: 264 (sidebar default) + 400 (canvas floor) + 320 (panel
+ * floor) = 984, with slack for the window chrome. M37.3 retired the rail's
+ * 56px from this arithmetic when the shell flattened to one nav column.
  */
-const SHELL_NARROW_MAX = 1120;
+const SHELL_NARROW_MAX = 1048;
 
 /**
  * Above this BOTH right-hand panels are drawn at once (M17.2).
  *
  * Derived rather than picked, from the same floors the layout already
- * enforces: 56 (rail) + 180 (sidebar at its MINIMUM — flex takes the shortfall
- * out of the sidebar first) + 400 (canvas floor) + 2 x 320 (panel floors) =
- * 1276. Below it the record wins the space and the assistant is parked, still
- * mounted and still streaming.
+ * enforces: 180 (sidebar at its MINIMUM — flex takes the shortfall out of the
+ * sidebar first) + 400 (canvas floor) + 2 x 320 (panel floors) = 1220. Below
+ * it the record wins the space and the assistant is parked, still mounted and
+ * still streaming.
  *
  * The 264px sidebar in M15's "~20px canvas at 1280" complaint is the DEFAULT
  * width, not the floor; at the floor the arithmetic clears 1280 with room to
  * spare, which is why the old rule over-corrected into mutual exclusion.
  */
-export const SHELL_TWO_PANEL_MIN =
-  56 + SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
+export const SHELL_TWO_PANEL_MIN = SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -99,6 +96,9 @@ function CanvasOutlet() {
       return <HomePage />;
     case 'inbox':
       return <InboxPage />;
+    // M43 — open work across every database, grouped by type.
+    case 'mywork':
+      return <MyWorkPage />;
     case 'knowledge':
       return <KnowledgePage selection={selection} />;
     // M12.5: `project` retired — a project is a folder, and a folder on
@@ -112,8 +112,6 @@ function CanvasOutlet() {
     // pending edit had flushed — writing A's bytes into B and losing A's edit.
     case 'diagram':
       return <DiagramPage key={selection.path} selection={selection} />;
-    case 'docs':
-      return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.
     case 'collection':
       return <CollectionPage selection={selection} />;
@@ -123,12 +121,6 @@ function CanvasOutlet() {
       return <TypePage selection={selection} />;
     case 'changes':
       return <ChangesPage />;
-    case 'review':
-      return <ReviewPage />;
-    case 'pipeline':
-      return <PipelinePage />;
-    case 'status':
-      return <EpistemicStatusPage />;
     case 'pulse':
       return <PulsePage />;
     case 'library':
@@ -137,6 +129,14 @@ function CanvasOutlet() {
     // index. Takes the selection so the open file survives Back.
     case 'workspace':
       return <WorkspacePage selection={selection} />;
+    // M40 — the prototype surface. Takes the selection so the open
+    // prototype survives Back.
+    case 'studio':
+      return <StudioPage selection={selection} />;
+    // M41 — the agents' front door. Same contract: the open agent survives
+    // Back.
+    case 'agents':
+      return <AgentsPage selection={selection} />;
     case 'settings':
       return <SettingsPage />;
   }
@@ -323,8 +323,8 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900">
-      {/* The rail and the whole sidebar tree sit between the top of the tab
-          order and the content, which in a real vault is dozens of stops. */}
+      {/* The whole sidebar tree sits between the top of the tab order and the
+          content, which in a real vault is dozens of stops. */}
       <button
         type="button"
         onClick={() => document.getElementById('main')?.focus()}
@@ -332,7 +332,6 @@ function App() {
       >
         Skip to content
       </button>
-      <Rail />
       <Sidebar narrow={narrow} onNewView={(collection) => setNewList({ collection })} />
       {/* M15: the floor that makes the sidebar yield first. Without a minimum
           here the main column shrinks to nothing and the canvas absorbs every
@@ -344,7 +343,6 @@ function App() {
           minWidth: CANVAS_MIN_WIDTH + drawnPanels * RIGHT_PANEL_MIN_WIDTH,
         }}
       >
-        <Topbar />
         {/* M23.7: the divergence circuit breaker's banner — visible only
             while the ledger's reconciliation mode is open (never in the
             browser mock, which has no ledger). */}
@@ -353,7 +351,7 @@ function App() {
             than a fixed overlay on top of it. That is what lets a table keep
             its full horizontal scroll while a record is open.
             M15: the assistant moved in here too. As a sibling of the whole main
-            column it stole width from the Topbar and the StatusBar as well as
+            column it stole width from the StatusBar as well as
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` lets a page respond to the width it actually
             has rather than the viewport's. */}

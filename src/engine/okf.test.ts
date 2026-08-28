@@ -4,6 +4,7 @@ import {
   conceptEdges,
   conceptsAbout,
   conceptsFrom,
+  defaultKnowledgeNav,
   footnoteRefs,
   nearDuplicates,
   isConcept,
@@ -21,6 +22,7 @@ import {
   parseLog,
   parseSources,
   parseVerified,
+  readThread,
   recentlyLearned,
   relatedConcepts,
   resolveBundleLink,
@@ -32,6 +34,7 @@ import {
   verifyPatch,
 } from './okf';
 import { makeEntry } from './testHelpers';
+import type { Entry } from './types';
 
 const TODAY = '2026-07-28';
 
@@ -458,6 +461,49 @@ describe('subjects', () => {
     expect(subject.label).toBe('not-written-yet');
   });
 
+  it('names a thread the way its own source names it (M33a.3 / D8)', () => {
+    // The anchor resolves INTO the bundle. `Entry.title` is the body H1 else
+    // the humanized stem, and frontmatter `title:` is ignored for entries by
+    // design — so this concept's entry is called `Rq 84b kestrel` while the
+    // agent that wrote it called it `RQ-84B KESTREL program`. The nav showed
+    // the humanized stem, a name nothing in the vault had ever written.
+    const program = makeEntry({
+      path: 'knowledge/programs/rq-84b-kestrel.md',
+      filename: 'rq-84b-kestrel.md',
+      folder: 'knowledge/programs',
+      type: 'Reference',
+      title: 'Rq 84b kestrel',
+      properties: { title: 'RQ-84B KESTREL program' },
+    });
+    const entries = [program, about('knowledge/risks/thermal.md', ['rq-84b-kestrel'])];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects.map((s) => s.label)).toEqual(['RQ-84B KESTREL program']);
+  });
+
+  it('still falls back to the entry title for an anchor outside the bundle', () => {
+    const entries = [project, about('knowledge/a.md', ['phoenix'])];
+    const [subject] = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subject.label).toBe('Phoenix warehouse rollout');
+  });
+
+  it('sorts threads by weight, breaking ties on the label (M33a.3 / D8)', () => {
+    // Alphabetical put the one real thread under a singleton whose label
+    // happened to sort earlier — the failure the design doc measured, with
+    // nineteen singletons instead of two.
+    const entries = [
+      project,
+      about('knowledge/alpha.md', ['aardvark']),
+      about('knowledge/beta.md', ['barnacle']),
+      ...Array.from({ length: 13 }, (_, i) => about(`knowledge/p${i}.md`, ['phoenix'])),
+    ];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects.map((s) => [s.label, s.concepts.length])).toEqual([
+      ['Phoenix warehouse rollout', 13],
+      ['aardvark', 1],
+      ['barnacle', 1],
+    ]);
+  });
+
   it('answers what a project page asks: concepts anchored to this path', () => {
     const entries = [
       project,
@@ -470,6 +516,178 @@ describe('subjects', () => {
       entries,
     );
     expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+  });
+});
+
+describe('where the Knowledge tab opens (M33a.3)', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    folder: 'projects/phoenix',
+    title: 'Phoenix warehouse rollout',
+    type: 'Project',
+  });
+  const about = (path: string, targets: string[]) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      type: 'Reference',
+      relationships: { about: targets },
+    });
+
+  it('lands on the heaviest thread', () => {
+    const entries = [
+      project,
+      about('knowledge/a.md', ['aardvark']),
+      about('knowledge/b.md', ['phoenix']),
+      about('knowledge/c.md', ['phoenix']),
+    ];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(defaultKnowledgeNav(subjects)).toEqual({
+      tab: 'entity',
+      key: 'projects/phoenix/project.md',
+    });
+  });
+
+  it('falls back to the flat list when the bundle anchors nothing', () => {
+    // Every vault with no bundle at all, too — and a list is the honest
+    // answer to "which thread" when there are none.
+    expect(defaultKnowledgeNav([])).toEqual({ tab: 'all' });
+  });
+});
+
+describe('reading one thread (M33a.4)', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    folder: 'projects/phoenix',
+    title: 'Phoenix warehouse rollout',
+    type: 'Project',
+  });
+
+  const knows = (
+    name: string,
+    patch: {
+      title?: string;
+      type?: string;
+      properties?: Record<string, unknown>;
+      relations?: Record<string, string[]>;
+    } = {},
+  ): Entry =>
+    makeEntry({
+      path: `knowledge/${name}.md`,
+      filename: `${name}.md`,
+      folder: 'knowledge',
+      title: patch.title ?? name,
+      type: patch.type ?? 'Reference',
+      relationships: { about: ['phoenix'], ...(patch.relations ?? {}) },
+      properties: patch.properties,
+    });
+
+  const read = (entries: Entry[]) => {
+    const concepts = listConcepts(entries, TODAY);
+    const [subject] = listSubjects(concepts, entries);
+    return readThread(subject, concepts, entries);
+  };
+
+  const titles = (reading: ReturnType<typeof read>) =>
+    reading.known.flatMap((group) => group.concepts.map((c) => c.title));
+
+  it('puts a replaced concept under contested and keeps it out of known', () => {
+    const reading = read([
+      project,
+      knows('offline-window', { title: 'The offline window' }),
+      knows('offline-guarantee', {
+        title: 'The offline guarantee',
+        relations: { supersedes: ['offline-window'] },
+      }),
+    ]);
+    expect(reading.contested).toHaveLength(1);
+    expect(reading.contested[0].concept.title).toBe('The offline window');
+    expect(reading.contested[0].reason).toBe('replaced');
+    expect(reading.contested[0].others.map((c) => c.title)).toEqual(['The offline guarantee']);
+    // Known is the SETTLED remainder — a claim the bundle has retired is not
+    // part of what it knows, and listing it under both would say it twice.
+    expect(titles(reading)).toEqual(['The offline guarantee']);
+  });
+
+  it('reads a contradiction from either end', () => {
+    const reading = read([
+      project,
+      knows('a-says', { title: 'A says', relations: { contradicts: ['b-says'] } }),
+      knows('b-says', { title: 'B says' }),
+    ]);
+    // The end that never declared it is contested too: disagreement has no
+    // direction, and only one of the two files carries the field.
+    expect(reading.contested.map((c) => [c.concept.title, c.reason])).toEqual([
+      ['A says', 'contradicted'],
+      ['B says', 'contradicted'],
+    ]);
+    expect(titles(reading)).toEqual([]);
+  });
+
+  it('reports an undated concept rather than sorting it oldest', () => {
+    const reading = read([
+      project,
+      knows('old', {
+        title: 'Old',
+        properties: { generated: { by: 'claude-code', at: '2026-05-01T00:00:00Z' } },
+      }),
+      knows('new', {
+        title: 'New',
+        properties: { generated: { by: 'claude-code', at: '2026-07-01T00:00:00Z' } },
+      }),
+      knows('undated', { title: 'Undated' }),
+    ]);
+    expect(reading.changed.map((c) => c.concept.title)).toEqual(['New', 'Old']);
+    // Not last in `changed`: a missing stamp is not an early one, and giving
+    // it a position is giving it a date it never carried.
+    expect(reading.undated.map((c) => c.title)).toEqual(['Undated']);
+  });
+
+  it('contests nothing on a settled thread, and says so with an empty finding', () => {
+    const reading = read([project, knows('one', { title: 'One', type: 'Metric' })]);
+    expect(reading.contested).toEqual([]);
+    expect(reading.known).toEqual([{ conceptType: 'Metric', concepts: [expect.anything()] }]);
+  });
+
+  it('keeps a stale concept out of known without calling it contested', () => {
+    const reading = read([
+      project,
+      knows('due', { title: 'Due a recheck', properties: { stale_after: '2026-07-01' } }),
+      knows('fresh', { title: 'Fresh' }),
+    ]);
+    expect(reading.stale.map((c) => c.title)).toEqual(['Due a recheck']);
+    expect(reading.contested).toEqual([]);
+    expect(titles(reading)).toEqual(['Fresh']);
+  });
+
+  it('dedupes sources by resource, counts what cites them, and counts what cites nothing', () => {
+    const reading = read([
+      project,
+      knows('one', {
+        title: 'One',
+        properties: {
+          sources: [
+            { id: 'dec', resource: '/records/dec.md', title: 'The decision' },
+            // The same artifact twice in one concept is one concept citing it.
+            { id: 'dec-again', resource: '/records/dec.md' },
+          ],
+        },
+      }),
+      knows('two', {
+        // `/records/dec.md` and `records/dec.md` name one file (§5.1).
+        title: 'Two',
+        properties: { sources: [{ id: 'dec', resource: 'records/dec.md' }] },
+      }),
+      knows('three', { title: 'Three' }),
+    ]);
+    expect(reading.sources).toEqual([
+      { resource: '/records/dec.md', title: 'The decision', citedBy: 2 },
+    ]);
+    // Never absorbed into the total: a concept resting on nothing is exactly
+    // what a reader of a reading list needs to be told about.
+    expect(reading.uncited.map((c) => c.title)).toEqual(['Three']);
   });
 });
 

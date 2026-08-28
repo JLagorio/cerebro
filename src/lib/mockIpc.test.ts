@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
+import { runAgent, stopAllAgents } from '@/agent/agentIpc';
 import * as mock from './mockIpc';
 
 beforeEach(() => {
@@ -663,6 +664,36 @@ describe('mockIpc', () => {
   });
 });
 
+/**
+ * The concurrency ceiling's mock parity (M33b.2).
+ *
+ * AGENTS.md: the mock backend must mirror every Rust-side guard. The Rust
+ * side is `runtime::settings::set_ambient_concurrency` and its test
+ * `a_ceiling_outside_one_through_the_process_cap_is_refused_before_it_is_stored`
+ * — the rule observed from both languages rather than mirrored in prose.
+ */
+describe('the background concurrency ceiling (M33b.2)', () => {
+  it('ships at one, which is what the retired singleton lease row enforced', async () => {
+    const overview = await mock.pipelineOverview('/demo-vault');
+    expect(overview.ambient_concurrency).toBe(1);
+    expect(overview.ambient_concurrency_max).toBe(4);
+  });
+
+  it('refuses both ends rather than clamping, and stores nothing when it refuses', async () => {
+    await expect(mock.setAmbientConcurrency(0)).rejects.toThrow(/it is a pause/);
+    await expect(mock.setAmbientConcurrency(5)).rejects.toThrow(/alive at once/);
+    await expect(mock.setAmbientConcurrency(1.5)).rejects.toThrow(/it is a pause/);
+    expect((await mock.pipelineOverview('/demo-vault')).ambient_concurrency).toBe(1);
+  });
+
+  it('accepts the whole allowed range, boundary included', async () => {
+    for (const ceiling of [4, 2, 1]) {
+      await mock.setAmbientConcurrency(ceiling);
+      expect((await mock.pipelineOverview('/demo-vault')).ambient_concurrency).toBe(ceiling);
+    }
+  });
+});
+
 describe('the deferral gates (M28.1)', () => {
   it('the board is the shared artifact: 14 entries, 34 gates, R14 honestly empty', async () => {
     const board = await mock.triggerStatus('/demo-vault');
@@ -774,5 +805,334 @@ describe('the deferral gates (M28.1)', () => {
     await expect(
       mock.triggerRecordPack('/demo-vault', '/repo', 'docs/x.md', 'fired'),
     ).rejects.toThrow(/browser mock/);
+  });
+
+  // --- Fleet parity (M33.2) ------------------------------------------------
+  //
+  // Every guard `fleet.rs` enforces has to hold here too, or a component test
+  // passes against a backend that would have refused it.
+
+  const fleetRun = (over: Partial<mock.FleetRun> = {}): mock.FleetRun => ({
+    run_id: 'r1',
+    actor: null,
+    vault_id: 'v1',
+    mode: 'ambient',
+    lane: 'filed',
+    started_at: '2026-07-28T10:00:00Z',
+    ended_at: '2026-07-28T10:01:00Z',
+    outcome: 'succeeded',
+    usage_state: 'exact',
+    input_tokens: 100,
+    output_tokens: 10,
+    proposals_submitted: 0,
+    applied: 0,
+    rejected: 0,
+    parent_run_id: null,
+    ...over,
+  });
+
+  it('fleet runs filter by actor and come back newest first', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:digest', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({ run_id: 'r2', actor: null, started_at: '2026-07-28T11:00:00Z' }),
+      fleetRun({ run_id: 'r3', actor: 'process:digest', started_at: '2026-07-28T12:00:00Z' }),
+    ]);
+    const page = await mock.fleetRunsPage({ actor: 'process:digest' });
+    expect(page.map((r) => r.run_id)).toEqual(['r3', 'r1']);
+    const all = await mock.fleetRunsPage();
+    expect(all).toHaveLength(3);
+    expect(all[1].actor).toBeNull();
+  });
+
+  it('fleet clamps an absurd limit rather than trusting it', async () => {
+    // The same clamp `fleet.rs` applies server-side. A mock that obeyed the
+    // caller would let a test pass against a page the backend truncates.
+    mock.__seedFleet(
+      ['a', 'b', 'c'].map((id) => fleetRun({ run_id: id, started_at: `2026-07-28T1${id}:00:00Z` })),
+    );
+    expect(await mock.fleetRunsPage({ limit: 2 })).toHaveLength(2);
+    expect(await mock.fleetRunsPage({ limit: 10_000_000 })).toHaveLength(3);
+  });
+
+  it('an unknown run id is REFUSED, exactly as Rust refuses it', async () => {
+    // Not null. A typo and a run that recorded nothing must not look the same.
+    mock.__seedFleet([fleetRun()], {
+      r1: { run: fleetRun(), cost_components: null, assembly: null },
+    });
+    await expect(mock.fleetRunDetail('nope')).rejects.toThrow(/no run with id/);
+    const detail = await mock.fleetRunDetail('r1');
+    expect(detail.cost_components).toBeNull();
+    expect(detail.assembly).toBeNull();
+  });
+
+  it('a missing runtime database refuses every fleet command', async () => {
+    // This is how the Agent work tab reaches `unavailable` instead of `empty`.
+    mock.__seedFleet(null);
+    await expect(mock.fleetRunsPage()).rejects.toThrow(/runtime database/);
+    await expect(mock.fleetRunDetail('r1')).rejects.toThrow(/runtime database/);
+    await expect(mock.fleetActorSummary('process:digest')).rejects.toThrow(/runtime database/);
+    mock.__seedFleet([]);
+  });
+
+  it('a lifetime summary counts unmetered runs instead of adding zero', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:digest', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({
+        run_id: 'r2',
+        actor: 'process:digest',
+        started_at: '2026-07-28T11:00:00Z',
+        usage_state: 'unknown',
+        input_tokens: 0,
+        output_tokens: 0,
+      }),
+      fleetRun({ run_id: 'r3', actor: 'other', started_at: '2026-07-28T12:00:00Z' }),
+    ]);
+    const summary = await mock.fleetActorSummary('process:digest');
+    expect(summary.run_count).toBe(2);
+    expect(summary.input_tokens).toBe(100);
+    expect(summary.unknown_runs).toBe(1);
+    expect(summary.last_started_at).toBe('2026-07-28T11:00:00Z');
+
+    const fresh = await mock.fleetActorSummary('process:brand-new');
+    expect(fresh.run_count).toBe(0);
+    expect(fresh.last_outcome).toBeNull();
+  });
+
+  // --- Roster parity (M33b.3) ------------------------------------------------
+
+  it('the roster returns one row per ATTRIBUTED actor, byte-sorted', async () => {
+    // `WHERE r.actor IS NOT NULL GROUP BY r.actor ORDER BY r.actor` on the
+    // other side. An unattributed run belongs to no actor and gets no row —
+    // it stays visible in the run history, which is where it belongs.
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:scout', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({ run_id: 'r2', actor: 'agent:m26-ingest', started_at: '2026-07-28T11:00:00Z' }),
+      fleetRun({ run_id: 'r3', actor: 'process:scout', started_at: '2026-07-28T12:00:00Z' }),
+      fleetRun({ run_id: 'r4', actor: null, started_at: '2026-07-28T13:00:00Z' }),
+    ]);
+    const roster = await mock.fleetActorSummaries();
+    expect(roster.map((s) => s.actor)).toEqual(['agent:m26-ingest', 'process:scout']);
+    expect(roster[1].run_count).toBe(2);
+    // The same fold, reached two ways. A roster row that disagreed with the
+    // dossier beside it would be two implementations of one number.
+    expect(roster[1]).toEqual(await mock.fleetActorSummary('process:scout'));
+  });
+
+  it('the roster counts a run still going, which is the whole of "working"', async () => {
+    mock.__seedFleet([
+      fleetRun({ run_id: 'r1', actor: 'process:scout', started_at: '2026-07-28T10:00:00Z' }),
+      fleetRun({
+        run_id: 'r2',
+        actor: 'process:scout',
+        started_at: '2026-07-28T11:00:00Z',
+        outcome: 'running',
+        usage_state: 'pending',
+        ended_at: null,
+        input_tokens: 0,
+        output_tokens: 0,
+      }),
+    ]);
+    const [scout] = await mock.fleetActorSummaries();
+    expect(scout.running_runs).toBe(1);
+    // A pending run has not said what it spent, so it is skipped and counted.
+    expect(scout.unknown_runs).toBe(1);
+    expect(scout.input_tokens).toBe(100);
+  });
+
+  it('a fleet with nothing attributed is EMPTY, and a missing database refuses', async () => {
+    // Measured-at-zero and unreadable, kept apart on this side of the wire
+    // exactly as `actor_summaries` keeps them apart on the other.
+    mock.__seedFleet([fleetRun({ run_id: 'r1', actor: null })]);
+    expect(await mock.fleetActorSummaries()).toEqual([]);
+    mock.__seedFleet(null);
+    await expect(mock.fleetActorSummaries()).rejects.toThrow(/runtime database/);
+    mock.__seedFleet([]);
+  });
+});
+
+/**
+ * The per-agent pause's mock parity (M33b.5).
+ *
+ * AGENTS.md: the mock backend must mirror every Rust-side guard, and this one
+ * is the phase's whole claim — spec §6, "if a paused agent can still be
+ * triggered from its record, the pause is a lie". The Rust side is
+ * `runtime::settings`' `agent_paused` / `set_agent_paused` / `paused_agents` /
+ * `refuse_if_agent_paused`, pinned by
+ * `an_agent_with_no_pause_row_is_not_paused_and_a_pause_survives_a_restart`,
+ * `a_pause_with_no_agent_to_be_about_is_refused_before_it_is_stored` and
+ * `the_refusal_names_the_agent_and_bare_chat_has_nothing_to_refuse` — one rule
+ * observed from both languages rather than described twice in prose.
+ */
+describe('the per-agent pause (M33b.5)', () => {
+  it('starts with nobody paused, which is measured and not missing', async () => {
+    expect(await mock.pausedAgents('/demo-vault')).toEqual([]);
+  });
+
+  it('pauses and resumes one agent, byte-sorted, saying nothing about the others', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await mock.setAgentPaused('/demo-vault', 'process:digest', true);
+    expect(await mock.pausedAgents('/demo-vault')).toEqual(['process:digest', 'process:scout']);
+
+    await mock.setAgentPaused('/demo-vault', 'process:digest', false);
+    expect(await mock.pausedAgents('/demo-vault')).toEqual(['process:scout']);
+  });
+
+  it('is vault-scoped, because an agent is a record and not a subscription', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    expect(await mock.pausedAgents('/other-vault')).toEqual([]);
+  });
+
+  it('refuses a pause with no agent to be about, before anything is stored', async () => {
+    await expect(mock.setAgentPaused('/demo-vault', '  ', true)).rejects.toThrow(
+      /no actor was named/,
+    );
+    expect(await mock.pausedAgents('/demo-vault')).toEqual([]);
+  });
+
+  it('refuses a run the paused agent would have started, and names it', async () => {
+    // The guard `agentIpc.runAgent` calls in browser mode. Rust refuses the
+    // same run in `run_agent`, ahead of the token and the child.
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:scout')).toThrow(
+      /process:scout is paused/,
+    );
+    // Bare chat has no pause to check, and neither does anybody else.
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', null)).not.toThrow();
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', undefined)).not.toThrow();
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:digest')).not.toThrow();
+
+    await mock.setAgentPaused('/demo-vault', 'process:scout', false);
+    expect(() => mock.refuseIfAgentPaused('/demo-vault', 'process:scout')).not.toThrow();
+  });
+});
+
+/**
+ * The run path itself, in browser mode (M33b.5).
+ *
+ * `agentIpc.runAgent` does not go through this module's facade — in the
+ * browser it drives the scripted mock directly — so the guard has to be
+ * reached from there or a paused agent would run in dev and in every
+ * browser-mode test. In Tauri the same refusal lives in `run_agent`, ahead of
+ * the run token and the child. Spec §6: the phase includes proving the pause
+ * is not a lie.
+ */
+describe('a paused agent cannot be run (M33b.5)', () => {
+  it('refuses the run the agent would have started, by name', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await expect(
+      runAgent('/demo-vault', {
+        message: 'go',
+        actor: 'process:scout',
+        shell: false,
+        connectors: false,
+        attended: false,
+        mcp: null,
+      }),
+    ).rejects.toThrow(/process:scout is paused/);
+  });
+
+  it('leaves every other run alone — bare chat, and anybody not paused', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    const options = {
+      message: 'go',
+      shell: false,
+      connectors: false,
+      attended: false,
+      mcp: null,
+    };
+    await expect(runAgent('/demo-vault', options)).resolves.toBeDefined();
+    await expect(
+      runAgent('/demo-vault', { ...options, actor: 'process:digest' }),
+    ).resolves.toBeDefined();
+    // Nothing scripted is left running behind these assertions.
+    await stopAllAgents();
+  });
+
+  it('runs again the moment it is resumed — the pause stopped it, not deleted it', async () => {
+    await mock.setAgentPaused('/demo-vault', 'process:scout', true);
+    await mock.setAgentPaused('/demo-vault', 'process:scout', false);
+    await expect(
+      runAgent('/demo-vault', {
+        message: 'go',
+        actor: 'process:scout',
+        shell: false,
+        connectors: false,
+        attended: false,
+        mcp: null,
+      }),
+    ).resolves.toBeDefined();
+    await stopAllAgents();
+  });
+});
+
+describe('the job ledgers (M34.2.2) — parity with runtime/job_ledger.rs', () => {
+  it('the first claim is fresh and the second identical one is not', async () => {
+    expect(
+      await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-20'),
+    ).toBe(true);
+    // The two-window double-run, refused in the store rather than by a
+    // renderer promise to be quick.
+    expect(
+      await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-20'),
+    ).toBe(false);
+    // A new fire is a new job.
+    expect(
+      await mock.jobLedgerClaim('/vault-claim', 'skillRuns', 'agent:risks', '2026-08-21'),
+    ).toBe(true);
+  });
+
+  it('two vaults never share a ledger row', async () => {
+    // Fire keys are calendar values: the same relative path in another vault
+    // reading as already-run is the PR #5 bug the table must not reintroduce.
+    await mock.jobLedgerClaim('/vault-iso-a', 'skillRuns', 'skills/daily.md', '2026-08-20');
+    expect(
+      await mock.jobLedgerClaim('/vault-iso-b', 'skillRuns', 'skills/daily.md', '2026-08-20'),
+    ).toBe(true);
+  });
+
+  it('unclaim surrenders only the exact claim still held', async () => {
+    await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20');
+    expect(
+      await mock.jobLedgerUnclaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20'),
+    ).toBe(true);
+    // A surrendered fire can be claimed again — the deferral did not eat it.
+    expect(
+      await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20'),
+    ).toBe(true);
+    // A claim someone else has since re-won is never destroyed.
+    await mock.jobLedgerClaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-21');
+    expect(
+      await mock.jobLedgerUnclaim('/vault-unclaim', 'skillRuns', 'agent:risks', '2026-08-20'),
+    ).toBe(false);
+    expect((await mock.jobLedgerRead('/vault-unclaim')).skillRuns['agent:risks']).toBe(
+      '2026-08-21',
+    );
+  });
+
+  it('a stamp always overwrites because a cooldown clock must move', async () => {
+    await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T10:00:00Z');
+    await mock.jobLedgerStamp('/vault-stamp', 'triggerRuns', 'agent:risks', '2026-08-20T11:00:00Z');
+    expect((await mock.jobLedgerRead('/vault-stamp')).triggerRuns['agent:risks']).toBe(
+      '2026-08-20T11:00:00Z',
+    );
+  });
+
+  it('an unknown ledger name is refused the way the schema CHECK refuses it', async () => {
+    await expect(mock.jobLedgerClaim('/vault-vocab', 'regrets', 'k', 'v')).rejects.toThrow(/CHECK/);
+  });
+
+  it('import lands only what the store does not hold and skips malformed remnants', async () => {
+    await mock.jobLedgerClaim('/vault-import', 'skillRuns', 'agent:risks', '2026-08-20');
+    const landed = await mock.jobLedgerImport('/vault-import', [
+      // Already answered — the stale localStorage copy must not win.
+      { ledger: 'skillRuns', key: 'agent:risks', runKey: '2026-08-01' },
+      { ledger: 'attempts', key: 'records/a.md', runKey: '2026-08-19T00:00:00.000Z' },
+      // Malformed remnants are skipped, not fatal.
+      { ledger: 'attempts', key: '', runKey: 'x' },
+    ]);
+    expect(landed).toBe(1);
+    const read = await mock.jobLedgerRead('/vault-import');
+    expect(read.skillRuns['agent:risks']).toBe('2026-08-20');
+    expect(read.attempts['records/a.md']).toBe('2026-08-19T00:00:00.000Z');
   });
 });

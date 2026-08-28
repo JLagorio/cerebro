@@ -429,6 +429,38 @@ describe('jobQueue', () => {
     expect(after).toEqual([]);
   });
 
+  it('a refreshed source wakes the agent watching sources/ — noticed, not pushed (M34.5.4)', () => {
+    // The whole connection-trigger story in one deterministic test: nothing
+    // in the app listens for webhooks (the Source Monitor never fetches, and
+    // there is no HTTP server to push to). A refresh WRITES the cached copy,
+    // the write is an ordinary VaultEvent, and `when: changed in sources` is
+    // ordinary trigger vocabulary — so an outside change is noticed when the
+    // copy lands, at app pace, under the app's own budget gate.
+    const watcher = makeEntry({
+      path: 'records/agents/source-watcher.md',
+      title: 'Source watcher',
+      type: 'Agent',
+      properties: { when: [{ event: 'changed', in: 'sources' }] },
+    });
+    const copy = makeEntry({
+      path: 'sources/issues/phx-421.md',
+      title: 'PHX-421',
+      modifiedAt: '2026-07-31T10:00:00Z',
+    });
+    const entries = [watcher, copy];
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
+      ...EMPTY,
+      now,
+      events: [{ kind: 'changed', path: copy.path, entry: copy, before: copy, fields: [] }],
+    });
+    expect(jobs.map((j) => [j.kind, j.path])).toEqual([
+      ['agent', 'records/agents/source-watcher.md'],
+    ]);
+    // The fire key names the event, so THIS refresh wakes the agent once and
+    // the next refresh — a new modifiedAt — is a genuinely new fire.
+    expect(jobs[0].runKey).toBe('event:changed:sources/issues/phx-421.md@2026-07-31T10:00:00Z');
+  });
+
   it('a skill is never read for material, however a concept cites it', () => {
     const playbook = skill('Playbook');
     const entries = [

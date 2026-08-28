@@ -24,3 +24,8 @@ coverage/
 
 # Agent worktrees and local scratch (M16.1)
 .claude/
+
+# Superpowers brainstorming scratch (mockups, server state)
+.superpowers/
+docs/cerebro
+docs/cerebro-ds

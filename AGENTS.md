@@ -29,10 +29,46 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 
 - `src/` — React app. `engine/` is the pure domain core (best-tested layer);
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
-  `git/` are surfaces; `stores/` is Zustand; `lib/` holds IPC + browser mocks.
+  `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
+  Zustand; `lib/` holds IPC + browser mocks.
+- **Knowledge is one tab made of sections** (M33.3–M33.5, folded in M33a.2).
+  What the base HOLDS and what it knows about ITSELF were two rail buttons
+  describing one subject; they are two groups of one nav now.
+  `knowledge/KnowledgeNav.tsx` is the nav and `knowledge/BaseItself.tsx`
+  composes the epistemic tabs from the section components in `src/status/`,
+  each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
+  and `EpistemicStatusPage` are all gone. **The shell is ONE nav column that
+  IS the chrome** (M37.3 flattened the rail and per-surface sidebar into
+  `app/Sidebar.tsx`; M43 dissolved the Topbar into it): header (vault tile ·
+  wordmark · Assistant zap · search · collapse), the New button, then the
+  STANDALONE destinations (Inbox, Home, My work, Studio, History, Library —
+  M37.2 spent the locked names, M38.3 retired Docs for the standing **Pages**
+  tree, M40 added Studio, M43 added My work and moved Library up; the
+  selection KINDS stay `knowledge`/`workspace`, labels only, plus M43's
+  `mywork`), then the sections — Collections, Pages, **Work** (M43.10: each
+  mounted repo is a row; ↗ opens the surface; empty says "No repositories
+  mounted"), **Base** (M43.10: KnowledgeNav's rows stand on every surface;
+  ↗ opens the base home), Agents (M43 turned M41's destination into a roster
+  section whose ↗ opens the fleet), **Databases** (M39 — the label; `type:`
+  and every internal identifier keep the old word), and Favorites (pinned
+  paths, `cerebro.favorites`, pruned when a pointer dies) — all wearing
+  `app/SectionHeader.tsx`'s one anatomy, then the footer (SyncBadge · Theme ·
+  Settings). No destination owns nested rows anymore — M42.2's group chevrons
+  retired with M43.10; section fold state rides the closed set
+  (`cerebro.navClosed`; Databases keeps `typesOpen`). The chrome is the DS's:
+  sunken sidebar, `--surface-selected` + cortex ink for the current row,
+  quiet mono counts — never a filled pill (M42.1).
+  The destination names are asserted in `app/Sidebar.test.tsx`; specs scope
+  destination clicks to `nav-surfaces` (nested rows live OUTSIDE those
+  containers precisely because they share accessible names with
+  destinations). Sections are addressed by `data-section`, never
+  by a per-section testid, and `KnowledgeNav` carries the tab (plus `run`,
+  for one fleet detail) so a section is a place the back button returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
   (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
-  `connectors.rs`.
+  `connectors.rs`, `runtime/fleet.rs` (SELECT-only run history — it writes
+  nothing, and a phase that needs a new fact goes through the Meter or the
+  governance writers instead).
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
@@ -64,6 +100,17 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   Parity is the shared artifact plus `shared/policy/goldens/`; see that
   directory's README before editing either artifact (both have regeneration
   steps that are deliberate, `#[ignore]`d tests).
+- **Absent is never zero, and unavailable is never empty.** A number nobody
+  recorded renders as words ("not recorded", "unknown", "unattributed"), never
+  as `0` or `$0`; a total that had to skip unmetered rows says how many it
+  skipped rather than absorbing them. A read that FAILED renders
+  `section-unavailable`, never the empty state — "nothing is waiting" and "we
+  could not tell you what is waiting" are opposite sentences, and a surface
+  that says the first when it means the second is worse than one that says
+  nothing. M33 retired two `catch → empty` collapses (`ReviewPage`,
+  `PipelinePage`) for exactly this; do not reintroduce one. `Option`/`null`
+  from Rust means NOT RECORDED and an empty collection means measured-at-zero,
+  so never map one to the other on the way through.
 - **Two records, two destinies**: every refusal names a code whose
   ledger-or-operational destiny is declared in the shipped policy table —
   `shared/policy/policy.v3.json` since M27.4; v1 and v2 are frozen negative

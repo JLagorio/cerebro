@@ -47,7 +47,8 @@ async function seedRepos(page: Page): Promise<void> {
 }
 
 async function openWorkspace(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Workspace' }).click();
+  // M43.10: the Work destination row died — the section's ↗ is the door.
+  await page.getByRole('button', { name: 'Open all repositories' }).click();
   await expect(page.getByTestId('workspace-page')).toBeVisible();
 }
 
@@ -58,13 +59,23 @@ test.describe('workspace', () => {
     await openWorkspace(page);
 
     await expect(page.getByTestId('root-tree')).toBeVisible();
-    await expect(page.getByTestId('tree-row')).toHaveCount(2);
+    await expect(page.getByTestId('root-tree').getByTestId('tree-row')).toHaveCount(2);
 
     // Expanding a root lists exactly one level.
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await expect(page.getByTestId('tree-row').filter({ hasText: 'README.md' })).toHaveCount(1);
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await expect(
+      page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'README.md' }),
+    ).toHaveCount(1);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
     await expect(page.getByTestId('doc-viewer')).toContainText('Alpha');
   });
 
@@ -73,8 +84,16 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
     await page.getByTestId('doc-internal-link').click();
 
     await expect(page.getByTestId('doc-viewer')).toHaveAttribute('data-path', 'docs/guide.md');
@@ -86,9 +105,17 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'src' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'main.rs' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'src' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'main.rs' })
+      .click();
 
     const viewer = page.getByTestId('code-viewer');
     await expect(viewer).toBeVisible();
@@ -100,16 +127,32 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
     await expect(page.getByTestId('tab')).toHaveCount(1);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'src' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'main.rs' }).click();
+    await page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'src' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'main.rs' })
+      .click();
     await expect(page.getByTestId('tab')).toHaveCount(2);
 
     // Re-opening a file focuses its tab rather than adding a duplicate.
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
     await expect(page.getByTestId('tab')).toHaveCount(2);
     await expect(page.getByTestId('doc-viewer')).toHaveAttribute('data-path', 'README.md');
 
@@ -123,8 +166,16 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
     await expect(page.getByTestId('editor-pane')).toHaveCount(1);
 
     await page.getByTestId('split-editor').click();
@@ -133,8 +184,12 @@ test.describe('workspace', () => {
 
     // The new pane has focus, so the next file opens there and the left pane
     // keeps what it was showing.
-    await page.getByTestId('tree-row').filter({ hasText: 'src' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'main.rs' }).click();
+    await page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'src' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'main.rs' })
+      .click();
 
     const panes = page.getByTestId('editor-pane');
     await expect(panes.nth(0).getByTestId('doc-viewer')).toHaveAttribute('data-path', 'README.md');
@@ -146,8 +201,16 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'README.md' })
+      .click();
 
     await page.keyboard.press('ControlOrMeta+\\');
     await expect(page.getByTestId('editor-pane')).toHaveCount(2);
@@ -164,9 +227,17 @@ test.describe('workspace', () => {
     await seedRepos(page);
     await openWorkspace(page);
 
-    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'src' }).click();
-    await page.getByTestId('tree-row').filter({ hasText: 'main.rs' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'alpha' })
+      .click();
+    await page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'src' }).click();
+    await page
+      .getByTestId('root-tree')
+      .getByTestId('tree-row')
+      .filter({ hasText: 'main.rs' })
+      .click();
 
     await expect(page.getByTestId('code-viewer')).toHaveAttribute('data-line-numbers', 'true');
     await expect(page.getByTestId('breadcrumb')).toHaveAttribute('data-path', 'src/main.rs');
@@ -186,7 +257,9 @@ test.describe('workspace', () => {
     await first.focus();
     // Right expands the root rather than moving off it.
     await page.keyboard.press('ArrowRight');
-    await expect(page.getByTestId('tree-row').filter({ hasText: 'README.md' })).toHaveCount(1);
+    await expect(
+      page.getByTestId('root-tree').getByTestId('tree-row').filter({ hasText: 'README.md' }),
+    ).toHaveCount(1);
 
     // alpha's children, directories first: docs, src, README.md.
     await page.keyboard.press('ArrowDown');
@@ -212,7 +285,7 @@ test.describe('workspace', () => {
     await expect(toggle).toHaveAttribute('data-checked', 'false');
 
     // The tree still renders; only the glyphs changed.
-    await expect(page.getByTestId('tree-row')).toHaveCount(2);
+    await expect(page.getByTestId('root-tree').getByTestId('tree-row')).toHaveCount(2);
   });
 
   test('the mount dialog opens and closes without mounting anything', async ({ page }) => {
@@ -225,7 +298,7 @@ test.describe('workspace', () => {
 
     await page.getByTestId('mount-cancel').click();
     await expect(page.getByTestId('mount-dialog')).toBeHidden();
-    await expect(page.getByTestId('tree-row')).toHaveCount(2);
+    await expect(page.getByTestId('root-tree').getByTestId('tree-row')).toHaveCount(2);
   });
 
   // The refusal PATH is not driven from here: the dialog's folder picker is the

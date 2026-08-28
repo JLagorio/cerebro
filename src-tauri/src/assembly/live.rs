@@ -62,6 +62,10 @@ impl Spawn for Live<'_> {
         self.mcp.run_token(
             Some(ACTOR),
             Some(vec![]),
+            // M34.4: the internal constructs read the whole vault by design —
+            // ingest and maintenance ARE whole-vault passes; their bound is
+            // the declared tool list, not a folder.
+            None,
             Some(declared_tools()),
             self.run_id.clone(),
         )
@@ -91,6 +95,13 @@ impl Spawn for Live<'_> {
                 // themselves. A watchdog here would kill an answer somebody is
                 // watching arrive.
                 elapsed_limit_seconds: None,
+                // M33.1 — attended, so this meter writes the row itself. The
+                // construct is attributed by its existing actor rather than a
+                // persona: the fleet shows what assembly has run, never a
+                // standing agent with a face (D6).
+                actor: Some(super::ask::ACTOR.to_string()),
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             }),
             Some(tx),
         )?;
@@ -137,10 +148,15 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run answers, and an answer is not a write.
         scope: Some(vec![]),
+        // M34.4: reads unbounded by folder — see the mint above.
+        read_scope: None,
         // M31.1a — a synthesis run answers from the manifest and nothing
         // else. That was always the design (prompt::RULES); until now it was
         // a sentence. The same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // No lane: an attended synthesis run is metered, never gated
+        // (M34.2.4's lane field is the unattended path to the dispatcher).
+        lane: None,
         // Cerebro's own run: attended means a person awaits the ANSWER, not
         // that anybody supervises the child, so the CLI built-ins are
         // withdrawn here too. Only the three internal spawn sites set this.

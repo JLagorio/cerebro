@@ -347,11 +347,11 @@ test('the diagram page is a pan/zoom canvas with a floating code overlay', async
   await expect(result).toContainText('Diagram');
   await result.click();
 
-  // -- Canvas up, sidebar gone (SIDEBARLESS) -----------------------------
+  // -- Canvas up, nav still standing (M37.3 retired the SIDEBARLESS set) --
   await expect(page.getByTestId('diagram-page')).toBeVisible();
   const viewport = page.getByTestId('canvas-viewport');
   await expect(viewport).toBeVisible();
-  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  await expect(page.getByTestId('sidebar')).toBeVisible();
   const host = page.getByTestId('structural-host');
   await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
 
@@ -1111,7 +1111,7 @@ async function bootVault(page: import('@playwright/test').Page): Promise<void> {
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 }
 
-async function openPipelinePage(page: import('@playwright/test').Page): Promise<void> {
+async function openPipelineDiagram(page: import('@playwright/test').Page): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('Pipeline');
   await page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first().click();
@@ -1125,7 +1125,7 @@ async function openPipelinePage(page: import('@playwright/test').Page): Promise<
 test('M29.53: a popover tracks its node through a wheel zoom', async ({ page }) => {
   test.setTimeout(90_000);
   await bootVault(page);
-  await openPipelinePage(page);
+  await openPipelineDiagram(page);
   const node = page.locator('g.node').first();
   await node.click();
   await page.getByRole('button', { name: 'Change shape' }).click();
@@ -1218,7 +1218,7 @@ test('M29.53: an exported svg carries the font it names', async ({ page, context
   test.setTimeout(90_000);
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await bootVault(page);
-  await openPipelinePage(page);
+  await openPipelineDiagram(page);
   await page.getByRole('button', { name: 'Copy SVG' }).click();
   await page.waitForTimeout(1500);
   const svg = await page.evaluate(() => navigator.clipboard.readText());

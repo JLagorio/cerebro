@@ -42,6 +42,14 @@ export interface ButtonProps {
   type?: 'button' | 'submit';
   style?: React.CSSProperties;
   className?: string;
+  /** forwarded as data-testid on the <button>, mirroring `Input.testId`.
+   *
+   * M33.3: this did not exist, so `<Button data-testid="approve">` silently
+   * rendered nothing — three review-card seams that looked like test hooks
+   * and reached no DOM node. The specs passed only because they queried by
+   * role and name. A prop that looks like a seam and is not is worse than no
+   * prop, so the seam is real now and named the way `Input` already names it. */
+  testId?: string;
 }
 
 export function Button({
@@ -55,6 +63,7 @@ export function Button({
   type = 'button',
   style,
   className = '',
+  testId,
 }: ButtonProps) {
   const iconSize = size === 'sm' ? 14 : 16;
   return (
@@ -64,6 +73,7 @@ export function Button({
       onClick={onClick}
       className={`cb-btn cb-btn-${size} cb-btn-${variant} ${className}`}
       style={{ width: fullWidth ? '100%' : undefined, ...style }}
+      data-testid={testId}
     >
       {icon ? <Icon name={icon} size={iconSize} /> : null}
       {children}

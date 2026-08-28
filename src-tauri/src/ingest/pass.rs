@@ -1,7 +1,7 @@
 //! One ambient ingest pass, start to finish (M26.4f) — `dispatch::claim`'s
 //! first production caller.
 //!
-//! M25 built the metering, the budget gate, the singleton ambient lease and
+//! M25 built the metering, the budget gate, the ambient lease and
 //! the durable scheduler, and nothing outside the soak simulation ever called
 //! them. This is the caller: plan the window, claim it, spend one run, close
 //! it, finalize.
@@ -194,6 +194,9 @@ pub fn run_once<R: Runner, C: Commit>(
         &input.lane,
         input.reservation,
         &item_keys,
+        // M33.1 — ingest owns the row it claims, under whichever of its lanes
+        // the batch came from.
+        Some(super::driver::ACTOR),
         now,
     )? {
         Dispatched::Started(lease) => lease,

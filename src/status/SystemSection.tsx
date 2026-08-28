@@ -1,27 +1,51 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { EmptyState } from '@/components/ui/EmptyState';
 import * as ipc from '@/lib/ipc';
 import type { PipelineOverview } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
 
 /**
- * What the background is doing, what it has spent, and what it is waiting on
- * (M25.7) — the first real surface of the overhaul.
+ * The background's controls, as a section of the Status hub (M33.4) — and,
+ * since M33a.2 folded that hub into Knowledge, as its "Background" tab.
+ *
+ * This is `PipelinePage`'s body — the meter, the banners, the lane toggles
+ * and the held piles — moved rather than rewritten, with every testid
+ * unchanged so `pipeline-surface.spec.ts` can prove the move dropped nothing.
+ *
+ * **The activity table did NOT come with it.** `PipelinePage` ended in a
+ * 50-row `runs` table that was not clickable and had no detail view. M33.5's
+ * fleet section replaces it with one that filters, attributes, and opens —
+ * so carrying the old table across would have shipped two run lists.
  *
  * **The meter is global and the lanes are not.** One personal CLI
  * subscription is metered once, however many vaults debit it; which KINDS of
  * background work run is a per-vault choice, because somebody may want
  * scheduled agents at work and nothing at all in their journal.
  *
+ * **The pause here is the WIDER of two (M33b.5).** This one stops every
+ * background run on the subscription. Stopping ONE agent is a button on that
+ * agent's row in the fleet, not a control here — this section is about the
+ * background as a whole, and a list of colleagues on it would be a second,
+ * worse roster. Neither pause overrides the other: both are collected at the
+ * gate and either is enough to refuse.
+ *
+ * **The concurrency ceiling (M33b.2) joined the pause, and is global for the
+ * same reason.** How MUCH background work may run at once is a fact about one
+ * subscription, not about a folder. It ships at 1 — the number the retired
+ * `ambient_dispatch` singleton row used to enforce — so the surface arrives
+ * saying exactly what the app already did, and raising it is a human act in
+ * the same way writing a `schedule:` is.
+ *
  * **Three faces of failure stay three banners.** A quota death means wait; a
  * dead source means reality may be moving unobserved; a broken file means fix
  * one file. One merged "something went wrong" would tell a person none of
  * those, and they need different actions.
  *
- * **"Activity log", never "ledger".** Ledger is reserved for the epistemic
- * record in the vault. Runs and token counts are operational.
+ * **What DID change is the failure state.** `PipelinePage.tsx:92` caught a
+ * failed read and rendered "Nothing to report yet" — the same empty state a
+ * genuinely quiet vault gets. A workspace whose runtime database could not be
+ * opened now says so, per the `Feed<T>` contract in
+ * `knowledge/BaseItself.tsx`.
  *
  * Every action here is a HUMAN UI action, so the store-layer never-throw rule
  * applies: they catch, toast, and reload rather than propagating.
@@ -34,6 +58,14 @@ const BANNER_TITLE: Record<string, string> = {
   accounting_unknown: "Today's spend could not be counted",
 };
 
+/** The ready state carries the vault it read, so the actions below cannot be
+ * called with a null path — the overview belongs to a vault, and pairing them
+ * removes the only place a cast would otherwise be needed. */
+type State =
+  | { kind: 'loading' }
+  | { kind: 'unavailable' }
+  | { kind: 'ready'; vault: string; data: PipelineOverview };
+
 function Meter({ overview }: { overview: PipelineOverview }) {
   const { meter } = overview;
   const bars: [string, number, number][] = [
@@ -44,7 +76,7 @@ function Meter({ overview }: { overview: PipelineOverview }) {
   return (
     <section className="rounded-lg border border-n-200 p-4" data-testid="budget-meter">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Today, across every vault</h2>
+        <h3 className="text-sm font-semibold">Today, across every vault</h3>
         <span
           className="text-xs uppercase tracking-wide text-n-500"
           data-testid="ceiling-state"
@@ -79,20 +111,23 @@ function Meter({ overview }: { overview: PipelineOverview }) {
   );
 }
 
-export function PipelinePage() {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
+export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
   const toast = useUiStore((s) => s.toast);
-  const [overview, setOverview] = useState<PipelineOverview | null>(null);
+  const [state, setState] = useState<State>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    if (vaultPath === null) return;
+    if (vaultPath === null) {
+      setState({ kind: 'unavailable' });
+      return;
+    }
     try {
-      setOverview(await ipc.pipelineOverview(vaultPath));
+      setState({ kind: 'ready', vault: vaultPath, data: await ipc.pipelineOverview(vaultPath) });
     } catch {
-      // A vault with no runtime database has nothing to show. That is a
-      // degraded workspace, not a broken one.
-      setOverview(null);
+      // NOT the empty state. A workspace whose runtime database could not be
+      // opened has an unknown pause, an unknown budget and unknown held work;
+      // "nothing to report" would be this surface inventing calm.
+      setState({ kind: 'unavailable' });
     }
   }, [vaultPath]);
 
@@ -115,28 +150,30 @@ export function PipelinePage() {
     }
   };
 
-  if (vaultPath === null || overview === null) {
+  if (state.kind === 'loading') return <p className="text-xs text-n-400">Reading…</p>;
+  if (state.kind === 'unavailable') {
     return (
-      <div className="p-6" data-testid="pipeline-page">
-        <EmptyState
-          icon="activity"
-          title="Nothing to report yet"
-          description="The background pipeline records what it runs and what it spends. Once it has, this is where it says so."
-        />
-      </div>
+      <p data-testid="section-unavailable" className="text-xs text-n-500">
+        Background health could not be read, so nothing here is a statement about this vault.
+      </p>
     );
   }
 
+  const { vault, data: overview } = state;
   const { held } = overview;
   return (
-    <div className="flex flex-col gap-4 overflow-auto p-6" data-testid="pipeline-page">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Background</h1>
-          <p className="text-sm text-n-500">What ran, what it cost, and what it is waiting on.</p>
-        </div>
+    <div className="flex flex-col gap-3" data-testid="pipeline-page">
+      <div className="flex items-center justify-between gap-3">
+        <p
+          className="text-xs text-n-600"
+          data-testid="pause-state"
+          data-paused={overview.global_pause}
+        >
+          {overview.global_pause ? 'The background is paused.' : 'The background is running.'}
+        </p>
         <Button
           variant={overview.global_pause ? 'primary' : 'secondary'}
+          size="sm"
           disabled={busy}
           onClick={() =>
             act(
@@ -147,7 +184,51 @@ export function PipelinePage() {
         >
           {overview.global_pause ? 'Resume background work' : 'Pause background work'}
         </Button>
-      </header>
+      </div>
+
+      {/* The concurrency ceiling (M33b.2), beside the pause because they are
+          the same control at two settings: this says how much background at
+          once, and the pause says none. It ships at 1 — the number the old
+          singleton lease row enforced — so arriving here changes nothing until
+          somebody moves it, which is the point.
+
+          The options come from `ambient_concurrency_max`, which Rust sends,
+          so this control cannot offer a number the backend would refuse and
+          the cap is never written down twice. */}
+      <div className="flex items-center justify-between gap-3">
+        <label
+          className="text-xs text-n-600"
+          htmlFor="ambient-concurrency"
+          data-testid="concurrency-state"
+          data-ceiling={overview.ambient_concurrency}
+        >
+          {overview.ambient_concurrency === 1
+            ? 'Background work runs one job at a time.'
+            : `Background work runs up to ${overview.ambient_concurrency} jobs at a time, so it can spend that much of your subscription at once.`}
+        </label>
+        <select
+          id="ambient-concurrency"
+          data-testid="ambient-concurrency"
+          className="rounded border border-n-200 px-2 py-1 text-sm"
+          value={overview.ambient_concurrency}
+          disabled={busy}
+          onChange={(e) => {
+            const ceiling = Number(e.target.value);
+            void act(
+              () => ipc.setAmbientConcurrency(ceiling),
+              ceiling === 1
+                ? 'Background work will run one job at a time'
+                : `Background work may now run ${ceiling} jobs at once`,
+            );
+          }}
+        >
+          {Array.from({ length: overview.ambient_concurrency_max }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {n === 1 ? '1 at a time' : `${n} at a time`}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {overview.banners.map((banner) => (
         <div
@@ -173,7 +254,7 @@ export function PipelinePage() {
 
       {(held.baseline_held > 0 || held.recovery_held > 0) && (
         <section className="rounded-lg border border-n-200 p-4" data-testid="held-items">
-          <h2 className="text-sm font-semibold">Waiting for you to decide</h2>
+          <h3 className="text-sm font-semibold">Waiting for you to decide</h3>
           {(
             [
               ['baseline_held', held.baseline_held, 'from the upgrade'],
@@ -192,7 +273,7 @@ export function PipelinePage() {
                   disabled={busy}
                   onClick={() =>
                     act(
-                      () => ipc.resolveHeldItems(vaultPath, which, 'baseline'),
+                      () => ipc.resolveHeldItems(vault, which, 'baseline'),
                       'Accepted as the new baseline',
                     )
                   }
@@ -203,7 +284,7 @@ export function PipelinePage() {
                   disabled={busy}
                   onClick={() =>
                     act(
-                      () => ipc.resolveHeldItems(vaultPath, which, 'process'),
+                      () => ipc.resolveHeldItems(vault, which, 'process'),
                       'Queued — the budget still governs when they run',
                     )
                   }
@@ -216,7 +297,7 @@ export function PipelinePage() {
       )}
 
       <section className="rounded-lg border border-n-200 p-4" data-testid="lane-toggles">
-        <h2 className="text-sm font-semibold">What may run in this vault</h2>
+        <h3 className="text-sm font-semibold">What may run in this vault</h3>
         <ul className="mt-2 flex flex-col gap-1">
           {overview.lanes.map((lane) => (
             <li key={lane.lane} className="flex items-center gap-2" data-testid="lane">
@@ -228,7 +309,7 @@ export function PipelinePage() {
                   data-testid={`lane-${lane.lane}`}
                   onChange={() =>
                     act(
-                      () => ipc.setLaneEnabled(vaultPath, lane.lane, !lane.enabled),
+                      () => ipc.setLaneEnabled(vault, lane.lane, !lane.enabled),
                       lane.enabled ? `${lane.lane} paused` : `${lane.lane} resumed`,
                     )
                   }
@@ -239,44 +320,6 @@ export function PipelinePage() {
             </li>
           ))}
         </ul>
-      </section>
-
-      <section className="rounded-lg border border-n-200 p-4" data-testid="activity-log">
-        <h2 className="text-sm font-semibold">Activity log</h2>
-        {overview.activity.length === 0 ? (
-          <p className="mt-2 text-sm text-n-500">Nothing has run yet.</p>
-        ) : (
-          <table className="mt-2 w-full text-sm">
-            <thead className="text-left text-xs uppercase tracking-wide text-n-500">
-              <tr>
-                <th className="font-medium">Lane</th>
-                <th className="font-medium">Mode</th>
-                <th className="font-medium">Outcome</th>
-                <th className="text-right font-medium">Tokens</th>
-                <th className="text-right font-medium">Proposals</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.activity.map((run) => (
-                <tr key={run.run_id} data-testid="activity-row" data-outcome={run.outcome}>
-                  <td>{run.lane}</td>
-                  <td>{run.mode}</td>
-                  <td>{run.outcome.replace(/_/g, ' ')}</td>
-                  <td className="text-right tabular-nums">
-                    {run.usage_state === 'exact' ? (
-                      run.total_tokens.toLocaleString()
-                    ) : (
-                      <span data-testid="usage-unknown">unknown</span>
-                    )}
-                  </td>
-                  <td className="text-right tabular-nums">
-                    {run.applied} applied · {run.rejected} rejected
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </section>
     </div>
   );

@@ -4,13 +4,13 @@ import { boot, readMockFile } from './boot';
 test('inbox: queue untyped captures, organize one, and watch it leave', async ({ page }) => {
   await boot(page);
 
-  // -- The Rail advertises the queue ----------------------------------
-  // Rail-scoped: the demo vault has an `inbox/` folder whose tree row
-  // matches the same accessible name.
-  const inboxNav = page.getByTestId('rail').getByRole('button', { name: /^Inbox/ });
+  // -- The nav advertises the queue -----------------------------------
+  // Scoped to the destination rows (M37.3): the demo vault has an `inbox/`
+  // folder whose tree row matches the same accessible name.
+  const inboxNav = page.getByTestId('nav-surfaces').getByRole('button', { name: /^Inbox/ });
   await expect(inboxNav).toBeVisible();
   // Scoped to the Inbox button: Knowledge carries a review badge too.
-  const badge = inboxNav.getByTestId('rail-badge');
+  const badge = inboxNav.getByTestId('nav-badge');
   await expect(badge).toBeVisible();
   const queuedBefore = Number(await badge.innerText());
   expect(queuedBefore).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ test('inbox: queue untyped captures, organize one, and watch it leave', async ({
 test('inbox: quick capture writes an untyped note into the queue', async ({ page }) => {
   await boot(page);
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 

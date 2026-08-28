@@ -11,10 +11,12 @@ export const SECTION_LABEL =
   'px-2 pb-1 pt-3.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 export function rowClass(active: boolean): string {
+  // Selection is a cortex wash with cortex ink (DS: `--surface-selected` +
+  // cortex-700), never a gray — gray is what HOVER says (M42.1).
   return [
     'flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 px-2 text-left text-sm',
     active
-      ? 'bg-n-100 font-medium text-n-900'
+      ? 'bg-surface-selected font-medium text-cortex-700'
       : 'bg-transparent font-normal text-n-700 hover:bg-n-100',
   ].join(' ');
 }

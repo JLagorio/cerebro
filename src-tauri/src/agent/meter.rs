@@ -27,6 +27,33 @@ use crate::runtime::{self, operational::LogEntry};
 
 use super::usage::{self, RunFacts, Usage};
 
+/// The three internal constructs, by the actor name they already answer to.
+///
+/// These are NOT new strings. Each construct has minted its actor since M26
+/// and stamps it on every ledger write through the MCP run token, so
+/// `runs.actor` reuses the same constant rather than forking a second
+/// vocabulary — a run's operational row and its epistemic writes have to
+/// agree about who did the work, and two inventories of actor names would
+/// drift the first time one of them was edited.
+///
+/// The list exists so the fleet UI's construct filter and these spawn sites
+/// read from ONE place (M31's no-twin-inventory rule applied to actor names).
+/// A construct added without appearing here is a construct the fleet cannot
+/// offer to filter by.
+///
+/// **Permanently internal — the M35 decision, recorded where the names
+/// live.** These three never become Agent records: their tool grants are
+/// structural (`AgentRequest.internal` is unreachable from the wire), their
+/// spawn sites are Rust, and a record would hand vault-authored frontmatter
+/// the steering of machinery the vault must not steer. The fleet renders
+/// them as the unowned rest of the roster — visible, named, and faceless BY
+/// DESIGN, not as an agent nobody got around to writing.
+pub const CONSTRUCT_ACTORS: [&str; 3] = [
+    crate::ingest::driver::ACTOR,
+    crate::maintain::pass::ACTOR,
+    crate::assembly::ask::ACTOR,
+];
+
 /// Which side of the budget a run sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -62,6 +89,15 @@ pub struct Meter {
     pub started_at: DateTime<Utc>,
     /// Seconds after which an ambient run is aborted. `None` for attended.
     pub elapsed_limit_seconds: Option<u64>,
+    /// Who this run is for (M33.1). `None` is bare attended chat — a run
+    /// nobody launched on a record's behalf — and it stays NULL rather than
+    /// being guessed at. Only [`Mode::Attended`] writes it here; the other
+    /// two modes work on a row `dispatch::claim` already attributed.
+    pub actor: Option<String>,
+    /// The run whose tool call started this one (M34.3). `None` is a root —
+    /// every run a person or a schedule started. Attended-mode only, like
+    /// `actor`, and for the same reason.
+    pub parent_run_id: Option<String>,
 }
 
 /// How a run ended, sent to whoever is waiting on it.
@@ -190,6 +226,8 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             outcome,
             counted,
             Some(&tally.facts),
+            meter.actor.as_deref(),
+            meter.parent_run_id.as_deref(),
             meter.started_at,
             now,
         ),
@@ -375,6 +413,9 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -444,6 +485,9 @@ mod tests {
             store_uuid: Some("store".into()),
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
+            actor: None,
+            // Root by construction (M34.3): no tool call started this run.
+            parent_run_id: None,
         };
         // No committed fixture carries a non-empty array, and none is needed:
         // the array's SHAPE is what the parser reads, so an inline event with
@@ -530,6 +574,9 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -546,6 +593,77 @@ mod tests {
             .unwrap();
         assert_eq!(mode, "attended");
         assert_eq!(output, 42);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unattended_schedule_run_books_ambient_on_its_own_lane_and_settles_the_budget() {
+        // M34.2.4 end to end at the meter: a zero-item claim on the job's
+        // lane — exactly what run_agent makes for an unattended laned
+        // request — books mode='ambient' with the real lane and actor, and
+        // finalization releases the reservation and commits the spend to the
+        // day. This is the §8.3 answer as a test: scheduled runs face the
+        // same books ingest does.
+        let dir = crate::vault::testutil::temp_vault("meter-unattended");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+
+        let dispatch::Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            crate::runtime::budget::Reservation {
+                total_tokens: 20_000,
+                output_tokens: 4_000,
+            },
+            &[],
+            Some("process:scout"),
+            Utc::now(),
+        )
+        .unwrap() else {
+            panic!("an empty item list must still reach the gate and claim");
+        };
+        drop(conn);
+
+        let mut tally = Tally::default();
+        tally.observe(&result(json!({ "output_tokens": 42 }), false, "ok"));
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: lease.run_id.clone(),
+                mode: Mode::Ambient,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+                actor: None,
+                parent_run_id: None,
+            },
+            &tally,
+            false,
+            Utc::now(),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (mode, lane, actor, outcome, output): (String, String, String, String, i64) = conn
+            .query_row(
+                "SELECT mode, lane, actor, outcome, output_tokens FROM runs WHERE run_id = ?1",
+                [&lease.run_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(mode, "ambient", "unattended is ambient spend, not attended");
+        assert_eq!(lane, "scheduled", "the job's real lane, not 'agent'");
+        assert_eq!(actor, "process:scout", "the claim attributed the run");
+        assert_eq!(outcome, "succeeded");
+        assert_eq!(output, 42);
+        let day = crate::runtime::budget::read_day(&conn, &lease.window_start_utc).unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "the reservation was released");
+        assert_eq!(day.ambient_output_tokens, 42, "the spend landed on the day");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -590,6 +708,7 @@ mod tests {
                 output_tokens: 4_000,
             },
             &["records/a.md".to_string()],
+            None,
             Utc::now(),
         )
         .unwrap() else {
@@ -607,6 +726,9 @@ mod tests {
                 store_uuid: Some("store".into()),
                 started_at: Utc::now(),
                 elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &tally,
             false,
@@ -651,6 +773,9 @@ mod tests {
                 store_uuid: None,
                 started_at: Utc::now(),
                 elapsed_limit_seconds: None,
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             },
             &Tally::default(),
             false,
@@ -668,6 +793,9 @@ mod tests {
             store_uuid: None,
             started_at: Utc::now(),
             elapsed_limit_seconds: None,
+            actor: None,
+            // Root by construction (M34.3): no tool call started this run.
+            parent_run_id: None,
         };
         let live = Arc::new(AtomicBool::new(true));
         let aborted = arm_watchdog(&meter, &super::super::AgentState::default(), 0, live);

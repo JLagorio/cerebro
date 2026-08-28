@@ -1,5 +1,5 @@
 import { addDays } from './dates';
-import type { Entry } from './types';
+import type { Entry, KnowledgeNav } from './types';
 import { resolveTarget } from './wikilink';
 
 /**
@@ -374,6 +374,7 @@ export interface Subject {
   /** The vault entry it points at, or null — a dangling anchor is legitimate
    * (OKF §6.1), it may just be an entity nobody has created yet. */
   entry: Entry | null;
+  /** What the thread's own source calls it — see `listSubjects` on casing. */
   label: string;
   concepts: Concept[];
 }
@@ -385,6 +386,16 @@ export interface Subject {
  * omission.
  */
 export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
+  // M33a.3 / D8 — a thread keeps the casing its source gave it.
+  //
+  // `Entry.title` is the body H1 falling back to the humanized filename stem;
+  // frontmatter `title:` is ignored for entries, app-wide and on purpose. The
+  // CONCEPT model does read it (`toConcept`). So an anchor pointing into the
+  // bundle — `about: "[[rq-84b-kestrel]]"` naming a concept file with no H1
+  // and `title: RQ-84B KESTREL program` in its frontmatter — rendered as
+  // `Rq 84b kestrel`, a name nothing in the vault had ever written down.
+  // Where the anchor resolves to a concept, that concept's own title wins.
+  const byPath = new Map(concepts.map((c) => [c.entry.path, c]));
   const subjects = new Map<string, Subject>();
   for (const concept of concepts) {
     for (const target of concept.about) {
@@ -392,11 +403,14 @@ export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
       const key = entry?.path ?? target.toLowerCase();
       const existing = subjects.get(key);
       if (existing === undefined) {
+        // A dangling target keeps its raw text: nobody has named this thing
+        // yet, so what the agent typed IS its source casing.
+        const named = entry === null ? undefined : byPath.get(entry.path)?.title;
         subjects.set(key, {
           key,
           target,
           entry,
-          label: entry?.title ?? target,
+          label: named ?? entry?.title ?? target,
           concepts: [concept],
         });
       } else {
@@ -404,7 +418,31 @@ export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
       }
     }
   }
-  return [...subjects.values()].sort((a, b) => a.label.localeCompare(b.label));
+  // Heaviest thread first (D8), label breaking ties so the order is stable.
+  // Alphabetical sorted by the one property of a thread nobody navigates by:
+  // in a working vault it buried the two subjects carrying 13 and 8 concepts
+  // among nineteen singletons, which is a sort answering a question nobody
+  // asked.
+  return [...subjects.values()].sort(
+    (a, b) => b.concepts.length - a.concepts.length || a.label.localeCompare(b.label),
+  );
+}
+
+/**
+ * Where the Knowledge tab opens when nothing has said otherwise (M33a.3).
+ *
+ * The heaviest thread, not the flat list. `all` is the search fallback — a tab
+ * that opens on every concept the base holds, undifferentiated, makes the
+ * reader redo the grouping the base already did. A vault whose bundle anchors
+ * nothing has no thread to open, and falls back to the list.
+ *
+ * One function because two callers need the same answer: the page renders it
+ * and the nav highlights it, and a default computed twice is a default that
+ * eventually disagrees with itself.
+ */
+export function defaultKnowledgeNav(subjects: Subject[]): KnowledgeNav {
+  const heaviest = subjects[0];
+  return heaviest === undefined ? { tab: 'all' } : { tab: 'entity', key: heaviest.key };
 }
 
 /** Concepts anchored to a vault path — what a project page asks for. */
@@ -826,6 +864,171 @@ export function nearDuplicates(
       return shares && titleOverlap(concept.title, other.title) >= DUPLICATE_THRESHOLD;
     })
     .sort((a, b) => titleOverlap(concept.title, b.title) - titleOverlap(concept.title, a.title));
+}
+
+// --- One thread, read as one thing (M33a.4) --------------------------------
+
+/**
+ * A concept in this thread the bundle does not settle on.
+ *
+ * Two shapes of dispute, kept apart because they ask the reader for different
+ * things. A REPLACED concept has been decided against and what matters is what
+ * won. A CONTRADICTED one is an open disagreement nothing has resolved —
+ * `contradicts` is deliberately not self-resolving (see `RELATION_LABELS`), so
+ * naming the other end is the whole of what can honestly be said.
+ */
+export interface ContestedConcept {
+  concept: Concept;
+  reason: 'replaced' | 'contradicted';
+  /** The concepts at the other end. Empty only when the replacement names a
+   * path this bundle does not hold — a fact, not a failure. */
+  others: Concept[];
+}
+
+/** A concept and when it was written. Never null: see `ThreadReading.undated`. */
+export interface ChangedConcept {
+  concept: Concept;
+  at: string;
+}
+
+export interface KnownGroup {
+  conceptType: string;
+  concepts: Concept[];
+}
+
+/** One cited artifact and how many concepts in the thread lean on it. */
+export interface ThreadSource {
+  resource: string;
+  title: string | null;
+  citedBy: number;
+}
+
+/**
+ * One subject, read as one thing: what is contested, what is stale, what
+ * changed, what is known, and where it came from.
+ *
+ * Every collection here is measured. The two things that could have been
+ * quietly absorbed are carried out instead — `undated` holds the concepts no
+ * timestamp could place, and `uncited` the ones citing nothing — because a
+ * timeline that sorts an absent date to the bottom has invented a date, and a
+ * reading list that omits the concepts resting on nothing has hidden the one
+ * thing a reader most needs to know about them.
+ */
+export interface ThreadReading {
+  contested: ContestedConcept[];
+  stale: Concept[];
+  /** Newest first. */
+  changed: ChangedConcept[];
+  /** Concepts carrying no `generated.at` — NOT the oldest, just unplaced. */
+  undated: Concept[];
+  /** The settled remainder — neither contested nor stale — by concept type. */
+  known: KnownGroup[];
+  /** Deduped by resource, most-cited first. */
+  sources: ThreadSource[];
+  /** Concepts in the thread citing no source at all. */
+  uncited: Concept[];
+}
+
+export function readThread(
+  subject: Subject,
+  concepts: readonly Concept[],
+  entries: Entry[],
+): ThreadReading {
+  const thread = subject.concepts;
+  const byPath = new Map(concepts.map((c) => [c.entry.path, c]));
+
+  // Edges are read against the WHOLE bundle, not just the thread: a concept
+  // contradicted from outside the thread is contradicted, and scoping the
+  // search to the subject would let a dispute hide by crossing a boundary.
+  const contested: ContestedConcept[] = [];
+  for (const concept of thread) {
+    const edges = conceptEdges(concept, concepts, entries);
+    const replacedBy = edges
+      .filter((e) => e.kind === 'supersedes' && e.direction === 'in')
+      .map((e) => e.concept);
+    if (concept.supersededBy !== null || replacedBy.length > 0) {
+      const declared = byPath.get(concept.supersededBy ?? '');
+      contested.push({
+        concept,
+        reason: 'replaced',
+        others: replacedBy.length > 0 ? replacedBy : declared === undefined ? [] : [declared],
+      });
+      // Replaced outranks contradicted: the bundle has already decided, and
+      // listing the same concept twice would read as two separate disputes.
+      continue;
+    }
+    const disputes = edges.filter((e) => e.kind === 'contradicts').map((e) => e.concept);
+    if (disputes.length > 0) contested.push({ concept, reason: 'contradicted', others: disputes });
+  }
+  const REASON_ORDER: Record<ContestedConcept['reason'], number> = {
+    replaced: 0,
+    contradicted: 1,
+  };
+  contested.sort(
+    (a, b) =>
+      REASON_ORDER[a.reason] - REASON_ORDER[b.reason] ||
+      a.concept.title.localeCompare(b.concept.title),
+  );
+
+  // Staleness is INDEPENDENT of dispute — a replaced concept can also be past
+  // its recheck date, and folding one into the other loses a signal.
+  const stale = thread.filter((c) => c.stale);
+
+  const disputed = new Set(contested.map((c) => c.concept.entry.path));
+  const groups = new Map<string, Concept[]>();
+  for (const concept of thread) {
+    if (disputed.has(concept.entry.path) || concept.stale) continue;
+    const list = groups.get(concept.conceptType);
+    if (list === undefined) groups.set(concept.conceptType, [concept]);
+    else list.push(concept);
+  }
+  const known = [...groups.entries()]
+    .map(([conceptType, list]) => ({
+      conceptType,
+      concepts: [...list].sort((a, b) => a.title.localeCompare(b.title)),
+    }))
+    .sort((a, b) => a.conceptType.localeCompare(b.conceptType));
+
+  const changed: ChangedConcept[] = [];
+  const undated: Concept[] = [];
+  for (const concept of thread) {
+    const at = concept.generated?.at ?? null;
+    if (at === null) undated.push(concept);
+    else changed.push({ concept, at });
+  }
+  changed.sort(
+    (a, b) => b.at.localeCompare(a.at) || a.concept.title.localeCompare(b.concept.title),
+  );
+  undated.sort((a, b) => a.title.localeCompare(b.title));
+
+  const cited = new Map<string, ThreadSource>();
+  const uncited: Concept[] = [];
+  for (const concept of thread) {
+    if (concept.sources.length === 0) {
+      uncited.push(concept);
+      continue;
+    }
+    // One concept citing the same artifact twice is one concept citing it.
+    const seen = new Set<string>();
+    for (const source of concept.sources) {
+      const key = normalizeResource(source.resource);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const existing = cited.get(key);
+      if (existing === undefined) {
+        cited.set(key, { resource: source.resource, title: source.title, citedBy: 1 });
+      } else {
+        existing.citedBy += 1;
+        // A later citation may be the one that bothered to name it.
+        if (existing.title === null) existing.title = source.title;
+      }
+    }
+  }
+  const sources = [...cited.values()].sort(
+    (a, b) => b.citedBy - a.citedBy || (a.title ?? a.resource).localeCompare(b.title ?? b.resource),
+  );
+
+  return { contested, stale, changed, undated, known, sources, uncited };
 }
 
 /** Frontmatter patch that records a human verification (§5.2). Appends —

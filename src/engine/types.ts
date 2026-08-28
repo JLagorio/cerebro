@@ -151,17 +151,26 @@ export interface ResolvedField {
 }
 
 /**
- * Which slice of the knowledge bundle is on screen (M8.1). Knowledge navigates
- * by its own axes — the bundle's sections, the entities concepts are about,
- * and the update log — rather than borrowing Home's Views and Types, which
- * describe a different corpus with a different author.
+ * Where you are inside the Knowledge tab.
+ *
+ * M33a.2 folded the Status hub in here. The first five arms are what the base
+ * HOLDS; the last six are what it knows about ITSELF and what its agents have
+ * done. One destination, because they were always one subject — a bundle that
+ * cannot say what it is unsure of is not a knowledge base, it is a folder.
  */
 export type KnowledgeNav =
   | { tab: 'all' }
   | { tab: 'review' }
   | { tab: 'log' }
   | { tab: 'section'; folder: string }
-  | { tab: 'entity'; key: string };
+  | { tab: 'entity'; key: string }
+  | { tab: 'changed' }
+  | { tab: 'contested' }
+  | { tab: 'waiting' }
+  | { tab: 'background' }
+  // `run` deep-links one run open, the way `entity` deep-links one subject.
+  | { tab: 'runs'; run?: string }
+  | { tab: 'gates' };
 
 /**
  * Which shelf of the library is open (M18).
@@ -175,9 +184,20 @@ export type LibraryTab = 'skill' | 'agent' | 'template';
 export type Selection =
   | { kind: 'home' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
-  // AI knowledge base: OKF bundle, read-only (M5); `nav` defaults to all (M8.1).
+  // M43 — open work across every database. Capability-gated membership
+  // (engine/myWork); no per-entry state rides on the selection.
+  | { kind: 'mywork' }
+  // AI knowledge base: OKF bundle, read-only (M5). An absent `nav` means "no
+  // view was asked for", which `defaultKnowledgeNav` answers with the heaviest
+  // thread (M33a.3) — it was a plain `all` from M8.1 until then.
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
+  // M33a.2 — and what the base knows about ITSELF: the epistemic tabs `nav`
+  // now carries were their own `status` kind until this milestone. One kind,
+  // because "what it holds" and "what it is unsure of" were never two
+  // subjects. Deep links that used to be `{kind:'status', section, run}` are
+  // `{kind:'knowledge', nav:{tab, run}}` — one vocabulary, not a mapping
+  // table between two.
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
@@ -186,7 +206,6 @@ export type Selection =
   // and no record shape, so it gets its own full-page editor surface rather
   // than being forced through the doc canvas.
   | { kind: 'diagram'; path: string }
-  | { kind: 'docs' } // all-docs rail surface (M2 Task 11)
   // M10 — a Collection is a container (a folder holding collection.yml); a List
   // is a database inside one. These were a single `view` kind that was both.
   | { kind: 'collection'; folder: string }
@@ -201,19 +220,6 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
-  // M24.9 — what the base is holding until a person decides. A place you can
-  // navigate back to, because a queued card outlives the session that made it.
-  | { kind: 'review' }
-  // M25.7 — what the background pipeline ran, what it spent, and what it is
-  // waiting on. A place rather than a modal because a paused pipeline and a
-  // held pile outlive the session that made them.
-  | { kind: 'pipeline' }
-  // M27.8 — one coherent home for what the base knows about itself: what
-  // changed, what it cannot see, what it contradicts itself about, what has
-  // gone stale, what is waiting on a decision, and whether the background is
-  // running. A destination rather than banners, because six pieces of chrome
-  // competing for the top of the screen is how "nothing speaks first" dies.
-  | { kind: 'status' }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so
@@ -224,6 +230,15 @@ export type Selection =
   // component state so "the README of cerebro" is a place Back returns to, the
   // same contract `list.view` and `library.tab` already follow.
   | { kind: 'workspace'; root?: string; path?: string }
+  // M40 — the prototype surface, the third locked name (Base/Work/Studio).
+  // `project` is the open prototype's folder slug: a SUBJECT the back button
+  // returns to. The previewed page within it is a lens and stays local.
+  | { kind: 'studio'; project?: string }
+  // M41 — the agents' front door. `actor` is the ACTOR string
+  // (`process:<slug>`, or an internal construct's name), not the record
+  // path: constructs have pages too, and the actor is the one identity a
+  // run, a write, and an @-mention already share.
+  | { kind: 'agents'; actor?: string }
   | { kind: 'settings' };
 
 /**

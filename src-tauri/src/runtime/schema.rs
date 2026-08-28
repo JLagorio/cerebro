@@ -235,10 +235,12 @@ pub const SCHEMA_V3: &str = r#"
     CREATE INDEX runs_by_window ON runs (mode, started_at);
     CREATE INDEX runs_by_vault ON runs (vault_id, started_at);
 
-    -- The singleton ambient lease: background LLM concurrency is ONE, inside
-    -- the process-wide cap of four, so attended chat always has headroom.
-    -- Encoded as a one-row table rather than a comment, because a comment has
-    -- never stopped a second dispatcher.
+    -- The singleton ambient lease, as v3 shipped it: background LLM
+    -- concurrency was ONE, encoded as a one-row table rather than a comment.
+    -- SUPERSEDED AT v14 (M33b.1), which rebuilds this table keyed by run_id
+    -- so the ceiling is a counted number rather than a primary key. This
+    -- statement is history and stays true of v3; nothing here describes the
+    -- schema the app runs on.
     CREATE TABLE ambient_dispatch (
         singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'ambient'),
         run_id TEXT NOT NULL UNIQUE REFERENCES runs (run_id),
@@ -1103,4 +1105,109 @@ pub const SCHEMA_V12: &str = "
     ALTER TABLE run_cost_components ADD COLUMN estimated INTEGER NOT NULL DEFAULT 0
         CHECK (estimated IN (0, 1));
     ALTER TABLE assembly_metrics ADD COLUMN answer_latency_micros INTEGER;
+";
+
+/// M33.1 — runs learn who ran them.
+///
+/// Nullable by design. Rows written before this migration are unattributed
+/// and STAY that way: nothing backfills, and nothing guesses. A run whose
+/// spawn site named nobody reads as "unattributed" in the fleet, which is
+/// the truth — absent is never zero, and in the one table whose whole job is
+/// to say honestly what the app spent, an invented attribution is worse than
+/// an admitted gap.
+///
+/// The value is an actor string, minted by the spawn site and shared with the
+/// ledger's `generated.by` for the same run rather than forked into a second
+/// vocabulary: `agent:m26-ingest` and its two siblings for the internal
+/// constructs (see `agent::meter::CONSTRUCT_ACTORS`), `process:<slug>` for an
+/// Agent record's run, absent for bare attended chat.
+///
+/// The index is `(actor, started_at)` because every query that filters by
+/// actor also orders by recency — an agent's dossier asks for exactly one
+/// actor's runs, newest first, and would otherwise scan the table.
+pub const SCHEMA_V13: &str = "
+    ALTER TABLE runs ADD COLUMN actor TEXT;
+    CREATE INDEX runs_by_actor ON runs (actor, started_at);
+";
+
+/// M33b.1 — the ambient lease stops being a singleton.
+///
+/// **What the singleton row guaranteed, and what replaces it.** The v3 table
+/// carried `singleton_key TEXT PRIMARY KEY CHECK (singleton_key = 'ambient')`,
+/// so the database could hold at most one ambient lease. Four properties fell
+/// out of that one column, and each is now carried by something else:
+///
+/// 1. *Mutual exclusion at claim time.* Now the claim transaction, which was
+///    always the real mechanism: `dispatch::claim` opens `BEGIN IMMEDIATE`,
+///    and the gate counts live leases inside it. Two dispatchers cannot
+///    interleave a count and an insert, so the count a claim acts on is the
+///    count at commit. The primary key only ever fired in one case the gate
+///    did not already cover — see `budget::ambient_leases_held`.
+/// 2. *Crash recovery.* Unchanged, and it never lived here: recovery sweeps
+///    `runs` by `lease_expires_at`, not this table.
+/// 3. *Accounting.* Unchanged, and it never lived here either. Spend is a
+///    `runs` row plus a `budget_days` reservation, one pair per run; N runs
+///    make N pairs, and the gate sums them.
+/// 4. *Headroom for attended chat inside `agent::MAX_CONCURRENT_RUNS`.* Now
+///    the Settings ceiling, which defaults to 1 — the same headroom, until a
+///    person raises it.
+///
+/// **`run_id` is the key now, and it is the honest one.** It was already
+/// `NOT NULL UNIQUE` in v3, so no row's identity changes and the copy cannot
+/// collide; a lease has always been one run's, and the singleton column was
+/// the only thing pretending otherwise. SQLite cannot drop a primary key in
+/// place, so this is the create-new / copy / drop / rename dance — with the
+/// live rows carried across, because a database migrated mid-run must come
+/// back holding the lease it held.
+///
+/// The index is on `lease_expires_at` because the gate's one question is "how
+/// many leases have not expired", asked on every dispatch attempt.
+pub const SCHEMA_V14: &str = "
+    ALTER TABLE ambient_dispatch RENAME TO ambient_dispatch_v13;
+    CREATE TABLE ambient_dispatch (
+        run_id TEXT PRIMARY KEY REFERENCES runs (run_id),
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        lane TEXT NOT NULL REFERENCES lane_registry (lane),
+        acquired_at TEXT NOT NULL CHECK (acquired_at LIKE '____-__-__T%Z'),
+        lease_expires_at TEXT NOT NULL CHECK (lease_expires_at LIKE '____-__-__T%Z')
+    );
+    INSERT INTO ambient_dispatch
+        (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at)
+        SELECT run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at
+        FROM ambient_dispatch_v13;
+    DROP TABLE ambient_dispatch_v13;
+    CREATE INDEX ambient_dispatch_live ON ambient_dispatch (lease_expires_at);
+";
+
+/// M34.3 — a run can be started by another run, and the chain must be
+/// walkable from the table alone. `parent_run_id` names the run whose tool
+/// call started this one; NULL is every run a person or a schedule started —
+/// the roots. A chain's total cost is the sum over the tree, derived at read
+/// time, never stored: a stored total would go stale the moment a late child
+/// finalized. The index is bare because the one query is "children of this
+/// run", and it already arrives holding the parent's id.
+pub const SCHEMA_V15: &str = "
+    ALTER TABLE runs ADD COLUMN parent_run_id TEXT;
+    CREATE INDEX runs_by_parent ON runs (parent_run_id);
+";
+
+/// M34.2 — the job runner's three ledgers move out of localStorage.
+///
+/// One row per (vault, ledger, key): `attempts` and `skillRuns` remember the
+/// last run_key answered (a note version, a fire key) and are written through
+/// a CLAIM — conditional on the stored key differing — so two windows deriving
+/// the same due job race for one insert and the loser spawns nothing.
+/// `triggerRuns` is a cooldown clock, last-write-wins. The table is the
+/// duplicate-spend guard the renderer's localStorage never was: a webview data
+/// wipe used to re-fire every schedule ever answered.
+pub const SCHEMA_V16: &str = "
+    CREATE TABLE job_ledger (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        ledger TEXT NOT NULL CHECK (ledger IN ('attempts', 'skillRuns', 'triggerRuns')),
+        key TEXT NOT NULL CHECK (length(key) > 0),
+        run_key TEXT NOT NULL CHECK (length(run_key) > 0),
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, ledger, key)
+    );
 ";

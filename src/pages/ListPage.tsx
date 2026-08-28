@@ -293,7 +293,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             <span className="flex-1" />
             {/* M15: Delete list no longer sits here. It was the ONLY control in
                 this gutter — a 24px unlabelled glyph roughly 55px above the
-                toolbar's "+ New" and directly below the topbar's, so the corner
+                toolbar's "+ New" and directly below the shell's, so the corner
                 read New / Delete-list / New with the destructive one in the
                 middle and no visual distinction. It lives where the rest of the
                 list's configuration lives: view settings, which this title

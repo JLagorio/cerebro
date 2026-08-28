@@ -52,7 +52,7 @@ export function PulsePage() {
       {/* The header shares the content column's left edge (M15). In `px-5`
           against a centred 720px list it floated ~220px to the left of every
           card it labels, reading as two unrelated fragments.
-          It is also titled "History", because that is what the rail and the
+          It is also titled "History", because that is what the nav and the
           status bar call this destination — a button labelled History that
           opens a page called Pulse is two names for one place. */}
       <div className="flex-none px-5 pb-2 pt-3.5">

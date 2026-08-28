@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { useOpenPath } from '@/app/useOpenPath';
-import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -85,9 +84,17 @@ export function CreateMenu() {
 
   return (
     <div className="relative" ref={trigger}>
-      <Button variant="primary" size="sm" icon="plus" onClick={() => setMenuOpen((v) => !v)}>
+      {/* The design's bordered New row (M43) — the sidebar is this menu's
+          one home now, so the trigger dresses for it rather than taking
+          variants it would never use. */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        className="flex h-8 w-full items-center gap-[9px] rounded-md border border-n-200 bg-n-0 px-2 text-left text-sm font-medium text-n-800 hover:bg-n-100"
+      >
+        <Icon name="plus" size={15} color="var(--n-500)" />
         New
-      </Button>
+      </button>
       {menuOpen && (
         <>
           <button
@@ -102,7 +109,7 @@ export function CreateMenu() {
             ref={popup}
             role="menu"
             aria-label="New"
-            className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-md)]"
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 w-44 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-md)]"
           >
             {/* `circle-check` is the app's completion glyph — it marks notes
                 organized and rows ready — so the primary create action read as
@@ -126,13 +133,27 @@ export function CreateMenu() {
   );
 }
 
-function NewRecordDialog({ onClose }: { onClose: () => void }) {
+/**
+ * Exported since M33a.3 so the Knowledge tab can raise the SAME dialog rather
+ * than grow a second one: promoting a knowledge thread into a workspace page
+ * is an ordinary record creation that happens to start with a name already in
+ * hand, and a parallel dialog would be a second answer to "where do records
+ * land" waiting to drift from `createTarget`.
+ */
+export function NewRecordDialog({
+  defaultTitle = '',
+  onClose,
+}: {
+  /** Pre-filled title, editable — a suggestion, not a decision. */
+  defaultTitle?: string;
+  onClose: () => void;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const createItem = useVaultStore((s) => s.createItem);
   const schema = useSchema();
   const openPath = useOpenPath();
   const types = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(defaultTitle);
   const [typeName, setTypeName] = useState(types[0] ?? '');
   // Fix (fix round M1): a double-click while the write was pending created
   // the record twice.

@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { openWork } from './myWork';
 import { columnUniverse, defaultColumnsFor } from './columns';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
@@ -233,15 +234,26 @@ export function resolveSurface(
       return { title: 'Home', entries: [], presentation: defaultPresentation() };
     case 'knowledge':
       // The bundle has its own read-only surface; it is deliberately not a
-      // collection of records, so nothing else can list or filter it.
+      // collection of records, so nothing else can list or filter it. M33a.2
+      // brought the epistemic tabs under the same kind, and the carve-out
+      // covers them for a second reason: lanes and convergence lines are
+      // derived from the LEDGER and never from the scanned entries.
       return { title: 'Knowledge', entries: [], presentation: defaultPresentation() };
     case 'inbox':
       // InboxPage draws its own queue/reading/organize layout, but the
-      // collection still reports the real contents so the topbar and any
+      // collection still reports the real contents so the shell and any
       // other consumer see the truth rather than an empty stand-in.
       return {
         title: 'Inbox',
         entries: inboxEntries(entries),
+        presentation: defaultPresentation(),
+      };
+    case 'mywork':
+      // MyWorkPage draws its own grouped layout; the surface still reports
+      // the real open set so any consumer sees the truth, the Inbox rule.
+      return {
+        title: 'My work',
+        entries: openWork(entries, schema).map((r) => r.entry),
         presentation: defaultPresentation(),
       };
     case 'doc':
@@ -250,24 +262,10 @@ export function resolveSurface(
     case 'diagram':
       // A standalone .mmd renders in DiagramPage (M29.21); no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
-    case 'docs':
-      return { title: 'Docs', entries: [], presentation: defaultPresentation() };
     case 'changes':
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.
       return { title: 'Changes', entries: [], presentation: defaultPresentation() };
-    case 'review':
-      // Same: review cards are proposals, not records, and nothing in the
-      // vault's filter vocabulary applies to them.
-      return { title: 'Needs review', entries: [], presentation: defaultPresentation() };
-    case 'pipeline':
-      // Runs and token counts are operational, not records — nothing in the
-      // vault's filter vocabulary applies to them either.
-      return { title: 'Background', entries: [], presentation: defaultPresentation() };
-    case 'status':
-      // Lanes and convergence lines are derived from the ledger and never
-      // from the scanned entries, so the same carve-out applies again.
-      return { title: 'Epistemic status', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     // Neither holds records. Listed rather than defaulted so that the next
@@ -281,6 +279,14 @@ export function resolveSurface(
     // surface deliberately lacks.
     case 'workspace':
       return { title: 'Workspace', entries: [], presentation: defaultPresentation() };
+    // M40 — Studio draws its own layout: a prototype is a folder of pages,
+    // not a query over records.
+    case 'studio':
+      return { title: 'Studio', entries: [], presentation: defaultPresentation() };
+    // M41 — the agents' front door draws its own layout too: a roster and a
+    // run feed, not a query over records.
+    case 'agents':
+      return { title: 'Agents', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

@@ -9,7 +9,7 @@ import {
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
-import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
+import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
 import { AiFormattingToolbar, type Preset } from '@/editor/SelectionToolbar';
 import { BlockNoteView } from '@blocknote/mantine';
@@ -547,25 +547,29 @@ export function MarkdownEditor({
         try {
           const document = await blocksToMarkdown(editor);
           const mcp = await startMcp(vaultPath);
-          const runId = await runAgent(vaultPath, {
-            message: [
-              `Answer this about the document below: ${prompt.trim()}`,
-              '',
-              'Return only the answer, as markdown, with no preamble and no code fence.',
-              'If the document does not support an answer, say that in one line rather than inventing one.',
-              '',
-              document,
-            ].join('\n'),
-            systemPrompt:
-              'You answer a standing question about a document the user is writing. Return only the answer.',
-            sessionId: null,
-            model: null,
-            shell: false,
-            connectors: false,
-            attended: true,
-            allowedTools: [],
-            mcp,
-          });
+          // Attended, no lane: never gated — startedOrThrow makes a contract
+          // break visible instead of a silent no-run.
+          const { run: runId } = startedOrThrow(
+            await runAgent(vaultPath, {
+              message: [
+                `Answer this about the document below: ${prompt.trim()}`,
+                '',
+                'Return only the answer, as markdown, with no preamble and no code fence.',
+                'If the document does not support an answer, say that in one line rather than inventing one.',
+                '',
+                document,
+              ].join('\n'),
+              systemPrompt:
+                'You answer a standing question about a document the user is writing. Return only the answer.',
+              sessionId: null,
+              model: null,
+              shell: false,
+              connectors: false,
+              attended: true,
+              allowedTools: [],
+              mcp,
+            }),
+          );
           let text = '';
           const stop = onAgentEvent((e) => {
             if (e.kind === 'TextDelta') text += e.text;

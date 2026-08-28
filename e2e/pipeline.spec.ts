@@ -18,7 +18,7 @@ test('ingest: a dropped transcript becomes an untyped working doc in the Inbox',
 }) => {
   await boot(page);
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
@@ -68,10 +68,7 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   page,
 }) => {
   await boot(page);
-  await page
-    .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
-    .click();
+  await page.getByRole('button', { name: 'Open base' }).click();
 
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
   await page.locator(`[data-testid="concept-row"][data-path="${CONCEPT}"]`).click();
@@ -114,7 +111,7 @@ test('commit: any note says what the base took from it, not just Inbox captures'
   // The same fact, visible without opening anything: the transcript row in
   // the queue carries what was distilled from it.
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
   const row = page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`);
@@ -225,7 +222,7 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
@@ -256,10 +253,7 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
 
 test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {
   await boot(page);
-  await page
-    .getByTestId('rail')
-    .getByRole('button', { name: /^Knowledge/ })
-    .click();
+  await page.getByRole('button', { name: 'Open base' }).click();
 
   // The pilot's week-long offline window was replaced by the 72-hour decision.
   const replaced = page.locator(

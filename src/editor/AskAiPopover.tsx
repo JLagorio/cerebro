@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { applyHunks, describeHunk, isUnchanged, rewriteHunks } from '@/engine/hunks';
 import { argumentHint, listSkills, skillPrompt, type SkillRef } from '@/engine/skills';
 import { readNote } from '@/lib/ipc';
-import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
+import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -87,24 +87,28 @@ export function AskAiPopover({
     void (async () => {
       try {
         const mcp = await startMcp(vaultPath);
-        const runId = await runAgent(vaultPath, {
-          message,
-          systemPrompt:
-            "You rewrite a passage of the user's document and return ONLY the rewritten passage. " +
-            'No preamble, no explanation, no code fence, no quotation marks around it. ' +
-            'Preserve the markdown formatting of the original unless the instruction asks otherwise. ' +
-            'If the instruction cannot be applied, return the passage unchanged.',
-          sessionId: null,
-          model: null,
-          shell: false,
-          connectors: false,
-          attended: true,
-          // No tools at all. A rewrite is a text transformation; giving it the
-          // vault would let it wander, and open_note would navigate the user
-          // away from the paragraph they are editing.
-          allowedTools: [],
-          mcp,
-        });
+        // Attended, no lane: never gated — startedOrThrow makes a contract
+        // break visible instead of a silent no-run.
+        const { run: runId } = startedOrThrow(
+          await runAgent(vaultPath, {
+            message,
+            systemPrompt:
+              "You rewrite a passage of the user's document and return ONLY the rewritten passage. " +
+              'No preamble, no explanation, no code fence, no quotation marks around it. ' +
+              'Preserve the markdown formatting of the original unless the instruction asks otherwise. ' +
+              'If the instruction cannot be applied, return the passage unchanged.',
+            sessionId: null,
+            model: null,
+            shell: false,
+            connectors: false,
+            attended: true,
+            // No tools at all. A rewrite is a text transformation; giving it
+            // the vault would let it wander, and open_note would navigate the
+            // user away from the paragraph they are editing.
+            allowedTools: [],
+            mcp,
+          }),
+        );
         let text = '';
         const stop = onAgentEvent((event) => {
           if (cancelled.current) return;

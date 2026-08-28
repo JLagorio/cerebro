@@ -138,6 +138,30 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /**
+   * Destination groups COLLAPSED in the one nav column (M42.2). Stored as the
+   * closed set so the default — everything open, "we see it all there,
+   * available" — is an empty list rather than a roll of group names a new
+   * group has to remember to join.
+   */
+  navClosed: string[];
+  setNavGroupOpen(key: string, open: boolean): void;
+
+  /**
+   * Vault path → pinned paths (M43) — ordered, vault-relative. Workspace
+   * state, not vault content: the same rule that put `cerebro.navClosed`
+   * here. A favorite is a POINTER — pruneFavorites drops any that stopped
+   * resolving, which the sidebar calls with the paths that still exist.
+   *
+   * Scoped by vault like `stdioApprovals` and `skillRuns` (PR #17 review).
+   * A flat list would be pruned against whichever vault happens to be open,
+   * so opening a second vault would permanently drop every pin belonging to
+   * the first — and `notes/plan.md` exists in more than one vault, so even
+   * the survivors would be the wrong rows.
+   */
+  favorites: Record<string, string[]>;
+  toggleFavorite(vault: string, path: string): void;
+  pruneFavorites(vault: string, existing: Set<string>): void;
 
   /**
    * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
@@ -174,7 +198,7 @@ interface UiState {
    */
   nodeMenu: { x: number; y: number; id: string } | null;
   setNodeMenu(v: { x: number; y: number; id: string } | null): void;
-  /** Inbox workflow (M4). Off = every note reads as organized and the Rail
+  /** Inbox workflow (M4). Off = every note reads as organized and the nav
    * hides the Inbox — for people who file at capture time. Persisted. */
   inboxEnabled: boolean;
   setInboxEnabled(v: boolean): void;
@@ -287,6 +311,22 @@ interface UiState {
   triggerRuns: Record<string, Record<string, string>>;
   recordTriggerRun(vault: string, agent: string, at: string): void;
   /**
+   * Replace this vault's slices of all three ledgers with what the durable
+   * table remembers (M34.2.3). The database has been the arbiter since it
+   * existed, so on hydration it wins over whatever localStorage still says —
+   * except `learnAttempts`, which is merged rather than replaced because its
+   * localStorage era was flat across vaults and a replace would forget every
+   * other vault's entries mid-session.
+   */
+  hydrateJobLedgers(
+    vault: string,
+    ledgers: {
+      attempts: Record<string, string>;
+      skillRuns: Record<string, string>;
+      triggerRuns: Record<string, string>;
+    },
+  ): void;
+  /**
    * Everything the assistant is doing, in start order (M17.7).
    *
    * Was `agentBusy` (a boolean) plus `learningPath` (a string), both unowned
@@ -321,6 +361,8 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const NAV_CLOSED_KEY = 'cerebro.navClosed';
+const FAVORITES_KEY = 'cerebro.favorites';
 const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
 const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
 const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
@@ -502,6 +544,10 @@ function loadStdioApprovals(key: string): Record<string, string[]> {
   return scrubbed.map;
 }
 
+/** vault → list. A stored ARRAY is the pre-scoping flat format and reads as
+ * `{}`: nothing records which vault those entries belonged to, so attributing
+ * them to whichever vault opens next would be a guess. Dropping is the honest
+ * migration — one re-approval, one re-pin. */
 function loadStringListMap(key: string): Record<string, string[]> {
   try {
     const raw = window.localStorage.getItem(key);
@@ -696,6 +742,30 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
   },
+  navClosed: loadStringList(NAV_CLOSED_KEY),
+  setNavGroupOpen: (key, open) => {
+    const closed = get().navClosed;
+    const next = open ? closed.filter((k) => k !== key) : [...new Set([...closed, key])];
+    storeString(NAV_CLOSED_KEY, JSON.stringify(next));
+    set({ navClosed: next });
+  },
+
+  favorites: loadStringListMap(FAVORITES_KEY),
+  toggleFavorite: (vault, path) => {
+    const current = get().favorites[vault] ?? [];
+    const pinned = current.includes(path) ? current.filter((p) => p !== path) : [...current, path];
+    const next = { ...get().favorites, [vault]: pinned };
+    storeString(FAVORITES_KEY, JSON.stringify(next));
+    set({ favorites: next });
+  },
+  pruneFavorites: (vault, existing) => {
+    const current = get().favorites[vault] ?? [];
+    const pinned = current.filter((p) => existing.has(p));
+    if (pinned.length === current.length) return;
+    const next = { ...get().favorites, [vault]: pinned };
+    storeString(FAVORITES_KEY, JSON.stringify(next));
+    set({ favorites: next });
+  },
 
   workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',
   setWorkspaceFileIcons: (v) => {
@@ -828,6 +898,18 @@ export const useUiStore = create<UiState>((set, get) => ({
       const next = { ...s.skillRuns, [vault]: scoped };
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };
+    }),
+  hydrateJobLedgers: (vault, ledgers) =>
+    set((s) => {
+      // localStorage keeps being written as a MIRROR: it is the browser
+      // mock's persistence and the import source after a runtime-DB loss.
+      const attempts = { ...s.learnAttempts, ...ledgers.attempts };
+      const skills = { ...s.skillRuns, [vault]: ledgers.skillRuns };
+      const triggers = { ...s.triggerRuns, [vault]: ledgers.triggerRuns };
+      storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(attempts));
+      storeString(SKILL_RUNS_KEY, JSON.stringify(skills));
+      storeString(TRIGGER_RUNS_KEY, JSON.stringify(triggers));
+      return { learnAttempts: attempts, skillRuns: skills, triggerRuns: triggers };
     }),
   runs: [],
   startRun: (record) => set((s) => ({ runs: [...s.runs, record] })),

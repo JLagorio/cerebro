@@ -3,9 +3,9 @@
 //! An owner decision, and worth restating: the driver is here and not in the
 //! renderer's `useJobRunner`. A background pass that spends the user's
 //! subscription must survive a window reload, must not run twice because two
-//! windows are open, and must hold the one ambient lease the dispatcher
-//! grants. All three are properties of the process, and the renderer is not
-//! the process.
+//! windows are open, and must hold an ambient lease the dispatcher grants —
+//! one of however many the concurrency ceiling allows (M33b.1). All three are
+//! properties of the process, and the renderer is not the process.
 //!
 //! **The SPENDING half is off unless the owner turns it on.** [`ENABLED`]
 //! defaults to false and gates ingest and maintenance: an app may not start
@@ -175,15 +175,65 @@ fn sleep_until(stop: &AtomicBool, total: Duration) -> bool {
     !stop.load(Ordering::Relaxed)
 }
 
-/// One pass: check the owner's switch, then drive a tick.
+/// Finalize every ambient run whose lease outlived it — and this is
+/// `dispatch::recover_expired_leases`'s only caller (M33b.1).
+///
+/// **Why it needs one at all.** `agent::meter::finish` closes the books on an
+/// ambient run whose CLI ended without a terminal event, but only while the
+/// reader thread is alive to do it. A process killed mid-run — a crash, a
+/// force quit, an OS restart — leaves a `runs` row saying `running`, a
+/// reservation debited against the day, and scheduler items `claimed` that
+/// catch-up classifies as `InFlight` and therefore never re-offers. Nothing
+/// else in the app reconciles that: the sweep had no production caller at
+/// all, and until M33b.1 the `ambient_dispatch` singleton primary key was
+/// accidentally standing in for it by making every later claim fail loudly.
+/// That backstop is gone by design, so the sweep it stood in for is wired
+/// here — the one loop the dispatcher is actually driven from, and so the one
+/// place where "a lease outlived its run" can be noticed.
+///
+/// **It runs BEFORE the pause, and M26.9's rule survives that.** The pause
+/// governs everything the app would newly DO on somebody's subscription. This
+/// does nothing new: it spends nothing, spawns nothing, appends nothing to
+/// the ledger, and every effect it has points the same way the pause does —
+/// work returned to the queue, the day's spend recorded as unknown, ambient
+/// dispatch stopped until an owner resolves it. A pause that also suspended
+/// the reconciliation would leave the owner's items stuck `claimed` and their
+/// day's accounting wrong for exactly as long as they left the app stopped,
+/// which is the pause quietly corrupting what it was pressed to protect.
+///
+/// Never fatal, and never silent. A sweep that could not run is a condition
+/// to report, not a reason to stop maintaining a vault.
+fn sweep_abandoned(conn: &rusqlite::Connection, now: chrono::DateTime<chrono::Utc>) {
+    match crate::runtime::dispatch::recover_expired_leases(conn, now) {
+        Ok(0) => {}
+        Ok(recovered) => eprintln!(
+            "ambient ingest: recovered {recovered} abandoned run(s) — their work is queued again \
+             and today's spend is recorded as unknown, which is not zero"
+        ),
+        Err(detail) => eprintln!("ambient ingest: expired leases could not be swept: {detail}"),
+    }
+}
+
+/// One pass: sweep what a dead process left, check the owner's switch, then
+/// drive a tick.
 fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), String> {
     let conn = crate::runtime::open_existing(config_dir)?;
     let vault_id = crate::runtime::scope::register(&conn, vault)?;
 
-    // The pause governs EVERYTHING (M26.9). Somebody who pressed pause meant
-    // "stop", not "stop the expensive half" — and a deterministic phase that
-    // kept appending to the ledger under a pause would be the app arguing
+    // Before anything else, and before the pause. See `sweep_abandoned`.
+    sweep_abandoned(&conn, chrono::Utc::now());
+
+    // The GLOBAL pause governs EVERYTHING (M26.9). Somebody who pressed pause
+    // meant "stop", not "stop the expensive half" — and a deterministic phase
+    // that kept appending to the ledger under a pause would be the app arguing
     // with a control the owner just used.
+    //
+    // Its sibling since M33b.5, the per-agent pause, is deliberately NOT here:
+    // it stops one actor rather than the tick, so it is enforced where an
+    // actor is named — `budget::gate`, inside the claim transaction — and a
+    // whole-tick check could not express it. The standard is the same one: a
+    // paused agent must not do the cheap half either, which is why the gate
+    // refuses the claim rather than the spawn.
     if crate::runtime::settings::global_pause(&conn) {
         return Ok(());
     }
@@ -235,8 +285,9 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
     }
     // The maintenance pass rides the SAME switch and the same tick, AFTER
     // ingest. Two reasons for the order: reading what changed is what makes
-    // the base worth maintaining, and the one ambient lease is better spent
-    // on new bytes than on tidying when both have work. It gets no default of
+    // the base worth maintaining, and an ambient lease is better spent on new
+    // bytes than on tidying when both have work — which at the shipped
+    // ceiling of one is still the same single lease. It gets no default of
     // its own — `ambient.ingest_enabled` is off until asked, and maintenance
     // should not be the thing that starts spending somebody's subscription.
     //
@@ -693,6 +744,107 @@ mod tests {
         (dir, conn, vault)
     }
 
+    /// A crashed process's abandoned run is reconciled by the tick — the
+    /// caller `recover_expired_leases` did not have until M33b.1.
+    ///
+    /// `tick_once` needs a live `AppHandle`, so what is pinned here is the
+    /// function it calls, exactly as `the_deterministic_phases_...` pins
+    /// `deterministic` rather than the tick around it.
+    #[test]
+    fn the_tick_reconciles_a_run_whose_process_died_holding_its_lease() {
+        use crate::runtime::budget::{self, Reservation, Settings};
+        use crate::runtime::dispatch::{self, Dispatched};
+        use crate::runtime::scheduler::{self, SchedulerState};
+
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let (dir, conn, vault) = armed("ambient-sweep");
+        let at = |raw: &str| {
+            chrono::DateTime::parse_from_rfc3339(raw)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        };
+        budget::append_version(
+            &conn,
+            &Settings {
+                ceilings: budget::shipped_defaults().unwrap(),
+                timezone_id: "UTC".into(),
+            },
+            at("2026-08-09T00:30:00Z"),
+        )
+        .unwrap();
+        scheduler::put(
+            &conn,
+            &vault,
+            "store",
+            &scheduler::Row {
+                item_key: "a.md".to_string(),
+                source_id: None,
+                content_hash: "a".repeat(64),
+                snapshot: crate::runtime::normalize::snapshot(
+                    &crate::vault::entry::Entry::empty_for_test("a.md"),
+                ),
+                event_cursor: None,
+                route: None,
+                state: SchedulerState::Pending,
+            },
+        )
+        .unwrap();
+        let Dispatched::Started(lease) = dispatch::claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            Reservation {
+                total_tokens: 5_000,
+                output_tokens: 1_000,
+            },
+            &["a.md".to_string()],
+            None,
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("a quiet day must dispatch");
+        };
+
+        // The process dies here. No reader thread survives to call
+        // `meter::finish`, so nothing finalizes; the app relaunches and ticks.
+        // Before the fix this returned an item stuck `claimed` forever.
+        sweep_abandoned(&conn, at("2026-08-09T11:00:00Z"));
+
+        assert_eq!(
+            scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "the work came back rather than staying claimed by a dead run"
+        );
+        let day = budget::read_day(&conn, &lease.window_start_utc).unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "the reservation was released");
+        assert!(
+            !day.accounting_exact,
+            "and the day says its spend is unknown, which is not zero"
+        );
+        assert!(
+            !crate::runtime::status::ambient_allowed(),
+            "which stops ambient work until an owner resolves it"
+        );
+
+        // Idempotent: the next tick finds nothing and changes nothing.
+        sweep_abandoned(&conn, at("2026-08-09T12:00:00Z"));
+        assert_eq!(
+            scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending
+        );
+        crate::runtime::status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_deterministic_phases_do_not_wait_for_the_spending_switch() {
         // M26.9's flip. `deterministic` is the function the tick calls before
@@ -755,8 +907,8 @@ mod tests {
 
     #[test]
     fn opening_the_same_vault_twice_does_not_start_a_second_supervisor() {
-        // Two loops on one subscription would each hold the "one ambient
-        // lease" the dispatcher grants, and one of them would lose.
+        // Two loops on one subscription would compete for the same leases the
+        // dispatcher grants, and one of them would lose.
         let state = AmbientState::default();
         let vault = Path::new("/tmp/cerebro-ambient-a");
         assert!(matches!(state.retarget(vault), Action::Start(_)));

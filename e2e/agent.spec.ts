@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot } from './boot';
+import { boot, seedBeforeBoot } from './boot';
 
 /**
  * The panel runs against the scripted mock in browser mode (see
@@ -12,7 +12,7 @@ import { boot } from './boot';
 test('agent: the panel streams a reply and shows what it did', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await expect(panel).toBeVisible();
 
@@ -40,7 +40,7 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
 test('agent: walking away keeps the thread, and moves the context with you', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('What is at risk right now?');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -50,7 +50,7 @@ test('agent: walking away keeps the thread, and moves the context with you', asy
   await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
 
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
@@ -80,7 +80,7 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // SHELL_TWO_PANEL_MIN); below that the record wins and the assistant parks.
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
 
   // Where you are is context, and it says so rather than being folded
@@ -112,14 +112,78 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // agent is told, not about what the user is reading.
   await expect(page.getByTestId('detail-panel')).toBeVisible();
 
-  // M17.6b: `@` puts it back, and leaves no text behind — a chip is not a
-  // mention. (`[[` is the mention; the two tokens do different jobs.)
+  // M17.6b: `@` puts it back, and a record row leaves no text behind — a chip
+  // is not a mention. (`[[` mentions a note; `@agent-slug` addresses an agent
+  // and does stay as text, which is the one exception — see the test below.)
   const composer = panel.getByLabel('Message the assistant');
   await composer.fill('what about @');
   await expect(panel.getByTestId('attach-menu')).toBeVisible();
   await panel.getByTestId('attach-menu').getByRole('button').first().click();
   await expect(panel.getByTestId('context-chip')).toHaveCount(2);
   await expect(composer).toHaveValue('what about ');
+});
+
+/**
+ * M33b.6 — you can address an agent by name, and it changes who the turn goes
+ * to and nothing else (D8).
+ *
+ * The routing itself is asserted in useAgentChat.test.tsx, against the run
+ * options. What only the real app can show is the other half: that `@` offers
+ * the agent, that the handle SURVIVES as text where every other row in that
+ * menu consumes it, and that the thread it was typed in stays exactly where it
+ * was.
+ */
+test('agent: a turn can be addressed by name, and the thread stays put', async ({ page }) => {
+  await boot(page);
+
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+  const composer = panel.getByLabel('Message the assistant');
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
+
+  // `@` offers the vault's agents, under their own heading. Only after a key
+  // is pressed: nothing volunteers an agent at anybody.
+  //
+  // Typed rather than `fill`ed: the menu is anchored to the CARET, and a
+  // programmatic value set leaves the selection where the harness left it —
+  // which opens the menu or not depending on timing.
+  await composer.click();
+  await composer.pressSequentially('@release');
+  const menu = panel.getByTestId('attach-menu');
+  await expect(menu).toBeVisible();
+  await menu.getByRole('button', { name: /@release-scout/ }).click();
+  // Completed into the message, not taken out of it — the recipient is read
+  // back out of the text at send.
+  await expect(composer).toHaveValue('@release-scout ');
+
+  await composer.fill('@release-scout what is slipping?');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  const asked = panel.getByTestId('chat-message').filter({ hasText: 'what is slipping' });
+  await expect(asked.getByTestId('turn-addressed')).toContainText('To Release scout');
+  // Send returns when the turn ends — the composer's own signal, and the one
+  // that matters here: the hook takes one turn per conversation, so a second
+  // send fired mid-stream is dropped rather than queued.
+  await expect(panel.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 10_000 });
+
+  // D8: an existing thread gained a recipient. It did not become a different
+  // surface — same thread, same anchor, one conversation. The stored anchor is
+  // the assertion that matters: addressing an agent must not file the thread
+  // under the agent instead of under where it happened.
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
+  await expect(panel.getByTestId('chat-message')).toHaveCount(2);
+  const threads = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem('cerebro.conversations') ?? '[]'),
+  );
+  expect(threads).toHaveLength(1);
+  expect(threads[0].place).toEqual({ kind: 'home' });
+  expect(threads[0].placeLabel).toBe('Home');
+
+  // A name nothing answers to is text, and says so rather than failing or
+  // going quiet.
+  await composer.fill('@nobody-here are you there?');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  const missed = panel.getByTestId('chat-message').filter({ hasText: 'are you there' });
+  await expect(missed.getByTestId('turn-addressed')).toContainText('No agent called @nobody-here');
 });
 
 test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({
@@ -130,10 +194,10 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   // M8.1: the three-mode dropdown is gone from the panel. It asked the user to
   // declare a policy before knowing what they were going to ask for; what the
   // agent may change now follows from which folder it is writing to.
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
   const shell = page.getByRole('switch', { name: 'Shell access' });
   // Off by default — shell access is chosen, never inherited.
   await expect(shell).not.toBeChecked();
@@ -145,7 +209,7 @@ test('agent: shell access is one persisted ceiling in Settings, not a per-chat m
   await expect(shell).toBeChecked();
 
   await page.reload();
-  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('switch', { name: 'Shell access' })).toBeChecked();
 });
 
@@ -160,7 +224,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   // since the dev server started (`?t=<hmr>`). Two module instances, two
   // listener sets, and the emit reached nobody — so the test passed on a cold
   // server and failed on a warm one.
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
   const panel = page.getByTestId('ai-panel');
   await panel.getByLabel('Message the assistant').fill('Help me clear the Inbox');
   await panel.getByRole('button', { name: 'Send' }).click();
@@ -198,7 +262,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
 test('agent: organizing AI-written work records who signed off', async ({ page }) => {
   await boot(page);
   await page
-    .getByTestId('rail')
+    .getByTestId('nav-surfaces')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
@@ -231,13 +295,14 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
   await expect(types.filter({ hasText: 'Skill' })).toHaveCount(0);
   await expect(types.filter({ hasText: 'Agent' })).toHaveCount(0);
 
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await expect(page.getByTestId('library-page')).toBeVisible();
 
   // Collections and Types describe the vault; the library holds the machinery
-  // that acts on it. Beside each other, the tree implied a skill lives in a
-  // Collection and left a type row highlighted while you edited a trigger.
-  await expect(types.first()).toHaveCount(0);
+  // that acts on it. M37.3's one nav column keeps both on screen — what still
+  // matters is that no type row claims the Library page: nothing is active.
+  await expect(types.first()).toBeVisible();
+  await expect(page.locator('[data-testid="sidebar-type"][aria-current="page"]')).toHaveCount(0);
 
   const cards = page.getByTestId('library-card');
   await expect(cards.filter({ hasText: 'Weekly review' })).toBeVisible();
@@ -255,7 +320,7 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
 
 test('library: an agent is built from pickers, not from remembered strings', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -317,11 +382,70 @@ test('library: an agent is built from pickers, not from remembered strings', asy
   await after.toContain('Check the release date first.');
 });
 
+test('library: an agent record carries its own run history (M33.6)', async ({ page }) => {
+  // The dossier answers "what has this agent done, what did it cost, when
+  // does it run next" without leaving the editor — and nothing about the
+  // agent itself is stored outside the vault to do it.
+  await seedBeforeBoot(
+    page,
+    '__cerebroSeedFleet',
+    [
+      {
+        run_id: 'scout-1',
+        actor: 'process:release-scout',
+        vault_id: 'v1',
+        mode: 'attended',
+        lane: 'agent',
+        started_at: '2026-07-28T09:00:00Z',
+        ended_at: '2026-07-28T09:01:00Z',
+        outcome: 'succeeded',
+        usage_state: 'exact',
+        input_tokens: 900,
+        output_tokens: 100,
+        proposals_submitted: 0,
+        applied: 0,
+        rejected: 0,
+      },
+    ],
+    {},
+  );
+  await boot(page);
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  const dossier = page.getByTestId('agent-dossier');
+  await expect(dossier).toBeVisible();
+  await expect(dossier).toHaveAttribute('data-actor', 'process:release-scout');
+  await expect(dossier.getByTestId('fleet-row')).toHaveCount(1);
+  await expect(dossier.getByTestId('dossier-runs')).toContainText('1');
+  await expect(dossier.getByTestId('dossier-last')).toContainText('succeeded');
+  // On duty is DERIVED. The demo scout has no schedule and no trigger, so
+  // nothing can fire it — and the strip says that rather than showing a
+  // stored flag.
+  await expect(dossier.getByTestId('dossier-duty')).toHaveAttribute('data-on-duty', 'false');
+});
+
+test('library: an agent with no runs says so, rather than showing a table of zeros', async ({
+  page,
+}) => {
+  await seedBeforeBoot(page, '__cerebroSeedFleet', [], {});
+  await boot(page);
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  const dossier = page.getByTestId('agent-dossier');
+  await expect(dossier.getByTestId('section-empty')).toContainText('No runs yet');
+  await expect(dossier.getByTestId('fleet-row')).toHaveCount(0);
+  await expect(dossier.getByTestId('dossier-last')).toContainText('never run');
+});
+
 test('library: a schedule is built, never typed as a grammar', async ({ page }) => {
   // An unparseable `schedule:` is not an error — it is silently not a
   // schedule, so the agent never runs and nothing anywhere would say why.
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
 
@@ -347,8 +471,8 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
   // Any doc with a paragraph in it. The point of this test is the AFFORDANCE:
   // M17.16 built the rewrite surface and bound it to Cmd-K, and nothing on
   // screen said so — selecting text looked exactly as it had before the
-  // assistant existed.
-  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
+  // assistant existed. M38.3: the Pages tree (and its New page) stands in the
+  // nav on every surface, so there is no Docs destination to click first.
   await page.getByRole('button', { name: 'New page', exact: true }).first().click();
   await page.getByPlaceholder('Page name').fill('Selection test');
   await page.getByRole('button', { name: 'Create' }).click();

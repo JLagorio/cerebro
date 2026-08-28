@@ -77,6 +77,22 @@ pub fn parse_frontmatter(block: &str) -> Result<serde_yaml::Mapping, String> {
     }
 }
 
+/// The `type` a document's LEADING frontmatter declares, read exactly the way
+/// the scanner reads it: no fence at byte zero, or malformed YAML, is untyped.
+///
+/// Reads content rather than a path because the callers that matter most are
+/// the guards — they have to know what a write will declare BEFORE it lands
+/// (`write::note_type` is the same question asked of a file already on disk).
+pub fn declared_type(content: &str) -> Option<String> {
+    let (block, _) = split_frontmatter(content);
+    let mapping = parse_frontmatter(block?).ok()?;
+    mapping
+        .iter()
+        .find(|(key, _)| yaml_key_string(key) == "type")
+        .and_then(|(_, value)| value.as_str())
+        .map(str::to_string)
+}
+
 /// All wikilink targets in a string: `[[target]]` and `[[target|alias]]`.
 pub fn wikilink_targets(text: &str) -> Vec<String> {
     let mut out = Vec::new();

@@ -118,6 +118,7 @@ mod tests {
             "behind",
             reservation(),
             &[item.into()],
+            None,
             now,
         )
         .unwrap()
@@ -222,6 +223,7 @@ mod tests {
                 "filed",
                 reservation(),
                 std::slice::from_ref(item),
+                None,
                 at("2026-08-09T18:00:00Z") + Duration::minutes(round as i64 * 5),
             )
             .unwrap()
@@ -339,6 +341,7 @@ mod tests {
             "behind",
             reservation(),
             &["n0.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -384,6 +387,7 @@ mod tests {
                 "behind",
                 reservation(),
                 &[],
+                None,
                 now + Duration::minutes(5),
             )
             .unwrap(),
@@ -399,6 +403,7 @@ mod tests {
                 "behind",
                 reservation(),
                 &["n1.md".into()],
+                None,
                 now + Duration::hours(6),
             )
             .unwrap(),
@@ -422,6 +427,7 @@ mod tests {
             "behind",
             reservation(),
             &["n0.md".into()],
+            None,
             now,
         )
         .unwrap() else {

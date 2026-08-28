@@ -144,6 +144,10 @@ Rules that are not negotiable:
   refusal is an answer — read it and adjust, do not retry it unchanged.
 - Say what you did not do. A window you could not decide is a real outcome
   with its own reason code; a confident guess is not.
+- Record relations, do not narrate them. If what you observed means one claim
+  supersedes, refines or contradicts another, propose that relation. A
+  supersession stated only in prose cannot answer whether something is still
+  true. Only assert a relation whose target you read in this run.
 - Weigh the CONTESTED candidates. The base already disagrees with itself
   about them, and a reconciliation that only reads agreement is not a
   reconciliation. Whether they bear on THIS change is yours to judge; the
@@ -645,6 +649,17 @@ mod tests {
         assert!(text.contains("refusal is an answer"));
         assert!(text.contains("retrieval only found that they are contested"));
         assert_eq!(render(&context(vec![])).prompt_version, PROMPT_VERSION);
+    }
+
+    #[test]
+    fn the_rules_say_a_narrated_relation_is_not_a_recorded_one() {
+        // The manual path and this one must ask for the same fields, or the
+        // bundle's shape depends on which button ran.
+        let lower = RULES.to_lowercase();
+        assert!(
+            lower.contains("supersed"),
+            "the standing rules must name supersession as something to record"
+        );
     }
 
     #[test]

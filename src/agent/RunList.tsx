@@ -123,13 +123,14 @@ export function RunList() {
               <div className="mt-1 border-t border-n-100 px-2 pb-0.5 pt-1.5 text-2xs font-medium uppercase tracking-wide text-n-400">
                 Recently
               </div>
-              {history.map((entry) => (
-                <div
-                  key={entry.id}
-                  data-testid="run-log-row"
-                  className="flex items-baseline gap-2 rounded-md px-2 py-1"
-                >
-                  <span className="min-w-0 flex-1">
+              {history.map((entry) => {
+                // M33.7: an entry that knows its durable id can open the row
+                // the database kept. One that does not is not broken — it is
+                // a run from before this shipped, or one that happened where
+                // no runtime database exists — and it says so rather than
+                // offering a link that would land nowhere.
+                const body = (
+                  <>
                     <span className="block truncate text-xs text-n-700">{entry.label}</span>
                     {/* What it did, not what it said. The log is deliberately
                         not a transcript — see engine/runLog.ts. */}
@@ -139,10 +140,38 @@ export function RunList() {
                       }`}
                     >
                       {describeRun(entry)} · {entry.trigger}
+                      {entry.durableId === undefined && ' · this device only'}
                     </span>
-                  </span>
-                </div>
-              ))}
+                  </>
+                );
+                return (
+                  <div
+                    key={entry.id}
+                    data-testid="run-log-row"
+                    data-durable={entry.durableId ?? ''}
+                    className="flex items-baseline gap-2 rounded-md px-2 py-1"
+                  >
+                    {entry.durableId === undefined ? (
+                      <span className="min-w-0 flex-1">{body}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="run-log-link"
+                        className="min-w-0 flex-1 border-0 bg-transparent p-0 text-left hover:underline"
+                        onClick={() => {
+                          navigate({
+                            kind: 'knowledge',
+                            nav: { tab: 'runs', run: entry.durableId },
+                          });
+                          setOpen(false);
+                        }}
+                      >
+                        {body}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </>
           )}
         </Popover>

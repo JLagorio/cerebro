@@ -1,30 +1,48 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ChangesView,
   LanesView,
   PipelineOverview,
   ReviewCard,
+  RevertableApplication,
   TriggerEntryStatus,
   TriggerRunReport,
   VerificationScope,
 } from '@/lib/ipc';
-import { useVaultStore } from '@/stores/vaultStore';
-import { EpistemicStatusPage } from './EpistemicStatusPage';
+import {
+  AgentWork,
+  Background,
+  DeferralGates,
+  WaitingOnYou,
+  WhatChanged,
+  WhatsContested,
+} from './BaseItself';
 
 /**
- * The Epistemic Status surface (M27.8c).
+ * What the base knows about itself (M27.8c, re-homed under Knowledge in
+ * M33a.2 — these specs were `pages/EpistemicStatusPage.test.tsx`).
  *
- * These specs are about ONE thing: that a section which could not read its
- * feed never renders as a section with nothing in it. Everything else on this
- * page is layout over sentences Rust composed, and asserting the wording here
+ * They are about ONE thing: that a section which could not read its feed
+ * never renders as a section with nothing in it. Everything else on these
+ * tabs is layout over sentences Rust composed, and asserting the wording here
  * would only pin a copy of it.
+ *
+ * What the move changed is the MOUNT. There is no page any more, so each spec
+ * renders the component it was really about, and the two that were about
+ * INDEPENDENCE render two components side by side — which is the honest shape
+ * of that claim now that the tabs never share a screen.
  */
 
 const converge = vi.fn<(vault: string) => Promise<ChangesView>>();
 const attentionLanes = vi.fn<(vault: string) => Promise<LanesView>>();
 const reviewQueue = vi.fn<(vault: string) => Promise<ReviewCard[]>>();
+// M33.3: the needs section reads BOTH halves of the queue itself, so the
+// revertables need a stub too — without one the section's own read throws and
+// it renders `unavailable`, which would quietly mask what these specs assert.
+const revertableApplications = vi.fn<(vault: string) => Promise<RevertableApplication[]>>();
 const pipelineOverview = vi.fn<(vault: string) => Promise<PipelineOverview>>();
 const triggerStatus = vi.fn<(vault: string) => Promise<TriggerEntryStatus[]>>();
 const triggerRun = vi.fn<(vault: string) => Promise<TriggerRunReport>>();
@@ -38,6 +56,7 @@ vi.mock('@/lib/ipc', async () => {
     converge: (vault: string) => converge(vault),
     attentionLanes: (vault: string) => attentionLanes(vault),
     reviewQueue: (vault: string) => reviewQueue(vault),
+    revertableApplications: (vault: string) => revertableApplications(vault),
     pipelineOverview: (vault: string) => pipelineOverview(vault),
     triggerStatus: (vault: string) => triggerStatus(vault),
     triggerRun: (vault: string) => triggerRun(vault),
@@ -48,6 +67,8 @@ vi.mock('@/lib/ipc', async () => {
 });
 
 afterEach(cleanup);
+
+const VAULT = '/demo-vault';
 
 const QUIET_CHANGES: ChangesView = {
   schema_version: 'convergence-v1',
@@ -77,6 +98,8 @@ const EMPTY_LANES: LanesView = {
 
 const HEALTH: PipelineOverview = {
   global_pause: false,
+  ambient_concurrency: 1,
+  ambient_concurrency_max: 4,
   runtime_status: 'ready',
   meter: {
     window_start_utc: '2026-08-12T00:00:00.000Z',
@@ -158,13 +181,20 @@ const RUN_REPORT: TriggerRunReport = {
   ],
 };
 
-describe('EpistemicStatusPage', () => {
+/** The gate board is collapsed by default (M33a.2, spec D5), so a spec about
+ * what the ROWS say opens it first. The summary is what a reader gets for
+ * free; the board is for whoever asks a second question. */
+async function openBoard() {
+  fireEvent.click(await screen.findByTestId('gates-expand'));
+}
+
+describe('What the base knows about itself', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useVaultStore.setState({ vaultPath: '/demo-vault' });
     converge.mockResolvedValue(QUIET_CHANGES);
     attentionLanes.mockResolvedValue(EMPTY_LANES);
     reviewQueue.mockResolvedValue([]);
+    revertableApplications.mockResolvedValue([]);
     pipelineOverview.mockResolvedValue(HEALTH);
     triggerStatus.mockResolvedValue(BOARD);
     triggerRun.mockResolvedValue(RUN_REPORT);
@@ -172,30 +202,60 @@ describe('EpistemicStatusPage', () => {
     triggerDeclareR7Scope.mockResolvedValue('a'.repeat(64));
   });
 
-  it('renders every lane the feed declares, including the ones holding nothing', async () => {
-    render(<EpistemicStatusPage />);
-    await waitFor(() => expect(screen.getByTestId('status-page')).toBeTruthy());
+  /**
+   * What the hub's section-ORDER assertion became.
+   *
+   * The old page stacked all of these in one scroll column, so there was a
+   * single ordering to pin. There is not one now — each tab is reached on its
+   * own — so what survives is the property the order assertion was really
+   * protecting: every one of these surfaces still carries the `data-section`
+   * that 30 Playwright assertions address it by.
+   */
+  it('every tab still carries its own data-section', async () => {
+    const sections = async (ui: ReactElement) => {
+      const { unmount } = render(ui);
+      const found = await screen.findAllByTestId('base-section');
+      const ids = found.map((s) => s.getAttribute('data-section'));
+      unmount();
+      return ids;
+    };
 
-    const sections = await screen.findAllByTestId('status-section');
+    expect(await sections(<WhatChanged vaultPath={VAULT} />)).toEqual(['changed']);
+    // The contested tab is the one exception to one-section-per-tab: the lanes
+    // arrive NAMED by Rust and their number varies, so it renders whatever the
+    // feed holds.
+    expect(await sections(<WhatsContested vaultPath={VAULT} />)).toEqual([
+      'contradiction',
+      'staleness',
+    ]);
+    expect(await sections(<WaitingOnYou vaultPath={VAULT} />)).toEqual(['needs-review']);
+    expect(await sections(<Background vaultPath={VAULT} />)).toEqual(['system']);
+    expect(await sections(<DeferralGates vaultPath={VAULT} />)).toEqual(['gates']);
+  });
+
+  it('renders every lane the feed declares, including the ones holding nothing', async () => {
+    render(<WhatsContested vaultPath={VAULT} />);
+
+    const sections = await screen.findAllByTestId('base-section');
     const ids = sections.map((s) => s.getAttribute('data-section'));
     expect(ids).toContain('contradiction');
     expect(ids).toContain('staleness');
     // Its own words, not a shared "nothing here" — the lane knows what it
-    // means to be empty and this page does not.
+    // means to be empty and this tab does not.
     expect(screen.getByText('Nothing in contradiction.')).toBeTruthy();
   });
 
   it('shows the protected badge only where a preference could not have hidden it', async () => {
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
     const badges = await screen.findAllByTestId('protected-badge');
     expect(badges).toHaveLength(1);
   });
 
-  /** The failure this page exists to prevent: a read that did not come back
+  /** The failure these tabs exist to prevent: a read that did not come back
    * rendering as a base with nothing wrong with it. */
   it('says a feed could not be read instead of rendering its empty state', async () => {
     attentionLanes.mockRejectedValue(new Error('no ledger'));
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const said = await screen.findByTestId('section-unavailable');
     expect(said.textContent).toContain('The attention lanes');
@@ -205,7 +265,16 @@ describe('EpistemicStatusPage', () => {
 
   it('keeps the other sections when one feed refuses', async () => {
     converge.mockRejectedValue(new Error('this vault has no ledger store'));
-    render(<EpistemicStatusPage />);
+    // Both mounted at once, because independence is the claim: the tabs never
+    // share a screen any more, so the only way to prove one feed's refusal
+    // does not travel is to put the two reads in the same tree and watch one
+    // of them still answer.
+    render(
+      <>
+        <WhatChanged vaultPath={VAULT} />
+        <WhatsContested vaultPath={VAULT} />
+      </>,
+    );
 
     await screen.findByTestId('section-unavailable');
     // The lanes are a separate call and a separate answer.
@@ -240,7 +309,7 @@ describe('EpistemicStatusPage', () => {
       ],
       withheld: 3,
     });
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const item = await screen.findByTestId('lane-item');
     expect(item.getAttribute('data-reasons')).toBe('freshness_stale');
@@ -253,46 +322,142 @@ describe('EpistemicStatusPage', () => {
       ...EMPTY_LANES,
       incomplete: ['Parked promotions could not be read, so epistemic debt may be under-reported.'],
     });
-    render(<EpistemicStatusPage />);
+    render(<WhatsContested vaultPath={VAULT} />);
 
     const note = await screen.findByTestId('lanes-incomplete');
     expect(note.textContent).toContain('under-reported');
   });
 
-  it('counts the queue and marks how much of it is HIGH or CRITICAL', async () => {
+  // M33.3 INVERTED this. It used to assert the section was a COUNT and a
+  // door — "3 cards are waiting, 2 at HIGH or CRITICAL" — because the cards
+  // themselves lived on a separate tab. The tab is gone, so the count is the
+  // thing that must not be here: the section renders the cards.
+  it('holds the cards themselves rather than a count and a door', async () => {
     const card = (risk: string): ReviewCard =>
-      ({ proposal_id: risk, effective_risk: risk }) as ReviewCard;
+      ({
+        proposal_id: risk,
+        effective_risk: risk,
+        op: `op_${risk}`,
+        queued_for: [],
+        targets: [],
+        evidence_refs: [],
+        coverage_refs: [],
+      }) as unknown as ReviewCard;
     reviewQueue.mockResolvedValue([card('LOW'), card('HIGH'), card('CRITICAL')]);
-    render(<EpistemicStatusPage />);
+    render(<WaitingOnYou vaultPath={VAULT} />);
 
-    const summary = await screen.findByTestId('review-summary');
-    expect(summary.getAttribute('data-urgent')).toBe('2');
-    expect(summary.textContent).toContain('3 cards are');
+    const cards = await screen.findAllByTestId('review-card');
+    expect(cards).toHaveLength(3);
+    expect(screen.getAllByTestId('card-risk').map((c) => c.textContent)).toEqual([
+      'LOW',
+      'HIGH',
+      'CRITICAL',
+    ]);
+    expect(screen.getAllByTestId('approve')).toHaveLength(3);
+    expect(screen.queryByTestId('review-summary')).toBeNull();
   });
 
-  /** A day whose spend was lost is not a day with budget left. */
+  // The defect the merge retires: `ReviewPage` turned a failed read into an
+  // empty one, telling a person with an unreadable ledger that nothing was
+  // waiting on them.
+  it('says the review queue could not be read rather than borrowing the empty state', async () => {
+    reviewQueue.mockRejectedValue(new Error('no ledger store for this vault'));
+    render(<WaitingOnYou vaultPath={VAULT} />);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId('section-unavailable')
+          .some((n) => n.textContent?.includes('The review queue')),
+      ).toBe(true),
+    );
+    expect(screen.queryByText('Nothing is waiting on a decision.')).toBeNull();
+  });
+
+  /**
+   * A day whose spend was lost is not a day with budget left.
+   *
+   * M33.4 INVERTED this too. It used to read the two-line `health-summary`
+   * door; the section is the controls now, so the same rule is asserted where
+   * it actually renders — on the meter itself.
+   */
   it('never reports a ceiling state over a meter that could not account for itself', async () => {
     pipelineOverview.mockResolvedValue({
       ...HEALTH,
       meter: { ...HEALTH.meter, accounting_state: 'unknown' },
     });
-    render(<EpistemicStatusPage />);
+    render(<Background vaultPath={VAULT} />);
 
-    const summary = await screen.findByTestId('health-summary');
-    expect(summary.textContent).toContain('not fully accounted for');
-    expect(summary.textContent).not.toContain('under budget');
+    const note = await screen.findByTestId('accounting-unknown');
+    expect(note.textContent).toContain('is not zero');
+    expect(screen.queryByTestId('health-summary')).toBeNull();
+  });
+
+  it('holds the background controls rather than a summary and a door', async () => {
+    render(<Background vaultPath={VAULT} />);
+
+    await waitFor(() => expect(screen.getByTestId('lane-toggles')).toBeTruthy());
+    expect(screen.getByTestId('budget-meter')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause background work' })).toBeTruthy();
+    expect(screen.queryByTestId('health-summary')).toBeNull();
+  });
+
+  // The second collapse the merge retires: PipelinePage rendered "Nothing to
+  // report yet" over a failed read, the same words a genuinely quiet vault
+  // gets.
+  it('says background health could not be read rather than reporting calm', async () => {
+    pipelineOverview.mockRejectedValue(new Error('no runtime database'));
+    render(<Background vaultPath={VAULT} />);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByTestId('section-unavailable')
+          .some((n) => n.textContent?.includes('Background health')),
+      ).toBe(true),
+    );
+    expect(screen.queryByTestId('budget-meter')).toBeNull();
   });
 
   it('renders nothing about a vault that is not open', async () => {
-    useVaultStore.setState({ vaultPath: null });
-    render(<EpistemicStatusPage />);
+    // Every tab that is ABOUT a vault — `AgentWork` included since M33b.3,
+    // which is the change that made it one. It used to take no vault at all
+    // ("the fleet spans them"), and that stopped being the whole story when
+    // the tab started listing AGENTS: agents are records in a vault, and the
+    // proposal queue, the background pause and (since M33b.5) which agents
+    // are paused are all read against it. Three of its four reads therefore
+    // have nothing to read here and say so; the run history still spans
+    // vaults and stands.
+    render(
+      <>
+        <WhatChanged vaultPath={null} />
+        <WhatsContested vaultPath={null} />
+        <WaitingOnYou vaultPath={null} />
+        <Background vaultPath={null} />
+        <AgentWork vaultPath={null} />
+        <DeferralGates vaultPath={null} />
+      </>,
+    );
 
-    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(6));
+    await waitFor(() => expect(screen.getAllByTestId('section-unavailable').length).toBe(9));
     expect(converge).not.toHaveBeenCalled();
   });
 
+  it('says how much is held back without listing it', async () => {
+    // A wall of "Never evaluated here" cards was 55% of the old Status page.
+    // The count is the answer; the board is for whoever asks a second one.
+    render(<DeferralGates vaultPath={VAULT} />);
+    expect((await screen.findByTestId('gates-summary')).textContent).toContain('held back');
+    // The plan wrote this as `queryByTestId('gate-card')` — a testid that has
+    // never existed here, which would have made the assertion pass over an
+    // unchanged board. The rows are `gate-row` inside `gate-entry`.
+    expect(screen.queryByTestId('gate-row')).toBeNull();
+    expect(screen.queryByTestId('gate-entry')).toBeNull();
+  });
+
   it('renders every gate the board declares, and never-evaluated is said, not omitted', async () => {
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
+    await openBoard();
 
     const rows = await screen.findAllByTestId('gate-row');
     expect(rows.map((row) => row.getAttribute('data-gate'))).toEqual(['R8:root', 'R13:root']);
@@ -323,17 +488,25 @@ describe('EpistemicStatusPage', () => {
         ],
       },
     ]);
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
+    // The one thing loud enough to survive the collapse. A firing is the only
+    // news this tab ever has, so it belongs in the line you get for free —
+    // collapsing it behind a click would be the tab hiding its one headline.
+    expect((await screen.findByTestId('gates-summary')).textContent).toContain(
+      'R13:root has fired',
+    );
+    await openBoard();
 
     const row = await screen.findByTestId('gate-row');
     expect(row.getAttribute('data-result')).toBe('fired');
     expect(row.textContent).toContain('A firing licenses a dated plan, never code.');
-    expect(screen.getByText(/R13:root has fired/)).toBeTruthy();
   });
 
   it('evaluate runs once, says what each gate did, and re-reads the board', async () => {
-    render(<EpistemicStatusPage />);
-    await screen.findAllByTestId('gate-row');
+    render(<DeferralGates vaultPath={VAULT} />);
+    // Evaluating does not need the board open: the action is the tab's, and
+    // what it did is a sentence, not a row.
+    await screen.findByTestId('gates-summary');
     expect(triggerStatus).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId('gates-evaluate'));
@@ -353,8 +526,8 @@ describe('EpistemicStatusPage', () => {
     triggerRun.mockRejectedValue(
       new Error('an R7 verification scope is declared, but this vault has no active ledger writer'),
     );
-    render(<EpistemicStatusPage />);
-    await screen.findAllByTestId('gate-row');
+    render(<DeferralGates vaultPath={VAULT} />);
+    await screen.findByTestId('gates-summary');
 
     fireEvent.click(screen.getByTestId('gates-evaluate'));
 
@@ -363,7 +536,7 @@ describe('EpistemicStatusPage', () => {
   });
 
   it('declaring an R7 scope canonicalizes the lists before anything is sent', async () => {
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     expect((await screen.findByTestId('r7-scope-none')).textContent).toContain(
       'No scope is declared',
     );
@@ -382,7 +555,7 @@ describe('EpistemicStatusPage', () => {
 
     await screen.findByTestId('r7-scope-digest');
     expect(triggerDeclareR7Scope).toHaveBeenCalledWith(
-      '/demo-vault',
+      VAULT,
       JSON.stringify({
         subjects: ['aaa', 'bbb'],
         predicate_classes: ['operational_status'],
@@ -399,7 +572,7 @@ describe('EpistemicStatusPage', () => {
     triggerDeclareR7Scope.mockRejectedValue(
       new Error('a verification scope with no subjects verifies nothing'),
     );
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
     await screen.findByTestId('r7-scope-none');
 
     fireEvent.click(screen.getByTestId('r7-scope-open'));
@@ -417,7 +590,7 @@ describe('EpistemicStatusPage', () => {
       environment: null,
       geography: null,
     });
-    render(<EpistemicStatusPage />);
+    render(<DeferralGates vaultPath={VAULT} />);
 
     const declared = await screen.findByTestId('r7-scope-declared');
     expect(declared.textContent).toContain('e0000000000000000000000000000001');

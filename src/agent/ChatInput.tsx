@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { argumentHint, listSkills, type SkillRef } from '@/engine/skills';
+import { isAgentEntry, listAgents } from '@/engine/agents';
 import { chipId, placeChip, recordChip, type ContextChip } from '@/agent/contextChips';
 import type { Place } from '@/engine/place';
 import type { Entry } from '@/engine/types';
@@ -9,18 +10,22 @@ import { typeStyle } from '@/engine/typeCatalog';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
- * The composer, with `[[`, `/` and `@` completion (M9.5, M13.1, M17.6b).
+ * The composer, with `[[`, `/` and `@` completion (M9.5, M13.1, M17.6b,
+ * M33b.6).
  *
- * Three tokens, three jobs, and the division is the point:
+ * Three tokens, and the division is the point:
  *
  * - **`[[note]]`** MENTIONS a note inline. The text stays in the message and
  *   the note travels into the snapshot with its content attached, so the agent
  *   does not have to search for what you already pointed at.
  * - **`/skill`** INVOKES. The transcript shows what you typed; the agent gets
  *   the skill's body.
- * - **`@thing`** ATTACHES it as context and leaves no text behind. It is the
- *   explicit control M17.6's chips were missing — the way to hand the agent a
- *   record or a surface you are not currently standing on.
+ * - **`@`** does two things, and they are the same shape: it names a
+ *   RECIPIENT or attaches CONTEXT. `@agent-slug` addresses one of the vault's
+ *   agents and stays in the message as text, because the send path reads the
+ *   recipient back out of what you wrote (M33b.6). Everything else — a
+ *   record, a surface — becomes a chip and leaves no text behind, which is
+ *   the explicit control M17.6's chips were missing.
  *
  * All three used to be hand-rolled menus with their own copy of the arrow /
  * Enter / Tab / Escape handling. They are one driver now: a menu is a list of
@@ -144,9 +149,34 @@ export function ChatInput({
   const attach = (chip: ContextChip) => {
     if (at === null || onAttach === undefined) return;
     onAttach(chip);
-    // The token is consumed, not completed: what `@` produces is a chip, and
-    // leaving `@Roadmap` in the prose would say the same thing twice.
+    // The token is consumed, not completed: what this row produces is a chip,
+    // and leaving `@Roadmap` in the prose would say the same thing twice.
+    // (An agent row is the exception — see addressAgent.)
     onChange(`${value.slice(0, at.start)}${value.slice(at.end)}`);
+    setActive(0);
+    requestAnimationFrame(() => ref.current?.focus());
+  };
+
+  /**
+   * Address an agent (M33b.6) — the one row in this menu that COMPLETES rather
+   * than consumes.
+   *
+   * A recipient is not context. It is who the turn goes to, and `send` reads it
+   * back out of the message text, so the handle has to survive as text — which
+   * also means the transcript shows what you addressed instead of hiding it in
+   * a chip you have to remember attaching.
+   */
+  const addressAgent = (handle: string) => {
+    if (at === null) return;
+    const after = value.slice(at.end);
+    onChange(`${value.slice(0, at.start)}@${handle}${after.startsWith(' ') ? '' : ' '}${after}`);
+    // Closed by the same anchor an Escape uses, and it has to be explicit:
+    // every other row in this menu ends by REMOVING the `@` token, so the menu
+    // stops matching on its own. A completed handle is still an `@` token, and
+    // the caret read this memo depends on lags a programmatic edit by a render
+    // — the stale-caret trap the slash menu avoids by keying on the value
+    // alone. A menu left open here would swallow the next Enter forever.
+    setDismissed(`at:${at.start}`);
     setActive(0);
     requestAnimationFrame(() => ref.current?.focus());
   };
@@ -200,7 +230,7 @@ export function ChatInput({
   }, [slashFragment, skills]);
 
   const attachMenu = useMemo((): Menu | null => {
-    if (at === null || onAttach === undefined) return null;
+    if (at === null) return null;
     const taken = new Set(attached ?? []);
     const match = (label: string) => (at.fragment === '' ? 1 : quickOpenScore(at.fragment, label));
 
@@ -228,8 +258,13 @@ export function ChatInput({
         run: () => attach(chip),
       }));
 
+    // Agent records are deliberately absent from here: they get their own rows
+    // below, which ADDRESS them. Offering one record two ways — "attach this
+    // page" and "talk to this agent" — reads as a duplicate long before it
+    // reads as a choice, and addressing already carries everything attaching
+    // would have (its brief, its memory, its scope).
     const recordItems = entries
-      .filter((e) => e.type !== 'Type')
+      .filter((e) => e.type !== 'Type' && !isAgentEntry(e))
       .map((e) => ({ entry: e, score: match(e.title) }))
       .filter((m) => m.score > 0)
       .sort((a, b) => b.score - a.score)
@@ -250,7 +285,28 @@ export function ChatInput({
         };
       });
 
-    const items = [...placeItems, ...recordItems].filter((i) => !taken.has(i.key));
+    // M33b.6 — the agents this vault holds, addressable by the handle their
+    // writes are already stamped with. LAST, and not for lack of importance:
+    // every row above consumes the token and produces a chip, and these do the
+    // opposite, so they are grouped apart from the rows that behave alike
+    // rather than interleaved with them.
+    const agentItems = listAgents(entries)
+      .map((agent) => ({ agent, score: Math.max(match(agent.handle), match(agent.title)) }))
+      .filter((m) => m.score > 0 && m.agent.handle !== '')
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(({ agent }) => ({
+        key: `agent:${agent.handle}`,
+        icon: 'bot',
+        color: 'var(--synapse-500)',
+        label: `@${agent.handle}`,
+        hint: agent.title,
+        group: 'Agents',
+        run: () => addressAgent(agent.handle),
+      }));
+
+    const chipItems = onAttach === undefined ? [] : [...placeItems, ...recordItems];
+    const items = [...chipItems, ...agentItems].filter((i) => !taken.has(i.key));
     return items.length === 0 ? null : { testid: 'attach-menu', anchor: `at:${at.start}`, items };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [at, attached, collections, entries, onAttach, schema, views, value]);

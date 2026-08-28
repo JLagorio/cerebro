@@ -217,6 +217,7 @@ describe('LibraryPage', () => {
       'get_vault_context',
       'search_notes',
       'get_note',
+      'knowledge_about',
       'list_inbox',
     ]);
   });
@@ -303,5 +304,19 @@ describe('LibraryPage', () => {
     expect(frontmatter).toMatchObject({ type: 'Skill' });
     expect('schedule' in frontmatter).toBe(false);
     expect('when' in frontmatter).toBe(false);
+  });
+
+  it('a new agent is born PAUSED, not just inert (M36.2)', async () => {
+    // Inert-by-no-schedule ends the moment somebody adds one. The settled
+    // design makes activation two acts — configure, then unpause — so the
+    // stamp is explicit, and the existing duty toggle is the way back.
+    useNavStore.setState({ selection: { kind: 'library', tab: 'agent' } });
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole('button', { name: /New agent/ }));
+    await waitFor(() => expect(vi.mocked(ipc.createNote)).toHaveBeenCalled());
+    const [, folder, , frontmatter] = vi.mocked(ipc.createNote).mock.calls[0];
+    expect(folder).toBe('records/agents');
+    expect(frontmatter).toMatchObject({ type: 'Agent', paused: true });
+    expect('schedule' in frontmatter).toBe(false);
   });
 });

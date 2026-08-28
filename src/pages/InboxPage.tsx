@@ -341,7 +341,7 @@ export function InboxPage() {
   // affordance lives on the page where it can hold a button.
   const [lastFiled, setLastFiled] = useState<{ path: string; title: string } | null>(null);
   // Focus follows the file: after ⌘E the row that opened next should be where
-  // the keyboard is, or the next Tab restarts at the Rail.
+  // the keyboard is, or the next Tab restarts at the nav.
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const refocusRow = useRef(false);
 

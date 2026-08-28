@@ -11,8 +11,9 @@
 //! it reads the base's shape rather than a queue of files. An empty claim is
 //! a supported shape (`claim_inner` only reports `NothingToClaim` when items
 //! were named and none survived), and it still buys the one thing that
-//! matters: the ambient lease, so a maintenance run and an ingest run cannot
-//! spend the same subscription at the same moment.
+//! matters: an ambient lease, so a maintenance run and an ingest run spend the
+//! same subscription only as concurrently as the ceiling allows — which at
+//! the shipped ceiling of one (M33b.1) means not at all.
 //!
 //! **Findings are still recorded only after a real run.** The lease is
 //! claimed first, the pass writes second — so a deferral leaves every finding
@@ -70,9 +71,10 @@ pub enum Scheduled {
 
 /// Try one maintenance pass.
 ///
-/// The findings are computed BEFORE the lease is claimed, deliberately: the
-/// one ambient lease is scarce, and taking it only to discover there was
-/// nothing to say would block an ingest tick that had real work.
+/// The findings are computed BEFORE the lease is claimed, deliberately: an
+/// ambient lease is scarce — there is one, by default — and taking it only to
+/// discover there was nothing to say would block an ingest tick that had real
+/// work.
 ///
 /// `proposals_enabled` is `agent_proposals_enabled`, handed IN rather than
 /// read here: the switch lives in the app config, and this module
@@ -110,6 +112,8 @@ pub fn attempt<R: Runner>(
         RESERVATION,
         // No scheduler items: this pass reads the base's shape, not a queue.
         &[],
+        // M33.1 — maintenance owns the lease it takes with no items at all.
+        Some(pass::ACTOR),
         now,
     )? {
         Dispatched::Started(lease) => lease,
@@ -300,8 +304,9 @@ mod tests {
 
     #[test]
     fn a_pass_with_nothing_to_say_never_takes_the_lease_at_all() {
-        // The one ambient lease is scarce. Taking it to discover there was
-        // nothing to say would block an ingest tick that had real work.
+        // An ambient lease is scarce — there is one, by default. Taking it to
+        // discover there was nothing to say would block an ingest tick that
+        // had real work.
         let harness = Harness::open("maintain-schedule-quiet");
         let spy = Spy::default();
         let outcome = attempt(
@@ -412,6 +417,69 @@ mod tests {
             })
             .unwrap();
         assert_eq!(findings, 0, "and nothing was marked as said");
+    }
+
+    #[test]
+    fn a_paused_actor_defers_this_scheduled_pass_and_says_nothing() {
+        // M33b.5, spec §6, on the scheduled path: the pass claims its lease
+        // under `pass::ACTOR`, so pausing that actor has to stop it exactly
+        // the way the global pause does — no CLI, no findings marked said,
+        // and the whole period offered again once it is resumed.
+        let harness = Harness::open("maintain-schedule-agent-paused");
+        crate::runtime::settings::set_agent_paused(
+            &harness.conn,
+            &harness.vault_id,
+            pass::ACTOR,
+            true,
+        )
+        .unwrap();
+        let spy = Spy::default();
+        let outcome = attempt(
+            &harness.conn,
+            &harness.context(),
+            &fixture::state(),
+            &spy,
+            true,
+            now(),
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, Scheduled::Deferred(reasons)
+                if reasons == &[crate::runtime::budget::GateReason::AgentPaused]),
+            "expected a deferral naming the agent pause, got {outcome:?}"
+        );
+        assert_eq!(*spy.runs.borrow(), 0, "no CLI ran");
+        let findings: i64 = harness
+            .conn
+            .query_row("SELECT count(*) FROM maintenance_findings", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(findings, 0, "a deferred pass leaves every finding unsaid");
+
+        // Resumed, the same pass runs — the pause stopped it, it did not
+        // consume it.
+        crate::runtime::settings::set_agent_paused(
+            &harness.conn,
+            &harness.vault_id,
+            pass::ACTOR,
+            false,
+        )
+        .unwrap();
+        let resumed = attempt(
+            &harness.conn,
+            &harness.context(),
+            &fixture::state(),
+            &spy,
+            true,
+            now(),
+        )
+        .unwrap();
+        assert!(
+            matches!(resumed, Scheduled::Ran { .. }),
+            "expected a run once resumed, got {resumed:?}"
+        );
+        assert_eq!(*spy.runs.borrow(), 1);
     }
 
     #[test]

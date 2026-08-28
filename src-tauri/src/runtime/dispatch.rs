@@ -1,12 +1,12 @@
-//! One ambient dispatch, start to finish (M25.2).
+//! One ambient dispatch, start to finish (M25.2; N leases at M33b.1).
 //!
 //! **The claim is one transaction or it is nothing.** Gate, token
-//! reservation, scheduler claim, run row, and the singleton ambient lease all
-//! commit together, and the subprocess spawns only afterwards. Split across
-//! two transactions — or worse, across the IPC boundary — every crash
-//! boundary becomes a way to lose the accounting: a run that spent tokens
-//! with no row, a reservation nothing will release, an item claimed by a run
-//! that never started.
+//! reservation, scheduler claim, run row, and the ambient lease all commit
+//! together, and the subprocess spawns only afterwards. Split across two
+//! transactions — or worse, across the IPC boundary — every crash boundary
+//! becomes a way to lose the accounting: a run that spent tokens with no row,
+//! a reservation nothing will release, an item claimed by a run that never
+//! started.
 //!
 //! **Finalization is the other transaction.** Exact usage lands, the
 //! reservation and the lease are released, and each claimed item is consumed
@@ -19,10 +19,86 @@
 //! accounting `unknown`, and pause ambient dispatch. A day whose spend was
 //! lost is not a day with budget left.
 //!
-//! **Background concurrency is one.** The singleton `ambient_dispatch` row is
-//! the enforcement, not a comment: chat keeps its headroom inside the
-//! process-wide cap of four because the database will not hand out a second
-//! ambient lease.
+//! # Background concurrency is a number, not a row (M33b.1)
+//!
+//! Until v14 the ceiling was `ambient_dispatch.singleton_key`, a primary key
+//! that could hold exactly one value. It is now `settings::ambient_concurrency`
+//! — one global number, defaulting to 1, counted against live leases by
+//! [`budget::gate`]. Four properties fell out of that one column. Each is
+//! named here with what carries it now, because three survive and one is
+//! genuinely weaker, and pretending otherwise is how an invariant gets lost.
+//!
+//! **1. Mutual exclusion at claim time — carried by the transaction, which
+//! was always the real mechanism.** [`claim`] opens `BEGIN IMMEDIATE`, and
+//! `ambient_leases_held` is counted inside it. Two dispatchers cannot
+//! interleave a count and an insert: SQLite serialises the writers, so the
+//! second one's count already includes the first one's committed lease and it
+//! defers with `ambient_busy`. Under the singleton this was true as well —
+//! the gate refused first and the primary key never fired — with one
+//! exception, documented at `budget::ambient_leases_held`: a stale expired
+//! lease used to roll a claim back with an error and now does not. That case
+//! traded an accidental error for a clean decision; it never protected any
+//! accounting.
+//!
+//! **2. Crash recovery — unchanged in mechanism, and WIRED for the first time
+//! here.** [`recover_expired_leases`] sweeps `runs` by `lease_expires_at`. It
+//! has never read `ambient_dispatch`, and N rows change nothing about it:
+//! each abandoned run is finalized on its own row, `abandoned_usage_unknown`,
+//! its items requeued, its day marked unknown.
+//!
+//! The honest part: **that sweep had no production caller until M33b.1**, and
+//! the singleton primary key had been standing in for it by accident — after
+//! a crash the stale row made every later claim fail its key and roll back,
+//! which stopped ambient dispatch loudly and forever. Retiring the singleton
+//! without wiring the sweep would have converted that loud wedge into a
+//! silent loss of work. So `ingest::ambient`'s tick now calls it, ahead of
+//! the pause, and `ambient::sweep_abandoned` carries the argument for that
+//! position. The invariant below is therefore a claim about code that runs,
+//! not about a function nobody calls.
+//!
+//! **3. Accounting — unchanged, and it never lived here either.** Spend is a
+//! `runs` row plus a `budget_days` reservation, one pair per run. N
+//! concurrent runs make N pairs; the gate sums them through
+//! `Day::committed_total`, so the second lease is checked against a day that
+//! already owes the first one's reservation. There is no shared counter for a
+//! second run to trample and no per-lease field for it to overwrite.
+//!
+//! **4. Headroom for attended chat inside `agent::MAX_CONCURRENT_RUNS` —
+//! WEAKER, and deliberately so.** The singleton guaranteed three free process
+//! slots as a side effect of allowing one. The ceiling guarantees
+//! `MAX_CONCURRENT_RUNS - ceiling`, which is the same three at the shipped
+//! default of 1 and zero at the maximum of 4. What remains at the maximum is
+//! `agent::spawn`'s own refusal — a visible message, not a silent eviction.
+//! This is a choice the owner makes by typing a number, not one the schema
+//! makes for them.
+//!
+//! ## Every crash boundary, walked
+//!
+//! - **Between the gate and the insert.** Same transaction. Nothing commits,
+//!   no run row, no reservation, no claimed item, and the decision row goes
+//!   with it. Identical at any N.
+//! - **Between the insert and the spawn.** The claim is committed and the
+//!   subprocess never existed. The run row is `running` with a lease, so the
+//!   sweep finalizes it `abandoned_usage_unknown`: the reservation is
+//!   released, the items requeue, the day goes unknown. At N > 1 the sibling
+//!   leases are untouched — the sweep is per run row.
+//! - **Mid-run.** As above; the difference is only that tokens were really
+//!   spent, which is exactly why the outcome is `unknown` rather than zero.
+//! - **During finalization.** One transaction: the run row, the reservation
+//!   release, the lease `DELETE` and the scheduler update roll back together.
+//!   The run stays `running` holding its lease, and is swept later. The
+//!   `DELETE` matches one row by primary key, as it did when `run_id` was
+//!   merely `UNIQUE`.
+//! - **Two dispatchers at the same instant.** `BEGIN IMMEDIATE` admits one.
+//!   The loser blocks up to the 5s busy timeout and then either counts the
+//!   winner's lease and defers, or takes the next slot if the ceiling has one.
+//!   It cannot observe a half-written claim, because there is no point in the
+//!   sequence where one exists.
+//!
+//! In none of these does a run reach a terminal state without its usage being
+//! either counted exactly or recorded as unknown. That is the invariant N
+//! leases had to preserve, and the reason it survives is that it was never a
+//! property of the singleton.
 
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
@@ -97,6 +173,12 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// `now` is passed rather than read so a test can drive a whole simulated day
 /// without sleeping, and so every row written inside the transaction carries
 /// the same instant.
+///
+/// `actor` (M33.1) names the construct taking the lease, and is an argument
+/// rather than something derived from `lane` because the two are not the same
+/// axis: ingest claims under five of the seven lanes, and a lane→construct
+/// guess would attribute work to whoever happened to share a queue.
+#[allow(clippy::too_many_arguments)]
 pub fn claim(
     conn: &Connection,
     vault_id: &str,
@@ -104,6 +186,7 @@ pub fn claim(
     lane: &str,
     reservation: Reservation,
     items: &[String],
+    actor: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // The process-level status is checked before the transaction: a failed
@@ -115,7 +198,16 @@ pub fn claim(
     conn.execute_batch("BEGIN IMMEDIATE")
         .map_err(|e| format!("dispatch: {e}"))?;
     crate::crash::crash_point("runtime-dispatch-begun");
-    let outcome = claim_inner(conn, vault_id, store_uuid, lane, reservation, items, now);
+    let outcome = claim_inner(
+        conn,
+        vault_id,
+        store_uuid,
+        lane,
+        reservation,
+        items,
+        actor,
+        now,
+    );
     match outcome {
         Ok(dispatched) => {
             conn.execute_batch("COMMIT")
@@ -130,6 +222,7 @@ pub fn claim(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn claim_inner(
     conn: &Connection,
     vault_id: &str,
@@ -137,6 +230,7 @@ fn claim_inner(
     lane: &str,
     reservation: Reservation,
     items: &[String],
+    actor: Option<&str>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // What is actually still claimable, BEFORE anything is written.
@@ -151,7 +245,11 @@ fn claim_inner(
         return Ok(Dispatched::NothingToClaim);
     }
 
-    let (decision, day) = budget::gate(conn, vault_id, store_uuid, lane, reservation, now)?;
+    // The gate takes the ACTOR as well as the lane (M33b.5): whether this one
+    // agent is paused is a gate decision like every other refusal, decided in
+    // the same transaction and recorded in the same deferral row, rather than
+    // a second check bolted on beside it.
+    let (decision, day) = budget::gate(conn, vault_id, store_uuid, lane, actor, reservation, now)?;
     let decision_id = crate::ledger::new_id128();
     budget::record_decision(
         conn,
@@ -180,9 +278,9 @@ fn claim_inner(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, lease_expires_at, proposals_submitted, \
-         applied, rejected) \
+         applied, rejected, actor) \
          VALUES (?1, ?2, ?3, 'ambient', ?4, ?5, 'running', 'pending', 0, 0, 0, 0, ?6, ?7, ?8, \
-                 0, 0, 0)",
+                 0, 0, 0, ?9)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -192,6 +290,7 @@ fn claim_inner(
             reservation.total_tokens as i64,
             reservation.output_tokens as i64,
             lease_expires_at,
+            actor,
         ],
     )
     .map_err(|e| format!("runs: {e}"))?;
@@ -217,12 +316,15 @@ fn claim_inner(
     )
     .map_err(|e| format!("budget_days: {e}"))?;
 
-    // The singleton. A second concurrent dispatcher fails the primary key
-    // here rather than discovering the conflict after spawning a subprocess.
+    // The lease. What enforces the ceiling is the transaction this statement
+    // is inside: `budget::gate` counted the live leases a few lines up, under
+    // the same `BEGIN IMMEDIATE`, so no other dispatcher can have inserted one
+    // in between. The primary key is `run_id` now and stops nothing but a run
+    // leasing twice — the ceiling is a counted number, not a column.
     conn.execute(
         "INSERT INTO ambient_dispatch \
-         (singleton_key, run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
-         VALUES ('ambient', ?1, ?2, ?3, ?4, ?5, ?6)",
+         (run_id, vault_id, store_uuid, lane, acquired_at, lease_expires_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -232,7 +334,7 @@ fn claim_inner(
             lease_expires_at
         ],
     )
-    .map_err(|e| format!("ambient_dispatch (the one ambient lease): {e}"))?;
+    .map_err(|e| format!("ambient_dispatch (this run's lease): {e}"))?;
 
     conn.execute(
         "INSERT INTO ambient_gate_state (vault_id, store_uuid, lane, consecutive_failures, \
@@ -537,6 +639,19 @@ fn finalize_inner(
 /// is either still `pending` (the claim never committed) or owned by exactly
 /// one run whose lease will expire and free it. It never assumes the run cost
 /// nothing.
+///
+/// **One production caller, and it is load-bearing**: `ingest::ambient`'s
+/// supervisor tick, ahead of the pause (see `sweep_abandoned` for why it sits
+/// there). Until M33b.1 this function had NO caller at all and the
+/// `ambient_dispatch` singleton primary key was accidentally covering for it,
+/// by turning every claim after a crash into a rolled-back error. Retiring
+/// the singleton without wiring this would have replaced a loud wedge with a
+/// silent loss: runs `running` forever, their items `claimed` and never
+/// re-offered, their reservations debited against a day that never learns its
+/// spend was unknown.
+///
+/// It reads `runs`, never `ambient_dispatch` — a lease row is a claim-time
+/// mutex, and the run row is the thing with accounting on it.
 pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<usize, String> {
     let expired: Vec<String> = {
         let mut statement = conn
@@ -566,6 +681,62 @@ pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<u
     Ok(expired.len())
 }
 
+/// The root's ceiling stops the chain (M36.6, settled design decision 5).
+///
+/// Hops bill to the root — `parent_run_id` is the migration that made both
+/// true — so the chain's recorded spend is summed over the ROOT's whole tree
+/// and a hop that would extend a spent chain is refused before any child
+/// exists, like every other hop rule. The allowance is the day's per-run
+/// ambient ceiling: a chain is one job fanned out, and what one background
+/// run may spend is what its whole chain may spend.
+///
+/// Enforcement grows as rows land, and that is stated rather than hidden:
+/// an attended caller's own row is only written when it FINISHES, so a
+/// chain of still-running attended turns sums what its finished members
+/// spent. The two-hop budget bounds what that window can cost.
+pub fn refuse_if_chain_spent(
+    conn: &Connection,
+    caller_run_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    let root: String = conn
+        .query_row(
+            "WITH RECURSIVE up(run_id, parent) AS ( \
+               SELECT run_id, parent_run_id FROM runs WHERE run_id = ?1 \
+               UNION ALL \
+               SELECT r.run_id, r.parent_run_id FROM runs r JOIN up ON up.parent = r.run_id \
+             ) SELECT run_id FROM up WHERE parent IS NULL",
+            [caller_run_id],
+            |row| row.get(0),
+        )
+        // No row yet (the caller is mid-run and unfinished): the caller IS
+        // the root as far as the table can see.
+        .unwrap_or_else(|_| caller_run_id.to_string());
+    let spent: i64 = conn
+        .query_row(
+            "WITH RECURSIVE chain(run_id) AS ( \
+               SELECT run_id FROM runs WHERE run_id = ?1 \
+               UNION ALL \
+               SELECT r.run_id FROM runs r JOIN chain c ON r.parent_run_id = c.run_id \
+             ) SELECT coalesce(sum(input_tokens + output_tokens), 0) FROM runs \
+             WHERE run_id IN (SELECT run_id FROM chain)",
+            [&root],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("chain spend: {e}"))?;
+    let ceiling = super::budget::ensure_day(conn, now)?
+        .ceilings
+        .max_ambient_run_tokens;
+    if (spent as u64) >= ceiling {
+        return Err(format!(
+            "refused: this chain has already spent {spent} tokens, at or past the \
+             {ceiling}-token ceiling its root ({root}) runs under — a spent chain stops, \
+             however many hops it has left"
+        ));
+    }
+    Ok(())
+}
+
 /// Record one attended run. Metered, never gated: no reservation, no lease,
 /// no budget debit, and no way for a full day to stop it.
 #[allow(clippy::too_many_arguments)]
@@ -577,6 +748,8 @@ pub fn meter_attended(
     outcome: RunOutcome,
     usage: Option<Usage>,
     facts: Option<&RunFacts>,
+    actor: Option<&str>,
+    parent_run_id: Option<&str>,
     started_at: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -584,8 +757,10 @@ pub fn meter_attended(
     conn.execute(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
          outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
-         reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected) \
-         VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, 0)",
+         reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
+         actor, parent_run_id) \
+         VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, \
+                 0, ?12, ?13)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -598,6 +773,8 @@ pub fn meter_attended(
             counted.output_tokens as i64,
             counted.cache_read as i64,
             counted.cache_write as i64,
+            actor,
+            parent_run_id,
         ],
     )
     .map_err(|e| format!("runs (attended): {e}"))?;
@@ -777,6 +954,54 @@ mod tests {
         }
     }
 
+    /// One finished run row, raw — enough for the chain walk, which reads
+    /// only identity, parentage and the two token columns.
+    fn seed_run(conn: &Connection, vault: &str, run_id: &str, parent: Option<&str>, tokens: i64) {
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
+             outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+             reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, \
+             rejected, parent_run_id) \
+             VALUES (?1, ?2, 'store', 'attended', 'agent', '2026-08-09T01:00:00Z', \
+                     '2026-08-09T01:01:00Z', 'succeeded', 'exact', ?3, 0, 0, 0, 0, 0, 0, 0, 0, ?4)",
+            rusqlite::params![run_id, vault, tokens, parent],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_spent_chain_refuses_its_next_hop_and_names_the_root() {
+        let (dir, conn, vault) = fixture("dispatch-chain-ceiling");
+        let _lock = status::test_lock();
+        status::clear();
+        // Root spent past the 20k per-run ambient ceiling; the caller is a
+        // CHILD, so the walk has to find the root and sum the whole tree.
+        seed_run(&conn, &vault, "root-1", None, 19_000);
+        seed_run(&conn, &vault, "child-1", Some("root-1"), 2_000);
+        let err = refuse_if_chain_spent(&conn, "child-1", at("2026-08-09T02:00:00Z")).unwrap_err();
+        assert!(err.contains("root-1"), "{err}");
+        assert!(err.contains("21000 tokens"), "{err}");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fresh_chain_and_an_unfinished_caller_both_pass_the_chain_gate() {
+        let (dir, conn, vault) = fixture("dispatch-chain-fresh");
+        let _lock = status::test_lock();
+        status::clear();
+        // No row at all — an attended caller mid-run whose row lands only at
+        // finish. The gate has nothing to sum and lets the hop through;
+        // stated in the fn docs rather than hidden.
+        refuse_if_chain_spent(&conn, "never-recorded", at("2026-08-09T02:00:00Z")).unwrap();
+        // A chain with real rows under the ceiling passes too.
+        seed_run(&conn, &vault, "root-2", None, 1_000);
+        seed_run(&conn, &vault, "child-2", Some("root-2"), 1_000);
+        refuse_if_chain_spent(&conn, "child-2", at("2026-08-09T02:00:00Z")).unwrap();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_claim_reserves_leases_and_claims_in_one_breath() {
         let (dir, conn, vault) = fixture("dispatch-claim");
@@ -791,6 +1016,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             now,
         )
         .unwrap() else {
@@ -820,11 +1046,14 @@ mod tests {
     }
 
     #[test]
-    fn global_ambient_concurrency_never_exceeds_one() {
-        // Two vaults, one subscription, one background slot. The second
-        // dispatch is refused by the gate rather than by luck.
-        let (dir, conn, vault_a) = fixture("dispatch-singleton");
-        let other = testutil::temp_vault("dispatch-singleton-b");
+    fn global_ambient_concurrency_never_exceeds_the_configured_ceiling() {
+        // Two vaults, one subscription, and — at the SHIPPED default of one —
+        // one background slot. The second dispatch is refused by the gate
+        // rather than by luck, and this is the test that used to be called
+        // `..._never_exceeds_one`: converted, not deleted, because "today's
+        // behaviour is the default behaviour" is a claim that needs a test.
+        let (dir, conn, vault_a) = fixture("dispatch-ceiling-default");
+        let other = testutil::temp_vault("dispatch-ceiling-default-b");
         let vault_b = crate::runtime::scope::register(&conn, &other).unwrap();
         let _lock = status::test_lock();
         status::clear();
@@ -840,6 +1069,7 @@ mod tests {
                 "filed",
                 small(),
                 &["a.md".into()],
+                None,
                 now
             )
             .unwrap(),
@@ -852,6 +1082,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -864,9 +1095,388 @@ mod tests {
             SchedulerState::Pending,
             "a deferred dispatch claims nothing"
         );
+
+        // Raise the ceiling and the SAME refusal becomes a grant — which is
+        // the whole of M33b.1: the number moved out of the primary key.
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault_b,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                None,
+                now
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn at_a_ceiling_of_two_the_second_lease_is_granted_and_the_third_is_refused() {
+        // The ceiling is a number, so N is a real question and not a rewording
+        // of "one". Three claims, one vault: two land, the third is deferred
+        // by the gate — and the refusal is the same `ambient_busy` a single
+        // run has always been refused with, because it is the same rule.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-two");
+        let _lock = status::test_lock();
+        status::clear();
+        for key in ["a.md", "b.md", "c.md"] {
+            seed_item(&conn, &vault, key);
+        }
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+
+        for key in ["a.md", "b.md"] {
+            assert!(
+                matches!(
+                    claim(
+                        &conn,
+                        &vault,
+                        "store",
+                        "filed",
+                        small(),
+                        &[key.into()],
+                        None,
+                        now
+                    )
+                    .unwrap(),
+                    Dispatched::Started(_)
+                ),
+                "{key} fits under a ceiling of two"
+            );
+        }
+        assert_eq!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["c.md".into()],
+                None,
+                now
+            )
+            .unwrap(),
+            Dispatched::Deferred(vec![GateReason::AmbientBusy]),
+            "the third is refused BY THE GATE — it does not start and then lose a race"
+        );
+
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leases, 2, "exactly the ceiling, never the ceiling plus one");
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert_eq!(
+            day.reserved_total_tokens,
+            2 * 5_000,
+            "each lease reserves its own tokens; the day owes both"
+        );
+        assert_eq!(day.ambient_runs_started, 2);
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "c.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "a deferred dispatch claims nothing, at any ceiling"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_paused_agent_is_refused_by_the_gate_and_claims_nothing() {
+        // M33b.5, spec §6: if a paused agent can still be dispatched, the
+        // pause is a lie. This is the AMBIENT path — every background run in
+        // the app comes through `claim`, so refusing here refuses ingest,
+        // maintenance and assembly at once — and the refusal is the gate's,
+        // in the same transaction as every other one, so a deferred agent
+        // claims no item, takes no lease and reserves no tokens.
+        let (dir, conn, vault) = fixture("dispatch-agent-paused");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+
+        let refused = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            Some("process:digest"),
+            now,
+        )
+        .unwrap();
+        assert_eq!(refused, Dispatched::Deferred(vec![GateReason::AgentPaused]));
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "a deferred dispatch claims nothing"
+        );
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert_eq!(day.reserved_total_tokens, 0, "and reserves nothing");
+        assert_eq!(day.ambient_runs_started, 0);
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            leases, 0,
+            "and takes no lease the ceiling would have to hold"
+        );
+
+        // Nobody ELSE is paused: the pause is about one colleague, and a
+        // fleet-wide stop is a different control with a different sentence.
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                Some("process:scout"),
+                now
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resuming_one_agent_under_the_global_pause_still_starts_nothing() {
+        // The two pauses are collected separately and either is enough. A
+        // person who resumed one agent while everything is stopped has not
+        // started it, and the deferral says which control is holding it.
+        let (dir, conn, vault) = fixture("dispatch-agent-resume-under-global");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        crate::runtime::settings::set_global_pause(&conn, true).unwrap();
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", true).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+        let call = |conn: &Connection| {
+            claim(
+                conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["a.md".into()],
+                Some("process:digest"),
+                now,
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            call(&conn),
+            Dispatched::Deferred(vec![GateReason::AgentPaused, GateReason::GlobalPause]),
+            "both are true and both are named"
+        );
+
+        crate::runtime::settings::set_agent_paused(&conn, &vault, "process:digest", false).unwrap();
+        assert_eq!(
+            call(&conn),
+            Dispatched::Deferred(vec![GateReason::GlobalPause]),
+            "resuming the agent did not start it — the global pause still wins"
+        );
+
+        crate::runtime::settings::set_global_pause(&conn, false).unwrap();
+        assert!(
+            matches!(call(&conn), Dispatched::Started(_)),
+            "and only with both released does it run"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_expired_lease_does_not_count_toward_the_ceiling() {
+        // The reasoning is v3's, unchanged: an expired lease is the
+        // crash-recovery path, and counting it as busy would wedge ambient
+        // work forever after one kill. What changed is the OUTCOME — under
+        // the singleton primary key this claim rolled back with an error,
+        // because the stale row still owned the only key. Now it dispatches,
+        // and the stale run is still recoverable on its own row.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-expired");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        let Dispatched::Started(stale) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap() else {
+            panic!("the first claim must start");
+        };
+        assert_eq!(stale.lease_expires_at, "2026-08-09T10:20:00.000Z");
+
+        // Nothing finalized it and nothing swept it. At the DEFAULT ceiling of
+        // one, the next claim still proceeds.
+        assert!(matches!(
+            claim(
+                &conn,
+                &vault,
+                "store",
+                "filed",
+                small(),
+                &["b.md".into()],
+                None,
+                at("2026-08-09T10:21:00Z"),
+            )
+            .unwrap(),
+            Dispatched::Started(_)
+        ));
+        let leases: i64 = conn
+            .query_row("SELECT count(*) FROM ambient_dispatch", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leases, 2, "the stale row survives — it is the sweep's job");
+
+        // And the abandoned run's accounting is still owed and still
+        // recoverable: the count did not free it, the sweep does.
+        assert_eq!(
+            recover_expired_leases(&conn, at("2026-08-09T10:21:00Z")).unwrap(),
+            1,
+            "exactly the stale one — the live lease is not swept"
+        );
+        let day = budget::read_day(&conn, "2026-08-09T00:00:00.000Z").unwrap();
+        assert!(
+            !day.accounting_exact,
+            "the abandoned run's spend is unknown, not zero"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "and its work came back"
+        );
+        status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_unknown_usage_path_is_unchanged_with_several_leases_held() {
+        // The invariant M33b.1 had to preserve verbatim: missing usage never
+        // becomes zero. One of two concurrent runs comes back with nothing to
+        // report — its work requeues, the DAY is marked unknown, ambient is
+        // paused — and the sibling lease is untouched, because accounting is
+        // per run row and always was.
+        let (dir, conn, vault) = fixture("dispatch-ceiling-unknown");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        seed_item(&conn, &vault, "b.md");
+        crate::runtime::settings::set_ambient_concurrency(&conn, 2).unwrap();
+        let now = at("2026-08-09T10:00:00Z");
+        let Dispatched::Started(first) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            None,
+            now,
+        )
+        .unwrap() else {
+            panic!("the first claim must start");
+        };
+        let Dispatched::Started(second) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["b.md".into()],
+            None,
+            now,
+        )
+        .unwrap() else {
+            panic!("the second claim must start");
+        };
+
+        finalize(
+            &conn,
+            &first.run_id,
+            RunOutcome::AbandonedUsageUnknown,
+            None,
+            None,
+            ItemOutcome::Requeue,
+            at("2026-08-09T10:05:00Z"),
+        )
+        .unwrap();
+
+        let day = budget::read_day(&conn, &first.window_start_utc).unwrap();
+        assert!(
+            !day.accounting_exact,
+            "a day that lost one run's spend is not a day with budget left"
+        );
+        assert!(!status::ambient_allowed(), "and ambient work is paused");
+        assert_eq!(
+            day.reserved_total_tokens, 5_000,
+            "only the abandoned run's reservation was released; the live one still owes"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "the abandoned run's work requeued"
+        );
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "b.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Claimed,
+            "and the sibling run still owns its own"
+        );
+        let held: Vec<String> = {
+            let mut statement = conn
+                .prepare("SELECT run_id FROM ambient_dispatch ORDER BY run_id")
+                .unwrap();
+            let rows = statement
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            rows
+        };
+        assert_eq!(
+            held,
+            vec![second.run_id.clone()],
+            "one lease released, one still held — the DELETE is per run"
+        );
+        status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -883,6 +1493,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -950,6 +1561,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1000,6 +1612,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             at("2026-08-09T11:00:00Z"),
         )
         .unwrap() else {
@@ -1047,6 +1660,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1098,6 +1712,7 @@ mod tests {
                 "filed",
                 small(),
                 &["a.md".into()],
+                None,
                 now,
             )
             .unwrap() else {
@@ -1141,6 +1756,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -1167,6 +1783,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1214,6 +1831,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1263,6 +1881,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1321,6 +1940,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1367,6 +1987,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:05:00Z"),
         )
         .unwrap();
@@ -1397,6 +2018,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap() else {
@@ -1450,6 +2072,8 @@ mod tests {
                 cache_write: 0,
             }),
             None,
+            None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -1474,6 +2098,142 @@ mod tests {
     }
 
     #[test]
+    fn a_run_records_the_actor_its_spawn_site_named_and_absent_stays_absent() {
+        // M33.1 — attribution is recorded at INSERT and never backfilled.
+        // Both row-creating paths carry it: the ambient claim, where the
+        // construct that took the lease owns the row, and the attended
+        // meter, where the request's actor rides through. A spawn site that
+        // named nobody leaves NULL, which the fleet reads as
+        // "unattributed" — a guessed attribution in the one table whose
+        // whole job is honesty is worse than an admitted gap.
+        let (dir, conn, vault) = fixture("dispatch-actor");
+        let _lock = status::test_lock();
+        status::clear();
+        let now = at("2026-08-09T10:00:00Z");
+
+        seed_item(&conn, &vault, "a.md");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".to_string()],
+            Some(crate::ingest::driver::ACTOR),
+            now,
+        )
+        .unwrap() else {
+            panic!("a quiet day must dispatch");
+        };
+
+        // The attended path takes its actor as an argument the caller mints:
+        // `process:<slug>` for an agent record's run, absent for bare chat.
+        meter_attended(
+            &conn,
+            "chat-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:weekly-digest"),
+            None,
+            now,
+            at("2026-08-09T10:01:00Z"),
+        )
+        .unwrap();
+        meter_attended(
+            &conn,
+            "chat-2",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            None,
+            None,
+            now,
+            at("2026-08-09T10:02:00Z"),
+        )
+        .unwrap();
+
+        let actor_of = |run_id: &str| -> Option<String> {
+            conn.query_row("SELECT actor FROM runs WHERE run_id = ?1", [run_id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            actor_of(&lease.run_id).as_deref(),
+            Some(crate::ingest::driver::ACTOR),
+            "the construct that claimed the lease owns the run row"
+        );
+        assert_eq!(
+            actor_of("chat-1").as_deref(),
+            Some("process:weekly-digest"),
+            "an agent record's run is attributed to the record"
+        );
+        assert_eq!(
+            actor_of("chat-2"),
+            None,
+            "and a run nobody named stays unattributed rather than guessed"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_records_the_run_that_started_it_and_a_root_stays_null() {
+        // M34.3 — the chain is walkable from the table alone. NULL is a
+        // root, and every run before this shipped was one; nothing backfills
+        // and nothing guesses, exactly like `actor`.
+        let (_dir, conn, vault) = fixture("dispatch-parent");
+        let now = at("2026-08-09T10:00:00Z");
+        meter_attended(
+            &conn,
+            "root-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:librarian"),
+            None,
+            now,
+            at("2026-08-09T10:01:00Z"),
+        )
+        .unwrap();
+        meter_attended(
+            &conn,
+            "child-1",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            Some("process:contradiction-hunter"),
+            Some("root-1"),
+            now,
+            at("2026-08-09T10:02:00Z"),
+        )
+        .unwrap();
+        let parent_of = |run_id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT parent_run_id FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(parent_of("root-1"), None, "a root run has no parent");
+        assert_eq!(
+            parent_of("child-1").as_deref(),
+            Some("root-1"),
+            "a handed-to run names the run whose tool call started it"
+        );
+    }
+
+    #[test]
     fn a_gate_refusal_leaves_no_run_no_lease_and_no_claim() {
         let (dir, conn, vault) = fixture("dispatch-deferred");
         let _lock = status::test_lock();
@@ -1488,6 +2248,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             now,
         )
         .unwrap();
@@ -1534,6 +2295,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap();
@@ -1558,6 +2320,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             at("2026-08-09T10:00:00Z"),
         );
     }
@@ -1579,6 +2342,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".to_string()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1600,7 +2364,7 @@ mod tests {
 
     /// At every dispatch kill point the item is either PENDING or owned by
     /// exactly one recoverable lease, and global ambient concurrency never
-    /// exceeds one.
+    /// exceeds the ceiling — which here is the shipped default of one.
     ///
     /// This is the acceptance row that makes the whole claim transaction
     /// worth its complexity: without it, a kill between "reserve" and "claim"
@@ -1761,6 +2525,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap();

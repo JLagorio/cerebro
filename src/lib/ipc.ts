@@ -455,6 +455,113 @@ export function pipelineOverview(vault: string): Promise<PipelineOverview> {
   return inTauri() ? invokeTauri('pipeline_overview', { vault }) : mock.pipelineOverview(vault);
 }
 
+// --- The fleet read surface (M33.2) ----------------------------------------
+
+import type {
+  FleetRun,
+  FleetCostComponent,
+  FleetAssemblyMetrics,
+  FleetRunDetail,
+  FleetActorSummary,
+  FleetFilter,
+} from './mockIpc';
+
+export type {
+  FleetRun,
+  FleetCostComponent,
+  FleetAssemblyMetrics,
+  FleetRunDetail,
+  FleetActorSummary,
+  FleetFilter,
+};
+
+/**
+ * One page of run history, newest first (M33.2).
+ *
+ * Takes no vault: the fleet spans them, and a caller that wants one vault's
+ * runs says so in the filter. REFUSES when there is no runtime database —
+ * the section renders "unavailable", which is not "no runs".
+ */
+export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
+  return inTauri() ? invokeTauri('fleet_runs', { filter }) : mock.fleetRunsPage(filter);
+}
+
+/** One run and whatever the governance tables recorded about it. An unknown
+ * id is refused, so a typo and an unmetered run never look the same. */
+export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
+  return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
+}
+
+/** What one actor's runs add up to (M33.6). An actor with no runs answers
+ * with zeros and a null last outcome rather than refusing — "no runs yet" is
+ * what a freshly written Agent record's dossier has to be able to say. */
+export function fleetActorSummary(actor: string): Promise<FleetActorSummary> {
+  return inTauri() ? invokeTauri('fleet_actor_summary', { actor }) : mock.fleetActorSummary(actor);
+}
+
+// --- Job ledgers (M34.2.2) --------------------------------------------------
+
+import type { JobLedgers } from './mockIpc';
+
+export type { JobLedgers };
+
+/**
+ * One vault's three scheduling ledgers. REFUSES without a runtime database —
+ * an empty ledger reads as "nothing ever ran", which would re-fire every
+ * schedule, so the runner must treat this error as "do not run yet".
+ */
+export function jobLedgerRead(vault: string): Promise<JobLedgers> {
+  return inTauri() ? invokeTauri('job_ledger_read', { vault }) : mock.jobLedgerRead(vault);
+}
+
+/** Record a run key and learn whether the record was FRESH — false means this
+ * exact fire was already answered (another window, an earlier session) and
+ * the caller must not spawn. The two-window arbitration lives in the store,
+ * not in a renderer promise to be quick. */
+export function jobLedgerClaim(
+  vault: string,
+  ledger: 'attempts' | 'skillRuns',
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('job_ledger_claim', { vault, ledger, key, runKey })
+    : mock.jobLedgerClaim(vault, ledger, key, runKey);
+}
+
+/** Surrender a claim this caller holds — the deferred runner's revert, so a
+ * budget refusal never eats the fire it refused. Conditional on the exact
+ * runKey: a claim another window re-won is never destroyed. */
+export function jobLedgerUnclaim(
+  vault: string,
+  ledger: 'attempts' | 'skillRuns',
+  key: string,
+  runKey: string,
+): Promise<boolean> {
+  return inTauri()
+    ? invokeTauri('job_ledger_unclaim', { vault, ledger, key, runKey })
+    : mock.jobLedgerUnclaim(vault, ledger, key, runKey);
+}
+
+/** Overwrite the trigger cooldown clock. No verdict — a clock is not a claim. */
+export function jobLedgerStamp(vault: string, key: string, runKey: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('job_ledger_stamp', { vault, ledger: 'triggerRuns', key, runKey })
+    : mock.jobLedgerStamp(vault, 'triggerRuns', key, runKey);
+}
+
+/** One-time import from the localStorage era. Keys the store already holds
+ * are kept — it has been the arbiter since it existed. Returns how many
+ * landed. */
+export function jobLedgerImport(
+  vault: string,
+  entries: readonly { ledger: string; key: string; runKey: string }[],
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('job_ledger_import', { vault, entries })
+    : mock.jobLedgerImport(vault, entries);
+}
+
 /**
  * Where the ingest scheduler holds one item (M26.4j).
  *
@@ -487,9 +594,35 @@ export function askQuestion(
     : mock.askQuestion(vault, question, aliases, intendedUse);
 }
 
-/** Subscription-wide, and persisted: one CLI account, one pause. */
+/**
+ * Subscription-wide, and persisted: one CLI account, one background.
+ *
+ * The WIDER of two pauses since M33b.5 — `setAgentPaused` stops one agent
+ * wherever it would have been started from. Neither overrides the other: both
+ * are collected at the gate and either is enough to refuse, so resuming one
+ * agent while this is on starts nothing.
+ */
 export function setGlobalPause(paused: boolean): Promise<void> {
   return inTauri() ? invokeTauri('set_global_pause', { paused }) : mock.setGlobalPause(paused);
+}
+
+/**
+ * How many background runs may be live at once (M33b.2). Subscription-wide
+ * and persisted, like the pause; 1 unless somebody raised it.
+ *
+ * The CURRENT value and the cap arrive on `pipelineOverview` rather than
+ * through a getter of their own — the section already does one read and owns
+ * one failure, and a second round trip would give the ceiling its own way to
+ * be unavailable. This is the write half only.
+ *
+ * **It rejects rather than clamping.** Below 1 or above the process cap comes
+ * back as a thrown refusal naming which end was hit, so the number on screen
+ * can never disagree with the number in force.
+ */
+export function setAmbientConcurrency(ceiling: number): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_ambient_concurrency', { ceiling })
+    : mock.setAmbientConcurrency(ceiling);
 }
 
 /** Per vault, because somebody may want scheduled agents at work and nothing
@@ -576,4 +709,58 @@ export function triggerRecordPack(
   return inTauri()
     ? invokeTauri('trigger_record_pack', { vault, repoRoot, packPath, result })
     : mock.triggerRecordPack(vault, repoRoot, packPath, result);
+}
+
+// --- The fleet roster (M33b.3) ---------------------------------------------
+
+/**
+ * Every actor the run table has attributed anything to, summed.
+ *
+ * Deliberately NOT the list of agents: agents are records in a vault, and the
+ * roster joins the two so it can say which side each row came from — an agent
+ * that has never run, and work that ran under no agent record. Taking no
+ * vault, for the same reason `fleetRuns` takes none.
+ *
+ * An empty array is measured-at-zero. A missing runtime database REFUSES, and
+ * the roster renders that as unavailable rather than as an empty team.
+ */
+export function fleetActorSummaries(): Promise<FleetActorSummary[]> {
+  return inTauri() ? invokeTauri('fleet_actor_summaries') : mock.fleetActorSummaries();
+}
+
+// --- One agent's own pause (M33b.5) -----------------------------------------
+
+/**
+ * Which agents are paused in this vault.
+ *
+ * Vault-scoped, unlike `setGlobalPause`, and for the opposite reason: the
+ * global pause is a property of one CLI subscription, spent once however many
+ * vaults debit it, while an agent is a RECORD — two vaults may each hold a
+ * `digest` without them being the same colleague.
+ *
+ * An EMPTY array is measured-at-zero: the rows were read and nobody is paused.
+ * A missing runtime database REFUSES, and the roster renders that as
+ * unavailable rather than as a fleet it is sure is running.
+ */
+export function pausedAgents(vault: string): Promise<string[]> {
+  return inTauri() ? invokeTauri('paused_agents', { vault }) : mock.pausedAgents(vault);
+}
+
+/**
+ * Stop or restart ONE agent, without deleting its record (M33b.5).
+ *
+ * **It THROWS rather than no-opping** when there is nowhere to store the
+ * answer. A pause that silently failed to persist would be the worst outcome
+ * this control has: the button would look pressed and the agent would keep
+ * running.
+ *
+ * Resuming is not the same as starting. The global pause is collected
+ * separately and either is enough to refuse a run, so an agent resumed while
+ * the background is paused stays stopped — and the roster row says which of
+ * the two is holding it.
+ */
+export function setAgentPaused(vault: string, actor: string, paused: boolean): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_agent_paused', { vault, actor, paused })
+    : mock.setAgentPaused(vault, actor, paused);
 }

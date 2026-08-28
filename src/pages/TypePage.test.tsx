@@ -105,14 +105,14 @@ describe('TypePage — Records tab', () => {
     // Delete moved into the floating view-settings menu with the rest of the
     // configuration — no destructive affordance sits in the header.
     fireEvent.click(screen.getByTestId('view-control-settings'));
-    expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete database' })).toBeTruthy();
   });
 
   it('offers rename and delete for custom types', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Person' }} />);
     expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe('Change display name');
     fireEvent.click(screen.getByTestId('view-control-settings'));
-    expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete database' })).toBeTruthy();
   });
 
   /**

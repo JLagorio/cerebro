@@ -104,6 +104,61 @@ describe('DetailPanel', () => {
     expect(screen.getByText('field-ops')).toBeTruthy();
   });
 
+  // M34.5.3 — a cached copy says its own freshness. Gated on the fetch
+  // bookkeeping properties, never on `type: Source`; extreme dates keep the
+  // assertions clock-proof without pinning the system time.
+  it('a cached copy past its refresh date says stale, and when it was fetched', () => {
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'sources/issues/phx-421.md',
+          title: 'PHX-421',
+          properties: { stale_after: '2020-01-01', fetched_at: '2019-12-20T10:00:00Z' },
+        }),
+      ],
+    });
+    useUiStore.setState({ detailPath: 'sources/issues/phx-421.md' });
+    render(<DetailPanel />);
+    const line = screen.getByTestId('detail-source-freshness');
+    expect(line.textContent).toContain('stale since 2020-01-01');
+    expect(line.textContent).toContain('fetched 2019-12-20');
+  });
+
+  it('a copy nobody gave a refresh date says so — and an unrecorded fetch is said, not zero', () => {
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'sources/web/wiki.md',
+          title: 'Wiki page',
+          properties: { fetched_at: '2026-08-20T10:00:00Z' },
+        }),
+        makeEntry({
+          path: 'sources/web/unstamped.md',
+          title: 'Unstamped',
+          properties: { stale_after: '2999-01-01' },
+        }),
+      ],
+    });
+    useUiStore.setState({ detailPath: 'sources/web/wiki.md' });
+    const { unmount } = render(<DetailPanel />);
+    expect(screen.getByTestId('detail-source-freshness').textContent).toContain(
+      'no refresh date set',
+    );
+    unmount();
+    useUiStore.setState({ detailPath: 'sources/web/unstamped.md' });
+    render(<DetailPanel />);
+    const line = screen.getByTestId('detail-source-freshness');
+    expect(line.textContent).toContain('fresh until 2999-01-01');
+    expect(line.textContent).toContain('fetch not recorded');
+  });
+
+  it('a record without fetch bookkeeping gets no freshness line at all', () => {
+    render(<DetailPanel />);
+    expect(screen.queryByTestId('detail-source-freshness')).toBeNull();
+  });
+
   it('closes on Escape', () => {
     render(<DetailPanel />);
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -350,6 +405,36 @@ describe('DetailPanel', () => {
     await user.click(screen.getByTestId('detail-knowledge-toggle'));
     expect(screen.getByTestId('related-knowledge')).toBeTruthy();
     expect(screen.queryByTestId('entity-dossier')).toBeNull();
+  });
+
+  // M33a.6 — the gate above decides WHICH surface answers, and for a while it
+  // also decided whether you could ask anything at all: `Ask the base` shipped
+  // on the related list only, so the records the base knew most about were
+  // exactly the ones with no way to question it. Asserted on both arms of the
+  // gate, because that is what let the two drift apart.
+  it('offers Ask the base on whichever knowledge surface the gate picked', async () => {
+    const user = userEvent.setup();
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
+
+    cleanup();
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'knowledge/systems/first-run.md',
+          title: 'First-run flow',
+          relationships: { about: ['fld-1'] },
+        }),
+      ],
+    });
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('entity-dossier')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
+    // Still distinct from the write-side act it used to sit alone beside.
+    expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
   });
 });
 

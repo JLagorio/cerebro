@@ -1,5 +1,6 @@
 import { runMockAgent, type MockRun } from './mockAgent';
 import type { AgentEvent, AgentStatus, CliWorkspace, McpInfo, UiAction } from './types';
+import { refuseIfAgentPaused } from '@/lib/mockIpc';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -91,6 +92,14 @@ export interface RunOptions {
    * unrestricted. Enforced in Rust against the bearer the child presents, so
    * an agent cannot talk its way out of it. */
   scope?: string[] | null;
+  /** Vault-relative folders this run may READ inside (M34.4). Same Option
+   * semantics as scope; its own axis, enforced in Rust on the same bearer. */
+  readScope?: string[] | null;
+  /** Which budget lane an UNATTENDED run bills to (M34.2.4) — the job
+   * runner names its job's kind. Present, the run claims a dispatcher lease
+   * and faces the ambient gate; the answer can be `{ deferred }` and the
+   * caller must read it. Absent keeps the legacy attended booking. */
+  lane?: string;
   mcp: McpInfo | null;
 }
 
@@ -100,10 +109,58 @@ export interface RunOptions {
 const mockRuns = new Map<number, MockRun>();
 let mockRunSeq = 0;
 
-/** Start a run. Resolves to the RUN ID whose tag every event of this run
- * carries — the same id stopAgent reports back when the run is killed. */
-export async function runAgent(vault: string, options: RunOptions): Promise<number> {
+/**
+ * What starting a run hands back (M33.7).
+ *
+ * `run` is the process-local tag every event of this run carries and the id
+ * `stopAgent` takes — unchanged. `durableId` is the id the `runs` row is
+ * keyed by, so a finished run in the status bar can open its own fleet
+ * detail.
+ *
+ * `durableId` is NULL in the browser, and that is the honest answer rather
+ * than a placeholder: there is no runtime database there, so no row exists to
+ * point at. It is the same "this device only" state a log entry written
+ * before M33.7 is in.
+ */
+export interface RunHandle {
+  run: number;
+  durableId: string | null;
+}
+
+/**
+ * What starting a run answers (M34.2.4): a handle, or a typed deferral.
+ *
+ * `deferred` is the ambient gate saying "not now" — over a ceiling, paused,
+ * accounting unknown — and only an unattended run that named a `lane` can
+ * receive it. It is a RESULT the caller must read, not an error to toast
+ * away: the runner logs one honest row and surrenders the fire key so the
+ * run happens when the window resets.
+ */
+export type RunStart = RunHandle | { deferred: string[] };
+
+/** Narrow a RunStart to its handle. Attended callers — every call without a
+ * `lane` — are never gated and never deferred, so reaching a deferral there
+ * is a contract break: thrown loudly rather than rendered as a silent
+ * no-run. Unattended callers must NOT use this — they read the deferral. */
+export function startedOrThrow(start: RunStart): RunHandle {
+  if ('deferred' in start) {
+    throw new Error(`run deferred by the budget gate: ${start.deferred.join(', ')}`);
+  }
+  return start;
+}
+
+/** Start a run. Resolves to the process tag and, where one exists, the
+ * durable id of the row this run will be recorded in — or to a typed
+ * deferral when the ambient gate refused an unattended, laned run. */
+export async function runAgent(vault: string, options: RunOptions): Promise<RunStart> {
   if (!inTauri()) {
+    // M33b.5 — the browser mirrors the Rust guard rather than skipping it. In
+    // Tauri the refusal lives in `run_agent`, ahead of the token and the
+    // child; here there is no backend to reach, so a paused agent would run
+    // in dev and in every browser-mode test unless this stands. AGENTS.md
+    // makes that parity a rule, and spec §6 makes this particular one the
+    // point of the phase.
+    refuseIfAgentPaused(vault, options.actor);
     const run = ++mockRunSeq;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
@@ -119,9 +176,11 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       { onUiAction: emitUiAction },
     );
     mockRuns.set(run, mock);
-    return run;
+    // No runtime database in the browser, so no durable row and no id to
+    // invent for it.
+    return { run, durableId: null };
   }
-  return invokeTauri<number>('run_agent', {
+  return invokeTauri<{ run: number; run_id: string } | { deferred: string[] }>('run_agent', {
     vault,
     request: {
       message: options.message,
@@ -134,12 +193,16 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       allowed_tools: options.allowedTools ?? null,
+      read_scope: options.readScope ?? null,
       connector_names: options.connectorNames ?? null,
       scope: options.scope ?? null,
+      lane: options.lane ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
-  });
+  }).then((result) =>
+    'deferred' in result ? result : { run: result.run, durableId: result.run_id },
+  );
 }
 
 /**

@@ -29,6 +29,7 @@ pub mod vault;
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -209,6 +210,183 @@ fn pipeline_overview(
     )
 }
 
+/// What starting a run hands back (M33.7).
+///
+/// EXTENDED, not replaced: `run` is the process-local tag every event of this
+/// run carries and the id `stop_agent` takes, exactly as before. `run_id` is
+/// the DURABLE id M31.2a mints before the token — the one the `runs` row, the
+/// grant, the proposals and the cost components all join on.
+///
+/// The renderer needed both. Its localStorage log has always been keyed by
+/// the process tag, which restarts at zero every launch and therefore cannot
+/// address a row in a database; carrying the durable id beside it is what
+/// lets a finished run in the status bar open its own fleet detail.
+#[derive(Debug, Serialize)]
+pub struct RunHandle {
+    pub run: u64,
+    pub run_id: String,
+}
+
+/// One page of the fleet's run history (M33.2).
+///
+/// Unlike `pipeline_overview`, this takes no vault: the fleet spans them, and
+/// a caller that wants one vault's runs says so in the filter. A missing
+/// runtime DB is an error for the same reason it is there — the section
+/// renders "unavailable", which is not the same as "no runs".
+#[tauri::command(async)]
+fn fleet_runs(
+    app: tauri::AppHandle,
+    filter: runtime::fleet::Filter,
+) -> Result<Vec<runtime::fleet::FleetRun>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::runs(&conn, &filter)
+}
+
+/// One run, with whatever the governance tables recorded about it (M33.2).
+///
+/// An id nothing knows is an error rather than an empty detail: a typo and a
+/// run that recorded nothing must not look the same.
+#[tauri::command(async)]
+fn fleet_run_detail(
+    app: tauri::AppHandle,
+    run_id: String,
+) -> Result<runtime::fleet::RunDetail, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::run_detail(&conn, &run_id)
+}
+
+/// What one actor's runs add up to (M33.6).
+///
+/// An actor with no runs is not an error — a freshly written Agent record has
+/// none — so this answers with a zeroed summary and an absent last outcome
+/// rather than refusing. "No runs yet" is a thing its dossier has to say.
+#[tauri::command(async)]
+fn fleet_actor_summary(
+    app: tauri::AppHandle,
+    actor: String,
+) -> Result<runtime::fleet::ActorSummary, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::actor_summary(&conn, &actor)
+}
+
+/// Every actor the run table has attributed anything to, summed (M33b.3).
+///
+/// The fleet surface lists AGENTS — records in a vault — and joins this to
+/// them. An empty array is measured-at-zero: nothing attributed has ever run.
+/// A missing runtime database REFUSES, and the roster renders that as
+/// unavailable rather than as an empty team.
+#[tauri::command(async)]
+fn fleet_actor_summaries(
+    app: tauri::AppHandle,
+) -> Result<Vec<runtime::fleet::ActorSummary>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::fleet::actor_summaries(&conn)
+}
+
+/// The three job ledgers, hydrated per vault (M34.2.2).
+#[derive(serde::Serialize, Default)]
+struct JobLedgers {
+    attempts: std::collections::HashMap<String, String>,
+    #[serde(rename = "skillRuns")]
+    skill_runs: std::collections::HashMap<String, String>,
+    #[serde(rename = "triggerRuns")]
+    trigger_runs: std::collections::HashMap<String, String>,
+}
+
+/// One localStorage-era entry offered for import (M34.2.3).
+#[derive(serde::Deserialize)]
+struct LedgerImportEntry {
+    ledger: String,
+    key: String,
+    #[serde(rename = "runKey")]
+    run_key: String,
+}
+
+fn job_ledger_scope(
+    app: &tauri::AppHandle,
+    vault: &str,
+) -> Result<(rusqlite::Connection, String), String> {
+    let conn = runtime::open_existing(&config_dir(app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(vault))?;
+    Ok((conn, vault_id))
+}
+
+/// Everything the ledgers remember about one vault. REFUSES without a
+/// runtime database: an empty ledger means "nothing ever ran", which would
+/// re-fire every schedule — the runner treats this error as "do not run".
+#[tauri::command(async)]
+fn job_ledger_read(app: tauri::AppHandle, vault: String) -> Result<JobLedgers, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    let mut out = JobLedgers::default();
+    for (ledger, key, run_key) in runtime::job_ledger::read_all(&conn, &vault_id)? {
+        match ledger.as_str() {
+            "attempts" => out.attempts.insert(key, run_key),
+            "skillRuns" => out.skill_runs.insert(key, run_key),
+            _ => out.trigger_runs.insert(key, run_key),
+        };
+    }
+    Ok(out)
+}
+
+/// Record a run key, answering whether the record was FRESH — false means
+/// another window or an earlier session already answered this exact fire,
+/// and the caller must not spawn.
+#[tauri::command(async)]
+fn job_ledger_claim(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<bool, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::claim(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// Surrender a claim the caller holds — the deferred runner's revert, so a
+/// gate refusal never eats the fire it refused. Conditional on the exact
+/// run_key, so a claim another window re-won is never destroyed.
+#[tauri::command(async)]
+fn job_ledger_unclaim(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<bool, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::unclaim(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// Overwrite a cooldown stamp. No verdict — a clock is not a claim.
+#[tauri::command(async)]
+fn job_ledger_stamp(
+    app: tauri::AppHandle,
+    vault: String,
+    ledger: String,
+    key: String,
+    run_key: String,
+) -> Result<(), String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    runtime::job_ledger::stamp(&conn, &vault_id, &ledger, &key, &run_key)
+}
+
+/// One-time import from the localStorage era. Keys the database already
+/// holds are kept — it has been the arbiter since it existed.
+#[tauri::command(async)]
+fn job_ledger_import(
+    app: tauri::AppHandle,
+    vault: String,
+    entries: Vec<LedgerImportEntry>,
+) -> Result<usize, String> {
+    let (conn, vault_id) = job_ledger_scope(&app, &vault)?;
+    let rows: Vec<(String, String, String)> = entries
+        .into_iter()
+        .map(|e| (e.ledger, e.key, e.run_key))
+        .collect();
+    runtime::job_ledger::import(&conn, &vault_id, &rows)
+}
+
 /// The subscription-wide pause. Persisted, so it survives a restart — a
 /// pause that forgot itself overnight would be the least trustworthy control
 /// in the app.
@@ -216,6 +394,52 @@ fn pipeline_overview(
 fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
     let conn = runtime::open_existing(&config_dir(&app)?)?;
     runtime::settings::set_global_pause(&conn, paused)
+}
+
+/// Stop or restart ONE agent, without deleting its record (M33b.5).
+///
+/// Vault-scoped, unlike the global pause: an agent is a record, and two vaults
+/// may each hold one whose slug is the same word.
+///
+/// **This THROWS rather than no-opping** when there is no runtime database or
+/// the vault is unregistered. A pause that silently failed to store would be
+/// the worst possible outcome for this control — the button would look pressed
+/// and the agent would keep running.
+#[tauri::command(async)]
+fn set_agent_paused(
+    app: tauri::AppHandle,
+    vault: String,
+    actor: String,
+    paused: bool,
+) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    runtime::settings::set_agent_paused(&conn, &vault_id, &actor, paused)
+}
+
+/// Which agents are paused in this vault (M33b.5).
+///
+/// An EMPTY array is measured-at-zero — the rows were read and nobody is
+/// paused. A missing runtime database REFUSES, and the roster renders that as
+/// unavailable rather than as a fleet that is definitely running.
+#[tauri::command(async)]
+fn paused_agents(app: tauri::AppHandle, vault: String) -> Result<Vec<String>, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let vault_id = runtime::scope::register(&conn, Path::new(&vault))?;
+    runtime::settings::paused_agents(&conn, &vault_id)
+}
+
+/// How many background runs may be live at once (M33b.2). Subscription-wide
+/// and persisted, like the pause.
+///
+/// **This one THROWS, and must.** A ceiling below 1 or above the process cap
+/// is refused by name so the person who typed it learns which end they hit —
+/// clamping silently would leave the number on screen disagreeing with the
+/// number in force.
+#[tauri::command(async)]
+fn set_ambient_concurrency(app: tauri::AppHandle, ceiling: usize) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::settings::set_ambient_concurrency(&conn, ceiling)
 }
 
 /// Where the ingest scheduler currently holds one item (M26.4j).
@@ -905,41 +1129,62 @@ fn start_mcp(
     state.ensure(&app, Path::new(&vault))
 }
 
-/// Returns the run's id — the tag on every event this run emits.
-#[tauri::command(async)]
-fn run_agent(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, agent::AgentState>,
-    mcp_state: tauri::State<'_, mcp::McpState>,
-    vault: String,
-    request: agent::AgentRequest,
-) -> Result<u64, String> {
-    // Attribution rides the run's own bearer token (M13.4): the MCP server
-    // stamps `generated.by` from the token each request presents, so a
-    // child killed while a write is in flight still stamps as itself.
-    // Shared "current actor" state had a window — set here, before the old
-    // child was gone — where the outgoing run's trailing writes stamped as
-    // the incoming run (PR #5 security review).
-    let mut request = request;
-    // M31.2a: the durable id is minted BEFORE the token so the grant and the
-    // meter carry the SAME one — an attended run used to hold two (the meter's
-    // here, a token-derived hash in the grant), and everything that joins runs
-    // to proposals, answers, or costs needs them to be one.
+/// M34.1.1: the tools half of the grant, taken from the REQUEST like the
+/// scope half always was. `None` is unrestricted (the panel's own turns: a
+/// person is watching them and no record narrowed them); `Some([])` is
+/// narrowed to nothing (the editor popovers say exactly that). The CLI never
+/// sees this and therefore cannot argue with it.
+fn grant_tools(request: &agent::AgentRequest) -> Option<Vec<String>> {
+    request.allowed_tools.clone()
+}
+
+/// Spawn a run another run asked for (M34.3.2) — mcp.rs's `hand_to` is the
+/// one caller. The callee works under its OWN axes, taken from its record by
+/// the tool and enforced by the token minted here; calling never lends the
+/// caller's permissions. The row it books names the caller, so the chain is
+/// walkable, and its chain in the grant carries the ancestry the hop rules
+/// are enforced against. Booked `Attended` like every renderer-started agent
+/// run — the §8.3 accounting question is answered for all of them at once,
+/// not specially here.
+pub(crate) fn start_handoff_run(
+    app: &tauri::AppHandle,
+    vault: &Path,
+    mut request: agent::AgentRequest,
+    caller: &mcp::RunGrant,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let actor = request
+        .actor
+        .clone()
+        .ok_or("a handed-to run always has an actor — the callee's record names it")?;
+    let scope = runtime::open_vault(vault);
+    // The same pause gate run_agent enforces, for the same reason: a paused
+    // agent cannot be called, and the chain that would have reached it stops
+    // with it — before any token exists for a child to present.
+    if let Some(scope) = scope.as_ref() {
+        runtime::sink::with_sink(|conn| {
+            runtime::settings::refuse_if_agent_paused(conn, &scope.vault_id, Some(&actor))
+        })
+        .unwrap_or(Ok(()))?;
+        // M36.6 — the root's ceiling stops the chain, enforced at the spawn
+        // like the hop budget and the cycle rule: hops bill to the root, so
+        // a chain that has spent what one background run may spend gets no
+        // further children, whatever its hop count says.
+        let conn = runtime::open_existing(&config_dir(app)?)?;
+        runtime::dispatch::refuse_if_chain_spent(&conn, &caller.run_id, chrono::Utc::now())?;
+    }
+    let mcp_state = app.state::<mcp::McpState>();
     let run_id = ledger::new_run_id();
-    // M17.13: the scope rides the same token. It is taken from the REQUEST,
-    // which the app builds from the Agent record — the CLI never sees it and
-    // therefore cannot argue with it. No tool narrowing (M31.1b): the
-    // panel's own turns are unrestricted, and a person is watching them.
-    request.mcp_token = Some(mcp_state.run_token(
-        request.actor.as_deref(),
+    let durable = run_id.clone();
+    request.mcp_token = Some(mcp_state.handoff_token(
+        &actor,
         request.scope.clone(),
-        None,
+        request.read_scope.clone(),
+        request.allowed_tools.clone(),
         run_id.clone(),
+        &caller.chain,
     )?);
-    let dir = config_dir(&app)?;
-    // M25.2: attended chat is METERED and never gated. The run is recorded
-    // with its tokens; no reservation, no lease, and no ceiling can refuse it.
-    let scope = runtime::open_vault(Path::new(&vault));
+    let dir = config_dir(app)?;
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
         run_id,
@@ -948,6 +1193,185 @@ fn run_agent(
         store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
         started_at: chrono::Utc::now(),
         elapsed_limit_seconds: None,
+        actor: Some(actor),
+        // The whole point of M34.3.1: this run knows who started it.
+        parent_run_id: Some(caller.run_id.clone()),
+    };
+    let agent_state = app.state::<agent::AgentState>();
+    agent::stream(
+        app.clone(),
+        agent_state.inner(),
+        vault,
+        request,
+        &dir,
+        Some(meter),
+        None,
+    )
+    .map(|_run| durable)
+}
+
+/// What starting a run answers (M34.2.4): a handle, or a typed deferral.
+///
+/// `Deferred` is the ambient gate saying "not now" — over a ceiling, paused,
+/// accounting unknown — and it is a RESULT, not an error: the caller is
+/// expected to read the reasons, log one honest row, and leave the fire key
+/// unconsumed so the run happens when the window resets. Untagged serde: the
+/// renderer tells the arms apart by which field is present.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum RunStart {
+    Started(RunHandle),
+    Deferred { deferred: Vec<String> },
+}
+
+/// Returns the run's id — the tag on every event this run emits.
+#[tauri::command(async)]
+fn run_agent(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
+    vault: String,
+    request: agent::AgentRequest,
+) -> Result<RunStart, String> {
+    // Attribution rides the run's own bearer token (M13.4): the MCP server
+    // stamps `generated.by` from the token each request presents, so a
+    // child killed while a write is in flight still stamps as itself.
+    // Shared "current actor" state had a window — set here, before the old
+    // child was gone — where the outgoing run's trailing writes stamped as
+    // the incoming run (PR #5 security review).
+    let mut request = request;
+    // M25.2: attended chat is METERED and never gated. The run is recorded
+    // with its tokens; no reservation, no lease, and no ceiling can refuse it.
+    let scope = runtime::open_vault(Path::new(&vault));
+    // M33b.5 — the ONE gate an agent-attributed run does pass, and it is not a
+    // budget question. Every frontend path that starts a CLI child funnels
+    // here (the job runner's schedules and triggers, and a thread addressing an
+    // agent by name), so this is where a per-agent pause has to be enforced;
+    // enforcing it in whichever surface remembered to check would be enforcing
+    // it nowhere. Before the token is minted and long before a child is
+    // spawned: a refused run must leave no run token behind for the CLI to
+    // present.
+    //
+    // The check needs a runtime database to read, and `open_vault` is `None`
+    // when there is none — in which case there is also nowhere a pause could
+    // have been stored, so there is nothing being waved through.
+    if let Some(scope) = scope.as_ref() {
+        runtime::sink::with_sink(|conn| {
+            runtime::settings::refuse_if_agent_paused(
+                conn,
+                &scope.vault_id,
+                request.actor.as_deref(),
+            )
+        })
+        .unwrap_or(Ok(()))?;
+    }
+    // M34.2.4 — an unattended run that names its lane is AMBIENT spend, and
+    // spec §8.3 is answered here: `mode='attended', lane='agent'` on every
+    // renderer-started run was a gap, not intent. The claim is the same call
+    // the ingest driver makes — zero items, the job's lane, the record's
+    // actor, the day's per-run reservation — so schedules and ingest share
+    // one budget, one concurrency ceiling, and one deferral record. A
+    // deferral returns TYPED, with its reasons: the runner logs one honest
+    // row and the fire key stays unconsumed, because a run the gate refused
+    // must not eat the period it was refused in.
+    //
+    // No lane, or no runtime scope to claim against, keeps the legacy
+    // attended booking — metering is a record, never a precondition.
+    let dir = config_dir(&app)?;
+    let mut lease: Option<runtime::dispatch::Lease> = None;
+    if !request.attended.unwrap_or(false) {
+        if let Some(lane) = request.lane.as_deref() {
+            if !runtime::schema::LANES
+                .iter()
+                .any(|(name, _, _)| *name == lane)
+            {
+                return Err(format!(
+                    "unknown lane {lane:?} — a lane is added by migration, not by request"
+                ));
+            }
+            if let Some((vault_id, store)) = scope
+                .as_ref()
+                .and_then(|s| s.store_uuid.as_ref().map(|store| (&s.vault_id, store)))
+            {
+                let conn = runtime::open_existing(&dir)?;
+                let now = chrono::Utc::now();
+                let reservation = ingest::driver::reservation(&conn, now)?;
+                match runtime::dispatch::claim(
+                    &conn,
+                    vault_id,
+                    store,
+                    lane,
+                    reservation,
+                    &[],
+                    request.actor.as_deref(),
+                    now,
+                )? {
+                    runtime::dispatch::Dispatched::Started(l) => lease = Some(l),
+                    runtime::dispatch::Dispatched::Deferred(reasons) => {
+                        return Ok(RunStart::Deferred {
+                            deferred: reasons.iter().map(|r| r.as_str().to_string()).collect(),
+                        });
+                    }
+                    // Unreachable with an empty item list — the empty-claim
+                    // guard deliberately passes it to the gate — but if it
+                    // ever arrives, honesty over spawning: nothing to do.
+                    runtime::dispatch::Dispatched::NothingToClaim => {
+                        return Ok(RunStart::Deferred {
+                            deferred: vec!["nothing_to_claim".to_string()],
+                        });
+                    }
+                }
+            }
+        }
+    }
+    // M31.2a: the durable id is minted BEFORE the token so the grant and the
+    // meter carry the SAME one — an attended run used to hold two (the meter's
+    // here, a token-derived hash in the grant), and everything that joins runs
+    // to proposals, answers, or costs needs them to be one. A leased run's id
+    // was minted by the CLAIM, which already booked its row.
+    let run_id = lease
+        .as_ref()
+        .map(|l| l.run_id.clone())
+        .unwrap_or_else(ledger::new_run_id);
+    // M33.7: the renderer gets this id back, so its device-local run log and
+    // the durable `runs` row can finally name the same run. Cloned rather
+    // than moved because the meter takes ownership below.
+    let durable = run_id.clone();
+    // M17.13: the scope rides the same token. It is taken from the REQUEST,
+    // which the app builds from the Agent record — the CLI never sees it and
+    // therefore cannot argue with it. M34.1.1: so do the tools. argv
+    // narrowing was always advice; this is the boundary behind it.
+    request.mcp_token = Some(mcp_state.run_token(
+        request.actor.as_deref(),
+        request.scope.clone(),
+        request.read_scope.clone(),
+        grant_tools(&request),
+        run_id.clone(),
+    )?);
+    let meter = agent::meter::Meter {
+        data_dir: dir.clone(),
+        run_id,
+        // A leased run finalizes through the dispatcher: usage lands in
+        // budget_days, the reservation is released, and the lease row goes
+        // with it (M34.2.4). Everything else keeps the attended booking.
+        mode: if lease.is_some() {
+            agent::meter::Mode::Ambient
+        } else {
+            agent::meter::Mode::Attended
+        },
+        vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
+        store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
+        started_at: chrono::Utc::now(),
+        // The lease's own limit, so the watchdog and the lease agree about
+        // when a run has outstayed its welcome.
+        elapsed_limit_seconds: lease.as_ref().map(|l| l.elapsed_limit_seconds),
+        // M33.1: the same actor the run's bearer token already stamps on
+        // every write it makes, so the operational row and the run's ledger
+        // writes agree about who did the work. `None` is bare chat, and it
+        // stays NULL — the fleet reads that as unattributed.
+        actor: request.actor.clone(),
+        // Root by construction (M34.3): no tool call started this run.
+        parent_run_id: None,
     };
     agent::stream(
         app.clone(),
@@ -960,6 +1384,12 @@ fn run_agent(
         // event stream, and the person is watching it.
         None,
     )
+    .map(|run| {
+        RunStart::Started(RunHandle {
+            run,
+            run_id: durable,
+        })
+    })
 }
 
 /// Empty string = the vault has no connectors.json (a real state Settings
@@ -1069,7 +1499,19 @@ pub fn run() {
             decide_proposal,
             revert_application,
             pipeline_overview,
+            fleet_runs,
+            fleet_run_detail,
+            fleet_actor_summary,
+            fleet_actor_summaries,
+            job_ledger_read,
+            job_ledger_claim,
+            job_ledger_unclaim,
+            job_ledger_stamp,
+            job_ledger_import,
             set_global_pause,
+            set_agent_paused,
+            paused_agents,
+            set_ambient_concurrency,
             set_lane_enabled,
             trigger_status,
             trigger_run,
@@ -1148,4 +1590,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A request shaped like the panel's — the same construction the agent
+    /// module's own tests use, since `AgentRequest` derives no Default.
+    fn panel_style_request() -> agent::AgentRequest {
+        agent::AgentRequest {
+            message: "hi".into(),
+            system_prompt: None,
+            session_id: None,
+            model: None,
+            shell: None,
+            connectors: None,
+            connector_names: None,
+            attended: None,
+            mcp_url: None,
+            mcp_token: None,
+            actor: None,
+            approved_stdio: None,
+            scope: None,
+            read_scope: None,
+            allowed_tools: None,
+            lane: None,
+            internal: false,
+        }
+    }
+
+    #[test]
+    fn grant_tools_passes_the_request_through_without_inventing_either_default() {
+        let mut req = panel_style_request();
+        assert_eq!(grant_tools(&req), None, "absent stays unrestricted");
+        req.allowed_tools = Some(vec![]);
+        assert_eq!(
+            grant_tools(&req),
+            Some(vec![]),
+            "narrowed-to-nothing stays nothing"
+        );
+        req.allowed_tools = Some(vec!["get_note".into()]);
+        assert_eq!(grant_tools(&req), Some(vec!["get_note".into()]));
+    }
 }

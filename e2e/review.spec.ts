@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
  * The M24.9 review surface: what the base is holding until a person decides.
@@ -10,6 +11,14 @@ import { test, expect, type Page } from '@playwright/test';
  * rejection cannot be sent without a reason, and that a revert only exists
  * where the server offered one. The DECISIONS themselves are Rust's, proved
  * against the real interpreter in `policy::review` and `policy::evals`.
+ *
+ * **M33.3 moved the home, not the behaviour, and M33a.2 moved it again.**
+ * These cards live in Knowledge's "Waiting on you" tab now — there is no
+ * review tab and no Status hub either. Every card testid
+ * below is unchanged on purpose — that is what makes this file able to prove
+ * the extraction dropped nothing. The spec also stopped hand-rolling its own
+ * boot: it used to set two localStorage keys and never pin the clock, which
+ * is exactly the shelf-life bug `boot.ts` exists to prevent.
  */
 
 const CARD = {
@@ -43,44 +52,22 @@ const CARD = {
 
 type Card = typeof CARD;
 
-async function boot(page: Page, fixture: { cards?: Card[]; applications?: unknown[] }) {
-  await page.addInitScript(
-    ({ seed }) => {
-      window.localStorage.setItem('cerebro.autoLearn', 'false');
-      window.localStorage.setItem('cerebro.themeMode', 'light');
-      // Staged before the app boots, so the first load already has them.
-      const pending = seed;
-      const install = () => {
-        const w = window as unknown as {
-          __cerebroSeedReview?: (f: unknown) => void;
-        };
-        if (w.__cerebroSeedReview === undefined) {
-          setTimeout(install, 10);
-          return;
-        }
-        w.__cerebroSeedReview(pending);
-      };
-      install();
-    },
-    { seed: fixture },
-  );
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Needs review' }).click();
-  await expect(page.getByTestId('review-page')).toBeVisible();
+/** Boot into Knowledge's "Waiting on you" tab with these cards staged, and
+ * hand back the section that holds them. */
+async function openNeedsReview(page: Page, fixture: { cards?: Card[]; applications?: unknown[] }) {
+  await seedBeforeBoot(page, '__cerebroSeedReview', fixture);
+  await boot(page);
+  await openKnowledgeTab(page, 'Waiting on you');
+  return page.locator('[data-section="needs-review"]');
 }
 
 test('review: a queued card says what it is, how dangerous it is, and why it waits', async ({
   page,
 }) => {
-  await boot(page, {
+  const section = await openNeedsReview(page, {
     cards: [{ ...CARD, queued_for: ['high_stakes_verification_required'] }],
   });
-  const card = page.getByTestId('review-card');
+  const card = section.getByTestId('review-card');
   await expect(card).toHaveCount(1);
   await expect(card.getByTestId('card-op')).toHaveText('tombstone_belief');
   await expect(card.getByTestId('card-risk')).toHaveText('HIGH');
@@ -90,7 +77,7 @@ test('review: a queued card says what it is, how dangerous it is, and why it wai
 });
 
 test('review: a card whose world moved says so before anyone clicks', async ({ page }) => {
-  await boot(page, {
+  const section = await openNeedsReview(page, {
     cards: [
       {
         ...CARD,
@@ -98,31 +85,31 @@ test('review: a card whose world moved says so before anyone clicks', async ({ p
       },
     ],
   });
-  await expect(page.getByTestId('card-stale')).toBeVisible();
-  await expect(page.getByTestId('card-targets')).toContainText('@1 → 2');
+  await expect(section.getByTestId('card-stale')).toBeVisible();
+  await expect(section.getByTestId('card-targets')).toContainText('@1 → 2');
 });
 
 test('review: a CRITICAL card is marked for diff review', async ({ page }) => {
-  await boot(page, {
+  const section = await openNeedsReview(page, {
     cards: [{ ...CARD, effective_risk: 'CRITICAL', review: 'diff' }],
   });
-  await expect(page.getByTestId('card-diff')).toBeVisible();
+  await expect(section.getByTestId('card-diff')).toBeVisible();
 });
 
 test('review: rejecting needs a reason, and approving clears the card', async ({ page }) => {
-  await boot(page, { cards: [CARD] });
+  const section = await openNeedsReview(page, { cards: [CARD] });
   // Reject is unavailable until there is something to record.
-  const reject = page.getByRole('button', { name: 'Reject' });
+  const reject = section.getByRole('button', { name: 'Reject' });
   await expect(reject).toBeDisabled();
-  await page.getByPlaceholder('Why not?').fill('the rewrite did not supersede this');
+  await section.getByPlaceholder('Why not?').fill('the rewrite did not supersede this');
   await expect(reject).toBeEnabled();
 
-  await page.getByRole('button', { name: 'Approve' }).click();
-  await expect(page.getByTestId('review-card')).toHaveCount(0);
+  await section.getByRole('button', { name: 'Approve' }).click();
+  await expect(section.getByTestId('review-card')).toHaveCount(0);
 });
 
 test('review: revert is offered only where the server offered one', async ({ page }) => {
-  await boot(page, {
+  const section = await openNeedsReview(page, {
     cards: [],
     applications: [
       {
@@ -133,8 +120,8 @@ test('review: revert is offered only where the server offered one', async ({ pag
       },
     ],
   });
-  const application = page.getByTestId('revertable');
+  const application = section.getByTestId('revertable');
   await expect(application).toHaveCount(1);
-  await page.getByRole('button', { name: 'Revert' }).click();
-  await expect(page.getByTestId('revertable')).toHaveCount(0);
+  await section.getByRole('button', { name: 'Revert' }).click();
+  await expect(section.getByTestId('revertable')).toHaveCount(0);
 });

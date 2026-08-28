@@ -51,6 +51,10 @@ impl Runner for Live<'_> {
         let token = self.mcp.run_token(
             Some(ACTOR),
             Some(vec![]),
+            // M34.4: the internal constructs read the whole vault by design —
+            // ingest and maintenance ARE whole-vault passes; their bound is
+            // the declared tool list, not a folder.
+            None,
             Some(declared_tools()),
             run_id.to_string(),
         )?;
@@ -71,6 +75,12 @@ impl Runner for Live<'_> {
                 store_uuid: Some(self.store_uuid.clone()),
                 started_at: chrono::Utc::now(),
                 elapsed_limit_seconds: Some(self.elapsed_limit_seconds),
+                // Carried for completeness, not written here: a supervised
+                // meter returns before touching `runs`, and `dispatch::claim`
+                // already attributed the row with the same constant.
+                actor: Some(super::pass::ACTOR.to_string()),
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
             }),
             Some(tx),
         )?;
@@ -109,9 +119,14 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         approved_stdio: Some(vec![]),
         // Scoped to nothing: this run proposes, and a proposal is not a write.
         scope: Some(vec![]),
+        // M34.4: reads unbounded by folder — see the mint above.
+        read_scope: None,
         // M31.1a — see `declared_tools` for what is granted and why. The
         // same list the mint grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // Claimed by this pass's own dispatch, never by the request
+        // (M34.2.4's lane field is the renderer's path to the same gate).
+        lane: None,
         // Cerebro's own run, on cerebro's own schedule: the CLI's built-in
         // tools are withdrawn in build_args. Only the three internal spawn
         // sites ever set this.

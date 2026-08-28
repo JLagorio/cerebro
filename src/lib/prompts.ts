@@ -20,12 +20,13 @@ export function distillPrompt(path: string, title: string): string {
     '1. Work out which vault entities it concerns — projects, people, records — and resolve them with search_notes.',
     '2. Search the bundle for what it already holds on those entities BEFORE writing anything.',
     '3. For each durable thing it establishes, write or revise a concept with write_concept.',
-    `4. Anchor every concept with \`about\`, and cite this note in \`sources\` (resource: ${path}).`,
+    `4. Anchor every concept with \`about\`, cite this note in \`sources\` (resource: ${path}), and give each one a one-sentence \`description\` — it is the only line shown beside the title in every list.`,
     '',
     'Every fact you store must be timeless, dated, or a pointer (M13.5). "The pipeline has 13 open deals" becomes a lie next Tuesday while still reading as truth — write "2026-07-31: pipeline at 13 open deals", or point at where the live number lives, or store only what does not move.',
     '',
     'Adding a second concept about something the bundle already covers is the failure mode here, not the goal. Revise the existing one in place when the note refines or extends it.',
     'When the note establishes something that REPLACES an existing concept, write the new one and set `supersedes: ["[[old-concept]]"]` — that retires the old one without deleting the record of what was believed before.',
+    'Anything you state in the body about one concept replacing, narrowing or disagreeing with another must ALSO be in `supersedes`/`refines`/`contradicts`. A supersession written only as prose cannot answer "is this still true". Only assert a relation whose target you read in this run.',
     'When two concepts genuinely disagree and you cannot tell which is right, say so with `contradicts` rather than picking a winner. That is a judgement for the person who owns the work.',
     '',
     'Skip anything ephemeral — scheduling, chit-chat, and things already recorded elsewhere.',
@@ -66,6 +67,42 @@ export function augmentDocPrompt(path: string, title: string): string {
     '**Contradicts** — anywhere the draft disagrees with a decision, a concept, or a record. Say which is newer.',
     '',
     'Do not edit the document. If a section has nothing in it, say so in one line rather than padding it.',
+  ].join('\n');
+}
+
+/**
+ * Ask the base what it knows that bears on the record in front of you
+ * (M33a.5).
+ *
+ * The counterpart to `augmentDocPrompt`, and a different question: that one
+ * reads your DRAFT and reports what it is missing, this one asks the base
+ * about the SUBJECT and reports what it holds. It is the invocable half of
+ * the same read the surfaces beside a record already render.
+ *
+ * Naming `knowledge_about` first is load-bearing. Told only to "see what you
+ * know", a model searches the bundle by keyword and returns whichever
+ * concepts share words with the title — which misses everything anchored to
+ * the record under a name the title never uses, and finds concepts that are
+ * about something else entirely. The tool answers by ANCHOR, which is the
+ * question being asked.
+ *
+ * The instruction not to write is equally load-bearing: the user pressed a
+ * button that asks a question, and an answer that arrives as three new
+ * concepts is not the thing they asked for.
+ */
+export function askBasePrompt(path: string, title: string): string {
+  return [
+    `What does the knowledge base know that bears on ${path} ("${title}")?`,
+    '',
+    `Call knowledge_about with target: ${path} FIRST — it answers by anchor, so it finds what is filed under this record rather than what happens to share words with its title. Then follow the threads it names: read the concepts that matter with get_note, and call knowledge_about again for anything they are also about.`,
+    '',
+    'Answer in three short sections:',
+    '',
+    '**Held** — what the base currently believes about this, each with the concept it came from.',
+    '**Unsettled** — anything contradicted, superseded, or past its recheck date. Say which claim is newer.',
+    '**Not covered** — what the record raises that the base has nothing on. This is the section worth reading, so do not pad the other two to reach it.',
+    '',
+    'Do not write or revise anything. This is a question, not an instruction to distil — if the answer is "almost nothing yet", that is the answer, and say so in one line.',
   ].join('\n');
 }
 
@@ -134,12 +171,156 @@ export function organizePrompt(path: string): string {
  * update_frontmatter, bounded, and visible as an ordinary property — so what
  * the agent carries forward is never hidden from the person it works for.
  */
+/**
+ * State pushed at a resumed run, rather than remembered by it (M33.8).
+ *
+ * An unattended run may carry notes it wrote weeks ago (`memory.recent`), and
+ * a model reading them has no way to tell which parts are still true. Pushing
+ * the few facts that go stale — and saying out loud that they SUPERSEDE what
+ * it remembers — is cheaper and more reliable than any instruction to
+ * distrust its own notes.
+ *
+ * Deliberately four lines. This block rides in front of every unattended run,
+ * so anything added here is paid for on every one of them; it holds only
+ * facts that (a) change without the agent doing anything and (b) change what
+ * a run should do.
+ *
+ * **Absent is never zero here either.** An agent that has never run says
+ * "none", not "succeeded"; a review count that could not be read is OMITTED
+ * rather than reported as 0, because telling an unattended agent that nothing
+ * is waiting when we do not know is exactly the false calm the rest of this
+ * milestone is built to avoid.
+ */
+export function currentStatePrompt(state: {
+  vaultName: string;
+  today: string;
+  /** The outcome of this agent's last run, or null if it has never run —
+   * which is different from a run that failed. */
+  lastOutcome: string | null;
+  /** Omitted from the block entirely when null (unreadable), which is not
+   * the same as 0 (read, and empty). */
+  openReviews: number | null;
+}): string {
+  return [
+    'CURRENT STATE (supersedes anything you remember)',
+    `- Vault: ${state.vaultName}`,
+    `- Today: ${state.today}`,
+    `- Your last run: ${state.lastOutcome ?? 'none'}`,
+    ...(state.openReviews === null
+      ? []
+      : [`- Proposals waiting on a person: ${state.openReviews}`]),
+  ].join('\n');
+}
+
+/**
+ * The two memory tiers, in priority order (M17.14) — ONE assembly.
+ *
+ * Shared by the unattended run below and the addressed turn (M33b.6), because
+ * the ORDER is the load-bearing part: what a person corrected outranks what the
+ * agent concluded about itself, every time, and presenting them as one blob is
+ * how the second quietly overwrites the first. Two copies of that ordering
+ * would be two chances to get it wrong, and only one of them would have a test.
+ */
+export function agentMemoryLines(memory: { recent: string; preferences: string }): string[] {
+  return [
+    ...(memory.preferences === ''
+      ? []
+      : [
+          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
+          '',
+        ]),
+    memory.recent === ''
+      ? 'This is your first run — you have no working notes yet.'
+      : `Your working notes from previous runs:\n${memory.recent}`,
+  ];
+}
+
+/**
+ * The scope boundary, stated up front (M17.13).
+ *
+ * Also shared, for the same reason: the sentence that says a folder list is
+ * ENFORCED is the difference between an agent planning inside its boundary and
+ * an agent discovering it as a tool error halfway through. `whenEmpty` is the
+ * one clause that differs by caller — a run nobody is watching should stop and
+ * say so in its memory; a turn someone is waiting on should say so to them.
+ */
+export function agentScopeLines(
+  scope: readonly string[] | null | undefined,
+  whenEmpty: string,
+): string[] {
+  if (scope == null) return [];
+  return [
+    scope.length === 0
+      ? `You are scoped to no folder at all: every write to a record will be refused. ${whenEmpty}`
+      : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
+    '',
+  ];
+}
+
+/**
+ * The READ boundary, stated (M36.4) — the M34.4 deferral's other half. The
+ * enforcement has existed since the grant grew the axis; until now the agent
+ * discovered it as refused reads and searches that said "N withheld". A
+ * boundary the agent knows about is one it can plan around.
+ */
+export function agentReadScopeLines(readScope: readonly string[] | null | undefined): string[] {
+  if (readScope == null) return [];
+  return [
+    readScope.length === 0
+      ? 'You can read no note in this vault: every get_note is refused and every search returns only a withheld count. Work from what this message hands you.'
+      : `You may read notes only inside: ${readScope.join(', ')}. This is enforced — a note elsewhere is refused before its body is served, and searches tell you how many hits were withheld rather than pretending they do not exist.`,
+    '',
+  ];
+}
+
+/**
+ * What a chat turn addressed to an agent is told (M33b.6).
+ *
+ * Prefixed to the person's own message, the way useJobRunner prefixes the
+ * CURRENT STATE block and for the same reason: a clause that supersedes the
+ * request has to LEAD it, or it reads as a footnote to it.
+ *
+ * Deliberately not a second `agentRunPrompt`. That prompt's first sentence —
+ * nobody is watching, no chat reply will be read — is the exact opposite of
+ * what is true here, and the rules that follow it are rules for a run with no
+ * one to ask. What the two genuinely share is the memory and the scope, and
+ * they share the assembly rather than a copy of it.
+ *
+ * The standing instructions are NOT folded in. They are the body of a record
+ * the turn is already told the path of and already holds the tools to read, and
+ * the turn a person typed is the request — an agent's charter pasted in above
+ * it would read as something the user had just said.
+ */
+export function addressedAgentPrompt(
+  path: string,
+  title: string,
+  actor: string,
+  memory: { recent: string; preferences: string },
+  scope?: readonly string[] | null,
+  /** Folders this turn may READ inside (M36.4) — the addressed turn runs
+   * under the agent's read grant (M34.4), so the agent is told the same
+   * boundary the tools will enforce. */
+  readScope?: readonly string[] | null,
+): string {
+  return [
+    `This turn is addressed to "${title}", the agent defined at ${path} in this vault. Answer as that agent: your writes are attributed to ${actor}, and your standing instructions are the body of that record — read it before you answer. A person typed this and is waiting, so reply to them as well as writing anything down.`,
+    '',
+    ...agentScopeLines(
+      scope,
+      'Say that to the person rather than trying and reporting the refusal.',
+    ),
+    ...agentReadScopeLines(readScope),
+    ...agentMemoryLines(memory),
+    '',
+    'What they asked:',
+  ].join('\n');
+}
+
 export function agentRunPrompt(
   path: string,
   title: string,
   actor: string,
   memory: { recent: string; preferences: string },
-  body: string,
   /** What woke this run, when an event did (M17.12) — layer TWO of the
    * trigger. Layer one already passed deterministically; this is the model
    * gate, and it comes with an explicit permission to do nothing. */
@@ -147,6 +328,8 @@ export function agentRunPrompt(
   /** Folders this run may write inside (M17.13). Stated so the agent plans
    * inside its boundary rather than discovering it as a tool error. */
   scope?: readonly string[] | null,
+  /** Folders this run may READ inside (M36.4) — same reason, other axis. */
+  readScope?: readonly string[] | null,
 ): string {
   return [
     `You are "${title}", the agent defined at ${path} in this vault, on an unattended ${trigger == null ? 'scheduled' : 'event-triggered'} run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
@@ -161,11 +344,11 @@ export function agentRunPrompt(
                 `Before doing anything else, answer this for yourself: ${trigger.ask}`,
                 'If the answer is no, write nothing and stop. A run that correctly does nothing is a success, and this question exists precisely so that most wakings end here.',
               ]),
-          // M18.5 — placed BEFORE the standing instructions and named as an
-          // addition to them, because the failure mode of per-trigger prose is
-          // a model that treats it as a replacement and forgets the agent's
-          // own rules. Said twice, in effect: here, and again by "Your
-          // instructions" arriving afterwards as the general case.
+          // M18.5 — named as an ADDITION to the standing instructions,
+          // because the failure mode of per-trigger prose is a model that
+          // treats it as a replacement and forgets the agent's own rules.
+          // The standing instructions themselves arrive with the system
+          // prompt (M34.1.4) — standing, not something the user just said.
           ...(trigger.do === undefined
             ? []
             : [
@@ -174,39 +357,18 @@ export function agentRunPrompt(
               ]),
           '',
         ]),
-    ...(scope == null
-      ? []
-      : [
-          scope.length === 0
-            ? 'You are scoped to no folder at all: every write to a record will be refused. Say so in your memory and stop.'
-            : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
-          '',
-        ]),
+    ...agentScopeLines(scope, 'Say so in your memory and stop.'),
+    ...agentReadScopeLines(readScope),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
     '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
     '',
-    // M17.14 — two tiers, in priority order, and the order is the point. What
-    // a person corrected outranks what the agent concluded about itself, every
-    // time; presenting them as one blob is how the second quietly overwrites
-    // the first.
-    ...(memory.preferences === ''
-      ? []
-      : [
-          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
-          '',
-        ]),
-    memory.recent === ''
-      ? 'This is your first run — you have no working notes yet.'
-      : `Your working notes from previous runs:\n${memory.recent}`,
+    // M17.14 — two tiers, in priority order. See agentMemoryLines.
+    ...agentMemoryLines(memory),
     '',
     `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
     'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
-    '',
-    'Your instructions:',
-    '',
-    body,
   ].join('\n');
 }
 

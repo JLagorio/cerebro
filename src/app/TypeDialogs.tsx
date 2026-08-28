@@ -68,7 +68,7 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       open
       onClose={onClose}
-      title="Create new type"
+      title="New database"
       width={440}
       primaryAction={{
         label: 'Create',
@@ -79,10 +79,11 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-3">
         <p className="m-0 text-sm leading-[19px] text-n-600">
-          A type is a document schema: notes of this type inherit its properties and styling.
+          A database is a schema for records: notes with its <code>type:</code> inherit its
+          properties and styling.
         </p>
         <label className="flex flex-col gap-1 text-xs text-n-600">
-          Type name
+          Database name
           <Input
             autoFocus
             placeholder="e.g. Recipe, Book, Habit…"
@@ -92,7 +93,7 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
           />
           {duplicate && (
             <span className="text-2xs text-danger-500">
-              A type named "{trimmed}" already exists.
+              A database named "{trimmed}" already exists.
             </span>
           )}
         </label>
@@ -295,7 +296,7 @@ export function DeleteTypeDialog({
       return;
     }
     onClose();
-    toast(`Type "${listing.name}" deleted`);
+    toast(`Database "${listing.name}" deleted`);
   };
 
   return (
@@ -304,14 +305,18 @@ export function DeleteTypeDialog({
       onClose={onClose}
       title={`Delete "${listing.name}"?`}
       width={440}
-      primaryAction={{ label: 'Delete type', onClick: () => void remove(), disabled: submitting }}
+      primaryAction={{
+        label: 'Delete database',
+        onClick: () => void remove(),
+        disabled: submitting,
+      }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
       <p className="m-0 text-sm leading-[19px] text-n-700">
-        The type document moves to the trash.{' '}
+        The database's schema document moves to the trash.{' '}
         {listing.count > 0
           ? `${listing.count} ${listing.count === 1 ? 'record keeps' : 'records keep'} the "${listing.name}" tag but lose its properties and styling.`
-          : 'No records use this type.'}
+          : 'No records use this database.'}
       </p>
     </Dialog>
   );

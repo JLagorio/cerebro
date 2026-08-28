@@ -1,43 +1,49 @@
 import { useEffect, useState } from 'react';
-import { Icon } from '@/components/ui/Icon';
 import * as ipc from '@/lib/ipc';
 import type {
   ChangesView,
   LanesView,
   LaneView,
-  PipelineOverview,
-  ReviewCard,
   TriggerEntryStatus,
   TriggerRunReport,
 } from '@/lib/ipc';
-import { useNavStore } from '@/stores/navStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { AgentRoster } from '@/status/AgentRoster';
+import { FleetSection } from '@/status/FleetSection';
+import { NeedsYouSection } from '@/status/NeedsYouSection';
+import { SystemSection } from '@/status/SystemSection';
 
 /**
- * Epistemic Status — one coherent home for what this base knows about
- * itself (M27.8c, §35 skeleton).
+ * What the base knows about ITSELF — the Status hub's five sections, moved
+ * here as Knowledge tabs (M33a.2, from `pages/EpistemicStatusPage.tsx`).
  *
- * **Why one page and not six banners.** M25, M26 and M27 each produce
- * something a person needs to see occasionally and nothing that should
- * interrupt them. Shipped separately those become six pieces of chrome
- * competing for the top of the screen, and the M8 rule — nothing speaks
- * first — dies by accretion rather than by decision. A destination they can
- * choose to open is the shape that keeps it.
+ * **Why the scroll column died.** The hub stacked every section in one
+ * column: 5,799px in an 844px viewport, seven screens to reach the last one.
+ * `Deferral gates` alone was 3,225px — 55% of the page — of cards reading
+ * "Never evaluated here." A nav that could only scroll you past four sections
+ * to reach the fifth is not navigation, and the sections were never one
+ * reading. Each is a tab now, and the Knowledge sidebar is the nav — and the
+ * gate board sits behind its own count, because giving 3,225px of
+ * build-planning bookkeeping a tab of its own only MOVES it.
+ *
+ * **Why it lives under Knowledge.** What the base HOLDS and what it knows
+ * about itself were two rail buttons describing one subject. A bundle that
+ * cannot say what it is unsure of is not a knowledge base, it is a folder.
  *
  * **Nothing here computes an epistemic answer.** Lane names, the sentence
  * under each lane, the reason on every item and every line of what changed
  * arrive composed from Rust, beside the rules that produced them. This file
  * chooses layout and says the empty cases out loud.
  *
- * **Four sections, four independent failures.** The feeds are deliberately
- * separate calls: a vault with no ledger can still show its review queue and
- * its budget, and a section whose read failed says so instead of rendering
- * the empty state. "Nothing is contested" and "we could not tell you whether
- * anything is contested" are opposite sentences.
+ * **Six tabs, six independent failures.** The feeds are deliberately separate
+ * calls, and each tab now reads only its own: a vault with no ledger can
+ * still show its review queue and its budget, and a section whose read failed
+ * says so instead of rendering the empty state. "Nothing is contested" and
+ * "we could not tell you whether anything is contested" are opposite
+ * sentences.
  *
- * **No counts in the rail.** A badge here would be the chrome nagging
- * somebody to drain a queue — the same rule that kept a review count off
- * Knowledge (M8.1) and a commit count off History (M9.4).
+ * **No counts in the nav chrome.** A badge would be the chrome nagging somebody to
+ * drain a queue — the same rule that kept a review count off Knowledge (M8.1)
+ * and a commit count off History (M9.4).
  */
 
 /** One feed's three states. `loading` is distinct from `unavailable` so a
@@ -64,8 +70,8 @@ function useFeed<T>(
       } catch {
         // A read behind a surface goes quiet rather than toasting (the
         // store-layer rule in AGENTS.md), and the section says what it could
-        // not find out. Nothing is retried on a timer: this page speaks when
-        // it is opened and never on its own.
+        // not find out. Nothing is retried on a timer: these tabs speak when
+        // they are opened and never on their own.
         if (live) setFeed({ kind: 'unavailable' });
       }
     })();
@@ -95,7 +101,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section data-testid="status-section" data-section={id} className="flex flex-col gap-1.5">
+    <section data-testid="base-section" data-section={id} className="flex flex-col gap-1.5">
       <div className="flex items-baseline gap-2">
         <h2 className="text-sm font-semibold text-n-800">{title}</h2>
         {/* §33 made visible. The guarantee that no preference can hide this
@@ -118,7 +124,7 @@ function Section({
 }
 
 /** What a section says when its read did not come back. Never the empty
- * state: a page that renders "no contradictions" over a failed read is
+ * state: a tab that renders "no contradictions" over a failed read is
  * telling somebody something it does not know. */
 function Unavailable({ what }: { what: string }) {
   return (
@@ -210,73 +216,6 @@ function Changes({ feed }: { feed: Feed<ChangesView> }) {
           </div>
         ))}
     </>
-  );
-}
-
-/** The M24 queue, as a count and a door — not as cards. The cards live on
- * the review page, which knows how to decide them; a second rendering here
- * would be a second place for the decision UI to drift. */
-function NeedsReview({ feed }: { feed: Feed<ReviewCard[]> }) {
-  const navigate = useNavStore((s) => s.navigate);
-  if (feed.kind === 'loading') return <Loading />;
-  if (feed.kind === 'unavailable') return <Unavailable what="The review queue" />;
-  const cards = feed.data;
-  const urgent = cards.filter(
-    (card) => card.effective_risk === 'HIGH' || card.effective_risk === 'CRITICAL',
-  ).length;
-  if (cards.length === 0) return <Quiet text="Nothing is waiting on a decision." />;
-  return (
-    <button
-      type="button"
-      data-testid="review-summary"
-      data-urgent={urgent}
-      onClick={() => navigate({ kind: 'review' })}
-      className="flex w-full items-center justify-between rounded border border-n-200 px-2.5 py-2 text-left hover:bg-n-50"
-    >
-      <span className="text-xs text-n-800">
-        {cards.length === 1 ? '1 card is' : `${cards.length} cards are`} waiting on a decision
-        {urgent > 0 && `, ${urgent} at HIGH or CRITICAL`}
-      </span>
-      <Icon name="chevron-right" size={14} color="var(--n-500)" />
-    </button>
-  );
-}
-
-/** M25's health, as the two facts that change what a reader should expect
- * from the rest of this page: whether the background is running at all, and
- * whether it has anything left to spend. */
-function SystemHealth({ feed }: { feed: Feed<PipelineOverview> }) {
-  const navigate = useNavStore((s) => s.navigate);
-  if (feed.kind === 'loading') return <Loading />;
-  if (feed.kind === 'unavailable') return <Unavailable what="Background health" />;
-  const overview = feed.data;
-  const held = overview.held.baseline_held + overview.held.recovery_held + overview.held.pending;
-  return (
-    <button
-      type="button"
-      data-testid="health-summary"
-      data-paused={overview.global_pause}
-      data-ceiling={overview.meter.ceiling_state}
-      onClick={() => navigate({ kind: 'pipeline' })}
-      className="flex w-full items-center justify-between rounded border border-n-200 px-2.5 py-2 text-left hover:bg-n-50"
-    >
-      <span className="flex flex-col gap-0.5">
-        <span className="text-xs text-n-800">
-          {overview.global_pause ? 'The background is paused.' : 'The background is running.'}
-        </span>
-        <span className="text-2xs text-n-500">
-          {/* `accounting_state` is the one that matters: a day whose spend was
-              lost is not a day with budget left, and saying "under budget"
-              over an unknown meter would be the page inventing good news. */}
-          {overview.meter.accounting_state === 'exact'
-            ? `Today's spend: ${overview.meter.ceiling_state.replaceAll('_', ' ')}.`
-            : "Today's spend is not fully accounted for."}
-          {held > 0 && ` ${held} item${held === 1 ? '' : 's'} held.`}
-          {overview.banners.length > 0 && ` ${overview.banners.length} open notice.`}
-        </span>
-      </span>
-      <Icon name="chevron-right" size={14} color="var(--n-500)" />
-    </button>
   );
 }
 
@@ -534,6 +473,26 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
   );
 }
 
+/**
+ * The board, behind one line (M33a.2, spec D5/D6).
+ *
+ * R1–R14 rendered as a wall of "Never evaluated here" cards — 3,225px, 55% of
+ * the whole Status page — to say one thing: nothing has fired. That is
+ * build-planning bookkeeping, not a reading surface, so the count is what a
+ * reader gets and the board is what a second question gets. The count is
+ * READ off the registry rather than written here: spec D6 guessed 24 and the
+ * shipped artifact declares 14 entries, which is exactly the kind of number
+ * that must not be hard-coded into a sentence.
+ *
+ * Two things deliberately stay OUT of the collapse. A FIRING is the only news
+ * this tab ever has, so it is in the summary line itself — a headline behind
+ * a click is a headline nobody reads. And "Evaluate now" stays, because the
+ * action is the tab's rather than the board's, and what a run did is a
+ * sentence, not a row.
+ *
+ * D6 says this is reversible once it has been lived with, which is why the
+ * board is collapsed rather than deleted.
+ */
 function Gates({
   feed,
   onEvaluate,
@@ -547,6 +506,7 @@ function Gates({
   report: TriggerRunReport | null;
   error: string | null;
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') return <Unavailable what="The trigger registry" />;
   const board = feed.data;
@@ -555,7 +515,7 @@ function Gates({
   );
   return (
     <>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           data-testid="gates-evaluate"
@@ -565,11 +525,24 @@ function Gates({
         >
           {running ? 'Evaluating…' : 'Evaluate now'}
         </button>
-        <span className="text-2xs text-n-500">
+        <span data-testid="gates-summary" className="text-2xs text-n-500">
+          {board.length} {board.length === 1 ? 'capability' : 'capabilities'} held back,{' '}
           {firedGates.length === 0
-            ? 'Nothing has fired.'
-            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired.`}
+            ? 'none fired'
+            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired`}
+          .
         </span>
+        {board.length > 0 && (
+          <button
+            type="button"
+            data-testid="gates-expand"
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+            className="text-2xs text-n-500 underline underline-offset-2 hover:text-n-700"
+          >
+            {expanded ? 'Hide the board' : 'Show the board'}
+          </button>
+        )}
       </div>
       {error !== null && (
         <p data-testid="gates-run-error" className="text-2xs text-warn-700">
@@ -577,26 +550,27 @@ function Gates({
         </p>
       )}
       {report !== null && <RunOutcome report={report} />}
-      {board.map((entry) => (
-        <div
-          key={entry.registry_id}
-          data-testid="gate-entry"
-          data-entry={entry.registry_id}
-          className="flex flex-col gap-1"
-        >
-          <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
-            {entry.registry_id} — {entry.capability}
-          </span>
-          {entry.gates.map((gate) => (
-            <GateRow key={gate.gate} gate={gate} />
-          ))}
-          {entry.note !== null && (
-            <p data-testid="gate-entry-note" className="text-2xs text-n-500">
-              {entry.note}
-            </p>
-          )}
-        </div>
-      ))}
+      {expanded &&
+        board.map((entry) => (
+          <div
+            key={entry.registry_id}
+            data-testid="gate-entry"
+            data-entry={entry.registry_id}
+            className="flex flex-col gap-1"
+          >
+            <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
+              {entry.registry_id} — {entry.capability}
+            </span>
+            {entry.gates.map((gate) => (
+              <GateRow key={gate.gate} gate={gate} />
+            ))}
+            {entry.note !== null && (
+              <p data-testid="gate-entry-note" className="text-2xs text-n-500">
+                {entry.note}
+              </p>
+            )}
+          </div>
+        ))}
     </>
   );
 }
@@ -625,19 +599,99 @@ function Lanes({ feed }: { feed: Feed<LanesView> }) {
   );
 }
 
-export function EpistemicStatusPage() {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
+/** What moved since the last time anybody looked. */
+export function WhatChanged({ vaultPath }: { vaultPath: string | null }) {
   const changes = useFeed(vaultPath, ipc.converge);
+  return (
+    <Section id="changed" title="What changed" blurb="Since the last time anybody looked at this.">
+      <Changes feed={changes} />
+    </Section>
+  );
+}
+
+/**
+ * The attention lanes: contradictions, blindness, staleness, epistemic debt.
+ *
+ * The lanes arrive NAMED by Rust and their number varies, so this renders
+ * whatever the feed holds rather than enumerating four ids — a second copy of
+ * a list Rust owns is the copy that drifts.
+ */
+export function WhatsContested({ vaultPath }: { vaultPath: string | null }) {
   const lanes = useFeed(vaultPath, ipc.attentionLanes);
-  const review = useFeed(vaultPath, ipc.reviewQueue);
-  const health = useFeed(vaultPath, ipc.pipelineOverview);
+  return <Lanes feed={lanes} />;
+}
+
+/** The proposal queue — what the base wants to change and is waiting on you
+ * to decide. Named "Waiting on you" rather than "Needs review": Knowledge
+ * already has a Needs review row, for CONCEPTS a human has not verified, and
+ * two unrelated queues under one string is a nav that lies. */
+export function WaitingOnYou({ vaultPath }: { vaultPath: string | null }) {
+  return (
+    <Section
+      id="needs-review"
+      title="Waiting on you"
+      blurb="What the base wants to change and is waiting for you to decide."
+    >
+      {/* M33.3: the cards themselves, not a count and a door. The section
+          owns its own read. */}
+      <NeedsYouSection vaultPath={vaultPath} />
+    </Section>
+  );
+}
+
+/** Whether anything is running, what it has left to spend, what it holds. */
+export function Background({ vaultPath }: { vaultPath: string | null }) {
+  return (
+    <Section
+      id="system"
+      title="Background"
+      blurb="Whether anything is running, what it has left to spend, and what it is holding."
+    >
+      {/* M33.4: the controls themselves, not a two-line summary and a door.
+          The section owns its own read. */}
+      <SystemSection vaultPath={vaultPath} />
+    </Section>
+  );
+}
+
+/**
+ * Who works here, and what they have done (M33b.3).
+ *
+ * The roster leads and the run history follows. It was the other way around
+ * until M33b.3 — the tab listed runs, which answers "what happened" when the
+ * question a person arrives with is "who works here" (spec D5). Selecting an
+ * agent narrows the history to that agent's runs; the selection lives here
+ * rather than inside either child, because it is the one thing they share.
+ */
+export function AgentWork({ vaultPath }: { vaultPath: string | null }) {
+  const [focus, setFocus] = useState<string | null>(null);
+  return (
+    <Section
+      id="fleet"
+      title="Agents"
+      blurb="Who works in this vault, what they are on, and what they have run."
+    >
+      {/* The roster is the vault's — agents are records — while the history
+          spans vaults, because one CLI subscription runs them all and an
+          agent's actor is the same string wherever it ran. */}
+      <AgentRoster vaultPath={vaultPath} focus={focus} onFocus={setFocus} />
+      <h3 className="pt-1 text-xs font-semibold text-n-700">
+        {focus === null ? 'Every run booked here' : `Runs by ${focus}`}
+      </h3>
+      <FleetSection focusActor={focus} />
+    </Section>
+  );
+}
+
+/** What stays unbuilt until measured evidence says otherwise. */
+export function DeferralGates({ vaultPath }: { vaultPath: string | null }) {
   const [gatesVersion, setGatesVersion] = useState(0);
   const gates = useFeed(vaultPath, ipc.triggerStatus, gatesVersion);
   const [running, setRunning] = useState(false);
   const [runReport, setRunReport] = useState<TriggerRunReport | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // The one action on this page. It never throws (the store-layer rule):
+  // The one action on this tab. It never throws (the store-layer rule):
   // failure becomes a sentence beside the button, and success re-reads the
   // board so the newest rows are the ones on screen.
   const evaluateNow = () => {
@@ -658,54 +712,19 @@ export function EpistemicStatusPage() {
   };
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto" data-testid="status-page">
-      <div className="mx-auto flex w-full min-w-0 max-w-[720px] flex-col gap-6 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <Icon name="brain" size={16} color="var(--n-600)" />
-          <h1 className="text-sm font-semibold text-n-800">Epistemic status</h1>
-        </div>
-
-        <Section
-          id="changed"
-          title="What changed"
-          blurb="Since the last time anybody looked at this."
-        >
-          <Changes feed={changes} />
-        </Section>
-
-        <Lanes feed={lanes} />
-
-        <Section
-          id="needs-review"
-          title="Needs review"
-          blurb="What the base wants to change and is waiting for you to decide."
-        >
-          <NeedsReview feed={review} />
-        </Section>
-
-        <Section
-          id="health"
-          title="Background"
-          blurb="Whether anything is running, and what it has left to spend."
-        >
-          <SystemHealth feed={health} />
-        </Section>
-
-        <Section
-          id="gates"
-          title="Deferral gates"
-          blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
-        >
-          <Gates
-            feed={gates}
-            onEvaluate={evaluateNow}
-            running={running}
-            report={runReport}
-            error={runError}
-          />
-          <R7Scope vaultPath={vaultPath} />
-        </Section>
-      </div>
-    </div>
+    <Section
+      id="gates"
+      title="Deferral gates"
+      blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
+    >
+      <Gates
+        feed={gates}
+        onEvaluate={evaluateNow}
+        running={running}
+        report={runReport}
+        error={runError}
+      />
+      <R7Scope vaultPath={vaultPath} />
+    </Section>
   );
 }

@@ -31,9 +31,11 @@ describe('DocPage', () => {
     expect(screen.getByTestId('doc-title').textContent).toBe(entry?.title);
     // Breadcrumb: folder segments render as humanized crumbs.
     expect(screen.getByText('Meetings')).toBeTruthy();
-    // The Docs crumb navigates back to the all-docs surface.
-    fireEvent.click(screen.getByRole('button', { name: 'Docs' }));
-    expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
+    // M38.2: the kickoff note is `type: Meeting` — a record — so its crumb
+    // roots at its backdrop (the type screen), not at Docs, which never
+    // owned it.
+    fireEvent.click(screen.getByRole('button', { name: 'Meeting' }));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Meeting' });
     await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
       timeout: 5_000,
     });
@@ -41,6 +43,30 @@ describe('DocPage', () => {
     await waitFor(() => expect(screen.getByTestId('doc-outline')).toBeTruthy(), {
       timeout: 5_000,
     });
+  });
+
+  // M38.2 — a record is a page too: the peek's property surface renders on
+  // the page canvas, and the crumb roots at the record's backdrop rather
+  // than at Docs, which never owned it.
+  it('renders a record as a page: properties above the body, backdrop crumb', async () => {
+    const entries = useVaultStore.getState().entries;
+    const record = entries.find((e) => e.type === 'Work item');
+    if (record === undefined) throw new Error('fixture vault has no Work item');
+    render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+    expect(screen.getByTestId('page-properties')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Docs' })).toBeNull();
+    cleanup();
+
+    // And a DOC keeps its document form: no property surface conjured for it.
+    const doc = entries.find(
+      (e) => (e.type === null || e.type === '') && !e.path.startsWith('knowledge/'),
+    );
+    if (doc === undefined) throw new Error('fixture vault has no untyped doc');
+    render(<DocPage selection={{ kind: 'doc', path: doc.path }} />);
+    expect(screen.queryByTestId('page-properties')).toBeNull();
+    // M38.3: the crumb root is a plain 'Pages' label — the Docs surface it
+    // used to navigate to is gone, and the nav's tree is the way up.
+    expect(screen.getByText('Pages')).toBeTruthy();
   });
 
   it('the panel toggle hides and shows the side panel', async () => {

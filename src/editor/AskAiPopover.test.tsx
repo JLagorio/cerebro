@@ -3,7 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 
 const handlers: Array<(event: unknown) => void> = [];
 vi.mock('@/agent/agentIpc', () => ({
-  runAgent: vi.fn(async () => 1),
+  runAgent: vi.fn(async () => ({ run: 1, durableId: null })),
+  // The real narrowing (M34.2.4): a scripted deferral must throw here the
+  // way production would, not slip through a permissive stub.
+  startedOrThrow: (start: { run: number } | { deferred: string[] }) => {
+    if ('deferred' in start) throw new Error(`run deferred: ${start.deferred.join(', ')}`);
+    return start;
+  },
   startMcp: vi.fn(async () => ({ url: 'mock', token: 't' })),
   onAgentEvent: vi.fn((handler: (event: unknown) => void) => {
     handlers.push(handler);
