@@ -13,8 +13,8 @@ import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
 import {
+  foldsWhenUnset,
   inferKindFromValue,
-  isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
   visibleProperties,
@@ -115,15 +115,10 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
 
   const showEmpty = typeDef?.display.showEmpty === true;
 
-  // M16.10, the same split the record panel makes — M44.1 follow-up: including
-  // show_empty. A show-empty type only unfolds rows hidden for BEING EMPTY;
-  // a field hidden on purpose (`visibility: hide`) stays behind the toggle
-  // either way, or the per-field eye-toggle would be lying about show-empty
-  // types.
+  // M16.10, the same split the record panel makes.
   const [revealed, setRevealed] = useState(false);
-  const foldsWhenUnset = (f: FieldDef) =>
-    !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display);
-  const { shown, hidden } = splitByVisibility(allDeclared, foldsWhenUnset);
+  const folds = foldsWhenUnset(entry, schema, showEmpty);
+  const { shown, hidden } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
 
   // M45.1, the record panel's math verbatim: resolution partitions
@@ -133,14 +128,14 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   // flow, and undeclared keys render exactly as the flat panel does.
   const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
   const containerRows = (fields: FieldDef[]) =>
-    revealed ? fields : splitByVisibility(fields, foldsWhenUnset).shown;
+    revealed ? fields : splitByVisibility(fields, folds).shown;
   // The strip cannot reveal its own folds; revealed, they surface headerless
   // at the top of the stack. Its SHOWN fields stay out of the stack — an
   // exclusion that is only sound because the host page (DocPage) co-mounts
   // the HeadingProperties strip that renders them. A strip-less host must
   // not reuse this exclusion, or the heading fields render NOWHERE — the
   // M45.1 whole-slice review caught InboxPage shipping exactly that hole.
-  const headingFolds = splitByVisibility(layout.heading, foldsWhenUnset).hidden;
+  const headingFolds = splitByVisibility(layout.heading, folds).hidden;
   const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
   );

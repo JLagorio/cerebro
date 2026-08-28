@@ -8,8 +8,8 @@ import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
 import {
+  foldsWhenUnset,
   inferKindFromValue,
-  isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
   visibleProperties,
@@ -61,14 +61,10 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   const showEmpty = typeDef?.display.showEmpty === true;
 
   // M16.10. Revealing folds the hidden rows back into the same list, which
-  // also makes the reorder mapping below the identity case. M44.1: show_empty
-  // unfolds only what was hidden for BEING EMPTY — a field hidden on purpose
-  // (`visibility: hide`) stays behind the toggle either way, or the per-field
-  // eye-toggle would be lying about show-empty types.
+  // also makes the reorder mapping below the identity case.
   const [revealed, setRevealed] = useState(false);
-  const foldsWhenUnset = (f: FieldDef) =>
-    !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display);
-  const { shown, hidden } = splitByVisibility(allDeclared, foldsWhenUnset);
+  const folds = foldsWhenUnset(entry, schema, showEmpty);
+  const { shown, hidden } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
 
   // M45.1: `layout:` arranges the stack into named groups. Resolution
@@ -80,11 +76,11 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   // Per container, the SAME fold the flat stack makes; revealing opens each
   // container's folds in place.
   const containerRows = (fields: FieldDef[]) =>
-    revealed ? fields : splitByVisibility(fields, foldsWhenUnset).shown;
+    revealed ? fields : splitByVisibility(fields, folds).shown;
   // Heading fields the strip folded. The strip cannot reveal them, so on
   // reveal they surface at the TOP of the stack — the heading is the topmost
   // container — headerless. The strip's SHOWN fields stay out of the stack.
-  const headingFolds = splitByVisibility(layout.heading, foldsWhenUnset).hidden;
+  const headingFolds = splitByVisibility(layout.heading, folds).hidden;
   const undeclared = visibleProperties([
     ...Object.keys(entry.properties),
     ...Object.keys(entry.relationships),

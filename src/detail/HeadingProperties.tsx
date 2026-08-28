@@ -1,6 +1,6 @@
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
-import { isEmptyForVisibility, kindMeta, splitByVisibility } from '@/engine/properties';
+import { foldsWhenUnset, kindMeta, splitByVisibility } from '@/engine/properties';
 import type { Entry, FieldDef, Schema } from '@/engine/types';
 
 /**
@@ -22,10 +22,7 @@ export function stripCells(
 ): FieldDef[] {
   const show =
     showEmpty ?? (entry.type ? schema.types.get(entry.type)?.display.showEmpty === true : false);
-  return splitByVisibility(
-    fields,
-    (f) => !show && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
-  ).shown;
+  return splitByVisibility(fields, foldsWhenUnset(entry, schema, show)).shown;
 }
 
 /**

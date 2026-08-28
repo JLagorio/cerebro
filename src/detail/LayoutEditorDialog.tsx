@@ -11,7 +11,7 @@ import { HeadingProperties } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { resolveLayout } from '@/engine/layout';
-import { isEmptyForVisibility, splitByVisibility } from '@/engine/properties';
+import { foldsWhenUnset, splitByVisibility } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldDef, TypeDef } from '@/engine/types';
 import { deepEqual } from '@/lib/deepEqual';
@@ -211,16 +211,14 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   // vault while the user edits the stage. Same visual grammar, draft-driven.
   const previewLayout = resolveLayout(draft.layout, typeDef.fields);
   // The canvas folds what the page folds (M45.3): the panels' predicate with
-  // the DRAFT overlaid — staged visibility on each def, staged showEmpty in
-  // the isEmpty lambda. Folded rows render NOTHING (the page's collapsed
+  // the DRAFT overlaid — staged visibility on each def, staged showEmpty into
+  // `foldsWhenUnset`. Folded rows render NOTHING (the page's collapsed
   // default; the canvas has no expander) — the group EDITOR is where hidden
   // things stay visible.
   const canvasRows = (fields: FieldDef[]) =>
     splitByVisibility(
       overlayVisibility(fields, draft.visibility),
-      (f) =>
-        !draft.display.showEmpty &&
-        isEmptyForVisibility(f, schema.resolveField(previewEntry, f.name).display),
+      foldsWhenUnset(previewEntry, schema, draft.display.showEmpty),
     ).shown;
   const restRows = canvasRows(previewLayout.rest);
   const previewRow = (f: FieldDef) => (
