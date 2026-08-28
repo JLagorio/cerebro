@@ -63,8 +63,9 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   // (`visibility: hide`) stays behind the toggle either way, or the upcoming
   // per-field eye-toggle would be lying about show-empty types.
   const [revealed, setRevealed] = useState(false);
-  const { shown, hidden } = splitByVisibility(allDeclared, (f) =>
-    !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+  const { shown, hidden } = splitByVisibility(
+    allDeclared,
+    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
   );
   const declared = revealed ? allDeclared : shown;
   const undeclared = visibleProperties([
