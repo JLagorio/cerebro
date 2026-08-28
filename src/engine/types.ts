@@ -437,7 +437,7 @@ export interface GallerySpec {
   fit?: boolean;
 }
 
-export const CHART_KINDS = ['bar', 'line', 'donut'] as const;
+export const CHART_KINDS = ['bar', 'line', 'donut', 'number'] as const;
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 /**
@@ -447,6 +447,14 @@ export type ChartKind = (typeof CHART_KINDS)[number];
  */
 export const CHART_AGGS = ['count', 'sum', 'avg'] as const;
 export type ChartAgg = Extract<RollupCalc, (typeof CHART_AGGS)[number]>;
+
+/** Band order on the X axis. Absent = the grouping's own declared order. */
+export const CHART_SORTS = ['value-desc', 'value-asc', 'label'] as const;
+export type ChartSort = (typeof CHART_SORTS)[number];
+
+/** Plot height preset. Absent = 'm', today's 320px. */
+export const CHART_HEIGHTS = ['s', 'm', 'l', 'xl'] as const;
+export type ChartHeight = (typeof CHART_HEIGHTS)[number];
 
 /**
  * The chart's own settings (M16.27).
@@ -466,6 +474,30 @@ export interface ChartSpec {
   value?: string;
   /** Drop bands that measure zero. Notion's "Omit zero values". */
   omitZero?: boolean;
+  /** Bar kind only: bands run down the page and bars extend right. */
+  horizontal?: boolean;
+  /** Band order. Absent = the grouping's declared order carries over. */
+  sort?: ChartSort;
+  /** Bar/line only: each band adds every band before it (running total). */
+  cumulative?: boolean;
+  /** Absent = 'm'. */
+  height?: ChartHeight;
+  /** One hue for every band (an option-colour word). Absent = per-option. */
+  palette?: string;
+  /** With `palette`: deeper shade = bigger value. */
+  colorByValue?: boolean;
+  /** Style switches, stored only when true — true is always the off-default. */
+  hideGrid?: boolean;
+  hideAxis?: boolean;
+  hideLabels?: boolean;
+  /** Line kind: curve through the points instead of straight segments. */
+  smooth?: boolean;
+  /** Line kind: wash the region under the line. */
+  area?: boolean;
+  /** Donut kind: drop the centre total. */
+  hideDonutCenter?: boolean;
+  /** Absent = the kind's own default: a donut shows one, the rest don't. */
+  legend?: boolean;
 }
 
 /**

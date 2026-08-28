@@ -4,7 +4,9 @@ import type {
   CardPreview,
   CardSize,
   ChartAgg,
+  ChartHeight,
   ChartKind,
+  ChartSort,
   ChartSpec,
   ChildrenSpec,
   ChipStyle,
@@ -29,7 +31,9 @@ import {
   CARD_PREVIEWS,
   CARD_SIZES,
   CHART_AGGS,
+  CHART_HEIGHTS,
   CHART_KINDS,
+  CHART_SORTS,
   FILTER_OPS,
   VIEW_TYPES,
 } from './types';
@@ -280,6 +284,8 @@ function parsePresentation(raw: unknown): Presentation {
 
 const KINDS = new Set<string>(CHART_KINDS);
 const AGGS = new Set<string>(CHART_AGGS);
+const CHART_SORT_SET = new Set<string>(CHART_SORTS);
+const CHART_HEIGHT_SET = new Set<string>(CHART_HEIGHTS);
 
 /**
  * Gallery card settings (M16.22). Every member is optional and only stored
@@ -315,6 +321,23 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (typeof obj.agg === 'string' && AGGS.has(obj.agg)) spec.agg = obj.agg as ChartAgg;
   if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
   if (obj.omitZero === true) spec.omitZero = true;
+  if (obj.horizontal === true) spec.horizontal = true;
+  if (typeof obj.sort === 'string' && CHART_SORT_SET.has(obj.sort))
+    spec.sort = obj.sort as ChartSort;
+  if (obj.cumulative === true) spec.cumulative = true;
+  if (typeof obj.height === 'string' && CHART_HEIGHT_SET.has(obj.height))
+    spec.height = obj.height as ChartHeight;
+  if (typeof obj.palette === 'string' && obj.palette.trim() !== '')
+    spec.palette = obj.palette.trim();
+  if (obj.colorByValue === true) spec.colorByValue = true;
+  if (obj.hideGrid === true) spec.hideGrid = true;
+  if (obj.hideAxis === true) spec.hideAxis = true;
+  if (obj.hideLabels === true) spec.hideLabels = true;
+  if (obj.smooth === true) spec.smooth = true;
+  if (obj.area === true) spec.area = true;
+  if (obj.hideDonutCenter === true) spec.hideDonutCenter = true;
+  // legend is a real boolean either way: donuts store `legend: false`, bars `legend: true`.
+  if (typeof obj.legend === 'boolean') spec.legend = obj.legend;
   return Object.keys(spec).length === 0 ? undefined : spec;
 }
 

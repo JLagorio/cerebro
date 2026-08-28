@@ -127,6 +127,7 @@ const CHART_KIND_LABEL: Record<ChartKind, string> = {
   bar: 'Bar',
   line: 'Line',
   donut: 'Donut',
+  number: 'Number',
 };
 
 /** What one band of a chart is CALLED, per kind — the word the Chart page's
@@ -136,6 +137,7 @@ const CHART_PARTS: Record<ChartKind, string> = {
   bar: 'bars',
   line: 'points',
   donut: 'slices',
+  number: 'totals',
 };
 
 const CHART_AGG_LABEL: Record<ChartAgg, string> = {

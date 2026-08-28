@@ -968,6 +968,52 @@ describe('serializeList', () => {
       expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
     });
 
+    it('round-trips every M44.2 chart setting', () => {
+      const def = oneView(
+        {
+          name: 'Burndown',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'chart',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [],
+          chart: {
+            kind: 'line',
+            agg: 'sum',
+            value: 'estimate',
+            omitZero: true,
+            horizontal: true,
+            sort: 'value-desc',
+            cumulative: true,
+            height: 'xl',
+            palette: 'blue',
+            colorByValue: true,
+            hideGrid: true,
+            hideAxis: true,
+            hideLabels: true,
+            smooth: true,
+            area: true,
+            hideDonutCenter: true,
+            legend: false,
+          },
+        },
+      );
+      expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a chart sort and height nothing implements', () => {
+      expect(
+        parse(
+          "presentation:\n  type: chart\n  chart:\n    kind: bar\n    sort: sideways\n    height: xxl\n    palette: ''\n",
+        ).chart,
+      ).toEqual({ kind: 'bar' });
+    });
+
     it('drops a chart type nothing draws', () => {
       expect(
         parse('presentation:\n  type: chart\n  chart:\n    kind: sankey\n').chart,
