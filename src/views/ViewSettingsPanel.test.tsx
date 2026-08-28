@@ -647,3 +647,61 @@ describe('the root page on a canvas (M29.46)', () => {
     expect(screen.getByText('Properties')).toBeTruthy();
   });
 });
+
+/**
+ * M44.4 Task 8: the canvas's own Edit mode became the widget editor (add
+ * popover, menu, drag, resize, filters) in Tasks 1-7, so this page shrinks to
+ * the Global filter plus a pointer back to the canvas — a second flat-widget
+ * editor over the same rows would only drift from it.
+ */
+describe('blocks page (M44.4)', () => {
+  const oneWidget: Partial<Presentation> = {
+    type: 'dashboard',
+    group: [],
+    dashboard: { rows: [{ id: 'r', widgets: [{ id: 'a', kind: 'table' }] }] },
+  };
+
+  it('counts widgets and points at the canvas instead of editing blocks', () => {
+    setup(oneWidget);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    expect(screen.getByText('1 widget')).toBeTruthy();
+    expect(screen.getByText(/edited on the dashboard itself/i)).toBeTruthy();
+    expect(screen.queryByTestId('add-number-block')).toBeNull();
+    expect(screen.queryByTestId('block-row-a')).toBeNull();
+  });
+
+  it('shows the widget count on the nav row without opening the page', () => {
+    setup(oneWidget);
+    expect(screen.getByTestId('view-settings-blocks').textContent).toContain('1');
+  });
+
+  it('reads zero widgets off an absent dashboard rather than throwing', () => {
+    setup({ type: 'dashboard', group: [] });
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    expect(screen.getByText('0 widgets')).toBeTruthy();
+  });
+
+  it('wires the Global filter to spec.global', () => {
+    const { nextPresentation } = setup(oneWidget);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    fireEvent.click(screen.getByText('Add filter'));
+    expect(nextPresentation().dashboard?.global).toEqual({
+      all: [{ field: 'status', op: 'is_not_empty' }],
+    });
+    // The widget rows themselves are untouched — this page no longer writes
+    // them at all.
+    expect(nextPresentation().dashboard?.rows).toEqual(oneWidget.dashboard?.rows);
+  });
+
+  it('an emptied Global filter deletes the key rather than storing an empty group', () => {
+    const withGlobal: Partial<Presentation> = {
+      type: 'dashboard',
+      group: [],
+      dashboard: { rows: [], global: { all: [{ field: 'status', op: 'is_not_empty' }] } },
+    };
+    const { nextPresentation } = setup(withGlobal);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    fireEvent.click(screen.getByLabelText('Remove filter'));
+    expect(nextPresentation().dashboard?.global).toBeUndefined();
+  });
+});

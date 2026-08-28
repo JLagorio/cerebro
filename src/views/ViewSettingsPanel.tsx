@@ -43,8 +43,7 @@ import type {
   ChartSpec,
   ChipStyle,
   ColumnSpec,
-  DashboardRow,
-  DashboardWidget,
+  DashboardSpec,
   FieldDef,
   GallerySpec,
   GroupSpec,
@@ -55,16 +54,10 @@ import type {
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import {
-  MAX_GROUP_DEPTH,
-  MAX_NEST_DEPTH,
-  MAX_SORT_KEYS,
-  moveSortKey,
-  nextDashboardWidgetId,
-} from '@/engine/views';
+import { widgetCount } from '@/engine/dashboard';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import { PICKABLE_OPTION_COLORS } from '@/lib/swatch';
-import { useVaultStore } from '@/stores/vaultStore';
 import {
   VIEW_KINDS,
   axesFor,
@@ -410,7 +403,7 @@ export function ViewSettingsPanel({
               <Row
                 icon="layout-dashboard"
                 label="Blocks"
-                value={String(p.dashboard?.rows.flatMap((r) => r.widgets).length ?? 0)}
+                value={String(widgetCount(p.dashboard ?? { rows: [] }))}
                 onClick={() => setPage('blocks')}
               />
             )}
@@ -1585,16 +1578,12 @@ function ChartPage({
 }
 
 /**
- * The dashboard's widgets (M16.28; rows of them since M44.4): add, name,
- * reorder, remove. `wide` died with blocks[] — row structure encodes width.
- *
- * A view block stores a REFERENCE to a saved view — the List's id and folder,
- * addressed exactly as a selection addresses one — rather than a copy of its
- * configuration. Editing that List updates every dashboard showing it, which
- * is the whole reason to point at one instead of building a second view.
- *
- * Reordering goes through `useSortableList`, the one drag implementation, so a
- * block moves from the keyboard like a property row does.
+ * The dashboard's widget count and its Global filter (M16.28; M44.4 shrank
+ * this from a flat widget editor to a pointer — Task 1 through 7 made the
+ * canvas's own Edit mode the widget editor, add popover, drag and all, so a
+ * second editor here would only drift from it). The Global filter stays: it
+ * is a `spec`-level rule with no home on the canvas itself, and the two
+ * surfaces share `spec.global` and the null-deletes-key rule.
  */
 function BlocksPage({
   presentation,
@@ -1605,188 +1594,38 @@ function BlocksPage({
   fields: ColumnDef[];
   onChange: (next: Presentation) => void;
 }) {
-  const lists = useVaultStore((s) => s.views);
-  // M44.4 Task 1 shim: the spec is rows of widgets now. This page still edits
-  // the FLAT widget list until Task 8 shrinks it to the Global filter — an
-  // add appends a fresh row, an edit patches in place, and a reorder rechunks
-  // the flat order back into the existing rows' sizes.
   const spec = presentation.dashboard ?? { rows: [] };
-  const widgets = spec.rows.flatMap((r) => r.widgets);
-  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
-
-  const write = (rows: DashboardRow[]) =>
-    onChange(
-      rows.length === 0 && spec.global === undefined
-        ? ((): Presentation => {
-            const { dashboard: _drop, ...rest } = presentation;
-            return rest;
-          })()
-        : { ...presentation, dashboard: { ...spec, rows } },
-    );
-  const patch = (id: string, next: Partial<DashboardWidget>) =>
-    write(
-      spec.rows.map((r) => ({
-        ...r,
-        widgets: r.widgets.map((w) => (w.id === id ? ({ ...w, ...next } as DashboardWidget) : w)),
-      })),
-    );
-  const remove = (id: string) =>
-    write(
-      spec.rows
-        .map((r) => ({ ...r, widgets: r.widgets.filter((w) => w.id !== id) }))
-        .filter((r) => r.widgets.length > 0),
-    );
-  const append = (widget: DashboardWidget) => {
-    const taken = new Set(spec.rows.map((r) => r.id));
-    let n = spec.rows.length + 1;
-    while (taken.has(`row-${n}`)) n += 1;
-    write([...spec.rows, { id: `row-${n}`, widgets: [widget] }]);
-  };
-
-  const sortable = useSortableList({
-    ids: widgets.map((w) => w.id),
-    onReorder: (id, to) => {
-      const from = widgets.findIndex((w) => w.id === id);
-      if (from === -1) return;
-      const flat = widgets.filter((w) => w.id !== id);
-      flat.splice(to, 0, widgets[from]);
-      const rows: DashboardRow[] = [];
-      let at = 0;
-      for (const r of spec.rows) {
-        rows.push({ ...r, widgets: flat.slice(at, at + r.widgets.length) });
-        at += r.widgets.length;
-      }
-      write(rows.filter((r) => r.widgets.length > 0));
-    },
-    labelFor: (id) => widgets.find((w) => w.id === id)?.title ?? id,
-  });
-
-  const addNumber = () => append({ id: nextDashboardWidgetId(spec), kind: 'number', agg: 'count' });
-  const addView = (value: string) => {
-    const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
-    if (hit === undefined) return;
-    append({
-      id: nextDashboardWidgetId(spec),
-      kind: 'view',
-      list: hit.id,
-      ...(hit.collection !== null ? { collection: hit.collection } : {}),
-    });
-  };
+  const write = (next: DashboardSpec) => onChange({ ...presentation, dashboard: next });
+  const count = widgetCount(spec);
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
-        {widgets.map((block, i) => (
-          <div
-            key={block.id}
-            data-testid={`block-row-${block.id}`}
-            className={[
-              'mb-1.5 rounded-md border border-n-200 p-1.5',
-              sortable.dragging === block.id ? 'opacity-60' : '',
-            ].join(' ')}
-            style={sortable.dropIndicator(i)}
-          >
-            <div className="flex items-center gap-1">
-              <span
-                {...sortable.gripProps(block.id, i)}
-                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
-              >
-                <Icon name="grip-vertical" size={12} />
-              </span>
-              <Icon
-                name={block.kind === 'number' ? 'hash' : 'table-2'}
-                size={12}
-                color="var(--n-400)"
-              />
-              <Input
-                size="sm"
-                ariaLabel={`Block ${i + 1} title`}
-                placeholder={
-                  block.kind === 'number'
-                    ? 'Number'
-                    : block.kind === 'view'
-                      ? block.list
-                      : humanize(block.kind)
-                }
-                value={block.title ?? ''}
-                onChange={(e) =>
-                  patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
-                }
-                width="100%"
-              />
-              <IconButton
-                icon="trash-2"
-                label={`Remove block ${i + 1}`}
-                size="sm"
-                onClick={() => remove(block.id)}
-              />
-            </div>
-            {block.kind === 'number' && (
-              <div className="mt-1.5 flex items-center gap-1.5 pl-5">
-                <Select
-                  size="sm"
-                  value={block.agg}
-                  options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
-                  onChange={(e) => patch(block.id, { agg: e.target.value as ChartAgg })}
-                  width="100%"
-                />
-                {block.agg !== 'count' && (
-                  <Select
-                    size="sm"
-                    value={block.value ?? ''}
-                    options={[
-                      { value: '', label: 'Property…' },
-                      ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
-                    ]}
-                    onChange={(e) =>
-                      patch(block.id, {
-                        value: e.target.value === '' ? undefined : e.target.value,
-                      })
-                    }
-                    width="100%"
-                  />
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <button
-        type="button"
-        data-testid="add-number-block"
-        onClick={addNumber}
-        className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
-      >
-        <Icon name="hash" size={13} />
-        Add a number
-      </button>
-      {lists.length > 0 ? (
-        <Select
-          size="sm"
-          value={ADD}
-          options={[
-            { value: ADD, label: 'Add a saved view…' },
-            ...lists.map((l) => ({
-              value: `${l.collection ?? ''}::${l.id}`,
-              label: l.definition.name,
-            })),
-          ]}
-          onChange={(e) => {
-            if (e.target.value !== ADD) addView(e.target.value);
-          }}
-          width="100%"
-        />
-      ) : (
-        <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
-          There are no saved lists in the vault to embed yet.
-        </p>
-      )}
-
-      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
-        A number measures this view’s own records, so its filters apply. A saved view is shown as it
-        is configured where it lives.
+      <p className="m-0 px-2 text-xs text-n-600">
+        {count} {count === 1 ? 'widget' : 'widgets'}
       </p>
+      <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
+        Widgets are edited on the dashboard itself — toggle Edit in its corner.
+      </p>
+      <div className="border-t border-n-100 pt-2">
+        <div className="px-0.5 pb-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+          Global filter — every widget’s rows pass it
+        </div>
+        <FilterBuilder
+          filters={spec.global ?? null}
+          fields={fields}
+          onChange={(g) => {
+            // An emptied group DELETES the key (FilterChips' null rule) — the
+            // same wiring as the canvas's own Global filter popover, because
+            // this is the same `spec.global`, edited from a second door.
+            if (g === null) {
+              const { global: _drop, ...rest } = spec;
+              write(rest);
+            } else {
+              write({ ...spec, global: g });
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }
