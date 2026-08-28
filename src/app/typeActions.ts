@@ -645,7 +645,15 @@ export interface TypeLayoutDraft {
   tabs: TabDef[];
   /** Staged per-field visibility; null clears back to show (key deleted). */
   visibility: Record<string, FieldVisibility | null>;
-  /** Staged new fields, appended in order. */
+  /** Staged new fields, appended in order.
+   *
+   * `config` here is FieldDef-SHAPED extras: it is spread into a FieldDef and
+   * serialized through `serializeFields`/`fieldToSpec`, which emits only the
+   * keys it models (unmodeled keys are DROPPED) and expects `options` to be
+   * FieldOption[] (`{id, label, color, hollow}`), not raw spec values. That
+   * is the OPPOSITE contract from `addFieldToType`'s `config`, which writes
+   * raw spec keys into the mapping verbatim — two contracts, one name, so
+   * M45.2's AddPropertyPanel wiring must build FieldDef shapes for this door. */
   added: { name: string; kind: FieldKind; config?: Record<string, unknown> }[];
 }
 

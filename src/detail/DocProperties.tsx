@@ -134,7 +134,11 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, foldsWhenUnset).shown;
   // The strip cannot reveal its own folds; revealed, they surface headerless
-  // at the top of the stack. Its SHOWN fields stay out of the stack.
+  // at the top of the stack. Its SHOWN fields stay out of the stack — an
+  // exclusion that is only sound because the host page (DocPage) co-mounts
+  // the HeadingProperties strip that renders them. A strip-less host must
+  // not reuse this exclusion, or the heading fields render NOWHERE — the
+  // M45.1 whole-slice review caught InboxPage shipping exactly that hole.
   const headingFolds = splitByVisibility(layout.heading, foldsWhenUnset).hidden;
   const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
