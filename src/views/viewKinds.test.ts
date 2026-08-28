@@ -214,7 +214,7 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
     dependencyField: 'blocked_by',
     gallery: { cover: 'artwork', fit: true },
     chart: { kind: 'donut' },
-    dashboard: { blocks: [{ id: 'b1', kind: 'number', agg: 'count' }] },
+    dashboard: { rows: [{ id: 'r1', widgets: [{ id: 'b1', kind: 'number', agg: 'count' }] }] },
     calendarSpan: 'week',
     showWeekends: false,
     weekStart: 'monday',

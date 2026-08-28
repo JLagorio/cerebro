@@ -43,7 +43,8 @@ import type {
   ChartSpec,
   ChipStyle,
   ColumnSpec,
-  DashboardBlock,
+  DashboardRow,
+  DashboardWidget,
   FieldDef,
   GallerySpec,
   GroupSpec,
@@ -59,7 +60,7 @@ import {
   MAX_NEST_DEPTH,
   MAX_SORT_KEYS,
   moveSortKey,
-  nextDashboardBlockId,
+  nextDashboardWidgetId,
 } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import { PICKABLE_OPTION_COLORS } from '@/lib/swatch';
@@ -404,12 +405,12 @@ export function ViewSettingsPanel({
               />
             )}
 
-            {/* M16.28: the dashboard's blocks. */}
+            {/* M16.28: the dashboard's widgets (rows of them since M44.4). */}
             {hasBlocks(p.type) && (
               <Row
                 icon="layout-dashboard"
                 label="Blocks"
-                value={String(p.dashboard?.blocks.length ?? 0)}
+                value={String(p.dashboard?.rows.flatMap((r) => r.widgets).length ?? 0)}
                 onClick={() => setPage('blocks')}
               />
             )}
@@ -1584,7 +1585,8 @@ function ChartPage({
 }
 
 /**
- * The dashboard's blocks (M16.28): add, name, widen, reorder, remove.
+ * The dashboard's widgets (M16.28; rows of them since M44.4): add, name,
+ * reorder, remove. `wide` died with blocks[] — row structure encodes width.
  *
  * A view block stores a REFERENCE to a saved view — the List's id and folder,
  * addressed exactly as a selection addresses one — rather than a copy of its
@@ -1604,56 +1606,77 @@ function BlocksPage({
   onChange: (next: Presentation) => void;
 }) {
   const lists = useVaultStore((s) => s.views);
-  const blocks = presentation.dashboard?.blocks ?? [];
+  // M44.4 Task 1 shim: the spec is rows of widgets now. This page still edits
+  // the FLAT widget list until Task 8 shrinks it to the Global filter — an
+  // add appends a fresh row, an edit patches in place, and a reorder rechunks
+  // the flat order back into the existing rows' sizes.
+  const spec = presentation.dashboard ?? { rows: [] };
+  const widgets = spec.rows.flatMap((r) => r.widgets);
   const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
 
-  const write = (next: DashboardBlock[]) =>
+  const write = (rows: DashboardRow[]) =>
     onChange(
-      next.length === 0
+      rows.length === 0 && spec.global === undefined
         ? ((): Presentation => {
             const { dashboard: _drop, ...rest } = presentation;
             return rest;
           })()
-        : { ...presentation, dashboard: { blocks: next } },
+        : { ...presentation, dashboard: { ...spec, rows } },
     );
-  const patch = (id: string, next: Partial<DashboardBlock>) =>
-    write(blocks.map((b) => (b.id === id ? ({ ...b, ...next } as DashboardBlock) : b)));
+  const patch = (id: string, next: Partial<DashboardWidget>) =>
+    write(
+      spec.rows.map((r) => ({
+        ...r,
+        widgets: r.widgets.map((w) => (w.id === id ? ({ ...w, ...next } as DashboardWidget) : w)),
+      })),
+    );
+  const remove = (id: string) =>
+    write(
+      spec.rows
+        .map((r) => ({ ...r, widgets: r.widgets.filter((w) => w.id !== id) }))
+        .filter((r) => r.widgets.length > 0),
+    );
+  const append = (widget: DashboardWidget) => {
+    const taken = new Set(spec.rows.map((r) => r.id));
+    let n = spec.rows.length + 1;
+    while (taken.has(`row-${n}`)) n += 1;
+    write([...spec.rows, { id: `row-${n}`, widgets: [widget] }]);
+  };
 
   const sortable = useSortableList({
-    ids: blocks.map((b) => b.id),
+    ids: widgets.map((w) => w.id),
     onReorder: (id, to) => {
-      const from = blocks.findIndex((b) => b.id === id);
+      const from = widgets.findIndex((w) => w.id === id);
       if (from === -1) return;
-      const next = blocks.filter((b) => b.id !== id);
-      next.splice(to, 0, blocks[from]);
-      write(next);
+      const flat = widgets.filter((w) => w.id !== id);
+      flat.splice(to, 0, widgets[from]);
+      const rows: DashboardRow[] = [];
+      let at = 0;
+      for (const r of spec.rows) {
+        rows.push({ ...r, widgets: flat.slice(at, at + r.widgets.length) });
+        at += r.widgets.length;
+      }
+      write(rows.filter((r) => r.widgets.length > 0));
     },
-    labelFor: (id) => blocks.find((b) => b.id === id)?.title ?? id,
+    labelFor: (id) => widgets.find((w) => w.id === id)?.title ?? id,
   });
 
-  const addNumber = () =>
-    write([
-      ...blocks,
-      { id: nextDashboardBlockId(blocks), kind: 'number', agg: 'count' } as DashboardBlock,
-    ]);
+  const addNumber = () => append({ id: nextDashboardWidgetId(spec), kind: 'number', agg: 'count' });
   const addView = (value: string) => {
     const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
     if (hit === undefined) return;
-    write([
-      ...blocks,
-      {
-        id: nextDashboardBlockId(blocks),
-        kind: 'view',
-        list: hit.id,
-        ...(hit.collection !== null ? { collection: hit.collection } : {}),
-      } as DashboardBlock,
-    ]);
+    append({
+      id: nextDashboardWidgetId(spec),
+      kind: 'view',
+      list: hit.id,
+      ...(hit.collection !== null ? { collection: hit.collection } : {}),
+    });
   };
 
   return (
     <div className="flex flex-col gap-1.5">
       <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
-        {blocks.map((block, i) => (
+        {widgets.map((block, i) => (
           <div
             key={block.id}
             data-testid={`block-row-${block.id}`}
@@ -1678,7 +1701,13 @@ function BlocksPage({
               <Input
                 size="sm"
                 ariaLabel={`Block ${i + 1} title`}
-                placeholder={block.kind === 'number' ? 'Number' : block.list}
+                placeholder={
+                  block.kind === 'number'
+                    ? 'Number'
+                    : block.kind === 'view'
+                      ? block.list
+                      : humanize(block.kind)
+                }
                 value={block.title ?? ''}
                 onChange={(e) =>
                   patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
@@ -1689,7 +1718,7 @@ function BlocksPage({
                 icon="trash-2"
                 label={`Remove block ${i + 1}`}
                 size="sm"
-                onClick={() => write(blocks.filter((b) => b.id !== block.id))}
+                onClick={() => remove(block.id)}
               />
             </div>
             {block.kind === 'number' && (
@@ -1719,14 +1748,6 @@ function BlocksPage({
                 )}
               </div>
             )}
-            <div className="mt-1.5 pl-5">
-              <Switch
-                checked={block.wide === true}
-                onChange={(wide) => patch(block.id, { wide: wide ? true : undefined })}
-                label="Full width"
-                ariaLabel={`Block ${i + 1} full width`}
-              />
-            </div>
           </div>
         ))}
       </div>

@@ -5,7 +5,7 @@ import { buildSchema } from '@/engine/schema';
 import { parseListYaml } from '@/engine/views';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import type { DashboardBlock, Entry, ListFile, Presentation } from '@/engine/types';
+import type { Entry, ListFile, Presentation } from '@/engine/types';
 
 /**
  * The dashboard (M16.28).
@@ -64,13 +64,20 @@ const lists = (): ListFile[] => [
   ),
 ];
 
-const view = (blocks: DashboardBlock[]): Presentation => ({
-  type: 'dashboard',
-  group: [],
-  sort: [],
-  columns: [],
-  ...(blocks.length > 0 ? { dashboard: { blocks } } : {}),
-});
+/**
+ * Fixtures stay LEGACY-SHAPED on purpose (M44.4): they route the pre-M44.4
+ * `blocks:` YAML through the real parser, so every test here also proves the
+ * blocks→rows migration renders. Rows-native fixtures arrive with the row
+ * renderer in Task 3.
+ */
+type LegacyBlock = Record<string, unknown>;
+const view = (blocks: LegacyBlock[]): Presentation =>
+  parseListYaml(
+    'dash',
+    `presentation:\n  type: dashboard\n${
+      blocks.length > 0 ? `  dashboard:\n    blocks: ${JSON.stringify(blocks)}\n` : ''
+    }`,
+  ).definition.views[0].presentation;
 
 afterEach(() => {
   cleanup();
@@ -182,7 +189,9 @@ describe('DashboardView', () => {
     expect(screen.getByText('Whiteboards live on their list')).toBeTruthy();
   });
 
-  it('spans a wide block across the grid', () => {
+  // `wide` died with blocks[] (M44.4): migration gives a wide block its own
+  // row, so the claim to keep is that every legacy block still renders.
+  it('shows every block of a migrated legacy dashboard, wide included', () => {
     const entries = vault();
     render(
       <DashboardView
@@ -194,8 +203,7 @@ describe('DashboardView', () => {
         schema={buildSchema(entries)}
       />,
     );
-    expect(
-      screen.getAllByTestId('dashboard-block').map((b) => b.getAttribute('data-wide')),
-    ).toEqual(['true', 'false']);
+    expect(screen.getAllByTestId('dashboard-number')).toHaveLength(2);
+    expect(screen.getByTestId('dashboard-view').getAttribute('data-blocks')).toBe('2');
   });
 });

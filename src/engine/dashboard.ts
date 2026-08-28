@@ -1,9 +1,9 @@
 import { aggregateNumbers, formatNumber } from './properties';
 import { humanize } from './schema';
-import type { ChartAgg, DashboardBlock, Entry, Schema } from './types';
+import type { ChartAgg, DashboardWidget, Entry, Schema } from './types';
 
 /**
- * The dashboard's number block (M16.28).
+ * The dashboard's number widget (M16.28; a `blocks[]` member until M44.4).
  *
  * It measures the DASHBOARD'S OWN rows — the same filtered, sorted set every
  * other layout of this view would show — so the view's filters scope it. A
@@ -37,7 +37,7 @@ const AGG_LABEL: Record<ChartAgg, string> = {
 
 export function dashboardNumber(
   entries: Entry[],
-  block: Extract<DashboardBlock, { kind: 'number' }>,
+  block: Extract<DashboardWidget, { kind: 'number' }>,
   schema: Schema,
 ): DashboardNumber {
   const label =

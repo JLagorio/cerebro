@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { dashboardNumber } from '@/engine/dashboard';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
-import type { DashboardBlock, Entry } from '@/engine/types';
+import type { DashboardWidget, Entry } from '@/engine/types';
 
 /**
  * The dashboard's number block (M16.28).
@@ -44,8 +44,8 @@ const vault = (): Entry[] => [
 const records = (entries: Entry[]) => entries.filter((e) => e.path.startsWith('items/'));
 
 const numberBlock = (
-  over: Partial<Extract<DashboardBlock, { kind: 'number' }>> = {},
-): Extract<DashboardBlock, { kind: 'number' }> => ({
+  over: Partial<Extract<DashboardWidget, { kind: 'number' }>> = {},
+): Extract<DashboardWidget, { kind: 'number' }> => ({
   id: 'block-1',
   kind: 'number',
   agg: 'count',

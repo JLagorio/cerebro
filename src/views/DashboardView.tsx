@@ -8,10 +8,11 @@ import { resolveView } from '@/engine/views';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import type { DashboardBlock, Entry, Presentation, Schema } from '@/engine/types';
+import type { DashboardWidget, Entry, Presentation, Schema } from '@/engine/types';
 
 /**
- * Dashboard (M16.28) — a grid of blocks, each a saved view or a single number.
+ * Dashboard (M16.28; rows of widgets since M44.4) — each widget a saved view
+ * or a single number, with four own-scope kinds arriving in M44.4 Task 4.
  *
  * The two block kinds read different data ON PURPOSE, and that is the whole
  * design:
@@ -40,21 +41,17 @@ export interface DashboardViewProps {
 function BlockShell({
   title,
   subtitle,
-  wide,
   testId,
   children,
 }: {
   title: string;
   subtitle?: string;
-  wide: boolean;
   testId: string;
   children: React.ReactNode;
 }) {
   return (
     <section
       data-testid={testId}
-      data-wide={wide ? 'true' : 'false'}
-      style={wide ? { gridColumn: '1 / -1' } : undefined}
       className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
       <header className="flex flex-none items-baseline gap-2 border-b border-n-100 px-3 py-2">
@@ -70,19 +67,9 @@ function BlockShell({
 
 /** A block that cannot draw says what is missing and where it pointed — a
  * blank tile is indistinguishable from a block that is still loading. */
-function BrokenBlock({
-  title,
-  wide,
-  icon,
-  message,
-}: {
-  title: string;
-  wide: boolean;
-  icon: string;
-  message: string;
-}) {
+function BrokenBlock({ title, icon, message }: { title: string; icon: string; message: string }) {
   return (
-    <BlockShell title={title} wide={wide} testId="dashboard-block">
+    <BlockShell title={title} testId="dashboard-block">
       <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
         <Icon name={icon} size={14} color="var(--n-400)" />
         {message}
@@ -96,7 +83,7 @@ function NumberBlock({
   entries,
   schema,
 }: {
-  block: Extract<DashboardBlock, { kind: 'number' }>;
+  block: Extract<DashboardWidget, { kind: 'number' }>;
   entries: Entry[];
   schema: Schema;
 }) {
@@ -105,7 +92,6 @@ function NumberBlock({
     <BlockShell
       title={measured.label}
       subtitle={`${measured.count} ${measured.count === 1 ? 'record' : 'records'}`}
-      wide={block.wide === true}
       testId="dashboard-block"
     >
       <div
@@ -129,7 +115,7 @@ function NumberBlock({
   );
 }
 
-function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }> }) {
+function ViewBlock({ block }: { block: Extract<DashboardWidget, { kind: 'view' }> }) {
   const vault = useVaultStore((s) => s.entries);
   const lists = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -142,7 +128,6 @@ function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }>
     return (
       <BrokenBlock
         title={block.title ?? block.list}
-        wide={block.wide === true}
         icon="unlink"
         message={`This block points at a list called “${block.list}” that is no longer in the vault.`}
       />
@@ -156,7 +141,6 @@ function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }>
     return (
       <BrokenBlock
         title={title}
-        wide={block.wide === true}
         icon="circle-slash"
         message="A dashboard cannot show another dashboard — pick one of its own views instead."
       />
@@ -180,7 +164,6 @@ function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }>
     <BlockShell
       title={title}
       subtitle={viewKind(active.presentation.type).label}
-      wide={block.wide === true}
       testId="dashboard-block"
     >
       {/* Bounded, and its own scroll container: the layouts all expand to fill
@@ -203,15 +186,17 @@ function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }>
 }
 
 export function DashboardView({ entries, presentation, schema }: DashboardViewProps) {
-  const blocks = presentation.dashboard?.blocks ?? [];
+  // M44.4 Task 1 shim: the spec is rows of widgets now, flattened here until
+  // Task 3 draws the rows themselves (heights, weights, per-row layout).
+  const widgets = presentation.dashboard?.rows.flatMap((r) => r.widgets) ?? [];
 
   return (
     <div
       data-testid="dashboard-view"
-      data-blocks={blocks.length}
+      data-blocks={widgets.length}
       className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
     >
-      {blocks.length === 0 ? (
+      {widgets.length === 0 ? (
         <EmptyState
           icon="layout-dashboard"
           title="No blocks yet"
@@ -225,12 +210,15 @@ export function DashboardView({ entries, presentation, schema }: DashboardViewPr
           className="grid items-start gap-3"
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}
         >
-          {blocks.map((block) =>
-            block.kind === 'number' ? (
-              <NumberBlock key={block.id} block={block} entries={entries} schema={schema} />
-            ) : (
-              <ViewBlock key={block.id} block={block} />
-            ),
+          {widgets.map((widget) =>
+            widget.kind === 'number' ? (
+              <NumberBlock key={widget.id} block={widget} entries={entries} schema={schema} />
+            ) : widget.kind === 'view' ? (
+              <ViewBlock key={widget.id} block={widget} />
+            ) : // The four own-scope kinds (table/board/timeline/chart) render in
+            // M44.4 Task 4; until then a rows-native file simply shows fewer
+            // tiles, and nothing saved before M44.4 can hold one.
+            null,
           )}
         </div>
       )}

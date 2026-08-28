@@ -510,48 +510,79 @@ export interface ChartSpec {
 }
 
 /**
- * One block of a dashboard (M16.28).
+ * One widget of a dashboard (M44.4; blocks[] was M16.28's shape).
  *
- * Two kinds, and they read different data on purpose:
+ * Two data flows, on purpose:
  *
- * - `view` embeds a SAVED VIEW from the vault — a List and one of its tabs,
- *   addressed the way a selection addresses one. That is what makes a
- *   dashboard worth having: widgets spanning several sources, which is
- *   Notion's model too. It carries the reference, never a copy of the view's
- *   configuration; editing the List updates every dashboard showing it.
- * - `number` measures the DASHBOARD'S OWN rows, so the dashboard's filters
- *   scope it. A number block that ignored them would be a constant.
+ * - `view` embeds a SAVED VIEW from the vault by reference — a List and one
+ *   of its tabs, addressed the way a selection addresses one. Widgets
+ *   spanning several sources is what makes a dashboard worth having, and it
+ *   carries the reference, never a copy of the view's configuration; editing
+ *   the List updates every dashboard showing it.
+ * - every other kind reads the DASHBOARD'S OWN rows, so the view's filters,
+ *   the Global filter, and the widget's own filter all scope it.
  */
-export type DashboardBlock =
-  | {
-      /** Unique within the dashboard; what a reorder and a delete address. */
-      id: string;
+export type DashboardWidget =
+  | (DashboardWidgetBase & {
       kind: 'view';
       /** List id. Ids are unique per folder, hence `collection` beside it. */
       list: string;
       collection?: string | null;
       /** Which of the List's tabs; absent = its first. */
       view?: string;
-      /** Overrides the List's own name in the block header. */
-      title?: string;
-      /** Spans both columns. Absent = one. */
-      wide?: boolean;
-    }
-  | {
-      id: string;
+    })
+  | (DashboardWidgetBase & {
       kind: 'number';
       agg: ChartAgg;
       /** Property summed or averaged. Unread when the measure is count. */
       value?: string;
-      title?: string;
-      wide?: boolean;
-    };
+    })
+  | (DashboardWidgetBase & { kind: 'table' })
+  | (DashboardWidgetBase & {
+      kind: 'board';
+      /** Property to band by. Absent = the source's status field. */
+      group?: string;
+    })
+  | (DashboardWidgetBase & { kind: 'timeline' })
+  | (DashboardWidgetBase & {
+      kind: 'chart';
+      /** The X axis property. Absent = the chart draws its no-group refusal. */
+      group?: string;
+      chart?: ChartSpec;
+    });
+
+export interface DashboardWidgetBase {
+  /** Unique within the dashboard; what a move, a resize and a delete address. */
+  id: string;
+  /** Overrides the computed name in the widget header. */
+  title?: string;
+  /** Width weight within the row, >= 1. Absent = 1 — equal shares. */
+  w?: number;
+  /** This widget's own filter, ANDed under the Global filter. */
+  filter?: FilterGroup;
+}
+
+export interface DashboardRow {
+  id: string;
+  /** Row height in px. Absent = 300, the M16.28 tile height. */
+  h?: number;
+  /** Left to right. 1..MAX_ROW_WIDGETS. */
+  widgets: DashboardWidget[];
+}
 
 export interface DashboardSpec {
-  /** In render order. Never absent — a dashboard with no blocks is [] and
+  /** Top to bottom. Never absent — an emptied dashboard is `rows: []` and
    * says so, rather than being indistinguishable from an unparsed one. */
-  blocks: DashboardBlock[];
+  rows: DashboardRow[];
+  /** ANDed onto every own-scope widget, under the view's own filters. */
+  global?: FilterGroup;
 }
+
+export const MAX_ROW_WIDGETS = 4;
+export const MAX_DASHBOARD_WIDGETS = 12;
+export const ROW_HEIGHT_DEFAULT = 300;
+export const ROW_HEIGHT_MIN = 200;
+export const ROW_HEIGHT_MAX = 640;
 /**
  * What a board card previews above its properties (M16.20).
  *
@@ -629,7 +660,7 @@ export interface Presentation {
   gallery?: GallerySpec;
   /** Chart settings (M16.27). Absent = a bar chart counting records. */
   chart?: ChartSpec;
-  /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
+  /** Dashboard rows of widgets (M44.4). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
   /**
    * The whiteboard's canvas (M29.45): a vault-relative `.mmd` path, created

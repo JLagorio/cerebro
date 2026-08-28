@@ -1093,10 +1093,17 @@ describe('serializeList', () => {
     });
 
     /**
-     * The dashboard's blocks (M16.28) — a LIST, unlike the other two, so a
-     * malformed member is dropped alone rather than taking the others with it.
+     * The dashboard's rows of widgets (M44.4; blocks[] was M16.28's shape) —
+     * a LIST, unlike the other two settings blocks, so a malformed member is
+     * dropped alone rather than taking the others with it. The pre-M44.4
+     * `blocks:` shape migrates on read: a wide block keeps its own row and
+     * neighbours pair up two to a row, ids surviving verbatim.
      */
-    it('round-trips a dashboard’s blocks in order', () => {
+    const parseDash = (dashboard: unknown) =>
+      parse(`presentation:\n  type: dashboard\n  dashboard: ${JSON.stringify(dashboard)}\n`)
+        .dashboard;
+
+    it('round-trips rows, heights, weights, widget kinds and filters', () => {
       const def = oneView(
         { name: 'Ops', icon: null, color: null, order: null, source: NO_SOURCE },
         {
@@ -1105,44 +1112,171 @@ describe('serializeList', () => {
           sort: [{ field: 'modifiedAt', dir: 'desc' }],
           columns: [],
           dashboard: {
-            blocks: [
-              { id: 'total', kind: 'number', agg: 'sum', value: 'estimate', title: 'Points' },
-              { id: 'grid', kind: 'view', list: 'delivery', collection: 'ops', wide: true },
-              { id: 'count', kind: 'number', agg: 'count' },
+            rows: [
+              {
+                id: 'row-1',
+                h: 360,
+                widgets: [
+                  { id: 'a', kind: 'number', agg: 'sum', value: 'estimate', w: 2 },
+                  { id: 'b', kind: 'view', list: 'delivery', collection: 'ops', view: 'board' },
+                ],
+              },
+              {
+                id: 'row-2',
+                widgets: [
+                  {
+                    id: 'c',
+                    kind: 'table',
+                    filter: { all: [{ field: 'status', op: 'equals', value: 'doing' }] },
+                  },
+                  {
+                    id: 'd',
+                    kind: 'chart',
+                    group: 'status',
+                    chart: { kind: 'bar', horizontal: true },
+                  },
+                  { id: 'e', kind: 'board', group: 'status' },
+                  { id: 'f', kind: 'timeline', title: 'Roadmap' },
+                ],
+              },
             ],
+            global: { all: [{ field: 'priority', op: 'not_equals', value: 'low' }] },
           },
         },
       );
       expect(parseListYaml('d', serializeList(def)).definition).toEqual(def);
     });
 
-    it('drops a view block with no list to point at, keeping its siblings', () => {
-      const p = parse(
-        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: a, kind: view }\n      - { id: b, kind: number, agg: count }\n',
-      );
-      expect(p.dashboard?.blocks).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
+    it('migrates legacy blocks: wide gets its own row, neighbours pair up, ids survive', () => {
+      const spec = parseDash({
+        blocks: [
+          { id: 'x', kind: 'number', agg: 'count' },
+          { id: 'y', kind: 'number', agg: 'count' },
+          { id: 'z', kind: 'view', list: 'delivery', wide: true },
+          { id: 'q', kind: 'number', agg: 'count' },
+        ],
+      });
+      expect(spec?.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([['x', 'y'], ['z'], ['q']]);
+      // The legacy `wide` flag dies in migration — row structure encodes it now.
+      expect(spec?.rows.flatMap((r) => r.widgets).some((w) => 'wide' in w)).toBe(false);
     });
 
-    it('makes block ids unique, because a delete addresses one', () => {
-      const p = parse(
-        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: x, kind: number, agg: count }\n      - { id: x, kind: number, agg: count }\n',
-      );
-      expect(p.dashboard?.blocks.map((b) => b.id)).toEqual(['x', 'block-2']);
+    it('drops a malformed widget without taking its row down, and mints unique ids', () => {
+      const spec = parseDash({
+        rows: [
+          {
+            id: 'r',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count' },
+              { kind: 'view' },
+              { id: 'a', kind: 'table' },
+            ],
+          },
+        ],
+      });
+      expect(spec?.rows[0].widgets.map((w) => w.id)).toEqual(['a', 'widget-2']);
+    });
+
+    it('drops a view widget with no list to point at, keeping its siblings', () => {
+      const spec = parseDash({
+        rows: [
+          {
+            id: 'r',
+            widgets: [
+              { id: 'a', kind: 'view' },
+              { id: 'b', kind: 'number', agg: 'count' },
+            ],
+          },
+        ],
+      });
+      expect(spec?.rows[0].widgets).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
+    });
+
+    it('drops an empty row, and caps a row at four widgets on read', () => {
+      const wid = (id: string) => ({ id, kind: 'table' });
+      const spec = parseDash({
+        rows: [
+          { id: 'empty', widgets: [{ kind: 'view' }] },
+          { id: 'full', widgets: [wid('a'), wid('b'), wid('c'), wid('d'), wid('e')] },
+        ],
+      });
+      expect(spec?.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([['a', 'b', 'c', 'd']]);
+    });
+
+    it('clamps a hand-edited row height into the sane band, and rounds it', () => {
+      expect(
+        parseDash({ rows: [{ id: 'r', h: 9999, widgets: [{ id: 'a', kind: 'table' }] }] })?.rows[0]
+          .h,
+      ).toBe(640);
+      expect(
+        parseDash({ rows: [{ id: 'r', h: 12, widgets: [{ id: 'a', kind: 'table' }] }] })?.rows[0].h,
+      ).toBe(200);
+      expect(
+        parseDash({ rows: [{ id: 'r', h: 300.6, widgets: [{ id: 'a', kind: 'table' }] }] })?.rows[0]
+          .h,
+      ).toBe(301);
+      expect(
+        parseDash({ rows: [{ id: 'r', h: 'tall', widgets: [{ id: 'a', kind: 'table' }] }] })
+          ?.rows[0].h,
+      ).toBeUndefined();
+    });
+
+    it('reads a width weight only when it is a real number of at least one', () => {
+      const at = (w: unknown) =>
+        parseDash({ rows: [{ id: 'r', widgets: [{ id: 'a', kind: 'table', w }] }] })?.rows[0]
+          .widgets[0];
+      expect(at(2.005)).toEqual({ id: 'a', kind: 'table', w: 2.01 });
+      expect(at(0.5)).toEqual({ id: 'a', kind: 'table' });
+      expect(at('wide')).toEqual({ id: 'a', kind: 'table' });
+    });
+
+    it('drops a widget filter that is not a filter group', () => {
+      const spec = parseDash({
+        rows: [{ id: 'r', widgets: [{ id: 'a', kind: 'table', filter: 'nonsense' }] }],
+      });
+      expect(spec?.rows[0].widgets[0]).toEqual({ id: 'a', kind: 'table' });
+    });
+
+    it('drops a widget kind nothing draws', () => {
+      const spec = parseDash({
+        rows: [
+          {
+            id: 'r',
+            widgets: [
+              { id: 'a', kind: 'sparkline' },
+              { id: 'b', kind: 'number', agg: 'count' },
+            ],
+          },
+        ],
+      });
+      expect(spec?.rows[0].widgets).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
     });
 
     it('forgets a value property the measure cannot use', () => {
-      const p = parse(
-        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: n, kind: number, agg: count, value: estimate }\n',
-      );
-      expect(p.dashboard?.blocks[0]).toEqual({ id: 'n', kind: 'number', agg: 'count' });
+      const spec = parseDash({
+        rows: [
+          { id: 'r', widgets: [{ id: 'n', kind: 'number', agg: 'count', value: 'estimate' }] },
+        ],
+      });
+      expect(spec?.rows[0].widgets[0]).toEqual({ id: 'n', kind: 'number', agg: 'count' });
+    });
+
+    it('makes row ids unique, because a resize addresses one', () => {
+      const spec = parseDash({
+        rows: [
+          { id: 'r', widgets: [{ id: 'a', kind: 'table' }] },
+          { id: 'r', widgets: [{ id: 'b', kind: 'table' }] },
+        ],
+      });
+      expect(spec?.rows.map((r) => r.id)).toEqual(['r', 'row-2']);
     });
 
     it('reads an empty dashboard as empty, not as unconfigured', () => {
-      // `blocks: []` is a dashboard someone emptied; absent is one nobody has
+      // `rows: []` is a dashboard someone emptied; absent is one nobody has
       // touched. Both render the same, but only the first survives a rewrite.
-      expect(
-        parse('presentation:\n  type: dashboard\n  dashboard:\n    blocks: []\n').dashboard,
-      ).toEqual({ blocks: [] });
+      // The legacy empty (`blocks: []`) migrates to the same emptied state.
+      expect(parseDash({ rows: [] })).toEqual({ rows: [] });
+      expect(parseDash({ blocks: [] })).toEqual({ rows: [] });
       expect(parse('presentation:\n  type: dashboard\n').dashboard).toBeUndefined();
     });
 
