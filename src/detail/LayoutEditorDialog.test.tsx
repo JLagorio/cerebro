@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import {
   LayoutEditorDialog,
   draftDirty,
+  draftRoster,
   overlayVisibility,
   seedDraft,
   updateDraft,
@@ -198,6 +199,30 @@ describe('overlayVisibility', () => {
   it('an empty stage returns the same array', () => {
     const fields: FieldDef[] = [{ name: 'status', kind: 'text' }];
     expect(overlayVisibility(fields, {})).toBe(fields);
+  });
+});
+
+describe('draftRoster (M45.3 Task 4)', () => {
+  it('appends staged added fields as FieldDefs — config spread under name/kind', () => {
+    const fields: FieldDef[] = [{ name: 'status', kind: 'text' }];
+    // A hand-built draft through the exported door: `added` stays empty until
+    // Task 5 wires AddPropertyPanel, so the seam is exercised the way Apply
+    // builds its defs (typeActions' {...config, name, kind} spread).
+    const draft = updateDraft(seedDraft(def()), {
+      added: [{ name: 'estimate', kind: 'number', config: { visibility: 'hide_when_empty' } }],
+    });
+    const out = draftRoster(fields, draft.added);
+    expect(out).toEqual([
+      { name: 'status', kind: 'text' },
+      { name: 'estimate', kind: 'number', visibility: 'hide_when_empty' },
+    ]);
+    // Pure: the declared roster never mutates.
+    expect(fields).toHaveLength(1);
+  });
+
+  it('no staged additions returns the same array', () => {
+    const fields: FieldDef[] = [{ name: 'status', kind: 'text' }];
+    expect(draftRoster(fields, [])).toBe(fields);
   });
 });
 
@@ -636,13 +661,22 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     expect(strip().textContent).toContain('todo');
   });
 
-  it('the canvas is inert, with no aria-hidden belt-and-suspenders', () => {
+  it('the inert boundary sits at each block CONTENT — the canvas and shells are live', () => {
     recordSetup();
-    const preview = screen.getByTestId('layout-preview');
-    expect(preview.hasAttribute('inert')).toBe(true);
-    // inert already removes the subtree from the a11y tree; a second claim
-    // via aria-hidden could only drift from the first (plan Decision).
-    expect(preview.hasAttribute('aria-hidden')).toBe(false);
+    // The boundary moved inward (M45.3): the container hosts interactive
+    // shells now, so it must not be inert itself.
+    expect(screen.getByTestId('layout-preview').hasAttribute('inert')).toBe(false);
+    const contents = screen.getAllByTestId('layout-preview-content');
+    expect(contents.length).toBeGreaterThan(0);
+    for (const content of contents) {
+      expect(content.hasAttribute('inert')).toBe(true);
+      // inert already removes the subtree from the a11y tree; a second claim
+      // via aria-hidden could only drift from the first (plan Decision).
+      expect(content.hasAttribute('aria-hidden')).toBe(false);
+    }
+    for (const shell of screen.getAllByTestId('layout-block')) {
+      expect(shell.hasAttribute('inert')).toBe(false);
+    }
   });
 
   it('zero records renders the synthetic preview — no crash, no picker, no store write', () => {
@@ -736,5 +770,113 @@ describe('the canvas folds what the page folds (M45.3 Task 1)', () => {
     expect(preview().getByText('Notes')).toBeTruthy();
     await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
     expect(preview().queryByText('Notes')).toBeNull();
+  });
+});
+
+describe('block shells around inert content (M45.3 Task 4)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  const RECORD = makeEntry({
+    path: 'items/alpha.md',
+    title: 'Alpha record',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'high', notes: 'keep' },
+  });
+
+  const shellSetup = () => setup({ entries: [typeDoc(), RECORD] });
+
+  const blockIds = () =>
+    screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+
+  it('every block wears a focusable shell addressed by container', () => {
+    shellSetup();
+    // Fixture order: heading strip, the Planning group, headerless rest,
+    // the body (show_body defaults true). No tabs, no tabs shell.
+    expect(blockIds()).toEqual(['heading', 'g1', 'rest', 'content']);
+    for (const shell of screen.getAllByTestId('layout-block')) {
+      // Prepared for Task 5's click-to-edit: in the tab order, button role,
+      // no handler yet — the popover lands with its wiring.
+      expect(shell.getAttribute('role')).toBe('button');
+      expect(shell.tabIndex).toBe(0);
+      // Exactly one inert content div inside each shell.
+      expect(within(shell).getAllByTestId('layout-preview-content')).toHaveLength(1);
+    }
+  });
+
+  it('the tab strip gains a shell while the draft has tabs', async () => {
+    const user = userEvent.setup();
+    shellSetup();
+    await user.click(screen.getByTestId('layout-structure-tabbed'));
+    expect(blockIds()).toEqual(['tabs', 'heading', 'g1', 'rest', 'content']);
+    const tabsShell = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'tabs');
+    if (tabsShell === undefined) throw new Error('tabs shell missing');
+    // The strip itself renders INSIDE the shell's inert content.
+    expect(
+      within(tabsShell)
+        .getByTestId('layout-preview-content')
+        .querySelector('[data-testid="record-tabs"]'),
+    ).toBeTruthy();
+  });
+
+  it('the name chip is shell chrome — outside the content div, naming the block', () => {
+    shellSetup();
+    const shells = screen.getAllByTestId('layout-block');
+    const chipOf = (container: string, text: string) => {
+      const shell = shells.find((b) => b.getAttribute('data-block') === container);
+      if (shell === undefined) throw new Error(`${container} shell missing`);
+      const hits = within(shell)
+        .getAllByText(text)
+        .filter((el) => el.closest('[data-testid="layout-preview-content"]') === null);
+      expect(hits).toHaveLength(1);
+      return shell;
+    };
+    expect(chipOf('heading', 'Heading').getAttribute('aria-label')).toBe('Heading');
+    // The group's chip wears the group NAME — 'Planning' also lives inside
+    // the content (GroupLabel), so the filter is what isolates the chrome.
+    expect(chipOf('g1', 'Planning').getAttribute('aria-label')).toBe('Planning');
+    expect(chipOf('rest', 'Properties').getAttribute('aria-label')).toBe('Properties');
+    expect(chipOf('content', 'Content').getAttribute('aria-label')).toBe('Content');
+  });
+
+  it('an EMPTY group regains a visible shell — its label and an empty hint', () => {
+    setup({
+      entries: [
+        makeEntry({
+          path: DOC,
+          title: 'Work item',
+          type: 'Type',
+          properties: {
+            fields: { status: 'text', priority: 'text' },
+            layout: {
+              heading: ['status'],
+              groups: [
+                { id: 'g1', name: 'Planning', fields: ['priority'] },
+                // Structurally empty — the editor's drop target, which the
+                // fold rule must NOT erase the way it erases a group whose
+                // rows all folded.
+                { id: 'g2', name: 'Later', fields: [] },
+              ],
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+        RECORD,
+      ],
+    });
+    const empty = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'g2');
+    if (empty === undefined) throw new Error('empty group shell missing');
+    expect(empty.textContent).toContain('Later');
+    expect(empty.textContent).toContain('No properties yet');
+    // The populated sibling still renders its rows as before.
+    expect(screen.getByTestId('property-group').textContent).toContain('high');
   });
 });

@@ -17,11 +17,13 @@ import { boot, readMockFile } from './boot';
  *    the record panel grows the file row AND the Type doc's frontmatter in
  *    the mock vault carries the bit. jsdom covers every joint; only e2e
  *    covers the chain.
- * 2. The preview is INERT. jsdom does not implement the `inert` attribute's
- *    behavior (its clicks are synthetic dispatches that ignore hit-testing),
- *    so the unit suite can only assert the attribute exists. A real
- *    browser's hit-test is the thing under test: a click at a live
- *    FieldEditor chip's coordinates must open nothing and write nothing.
+ * 2. The block CONTENT is inert. M45.3 moved the boundary inward — the
+ *    canvas and its block shells are live; each block's content div carries
+ *    the `inert`. jsdom does not implement the attribute's behavior (its
+ *    clicks are synthetic dispatches that ignore hit-testing), so the unit
+ *    suite can only assert where the attribute sits. A real browser's
+ *    hit-test is the thing under test: a click at a live FieldEditor chip's
+ *    coordinates must open nothing and write nothing.
  */
 test('layout editor: strip to vault bytes, and the preview stays inert', async ({ page }) => {
   await boot(page);
@@ -73,8 +75,14 @@ test('layout editor: strip to vault bytes, and the preview stays inert', async (
   // write target a NON-inert FieldEditor would hit.
   const previewedPath = await page.getByTestId('layout-preview-picker').inputValue();
   const before = await readMockFile(page, previewedPath);
-  // The same chip button the control group just proved opens a listbox.
+  // The same chip button the control group just proved opens a listbox —
+  // reached through the heading BLOCK's inert content div, because that is
+  // where the boundary sits now (M45.3): the shell around it is live, so a
+  // click that lands must be swallowed by the content's inert, not by a
+  // still-inert canvas.
   const chip = preview
+    .locator('[data-block="heading"]')
+    .getByTestId('layout-preview-content')
     .getByTestId('heading-strip')
     .locator('[data-field="status"]')
     .getByRole('button', { includeHidden: true });
