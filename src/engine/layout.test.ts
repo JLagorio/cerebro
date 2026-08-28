@@ -81,12 +81,23 @@ describe('resolveLayout (M45.1)', () => {
     });
   });
 
-  it('never mutates the config — dead pointers survive until the editor prunes on Apply', () => {
+  it('never mutates its inputs — dead pointers survive until the editor prunes on Apply', () => {
+    // Frozen inputs make ANY write throw under strict mode — including a
+    // transient mutate-then-restore, or a write to the roster, which a
+    // compare-after-the-fact alone would miss.
     const config: LayoutConfig = {
       heading: ['due', 'ghost'],
       groups: [{ id: 'g1', name: 'Main', fields: ['gone', 'budget'] }],
     };
-    resolveLayout(config, fields);
+    Object.freeze(config);
+    Object.freeze(config.heading);
+    Object.freeze(config.groups);
+    for (const g of config.groups) {
+      Object.freeze(g);
+      Object.freeze(g.fields);
+    }
+    const roster = Object.freeze(fields.map((d) => Object.freeze({ ...d })));
+    resolveLayout(config, roster as FieldDef[]);
     expect(config).toEqual({
       heading: ['due', 'ghost'],
       groups: [{ id: 'g1', name: 'Main', fields: ['gone', 'budget'] }],
