@@ -436,6 +436,39 @@ describe('DetailPanel', () => {
     // Still distinct from the write-side act it used to sit alone beside.
     expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
   });
+
+  describe('display config (M44.1)', () => {
+    const withDisplay = (display: Record<string, unknown>) => {
+      const entries = fixtureVault();
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      (typeDoc.properties as unknown as Record<string, unknown>).display = display;
+      useVaultStore.setState({ entries, vaultPath: '/vault' });
+      useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
+    };
+
+    it('shows the Description section by default and drops it on show_body: false', () => {
+      withDisplay({});
+      const { unmount } = render(<DetailPanel />);
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      unmount();
+      withDisplay({ show_body: false });
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('show_file adds a muted path row; absent means none', () => {
+      withDisplay({ show_file: true });
+      render(<DetailPanel />);
+      expect(screen.getByTestId('detail-file').textContent).toContain(
+        'projects/onboarding/items/fld-1.md',
+      );
+      // and the default case:
+      cleanup();
+      withDisplay({});
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('detail-file')).toBeNull();
+    });
+  });
 });
 
 // spliceTitle (string splice) was replaced by spliceTitleIntoBlocks in Task
