@@ -176,3 +176,53 @@ describe('DocProperties', () => {
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 });
+
+describe('DocProperties display config (M44.1 follow-up)', () => {
+  afterEach(cleanup);
+
+  // Mirrors RecordProperties.test.tsx's fixture mechanics (the Info tab is
+  // reachable for a typed record too, via DocPage's side panel): the
+  // work-item fields declare no `visibility` by default, so marking `due`
+  // `hide_when_empty` is enough to fold it without blanking a field that IS
+  // set on fld-1. `hideField` adds a field marked `visibility: 'hide'`
+  // outright — hidden on purpose, not merely empty — to pin that show_empty
+  // never reaches it here either.
+  const setupTyped = (options: { display?: Record<string, unknown>; hideField?: boolean } = {}) => {
+    const entries = fixtureVault();
+    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+    const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+    const fields = typeProps.fields as Record<string, unknown>;
+    fields.due = { kind: 'date', visibility: 'hide_when_empty' };
+    if (options.hideField === true) {
+      fields.internal = { kind: 'text', visibility: 'hide' };
+    }
+    if (options.display !== undefined) {
+      typeProps.display = options.display;
+    }
+    useVaultStore.setState({ entries, vaultPath: '/vault' });
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    render(<DocProperties entry={entry} schema={buildSchema(entries)} />);
+  };
+
+  it('folds empty properties behind the count by default', () => {
+    setupTyped();
+    expect(screen.queryByTestId('hidden-properties-toggle')).toBeTruthy();
+    expect(screen.queryByText('Due')).toBeNull();
+  });
+
+  it('show_empty unfolds them and retires the toggle — nothing left to fold', () => {
+    setupTyped({ display: { show_empty: true } });
+    expect(screen.queryByTestId('hidden-properties-toggle')).toBeNull();
+    expect(screen.getByText('Due')).toBeTruthy();
+  });
+
+  it('show_empty does not reach a field hidden on purpose', () => {
+    setupTyped({ display: { show_empty: true }, hideField: true });
+    // `due` was hidden for being empty — show_empty unfolds it.
+    expect(screen.getByText('Due')).toBeTruthy();
+    // `internal` was hidden on purpose — show_empty speaks about emptiness
+    // only, so it stays folded and the toggle reappears counting it alone.
+    expect(screen.queryByText('Internal')).toBeNull();
+    expect(screen.getByTestId('hidden-properties-toggle')).toBeTruthy();
+  });
+});

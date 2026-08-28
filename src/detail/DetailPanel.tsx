@@ -175,19 +175,25 @@ export function DetailPanel() {
   // load/save). The handle is only needed for the rename splice below.
   const editorRef = useRef<CerebroEditor | null>(null);
 
+  // M44.1: per-type presentation. Untyped records and types the schema
+  // doesn't know about fall back to the pre-M44.1 defaults. Computed ahead
+  // of the early return below (tolerating a null entry) so the effect right
+  // after it can react to show_body toggling.
+  const display =
+    (entry && entry.type !== null ? schema.types.get(entry.type)?.display : undefined) ??
+    DISPLAY_DEFAULTS;
+
   useEffect(() => {
     setTitle(entry?.title ?? '');
     // The keyed NoteBodyEditor remounts on path change; drop the stale
-    // handle until the new editor reports ready.
+    // handle until the new editor reports ready. M44.1 follow-up: also drop
+    // it when show_body flips off — NoteBodyEditor unmounts then too, and
+    // nothing else nulled this ref, so a later commitTitle's splice could
+    // hit a detached editor.
     editorRef.current = null;
-  }, [entry?.path, entry?.title]);
+  }, [entry?.path, entry?.title, display.showBody]);
 
   if (!detailPath || !entry) return null;
-
-  // M44.1: per-type presentation. Untyped records and types the schema
-  // doesn't know about fall back to the pre-M44.1 defaults.
-  const display =
-    (entry.type !== null ? schema.types.get(entry.type)?.display : undefined) ?? DISPLAY_DEFAULTS;
 
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
