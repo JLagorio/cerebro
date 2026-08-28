@@ -366,7 +366,7 @@ export function DetailPanel() {
       {display.showFile && (
         <div
           data-testid="detail-file"
-          className="truncate px-0.5 pt-1 font-mono text-2xs text-n-400"
+          className="truncate px-4 pt-1 font-mono text-2xs text-n-400"
           title={entry.path}
         >
           {entry.path}
