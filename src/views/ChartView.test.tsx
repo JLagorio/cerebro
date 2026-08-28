@@ -49,6 +49,23 @@ const vault = (): Entry[] => [
   }),
 ];
 
+/** vault() plus a third status and record — a curve needs three points. */
+const wide = (): Entry[] => {
+  const entries = vault();
+  (
+    entries[0].properties as unknown as { statuses: { id: string; group: string; color: string }[] }
+  ).statuses.push({ id: 'done', group: 'done', color: 'green' });
+  entries.push(
+    makeEntry({
+      path: 'items/d.md',
+      title: 'D',
+      type: 'Work item',
+      properties: { status: 'done', estimate: 1 },
+    }),
+  );
+  return entries;
+};
+
 const records = (entries: Entry[]) => entries.filter((e) => e.path.startsWith('items/'));
 
 const view = (over: Partial<Presentation> = {}): Presentation => ({
@@ -220,6 +237,218 @@ describe('ChartView', () => {
     const bars = screen.getAllByTestId('chart-bar');
     expect(bars.length).toBeGreaterThan(0);
     for (const bar of bars) expect(Number(bar.getAttribute('height'))).toBeLessThanOrEqual(40);
+  });
+
+  it('hideGrid keeps the base line and drops the rest', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const on = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(on.container.querySelectorAll('[data-testid="chart-grid-line"]').length).toBeGreaterThan(
+      0,
+    );
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hideGrid: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-grid-line"]').length).toBe(0);
+    // The base line survives — a floating chart with no ground reads broken.
+    expect(container.querySelectorAll('svg line').length).toBe(1);
+  });
+
+  it('hideAxis drops tick numbers and band labels', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const on = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(on.container.querySelectorAll('[data-testid="chart-tick"]').length).toBeGreaterThan(0);
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hideAxis: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-tick"]').length).toBe(0);
+    // Everything textual left in the svg is a value label — no ticks, no
+    // measure label, no band labels under the axis.
+    const texts = [...container.querySelectorAll('svg text')].map((t) => t.textContent);
+    expect(texts).toEqual(['2', '1']);
+  });
+
+  it('a smooth line is a curve, a plain line is segments', () => {
+    // Three bands: a Catmull-Rom curve through two points is just the segment.
+    const entries = wide();
+    const schema = buildSchema(entries);
+    const plain = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    const straight = plain.container.querySelector('[data-testid="chart-line"]')?.getAttribute('d');
+    expect(straight).toMatch(/^M/);
+    expect(straight).not.toContain('C');
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', smooth: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('[data-testid="chart-line"]')?.getAttribute('d')).toContain('C');
+  });
+
+  it('area fill draws a closed wash under the line', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', area: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-area')).toBeTruthy();
+    expect(screen.getByTestId('chart-area').getAttribute('d')).toContain('Z');
+  });
+
+  it('hideDonutCenter empties the ring', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-donut-total')).toHaveLength(1);
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', hideDonutCenter: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-donut-total"]').length).toBe(0);
+  });
+
+  it('legend: true puts a legend under a bar chart, and a donut can refuse its own', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-legend-item').length).toBeGreaterThan(0);
+    cleanup();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', legend: false } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.queryAllByTestId('chart-legend-item').length).toBe(0);
+  });
+
+  it('a palette paints every band the one hue, tokens only', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { palette: 'purple' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const fills = [...container.querySelectorAll('[data-testid="chart-bar"]')].map((b) =>
+      b.getAttribute('fill'),
+    );
+    expect(new Set(fills).size).toBe(1);
+    expect(fills[0]).toContain('--opt-purple');
+  });
+
+  it('colorByValue shades by share of the max via color-mix', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { palette: 'purple', colorByValue: true, agg: 'sum', value: 'estimate' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const fills = [...container.querySelectorAll('[data-testid="chart-bar"]')].map((b) =>
+      b.getAttribute('fill'),
+    );
+    expect(fills.some((f) => f?.startsWith('color-mix('))).toBe(true);
+  });
+
+  it('a maxed horizontal bar draws its value label inside the bar end', () => {
+    // The Todo band sums to exactly its nice ceiling, so its bar spans the
+    // whole plot and the outside label would run past the 640 viewBox.
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', estimate: 10000 },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', estimate: 2 },
+      }),
+    ];
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true, agg: 'sum', value: 'estimate' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const bar = container.querySelector('[data-testid="chart-bar"][data-label="Todo"]');
+    const label = bar?.parentElement?.querySelector('text:last-of-type');
+    expect(label?.getAttribute('text-anchor')).toBe('end');
+    expect(label?.getAttribute('fill')).toBe('var(--n-0)');
   });
 
   // Every colour must come from the token layer, so the chart follows the

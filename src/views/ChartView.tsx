@@ -58,7 +58,20 @@ function plotDims(chart: ChartSpec | undefined): { H: number; PLOT_H: number } {
  * no-value bucket stays neutral on purpose: "no status" is an absence, and
  * giving it a hue makes it look like one more status.
  */
-export function sliceColor(slice: ChartSlice, index: number): string {
+export function sliceColor(
+  slice: ChartSlice,
+  index: number,
+  opts?: { palette?: string; share?: number },
+): string {
+  if (opts?.palette !== undefined) {
+    const swatch = resolveOptionColor(opts.palette);
+    const base =
+      swatch.name !== 'default' ? swatch.solid : `var(--opt-${PICKABLE_OPTION_COLORS[0]})`;
+    if (opts.share === undefined) return base;
+    // 35%–100% of the hue against the app surface: the smallest band stays visible.
+    const pct = Math.round(35 + 65 * Math.max(0, Math.min(1, opts.share)));
+    return `color-mix(in srgb, ${base} ${pct}%, var(--surface-app))`;
+  }
   if (slice.key === '__none__') return 'var(--n-300)';
   if (!slice.ghost && slice.color !== null) {
     const swatch = resolveOptionColor(slice.color);
@@ -67,6 +80,42 @@ export function sliceColor(slice: ChartSlice, index: number): string {
     if (swatch.name !== 'default') return swatch.solid;
   }
   return `var(--opt-${PICKABLE_OPTION_COLORS[index % PICKABLE_OPTION_COLORS.length]})`;
+}
+
+/** The options bag every sliceColor call site threads: the spec's palette,
+ * and — under colorByValue — this band's share of the biggest one. */
+function colorOpts(
+  chart: ChartSpec | undefined,
+  data: ChartData,
+  s: ChartSlice,
+): { palette?: string; share?: number } {
+  return {
+    palette: chart?.palette,
+    share: chart?.colorByValue === true && data.max > 0 ? s.value / data.max : undefined,
+  };
+}
+
+/** The line's path: straight segments, or a Catmull-Rom curve through the
+ * same points when `smooth` — two points have no curvature to smooth. */
+function linePath(pts: { x: number; y: number }[], smooth: boolean): string {
+  if (pts.length === 0) return '';
+  if (!smooth || pts.length < 3)
+    return (
+      `M${pts[0].x},${pts[0].y}` +
+      pts
+        .slice(1)
+        .map((p) => ` L${p.x},${p.y}`)
+        .join('')
+    );
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(pts.length - 1, i + 2)];
+    d += ` C${p1.x + (p2.x - p0.x) / 6},${p1.y + (p2.y - p0.y) / 6} ${p2.x - (p3.x - p1.x) / 6},${p2.y - (p3.y - p1.y) / 6} ${p2.x},${p2.y}`;
+  }
+  return d;
 }
 
 /** Tick labels, trimmed — a 4-way split of 25 is 6.25, not 6.25000000001. */
@@ -79,38 +128,61 @@ function clip(label: string, band: number): string {
   return label.length <= max ? label : `${label.slice(0, max - 1)}…`;
 }
 
-function Axes({ top, label, plotH }: { top: number; label: string; plotH: number }) {
+function Axes({
+  top,
+  label,
+  plotH,
+  hideGrid,
+  hideAxis,
+}: {
+  top: number;
+  label: string;
+  plotH: number;
+  hideGrid: boolean;
+  hideAxis: boolean;
+}) {
   return (
     <g>
       {Array.from({ length: TICKS + 1 }, (_, i) => {
+        // The base line survives both toggles — a chart with no ground under
+        // its bars reads broken, not minimal.
+        const base = i === TICKS;
         const value = (top * (TICKS - i)) / TICKS;
         const y = PAD.top + (plotH * i) / TICKS;
         return (
           <g key={i}>
-            <line
-              x1={PAD.left}
-              x2={PAD.left + PLOT_W}
-              y1={y}
-              y2={y}
-              stroke={i === TICKS ? 'var(--n-300)' : 'var(--n-200)'}
-              strokeWidth={1}
-            />
-            <text
-              x={PAD.left - 8}
-              y={y + 3.5}
-              textAnchor="end"
-              fontSize={10}
-              fill="var(--n-400)"
-              fontFamily="var(--font-mono)"
-            >
-              {tick(value)}
-            </text>
+            {(base || !hideGrid) && (
+              <line
+                data-testid={base ? undefined : 'chart-grid-line'}
+                x1={PAD.left}
+                x2={PAD.left + PLOT_W}
+                y1={y}
+                y2={y}
+                stroke={base ? 'var(--n-300)' : 'var(--n-200)'}
+                strokeWidth={1}
+              />
+            )}
+            {!hideAxis && (
+              <text
+                data-testid="chart-tick"
+                x={PAD.left - 8}
+                y={y + 3.5}
+                textAnchor="end"
+                fontSize={10}
+                fill="var(--n-400)"
+                fontFamily="var(--font-mono)"
+              >
+                {tick(value)}
+              </text>
+            )}
           </g>
         );
       })}
-      <text x={PAD.left - 8} y={PAD.top - 6} textAnchor="end" fontSize={10} fill="var(--n-500)">
-        {label}
-      </text>
+      {!hideAxis && (
+        <text x={PAD.left - 8} y={PAD.top - 6} textAnchor="end" fontSize={10} fill="var(--n-500)">
+          {label}
+        </text>
+      )}
     </g>
   );
 }
@@ -135,13 +207,27 @@ function XLabels({ slices, band, plotH }: { slices: ChartSlice[]; band: number; 
   );
 }
 
-function BarChart({ data, plotH }: { data: ChartData; plotH: number }) {
+function BarChart({
+  data,
+  chart,
+  plotH,
+}: {
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  plotH: number;
+}) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
   const width = Math.min(56, band * 0.62);
   return (
     <>
-      <Axes top={top} label={data.measure} plotH={plotH} />
+      <Axes
+        top={top}
+        label={data.measure}
+        plotH={plotH}
+        hideGrid={chart?.hideGrid === true}
+        hideAxis={chart?.hideAxis === true}
+      />
       {data.slices.map((s, i) => {
         const height = (s.value / top) * plotH;
         return (
@@ -157,11 +243,11 @@ function BarChart({ data, plotH }: { data: ChartData; plotH: number }) {
               width={width}
               height={Math.max(height, s.value > 0 ? 1 : 0)}
               rx={3}
-              fill={sliceColor(s, i)}
+              fill={sliceColor(s, i, colorOpts(chart, data, s))}
             >
               <title>{`${s.label}: ${s.display}`}</title>
             </rect>
-            {band > 34 && (
+            {chart?.hideLabels !== true && band > 34 && (
               <text
                 x={PAD.left + band * i + band / 2}
                 y={PAD.top + plotH - height - 5}
@@ -176,7 +262,7 @@ function BarChart({ data, plotH }: { data: ChartData; plotH: number }) {
           </g>
         );
       })}
-      <XLabels slices={data.slices} band={band} plotH={plotH} />
+      {chart?.hideAxis !== true && <XLabels slices={data.slices} band={band} plotH={plotH} />}
     </>
   );
 }
@@ -205,6 +291,10 @@ function HBarChart({
       {data.slices.map((s, i) => {
         const width = top === 0 ? 0 : (s.value / top) * plotW;
         const y = HPAD.top + band * i + (band - barH) / 2;
+        // A maxed bar leaves a wide value label no room before the viewBox
+        // edge (~6.6px per character at fontSize 11) — draw it inside the bar
+        // end instead of letting it clip past 640.
+        const fits = HPAD.left + width + 6 + s.display.length * 6.6 <= W - 8;
         return (
           <g key={s.key || s.label}>
             <text
@@ -226,17 +316,18 @@ function HBarChart({
               width={s.value > 0 ? Math.max(1, width) : width}
               height={barH}
               rx={3}
-              fill={sliceColor(s, i)}
+              fill={sliceColor(s, i, colorOpts(chart, data, s))}
             >
               <title>{`${s.label}: ${s.display}`}</title>
             </rect>
             {chart?.hideLabels !== true && (
               <text
-                x={HPAD.left + width + 6}
+                x={fits ? HPAD.left + width + 6 : HPAD.left + width - 6}
                 y={y + barH / 2}
+                textAnchor={fits ? 'start' : 'end'}
                 dominantBaseline="central"
                 fontSize={11}
-                fill="var(--n-500)"
+                fill={fits ? 'var(--n-500)' : 'var(--n-0)'}
               >
                 {s.display}
               </text>
@@ -248,7 +339,15 @@ function HBarChart({
   );
 }
 
-function LineChart({ data, plotH }: { data: ChartData; plotH: number }) {
+function LineChart({
+  data,
+  chart,
+  plotH,
+}: {
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  plotH: number;
+}) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
   const at = (s: ChartSlice, i: number) => ({
@@ -256,14 +355,34 @@ function LineChart({ data, plotH }: { data: ChartData; plotH: number }) {
     y: PAD.top + plotH - (s.value / top) * plotH,
   });
   const points = data.slices.map((s, i) => at(s, i));
+  // One line, one hue: the palette when the spec declares one, cortex
+  // otherwise. Per-band colours would claim the line is several series.
+  const stroke =
+    chart?.palette !== undefined
+      ? sliceColor(data.slices[0], 0, { palette: chart.palette })
+      : 'var(--cortex-500)';
   return (
     <>
-      <Axes top={top} label={data.measure} plotH={plotH} />
-      <polyline
+      <Axes
+        top={top}
+        label={data.measure}
+        plotH={plotH}
+        hideGrid={chart?.hideGrid === true}
+        hideAxis={chart?.hideAxis === true}
+      />
+      {chart?.area === true && points.length > 1 && (
+        <path
+          data-testid="chart-area"
+          d={`${linePath(points, chart?.smooth === true)} L${points.at(-1)!.x},${PAD.top + plotH} L${points[0].x},${PAD.top + plotH} Z`}
+          fill={stroke}
+          fillOpacity={0.12}
+        />
+      )}
+      <path
         data-testid="chart-line"
-        points={points.map((p) => `${p.x},${p.y}`).join(' ')}
+        d={linePath(points, chart?.smooth === true)}
         fill="none"
-        stroke="var(--cortex-500)"
+        stroke={stroke}
         strokeWidth={2}
         strokeLinejoin="round"
         strokeLinecap="round"
@@ -278,13 +397,15 @@ function LineChart({ data, plotH }: { data: ChartData; plotH: number }) {
           cy={points[i].y}
           r={3.5}
           fill="var(--n-0)"
-          stroke="var(--cortex-500)"
+          stroke={
+            chart?.palette !== undefined ? sliceColor(s, i, colorOpts(chart, data, s)) : stroke
+          }
           strokeWidth={2}
         >
           <title>{`${s.label}: ${s.display}`}</title>
         </circle>
       ))}
-      <XLabels slices={data.slices} band={band} plotH={plotH} />
+      {chart?.hideAxis !== true && <XLabels slices={data.slices} band={band} plotH={plotH} />}
     </>
   );
 }
@@ -308,85 +429,93 @@ function arcs(data: ChartData, circumference: number) {
   });
 }
 
-function DonutChart({ data }: { data: ChartData }) {
+function DonutChart({ data, chart }: { data: ChartData; chart: ChartSpec | undefined }) {
   const c = DONUT.size / 2;
   const circumference = 2 * Math.PI * DONUT.r;
   const segments = arcs(data, circumference);
   return (
-    <div className="flex flex-wrap items-center gap-6">
-      <svg
-        width={DONUT.size}
-        height={DONUT.size}
-        viewBox={`0 0 ${DONUT.size} ${DONUT.size}`}
-        role="img"
-        aria-label={`${data.measure} by ${data.axis}`}
-        className="flex-none"
-      >
-        <circle
-          cx={c}
-          cy={c}
-          r={DONUT.r}
-          fill="none"
-          stroke="var(--n-100)"
-          strokeWidth={DONUT.stroke}
-        />
-        {/* -90° so the first slice starts at twelve o'clock, which is where a
-            reader starts. */}
-        <g transform={`rotate(-90 ${c} ${c})`}>
-          {segments.map(({ slice: s, start, length }, i) =>
-            // A zero-value band contributes no arc: `stroke-dasharray: 0 …`
-            // still paints a linecap-width hairline at twelve o'clock.
-            s.value <= 0 ? null : (
-              <circle
-                key={s.key || s.label}
-                data-testid="chart-arc"
-                data-label={s.label}
-                data-value={s.value}
-                cx={c}
-                cy={c}
-                r={DONUT.r}
-                fill="none"
-                stroke={sliceColor(s, i)}
-                strokeWidth={DONUT.stroke}
-                strokeDasharray={`${length} ${circumference - length}`}
-                strokeDashoffset={-start}
-              >
-                <title>{`${s.label}: ${s.display}`}</title>
-              </circle>
-            ),
-          )}
-        </g>
-        <text
-          x={c}
-          y={c - 2}
-          textAnchor="middle"
-          fontSize={26}
-          fontWeight={600}
-          fill="var(--n-900)"
-        >
-          {tick(data.total)}
-        </text>
-        <text x={c} y={c + 18} textAnchor="middle" fontSize={11} fill="var(--n-500)">
-          {data.measure}
-        </text>
-      </svg>
-      <ul className="m-0 flex min-w-0 list-none flex-col gap-1.5 p-0">
-        {data.slices.map((s, i) => (
-          <li
-            key={s.key || s.label}
-            data-testid="chart-legend-item"
-            className="flex items-center gap-2 text-xs text-n-700"
+    <svg
+      width={DONUT.size}
+      height={DONUT.size}
+      viewBox={`0 0 ${DONUT.size} ${DONUT.size}`}
+      role="img"
+      aria-label={`${data.measure} by ${data.axis}`}
+      className="flex-none"
+    >
+      <circle
+        cx={c}
+        cy={c}
+        r={DONUT.r}
+        fill="none"
+        stroke="var(--n-100)"
+        strokeWidth={DONUT.stroke}
+      />
+      {/* -90° so the first slice starts at twelve o'clock, which is where a
+          reader starts. */}
+      <g transform={`rotate(-90 ${c} ${c})`}>
+        {segments.map(({ slice: s, start, length }, i) =>
+          // A zero-value band contributes no arc: `stroke-dasharray: 0 …`
+          // still paints a linecap-width hairline at twelve o'clock.
+          s.value <= 0 ? null : (
+            <circle
+              key={s.key || s.label}
+              data-testid="chart-arc"
+              data-label={s.label}
+              data-value={s.value}
+              cx={c}
+              cy={c}
+              r={DONUT.r}
+              fill="none"
+              stroke={sliceColor(s, i, colorOpts(chart, data, s))}
+              strokeWidth={DONUT.stroke}
+              strokeDasharray={`${length} ${circumference - length}`}
+              strokeDashoffset={-start}
+            >
+              <title>{`${s.label}: ${s.display}`}</title>
+            </circle>
+          ),
+        )}
+      </g>
+      {chart?.hideDonutCenter !== true && (
+        <g data-testid="chart-donut-total">
+          <text
+            x={c}
+            y={c - 2}
+            textAnchor="middle"
+            fontSize={26}
+            fontWeight={600}
+            fill="var(--n-900)"
           >
-            <span
-              className="box-border h-2.5 w-2.5 flex-none rounded-full"
-              style={{ background: sliceColor(s, i) }}
-            />
-            <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{s.display}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+            {tick(data.total)}
+          </text>
+          <text x={c} y={c + 18} textAnchor="middle" fontSize={11} fill="var(--n-500)">
+            {data.measure}
+          </text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/** One legend for every kind, under the chart — the donut's old private list,
+ * lifted out so a bar or line can ask for the same thing. */
+function Legend({ data, chart }: { data: ChartData; chart: ChartSpec | undefined }) {
+  return (
+    <ul className="m-0 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 pt-3">
+      {data.slices.map((s, i) => (
+        <li
+          key={s.key || s.label}
+          data-testid="chart-legend-item"
+          className="flex items-center gap-1.5 text-xs text-n-600"
+        >
+          <span
+            className="inline-block h-2.5 w-2.5 rounded-sm"
+            style={{ background: sliceColor(s, i, colorOpts(chart, data, s)) }}
+          />
+          {s.label}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -429,6 +558,9 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
   const kind: ChartKind = chart?.kind ?? 'bar';
   const { H, PLOT_H } = plotDims(chart);
   const horizontal = kind === 'bar' && chart?.horizontal === true;
+  // The donut defaults its legend on — the ring has no other labels; the
+  // axis kinds default off and can opt in.
+  const showLegend = chart?.legend ?? kind === 'donut';
 
   return (
     <div
@@ -474,7 +606,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (
-              <DonutChart data={data} />
+              <DonutChart data={data} chart={chart} />
             )
           ) : (
             <svg
@@ -488,12 +620,13 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
               {horizontal ? (
                 <HBarChart data={data} chart={chart} h={H} />
               ) : kind === 'line' ? (
-                <LineChart data={data} plotH={PLOT_H} />
+                <LineChart data={data} chart={chart} plotH={PLOT_H} />
               ) : (
-                <BarChart data={data} plotH={PLOT_H} />
+                <BarChart data={data} chart={chart} plotH={PLOT_H} />
               )}
             </svg>
           )}
+          {showLegend && <Legend data={data} chart={chart} />}
         </figure>
       )}
     </div>
