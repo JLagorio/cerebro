@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STATUSES, buildSchema } from './schema';
+import { DEFAULT_STATUSES, buildSchema, serializeDisplayConfig } from './schema';
+import type { DisplayConfig } from './types';
 import { makeEntry } from './testHelpers';
 
 const typeNote = makeEntry({
@@ -446,5 +447,25 @@ describe('display config (M44.1)', () => {
       showFile: false,
       showBody: true,
     });
+  });
+
+  // Review Minor (M44.1 follow-up): serialize → parse must be the identity
+  // for every combination of the three booleans, not just the cases above.
+  // `parseDisplayConfig` is module-private, so this routes the serialized
+  // value back through `buildSchema` — the same parse path a Type doc's
+  // frontmatter takes — rather than growing schema.ts's exported surface
+  // for a test-only need.
+  it('round-trips every combination of the three display booleans', () => {
+    const bools = [true, false];
+    for (const showEmpty of bools) {
+      for (const showFile of bools) {
+        for (const showBody of bools) {
+          const config: DisplayConfig = { showEmpty, showFile, showBody };
+          const serialized = serializeDisplayConfig(config);
+          const schema = buildSchema([typeDoc(serialized ?? undefined)]);
+          expect(schema.types.get('Work item')?.display).toEqual(config);
+        }
+      }
+    }
   });
 });

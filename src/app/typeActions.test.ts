@@ -9,6 +9,8 @@ import {
   removeFieldFromType,
   setFieldOptions,
   setTypeDisplay,
+  setTypeStatuses,
+  setTypeViews,
 } from '@/app/typeActions';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
@@ -166,6 +168,42 @@ describe('setFieldOptions', () => {
   });
 });
 
+// M44.1 follow-up: patchFrontmatter never rejects on a real disk failure — it
+// catches internally, toasts, and returns false. setTypeStatuses/setTypeViews
+// have to READ that boolean instead of assuming the write landed whenever
+// nothing threw.
+describe('setTypeStatuses (M44.1 follow-up)', () => {
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeStatuses({ name: 'Recipe', docPath: 'types/recipe.md' }, [
+      { id: 'todo', label: 'Todo', color: null, group: 'active' },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+});
+
+describe('setTypeViews (M44.1 follow-up)', () => {
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeViews({ name: 'Recipe', docPath: 'types/recipe.md' }, [
+      {
+        id: 'v1',
+        name: 'Board',
+        icon: null,
+        filters: null,
+        presentation: { type: 'table', group: [], sort: [], columns: [] },
+      },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+});
+
 describe('setTypeDisplay (M44.1)', () => {
   const workItemTypeDoc = {
     ...typeDoc,
@@ -210,6 +248,47 @@ describe('setTypeDisplay (M44.1)', () => {
     );
     expect(ok).toBe(false);
     expect(toasts[0]).toMatch(/display/i);
+  });
+
+  // M44.1 follow-up: patchFrontmatter never rejects on a real disk failure —
+  // it catches internally, toasts, and returns false. The action has to READ
+  // that boolean instead of assuming the write landed whenever nothing threw.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+
+  it('doc-null and deviating from defaults creates the Type doc via ensureTypeDoc', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Ghost Type', docPath: null },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(true);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: { type: 'Type', display: { show_empty: true } },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and all-defaults returns true and writes nothing', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Ghost Type', docPath: null },
+      { showEmpty: false, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(true);
+    expect(created).toEqual([]);
+    expect(patches).toEqual([]);
   });
 });
 
