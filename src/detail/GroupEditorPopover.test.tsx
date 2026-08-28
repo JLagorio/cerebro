@@ -375,3 +375,159 @@ describe('the heading preview folds staged visibility (Task 1 review gap)', () =
     expect(shellOf('heading').textContent).toContain('All properties hidden');
   });
 });
+
+describe('Add a property (M45.3 Task 5)', () => {
+  it('the existing-fields drill-in pulls a field in via moveField', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    // Fields NOT in this container: the heading's and the rest's.
+    expect(screen.getByTestId('group-editor-pull-status')).toBeTruthy();
+    expect(screen.getByTestId('group-editor-pull-notes')).toBeTruthy();
+    expect(screen.queryByTestId('group-editor-pull-priority')).toBeNull();
+    await user.click(screen.getByTestId('group-editor-pull-notes'));
+    // Back on the main step, the row landed; the canvas group carries it.
+    expect(editor().getByText('Notes')).toBeTruthy();
+    expect(within(shellOf('g1')).getByText('keep')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(patch.layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'notes'] }],
+    });
+  });
+
+  it('Create new stages a normalized FieldDef-shaped addition into this container', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Story Points');
+    await user.click(screen.getByTestId('property-kind-text'));
+    // Normalized at STAGING time (obligation: preview and Apply must agree),
+    // so the canvas previews the name Apply will write.
+    expect(editor().getByText('Story points')).toBeTruthy();
+    expect(within(shellOf('g1')).getByText('Story points')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(patch.fields).toEqual({
+      status: 'text',
+      priority: 'text',
+      notes: 'text',
+      story_points: { kind: 'text' },
+    });
+    expect(patch.layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'story_points'] }],
+    });
+  });
+
+  it('a duplicate the panel guard cannot see refuses inline — a form, not a toast', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+    // "Story  Points" (double space) normalizes to the staged name but does
+    // NOT match it by the panel's trim+lowercase compare — the staging guard
+    // mirrors applyTypeLayout's normalized compare, where the panel's cannot.
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Story points');
+    await user.click(screen.getByTestId('property-kind-text'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Story  Points');
+    await user.click(screen.getByTestId('property-kind-text'));
+    expect(screen.getByRole('alert').textContent).toContain('already a property');
+    expect(useUiStore.getState().toasts).toEqual([]);
+    // Nothing staged twice: the first addition is the only new row.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(within(shellOf('g1')).getAllByText('Story points')).toHaveLength(1);
+  });
+
+  it('a reserved key refuses inline with applyTypeLayout’s reason', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Tabs');
+    await user.click(screen.getByTestId('property-kind-text'));
+    expect(screen.getByRole('alert').textContent).toContain('reserved');
+    expect(useUiStore.getState().toasts).toEqual([]);
+  });
+
+  it('Discard new property sweeps the stage clean — added, layout pointer, and eye', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Story Points');
+    await user.click(screen.getByTestId('property-kind-text'));
+    // Eye it too: the discard must sweep the staged visibility along.
+    await user.click(editor().getByRole('button', { name: 'Hide Story points' }));
+
+    await user.click(editor().getByRole('button', { name: 'Story points options' }));
+    await user.click(screen.getByTestId('group-editor-discard-new'));
+    expect(editor().queryByText('Story points')).toBeNull();
+    expect(within(shellOf('g1')).queryByText('Story points')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    // The strongest sweep assertion there is: the draft is CLEAN again, so
+    // Cancel closes without a confirm. A dead layout pointer or a stale
+    // visibility key would each leave it dirty (obligation: Apply must not
+    // persist a dead pointer).
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+  });
+
+  it('declared rows carry no Discard new property', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByRole('button', { name: 'Priority options' }));
+    expect(screen.queryByTestId('group-editor-discard-new')).toBeNull();
+  });
+});
+
+describe('Add section (rest/heading footers only)', () => {
+  it('appends an empty group and retargets the editor onto it', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(shellOf('rest'));
+    await user.click(editor().getByTestId('group-editor-add-section'));
+    // The fresh group's shell stands (structurally empty) …
+    expect(shellOf('group-1').textContent).toContain('New group');
+    expect(shellOf('group-1').textContent).toContain('No properties yet');
+    // … and the editor moved onto it, rename box ready (the {layout, id}
+    // return exists for exactly this hand-off).
+    expect(
+      (editor().getByRole('textbox', { name: 'Section name' }) as HTMLInputElement).value,
+    ).toBe('New group');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(patch.layout).toEqual({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Planning', fields: ['priority'] },
+        { id: 'group-1', name: 'New group', fields: [] },
+      ],
+    });
+  });
+
+  it('group editors offer no Add section; heading does', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    expect(editor().queryByTestId('group-editor-add-section')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await user.click(shellOf('heading'));
+    expect(editor().getByTestId('group-editor-add-section')).toBeTruthy();
+  });
+});

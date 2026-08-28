@@ -31,8 +31,11 @@ import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
-/** Frontmatter keys with schema meaning on a Type doc — never field names. */
-const RESERVED = new Set([
+/** Frontmatter keys with schema meaning on a Type doc — never field names.
+ * Exported for the layout editor's staging guard (M45.3), which must refuse
+ * with `applyTypeLayout`'s reasons BEFORE staging — inline, form-style —
+ * instead of letting Apply toast the same refusal later. */
+export const RESERVED = new Set([
   'type',
   'icon',
   'color',

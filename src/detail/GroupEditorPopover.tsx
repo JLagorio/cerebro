@@ -1,18 +1,19 @@
 import React, { useMemo, useRef, useState } from 'react';
-import type { TypeLayoutDraft } from '@/app/typeActions';
+import { normalizeFieldName, RESERVED, type TypeLayoutDraft } from '@/app/typeActions';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
-import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
+import { MenuBack, MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { draftRoster, overlayVisibility } from '@/detail/LayoutCanvas';
 import { VISIBILITIES } from '@/detail/PropertyMenu';
-import { moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
+import { addGroup, moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
 import { resolveLayout } from '@/engine/layout';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
-import type { FieldDef, TypeDef } from '@/engine/types';
+import type { FieldDef, FieldKind, TypeDef } from '@/engine/types';
 
 /**
  * The editor behind a canvas shell (M45.3, spec §3.3): click a container and
@@ -33,6 +34,7 @@ export function GroupEditorPopover({
   update,
   anchorRef,
   onClose,
+  onOpenGroup,
 }: {
   /** 'heading' | 'rest' | a group id — the shell that opened this. */
   container: string;
@@ -42,10 +44,17 @@ export function GroupEditorPopover({
   update: (patch: Partial<TypeLayoutDraft>) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
+  /** Retargets the editor onto another group — Add section's hand-off. */
+  onOpenGroup: (id: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [step, setStep] = useState<'main' | 'add' | 'create'>('main');
+  /** The staging guard's inline refusal — a form refuses in place, never by
+   * toast (the store-layer toast contract is for vault writes; nothing here
+   * writes). */
+  const [stageError, setStageError] = useState<string | null>(null);
 
   const group = draft.layout.groups.find((g) => g.id === container);
   const isGroup = group !== undefined;
@@ -104,6 +113,88 @@ export function GroupEditorPopover({
     onClose();
   };
 
+  // Where a landed field goes: after the container's last CONFIG slot. Rest
+  // ignores the index (it orders by roster declaration).
+  const appendIndex = isGroup ? group.fields.length : draft.layout.heading.length;
+
+  /** Add-existing: the field is already on the type — placement is the whole
+   * edit, so pulling it in IS one moveField. */
+  const pullIn = (name: string) => {
+    update({ layout: moveField(draft.layout, name, { container, index: appendIndex }) });
+    setStep('main');
+  };
+
+  /** Create-new: stage the FieldDef-shaped addition AND place it here. */
+  const stageNew = (rawName: string, kind: FieldKind, relation?: RelationConfig) => {
+    // Normalized at STAGING time so preview and Apply agree on the name
+    // (Task 4 review obligation): the canvas previews what Apply will write —
+    // one value, computed once, here.
+    const name = normalizeFieldName(rawName);
+    // applyTypeLayout's own refusals, mirrored BEFORE staging: same reasons,
+    // rendered inline where the typo is, instead of a toast at Apply time.
+    if (name === '') {
+      setStageError('A property needs a name');
+      return;
+    }
+    if (RESERVED.has(name)) {
+      setStageError(`“${name}” is a reserved key and can't be a property`);
+      return;
+    }
+    // Normalized compare over existing AND staged names: the panel's own
+    // trim+lowercase guard cannot see that "Story  Points" collides with
+    // `story_points`, but Apply's normalized compare would.
+    if (overlaid.some((f) => normalizeFieldName(f.name) === name)) {
+      setStageError(`“${name}” is already a property here`);
+      return;
+    }
+    if (relation?.reciprocalName !== undefined) {
+      // The reciprocal declares a field on the TARGET type — a second doc the
+      // one-write atomic Apply can never carry. Refusing outright beats
+      // silently staging half of what was asked for.
+      setStageError(
+        'A two-way relation also writes the other type, which Apply cannot stage — add it from a record’s + Add property, or switch off “Add related property”.',
+      );
+      return;
+    }
+    const config =
+      relation === undefined
+        ? undefined
+        : // FieldDef members (the typeActions.ts contract on `added`): Apply
+          // spreads this under {name, kind} and serializes via fieldToSpec.
+          { target: relation.target, ...(relation.limit === 1 ? { limit: 1 as const } : {}) };
+    update({
+      added: [...draft.added, { name, kind, ...(config === undefined ? {} : { config }) }],
+      layout: moveField(draft.layout, name, { container, index: appendIndex }),
+    });
+    setStageError(null);
+    setStep('main');
+  };
+
+  /** Discard a staged addition. The sweep is threefold (review obligation):
+   * the `added` entry, every layout pointer — Apply must never persist a
+   * dead pointer — and any staged eye, which names a field Apply would just
+   * drop. A full sweep leaves the draft exactly as the add found it. */
+  const discardNew = (name: string) => {
+    const { [name]: _dropped, ...visibility } = draft.visibility;
+    update({
+      added: draft.added.filter((a) => a.name !== name),
+      layout: moveField(draft.layout, name, { container: 'rest', index: 0 }),
+      visibility,
+    });
+    setMenuFor(null);
+  };
+
+  const addSection = () => {
+    const minted = addGroup(
+      draft.layout,
+      draft.layout.groups.map((g) => g.id),
+    );
+    update({ layout: minted.layout });
+    // Open the fresh group's editor — addGroup reports its id for exactly
+    // this hand-off; the canvas remounts us keyed by the new container.
+    onOpenGroup(minted.id);
+  };
+
   const eyeRow = (f: FieldDef) => {
     const label = humanize(f.name);
     const hidden = (f.visibility ?? 'show') === 'hide';
@@ -138,6 +229,144 @@ export function GroupEditorPopover({
     );
   };
 
+  // The fields NOT in this container — other containers' plus rest's — for
+  // the Add-existing drill-in: on the type already, so pulling one in is
+  // purely a placement edit.
+  const candidates = overlaid.filter((f) => !fields.some((c) => c.name === f.name));
+
+  const mainStep = (
+    <MenuSurface width={264} autoFocus={false}>
+      <div data-testid="group-editor" className="flex min-w-0 flex-col">
+        {isGroup ? (
+          <div className="px-1 pb-1 pt-0.5">
+            <SectionNameInput
+              name={group.name}
+              onCommit={(next) => update({ layout: renameGroup(draft.layout, container, next) })}
+            />
+          </div>
+        ) : (
+          // Heading and rest are structural, not named — static titles.
+          <div className="px-2 pb-1 pt-0.5 text-sm font-semibold text-n-900">{title}</div>
+        )}
+        <div className="px-1 pb-1">
+          <Input
+            size="sm"
+            ariaLabel="Search properties"
+            placeholder="Search properties…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            width="100%"
+          />
+        </div>
+        {shown.map(eyeRow)}
+        {fields.length === 0 && (
+          <div className="px-2 py-1.5 text-xs text-n-400">No properties yet</div>
+        )}
+        {fields.length > 0 && shown.length === 0 && (
+          <div className="px-2 py-1.5 text-xs text-n-400">
+            No property matches “{query.trim()}”.
+          </div>
+        )}
+        <MenuSeparator />
+        <MenuItem
+          icon="plus"
+          label="Add a property"
+          submenu
+          testId="group-editor-add"
+          onSelect={() => setStep('add')}
+        />
+        {!isGroup && (
+          // Rest/heading footers only (the plan's §3.3 call): a group's own
+          // editor arranges the group; sections are the page's to grow.
+          <MenuItem
+            icon="square-plus"
+            label="Add section"
+            testId="group-editor-add-section"
+            onSelect={addSection}
+          />
+        )}
+        {isGroup && (
+          <MenuItem
+            icon="trash-2"
+            label="Delete section"
+            danger
+            testId="group-editor-delete-section"
+            onSelect={() => {
+              // A populated group asks first — its fields fall to rest,
+              // and the fall should not be a surprise. An empty one has
+              // nothing to re-home, so the click IS the delete.
+              if (group.fields.length > 0) setConfirmDelete(true);
+              else deleteSection();
+            }}
+          />
+        )}
+      </div>
+    </MenuSurface>
+  );
+
+  const addStep = (
+    <MenuSurface width={264} autoFocus={false}>
+      <div data-testid="group-editor-add-list" className="flex min-w-0 flex-col">
+        <MenuBack title="Add a property" onBack={() => setStep('main')} />
+        {candidates.map((f) => (
+          <MenuItem
+            key={f.name}
+            icon={kindMeta(f.kind).icon}
+            label={humanize(f.name)}
+            testId={`group-editor-pull-${f.name}`}
+            onSelect={() => pullIn(f.name)}
+          />
+        ))}
+        {candidates.length === 0 && (
+          <div className="px-2 py-1.5 text-xs text-n-400">
+            Every property is already in this section.
+          </div>
+        )}
+        <MenuSeparator />
+        <MenuItem
+          icon="plus"
+          label="Create new"
+          submenu
+          testId="group-editor-create-new"
+          onSelect={() => {
+            setStageError(null);
+            setStep('create');
+          }}
+        />
+      </div>
+    </MenuSurface>
+  );
+
+  const createStep = (
+    // The panel's INLINE variant on purpose (the view-settings precedent): a
+    // page inside a popover that already exists — an anchored second surface
+    // here would point at the first one's trigger. Its own dismiss layer
+    // stacks above ours, so Escape steps back one surface at a time.
+    <MenuSurface width={300} className="p-2" autoFocus={false}>
+      <MenuBack
+        title="New property"
+        onBack={() => {
+          setStageError(null);
+          setStep('add');
+        }}
+      />
+      <AddPropertyPanel
+        existingNames={overlaid.map((f) => f.name)}
+        ownerType={typeDef.name}
+        onAdd={stageNew}
+        onCancel={() => {
+          setStageError(null);
+          setStep('add');
+        }}
+      />
+      {stageError !== null && (
+        <p role="alert" className="m-0 px-1.5 pt-1 text-2xs leading-[1.35] text-danger-600">
+          {stageError}
+        </p>
+      )}
+    </MenuSurface>
+  );
+
   return (
     <Popover
       anchorRef={anchorRef}
@@ -146,60 +375,10 @@ export function GroupEditorPopover({
       ariaLabel={`Edit ${title}`}
       trapFocus
     >
-      {/* autoFocus off (PropertyMenu's drill-in idiom): the Popover's trap
-          already hands focus to the first control once placed. */}
-      <MenuSurface width={264} autoFocus={false}>
-        <div data-testid="group-editor" className="flex min-w-0 flex-col">
-          {isGroup ? (
-            <div className="px-1 pb-1 pt-0.5">
-              <SectionNameInput
-                name={group.name}
-                onCommit={(next) => update({ layout: renameGroup(draft.layout, container, next) })}
-              />
-            </div>
-          ) : (
-            // Heading and rest are structural, not named — static titles.
-            <div className="px-2 pb-1 pt-0.5 text-sm font-semibold text-n-900">{title}</div>
-          )}
-          <div className="px-1 pb-1">
-            <Input
-              size="sm"
-              ariaLabel="Search properties"
-              placeholder="Search properties…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              width="100%"
-            />
-          </div>
-          {shown.map(eyeRow)}
-          {fields.length === 0 && (
-            <div className="px-2 py-1.5 text-xs text-n-400">No properties yet</div>
-          )}
-          {fields.length > 0 && shown.length === 0 && (
-            <div className="px-2 py-1.5 text-xs text-n-400">
-              No property matches “{query.trim()}”.
-            </div>
-          )}
-          {isGroup && (
-            <>
-              <MenuSeparator />
-              <MenuItem
-                icon="trash-2"
-                label="Delete section"
-                danger
-                testId="group-editor-delete-section"
-                onSelect={() => {
-                  // A populated group asks first — its fields fall to rest,
-                  // and the fall should not be a surprise. An empty one has
-                  // nothing to re-home, so the click IS the delete.
-                  if (group.fields.length > 0) setConfirmDelete(true);
-                  else deleteSection();
-                }}
-              />
-            </>
-          )}
-        </div>
-      </MenuSurface>
+      {/* autoFocus off on every surface (PropertyMenu's drill-in idiom): the
+          Popover's trap already hands focus to the first control once placed,
+          and a drill-in must not steal focus mid-flow. */}
+      {step === 'main' ? mainStep : step === 'add' ? addStep : createStep}
       {menuFor !== null && menuDef !== null && (
         <Popover
           anchorRef={menuAnchorRef}
@@ -246,6 +425,21 @@ export function GroupEditorPopover({
                   setMenuFor(null);
                 }}
               />
+            )}
+            {draft.added.some((a) => a.name === menuFor) && (
+              // Added-only: a STAGED field can simply un-happen before Apply
+              // — a declared one goes through Delete property's confirm on
+              // the record panel, where the blast radius is named.
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  icon="trash-2"
+                  label="Discard new property"
+                  danger
+                  testId="group-editor-discard-new"
+                  onSelect={() => discardNew(menuFor)}
+                />
+              </>
             )}
           </MenuSurface>
         </Popover>

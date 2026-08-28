@@ -267,6 +267,7 @@ export function LayoutCanvas({
           update={update}
           anchorRef={anchorRef}
           onClose={() => setEditing(null)}
+          onOpenGroup={setEditing}
         />
       )}
     </div>
