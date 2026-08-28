@@ -175,11 +175,17 @@ export function addWidget(
 }
 
 /** Removes a widget wherever it sits; a row left with nothing in it does not
- * survive the edit. A missing id is a no-op, not a refusal. */
+ * survive the edit. A missing id is a no-op — same spec reference, matching
+ * every sibling editor's no-op discipline — and only the row that actually
+ * held the widget is rebuilt; every other row keeps its identity. */
 export function removeWidget(spec: DashboardSpec, id: string): DashboardEdit {
-  const rows = withoutEmptyRows(
-    spec.rows.map((r) => ({ ...r, widgets: r.widgets.filter((w) => w.id !== id) })),
-  );
+  const rowIdx = findRowIndex(spec, id);
+  if (rowIdx === -1) return { ok: true, spec };
+  const widgets = spec.rows[rowIdx].widgets.filter((w) => w.id !== id);
+  const rows =
+    widgets.length === 0
+      ? spec.rows.filter((_, i) => i !== rowIdx)
+      : spec.rows.map((r, i) => (i === rowIdx ? { ...r, widgets } : r));
   return { ok: true, spec: { ...spec, rows } };
 }
 
@@ -197,12 +203,17 @@ export function moveWidget(
   toRowId: string,
   toSlot: number,
 ): DashboardEdit {
-  const widget = findWidget(spec, id);
-  if (widget === null) return { ok: true, spec };
-  const withoutSource = spec.rows.map((r) => ({
-    ...r,
-    widgets: r.widgets.filter((w) => w.id !== id),
-  }));
+  const sourceIdx = findRowIndex(spec, id);
+  if (sourceIdx === -1) return { ok: true, spec };
+  const widget = spec.rows[sourceIdx].widgets.find((w) => w.id === id);
+  if (widget === undefined) return { ok: true, spec };
+  // Only the source row is rebuilt here — every sibling row keeps its
+  // identity, the same discipline `moveToOwnRow` and `duplicateWidget`
+  // already follow. The rows renderer keys widgets and rows by id, so a
+  // rebuilt-but-unchanged row is a wasted re-render, not just wasted work.
+  const withoutSource = spec.rows.map((r, i) =>
+    i === sourceIdx ? { ...r, widgets: r.widgets.filter((w) => w.id !== id) } : r,
+  );
   const targetIdx = withoutSource.findIndex((r) => r.id === toRowId);
   if (targetIdx === -1) return { ok: true, spec };
   const targetRow = withoutSource[targetIdx];

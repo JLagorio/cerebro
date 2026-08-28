@@ -230,6 +230,16 @@ const twelveWidgetSpec = (): DashboardSpec => ({
   ],
 });
 
+// A third, untouched row — what proves an edit rebuilds only the row(s) it
+// actually changes rather than every row in the spec.
+const threeRowSpec = (): DashboardSpec => ({
+  rows: [
+    { id: 'r1', widgets: [wid('a'), wid('b')] },
+    { id: 'r2', widgets: [wid('c')] },
+    { id: 'r3', widgets: [wid('d')] },
+  ],
+});
+
 describe('dashboard structure editors (M44.4)', () => {
   it('widgetCount sums every row', () => {
     expect(widgetCount(twoRowSpec())).toBe(3);
@@ -252,6 +262,22 @@ describe('dashboard structure editors (M44.4)', () => {
     expect(next.ok && next.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b', 'd', 'e', 'a']);
   });
 
+  it('moveWidget onto an unknown row is a no-op — same spec reference', () => {
+    const spec = twoRowSpec();
+    const next = moveWidget(spec, 'a', 'ghost-row', 0);
+    expect(next.ok && next.spec).toBe(spec);
+  });
+
+  it('moveWidget rebuilds only the source and target rows — a third row keeps its reference', () => {
+    const spec = threeRowSpec();
+    // 'a' moves from r1 into r2; neither move empties a row, so the rows
+    // stay aligned by index and r3 is untouched by either rebuilt row.
+    const next = moveWidget(spec, 'a', 'r2', 0);
+    expect(next.ok && next.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b']);
+    expect(next.ok && next.spec.rows[1].widgets.map((w) => w.id)).toEqual(['a', 'c']);
+    expect(next.ok && next.spec.rows[2]).toBe(spec.rows[2]);
+  });
+
   it('addWidget refuses a thirteenth widget with the rule named', () => {
     const next = addWidget(twelveWidgetSpec(), 'r1', wid('n'));
     expect(next).toEqual({ ok: false, reason: 'A dashboard holds at most twelve widgets' });
@@ -269,6 +295,22 @@ describe('dashboard structure editors (M44.4)', () => {
   it('removeWidget drops a row it empties', () => {
     const next = removeWidget(twoRowSpec(), 'c');
     expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([['a', 'b']]);
+  });
+
+  it('removeWidget is a no-op — same spec reference — when the id is not found', () => {
+    const spec = twoRowSpec();
+    const next = removeWidget(spec, 'ghost');
+    expect(next.ok && next.spec).toBe(spec);
+  });
+
+  it('removeWidget rebuilds only the row it touched — untouched rows keep their reference', () => {
+    const spec = threeRowSpec();
+    const next = removeWidget(spec, 'a');
+    // r1 loses 'a' but keeps 'b', so it survives (rebuilt); r2 and r3 never
+    // held 'a' and must come back as the exact same objects.
+    expect(next.ok && next.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b']);
+    expect(next.ok && next.spec.rows[1]).toBe(spec.rows[1]);
+    expect(next.ok && next.spec.rows[2]).toBe(spec.rows[2]);
   });
 
   it('moveToOwnRow splices a new row after the source row', () => {
