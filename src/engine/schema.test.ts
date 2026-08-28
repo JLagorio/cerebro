@@ -438,4 +438,13 @@ describe('display config (M44.1)', () => {
       showBody: true,
     });
   });
+
+  it('wrong-typed members inside the object default too', () => {
+    const schema = buildSchema([typeDoc({ show_empty: 'yes', show_body: 0 })]);
+    expect(schema.types.get('Work item')?.display).toEqual({
+      showEmpty: false,
+      showFile: false,
+      showBody: true,
+    });
+  });
 });

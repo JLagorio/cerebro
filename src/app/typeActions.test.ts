@@ -8,6 +8,7 @@ import {
   normalizeFieldName,
   removeFieldFromType,
   setFieldOptions,
+  setTypeDisplay,
 } from '@/app/typeActions';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
@@ -162,6 +163,53 @@ describe('setFieldOptions', () => {
   it('refuses built-in fields of system types', async () => {
     expect(await setFieldOptions('Work item', 'priority', [])).toBe(false);
     expect(patches).toEqual([]);
+  });
+});
+
+describe('setTypeDisplay (M44.1)', () => {
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: { fields: {} } as unknown as typeof typeDoc.properties,
+  };
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes only the deviations, snake_case, under display', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: false },
+    );
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: { show_empty: true, show_body: false } },
+      },
+    ]);
+  });
+
+  it('all-defaults deletes the key — reset IS the write', async () => {
+    await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: false, showFile: false, showBody: true },
+    );
+    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { display: null } }]);
+  });
+
+  it('toasts and returns false when the write fails', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockRejectedValue(new Error('disk')),
+    });
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(false);
+    expect(toasts[0]).toMatch(/display/i);
   });
 });
 

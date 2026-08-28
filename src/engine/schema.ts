@@ -10,7 +10,7 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
-import { FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES } from './types';
 import {
   DATE_DISPLAY_FORMATS,
   DEFAULT_TIME_FORMAT,
@@ -167,6 +167,16 @@ function parseDisplayConfig(raw: unknown): DisplayConfig {
     showFile: obj.show_file === true,
     showBody: obj.show_body !== false,
   };
+}
+
+/** DisplayConfig → the `display:` frontmatter value. Deviations only; all
+ * defaults = null, which patchFrontmatter spells "delete the key". */
+export function serializeDisplayConfig(d: DisplayConfig): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (d.showEmpty !== DISPLAY_DEFAULTS.showEmpty) out.show_empty = d.showEmpty;
+  if (d.showFile !== DISPLAY_DEFAULTS.showFile) out.show_file = d.showFile;
+  if (d.showBody !== DISPLAY_DEFAULTS.showBody) out.show_body = d.showBody;
+  return Object.keys(out).length === 0 ? null : out;
 }
 
 function isEmptyValue(raw: unknown): boolean {

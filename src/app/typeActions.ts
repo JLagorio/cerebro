@@ -11,11 +11,18 @@
  */
 
 import { kindMeta } from '@/engine/properties';
-import { humanize } from '@/engine/schema';
+import { humanize, serializeDisplayConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
 import { serializeViewList } from '@/engine/views';
-import type { Entry, FieldKind, FieldOption, StatusDef, ViewDefinition } from '@/engine/types';
+import type {
+  DisplayConfig,
+  Entry,
+  FieldKind,
+  FieldOption,
+  StatusDef,
+  ViewDefinition,
+} from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -592,6 +599,34 @@ export async function setTypeViews(
     }
   } catch {
     toast(`Couldn't update ${listing.name} views`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Persist the record panel's per-type display config onto its Type doc
+ * (M44.1). Deviations only — a type left at the defaults carries no
+ * `display:` key at all.
+ */
+export async function setTypeDisplay(
+  listing: { name: string; docPath: string | null },
+  display: DisplayConfig,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = serializeDisplayConfig(display);
+  try {
+    if (doc === null) {
+      if (serialized === null) return true; // nothing to write and nowhere to write it
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { display: serialized });
+    } else {
+      await patchFrontmatter(doc.path, { display: serialized });
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} display`);
     return false;
   }
   return true;
