@@ -3,6 +3,7 @@ import { applyTypeLayout, type TypeLayoutDraft } from '@/app/typeActions';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
+import { Switch } from '@/components/ui/Switch';
 import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { TypeDef } from '@/engine/types';
@@ -37,9 +38,8 @@ export function seedDraft(typeDef: TypeDef): TypeLayoutDraft {
   };
 }
 
-/** The one door every draft edit walks through — the rail's controls call
- * this (M45.2 Task 3). Exported pure so tests can stage an edited draft
- * before any control exists to click. */
+/** The one door every draft edit walks through — the rail's controls all
+ * funnel here via `update` (M45.2). Exported pure for the dirty tests. */
 export function updateDraft(
   draft: TypeLayoutDraft,
   patch: Partial<TypeLayoutDraft>,
@@ -71,26 +71,16 @@ export function draftDirty(draft: TypeLayoutDraft, seed: TypeLayoutDraft): boole
  * mounted once at App level, raised by `uiStore.layoutEditor`. Everything
  * edits a staged `TypeLayoutDraft`; `applyTypeLayout` is the only write and
  * the dialog closes only on `true` (M14.8).
- *
- * `initialDraft` is a test seam until the rail lands (Task 3): dirty state
- * has no UI door yet, so tests mount an already-edited draft built with
- * `updateDraft`. App passes nothing.
  */
-export function LayoutEditorDialog({ initialDraft }: { initialDraft?: TypeLayoutDraft } = {}) {
+export function LayoutEditorDialog() {
   const signal = useUiStore((s) => s.layoutEditor);
   if (signal === null) return null;
   // Keyed so a retargeted signal reseeds the draft instead of editing one
   // type's layout under another's name.
-  return <LayoutEditorCard key={signal.type} type={signal.type} initialDraft={initialDraft} />;
+  return <LayoutEditorCard key={signal.type} type={signal.type} />;
 }
 
-function LayoutEditorCard({
-  type,
-  initialDraft,
-}: {
-  type: string;
-  initialDraft?: TypeLayoutDraft;
-}) {
+function LayoutEditorCard({ type }: { type: string }) {
   const schema = useSchema();
   const closeLayoutEditor = useUiStore((s) => s.closeLayoutEditor);
   const typeDef = schema.types.get(type) ?? null;
@@ -103,24 +93,20 @@ function LayoutEditorCard({
     if (typeDef === null) closeLayoutEditor();
   }, [typeDef, closeLayoutEditor]);
   if (typeDef === null) return null;
-  return <LayoutEditorBody typeDef={typeDef} initialDraft={initialDraft} />;
+  return <LayoutEditorBody typeDef={typeDef} />;
 }
 
-function LayoutEditorBody({
-  typeDef,
-  initialDraft,
-}: {
-  typeDef: TypeDef;
-  initialDraft?: TypeLayoutDraft;
-}) {
+function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   const schema = useSchema();
   const closeLayoutEditor = useUiStore((s) => s.closeLayoutEditor);
   // The seed is captured at mount: dirty means "differs from what the editor
   // opened on", not from wherever the schema has drifted since.
   const [seed] = useState(() => seedDraft(typeDef));
-  const [draft] = useState(initialDraft ?? seed);
+  const [draft, setDraft] = useState(seed);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  /** The ONE door for every rail control — nothing else touches the draft. */
+  const update = (patch: Partial<TypeLayoutDraft>) => setDraft((d) => updateDraft(d, patch));
 
   const dirty = draftDirty(draft, seed);
   const maybeClose = () => {
@@ -140,6 +126,21 @@ function LayoutEditorBody({
     } finally {
       setBusy(false);
     }
+  };
+
+  // Structure is derived, both ways (spec §4): Tabbed ⟺ the draft has tabs.
+  // No structure flag anywhere — switching writes `tabs`, and the active
+  // tile is a no-op so Tabbed can never reseed saved tabs to Overview.
+  const tabbed = draft.tabs.length > 0;
+  const setStructure = (toTabbed: boolean) => {
+    if (toTabbed === tabbed) return;
+    update({
+      tabs: toTabbed
+        ? // The synthesized default made explicit — the one tab every
+          // tabless record already renders as.
+          [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }]
+        : [],
+    });
   };
 
   const style = typeStyle(typeDef.name, schema);
@@ -172,11 +173,53 @@ function LayoutEditorBody({
           <div className="flex min-h-0 flex-1">
             {/* The inert preview canvas renders here (Task 4). */}
             <div data-testid="layout-preview" className="min-w-0 flex-1 overflow-auto" />
-            {/* The Page settings rail renders here (Task 3). */}
             <div
               data-testid="layout-rail"
-              className="w-72 flex-none overflow-auto border-l border-n-100"
-            />
+              className="w-72 flex-none overflow-auto border-l border-n-100 p-3"
+            >
+              <div className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+                Structure
+              </div>
+              <div className="mt-1.5 grid grid-cols-2 gap-1">
+                <StructureTile
+                  label="Simple"
+                  icon="file-text"
+                  active={!tabbed}
+                  onSelect={() => setStructure(false)}
+                />
+                <StructureTile
+                  label="Tabbed"
+                  icon="panel-top"
+                  active={tabbed}
+                  onSelect={() => setStructure(true)}
+                />
+              </div>
+              <div className="mt-4 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+                Options
+              </div>
+              {/* The M44.1 drill-in's switches — same storage, new home
+                  (spec §3.2), except these stage into the draft and land on
+                  Apply instead of writing per toggle. Labels per the spec:
+                  its "Show body" replaces the drill-in's "Show description",
+                  the other two carry over verbatim. */}
+              <div className="mt-1.5 flex flex-col gap-2">
+                <Switch
+                  checked={draft.display.showEmpty}
+                  onChange={(on) => update({ display: { ...draft.display, showEmpty: on } })}
+                  label="Show empty properties"
+                />
+                <Switch
+                  checked={draft.display.showFile}
+                  onChange={(on) => update({ display: { ...draft.display, showFile: on } })}
+                  label="Show file path"
+                />
+                <Switch
+                  checked={draft.display.showBody}
+                  onChange={(on) => update({ display: { ...draft.display, showBody: on } })}
+                  label="Show body"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </Dialog>
@@ -206,5 +249,37 @@ function LayoutEditorBody({
         </Dialog>
       )}
     </>
+  );
+}
+
+/** One Structure tile — NewTabForm's aria-pressed button idiom, NOT
+ * SegmentedControl (which renders role=tab, the M44.2 learning). */
+function StructureTile({
+  label,
+  icon,
+  active,
+  onSelect,
+}: {
+  label: string;
+  icon: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      data-testid={`layout-structure-${label.toLowerCase()}`}
+      onClick={onSelect}
+      className={[
+        'flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-2xs',
+        active
+          ? 'border-cortex-500 bg-cortex-50 text-cortex-700'
+          : 'border-n-200 bg-transparent text-n-600 hover:bg-n-50',
+      ].join(' ')}
+    >
+      <Icon name={icon} size={15} />
+      {label}
+    </button>
   );
 }

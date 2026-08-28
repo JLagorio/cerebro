@@ -20,8 +20,9 @@ const DOC = 'types/work-item.md';
 /** The schema builds a TypeDef only from a Type doc (the DetailHeaderActions
  * idiom), so the fixture seeds one whose `layout:` carries a dead pointer —
  * the seed-prunes-on-Apply path needs it. `display.show_file` deviates from
- * the defaults so Apply always has a real patch to send. */
-function typeDoc() {
+ * the defaults so Apply always has a real patch to send. `tabs` opts a test
+ * into the saved-tabs seed (Tabbed active at open). */
+function typeDoc(tabs?: unknown[]) {
   return makeEntry({
     path: DOC,
     title: 'Work item',
@@ -33,6 +34,7 @@ function typeDoc() {
         heading: ['status', 'ghost'],
         groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
       },
+      ...(tabs !== undefined ? { tabs } : {}),
       // Nested Type-doc blocks, the typeActions.test cast idiom.
     } as unknown as ReturnType<typeof makeEntry>['properties'],
   });
@@ -42,7 +44,6 @@ function setup(
   opts: {
     patchFrontmatter?: ReturnType<typeof vi.fn>;
     entries?: ReturnType<typeof makeEntry>[];
-    initialDraft?: TypeLayoutDraft;
   } = {},
 ) {
   const patchFrontmatter = opts.patchFrontmatter ?? vi.fn().mockResolvedValue(true);
@@ -52,7 +53,7 @@ function setup(
     patchFrontmatter,
   });
   useUiStore.setState({ layoutEditor: { type: 'Work item' }, toasts: [] });
-  render(<LayoutEditorDialog initialDraft={opts.initialDraft} />);
+  render(<LayoutEditorDialog />);
   return { patchFrontmatter };
 }
 
@@ -208,14 +209,10 @@ describe('LayoutEditorDialog', () => {
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 
-  // Dirty is only reachable through the exported reducer until the rail lands
-  // (M45.2 Task 3 rewrites this through a real switch).
   it('Cancel with an edited draft confirms; Keep editing returns, Discard closes without a write', async () => {
     const user = userEvent.setup();
-    const seed = seedDraft(def({ display: { ...DISPLAY_DEFAULTS, showFile: true } }));
-    const { patchFrontmatter } = setup({
-      initialDraft: updateDraft(seed, { display: { ...seed.display, showBody: false } }),
-    });
+    const { patchFrontmatter } = setup();
+    await user.click(screen.getByRole('switch', { name: 'Show body' }));
 
     await user.click(screen.getByTestId('layout-cancel'));
     expect(screen.getByText('Discard layout changes?')).toBeTruthy();
@@ -230,9 +227,9 @@ describe('LayoutEditorDialog', () => {
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 
-  it('Escape with the confirm open dismisses the confirm, not the editor', async () => {
-    const seed = seedDraft(def({ display: { ...DISPLAY_DEFAULTS, showFile: true } }));
-    setup({ initialDraft: updateDraft(seed, { display: { ...seed.display, showBody: false } }) });
+  it('Escape with the confirm open dismisses the confirm, not the editor', () => {
+    setup();
+    fireEvent.click(screen.getByRole('switch', { name: 'Show body' }));
 
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByText('Discard layout changes?')).toBeTruthy();
@@ -254,19 +251,26 @@ describe('LayoutEditorDialog', () => {
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, FIXTURE_PATCH);
   });
 
-  it('a failed Apply keeps the editor open with the draft intact', async () => {
+  it('a failed Apply keeps the editor open with the EDITED draft intact', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter } = setup({
       patchFrontmatter: vi.fn().mockResolvedValue(false),
     });
+    // Edit first: an untouched draft cannot distinguish survived from
+    // reseeded — the M14.8 claim is that the user's WORK survives a failure.
+    await user.click(screen.getByRole('switch', { name: 'Show body' }));
     await user.click(screen.getByTestId('layout-apply'));
     await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('layout-editor')).toBeTruthy();
 
-    // The draft survived the failure: a second Apply sends the same patch.
+    // The second Apply CARRIES the edit: a reseeded draft would send the
+    // fixture's saved display without show_body.
     await user.click(screen.getByTestId('layout-apply'));
     await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(2));
-    expect(patchFrontmatter).toHaveBeenNthCalledWith(2, DOC, FIXTURE_PATCH);
+    expect(patchFrontmatter).toHaveBeenNthCalledWith(2, DOC, {
+      ...FIXTURE_PATCH,
+      display: { show_file: true, show_body: false },
+    });
   });
 
   it('busy disables Apply, so a double-fire writes once', async () => {
@@ -290,5 +294,106 @@ describe('LayoutEditorDialog', () => {
     });
     expect(patchFrontmatter).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(useUiStore.getState().layoutEditor).toBeNull());
+  });
+});
+
+describe('the Page settings rail (M45.2 Task 3)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  const railSwitch = (name: string) => screen.getByRole('switch', { name }) as HTMLInputElement;
+
+  const OVERVIEW_TAB = { id: 'overview', name: 'Overview', icon: null, content: 'overview' };
+  const SAVED_TABS = [
+    { id: 'plan', name: 'Plan', icon: null, content: 'sections' },
+    { id: 'props', name: 'Props', icon: null, content: 'properties' },
+  ];
+
+  it('shows Structure tiles and Options switches seeded from the type', () => {
+    setup();
+    const rail = screen.getByTestId('layout-rail');
+    expect(rail.textContent).toContain('Structure');
+    expect(rail.textContent).toContain('Options');
+    // Tabbed active ⟺ draft.tabs.length > 0 — the fixture has no tabs.
+    expect(screen.getByTestId('layout-structure-simple').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('layout-structure-tabbed').getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+    // Seeded from the fixture's display: show_file deviates, the rest default.
+    expect(railSwitch('Show empty properties').checked).toBe(false);
+    expect(railSwitch('Show file path').checked).toBe(true);
+    expect(railSwitch('Show body').checked).toBe(true);
+  });
+
+  it('a switch toggle edits the DRAFT only; Apply carries it', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(railSwitch('Show body'));
+    expect(railSwitch('Show body').checked).toBe(false);
+    // Nothing writes until Apply — the draft is the only thing that moved.
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    expect(patchFrontmatter).toHaveBeenCalledWith(DOC, {
+      ...FIXTURE_PATCH,
+      display: { show_file: true, show_body: false },
+    });
+  });
+
+  it('Simple→Tabbed on an empty draft seeds the explicit Overview tab', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(screen.getByTestId('layout-structure-tabbed'));
+    expect(screen.getByTestId('layout-structure-tabbed').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('layout-structure-simple').getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+
+    await user.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { ...FIXTURE_PATCH, tabs: [OVERVIEW_TAB] });
+  });
+
+  it('a type WITH saved tabs seeds Tabbed active, and Simple empties them', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup({ entries: [typeDoc(SAVED_TABS)] });
+    expect(screen.getByTestId('layout-structure-tabbed').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('layout-structure-simple').getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+
+    await user.click(screen.getByTestId('layout-structure-simple'));
+    expect(screen.getByTestId('layout-structure-simple').getAttribute('aria-pressed')).toBe('true');
+
+    await user.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    // tabs: [] serializes to null — the key deletes at the default.
+    expect(patchFrontmatter).toHaveBeenCalledWith(DOC, FIXTURE_PATCH);
+  });
+
+  it('clicking the already-active tile is a no-op — no dirty, no confirm', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(screen.getByTestId('layout-structure-simple'));
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+
+  it('clicking Tabbed while Tabbed keeps the saved tabs — never reseeds Overview', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup({ entries: [typeDoc(SAVED_TABS)] });
+    await user.click(screen.getByTestId('layout-structure-tabbed'));
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+    expect(patchFrontmatter).not.toHaveBeenCalled();
   });
 });
