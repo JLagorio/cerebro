@@ -1256,16 +1256,27 @@ function ChartPage({
       ...(next.cumulative === true && (nextKind === 'bar' || nextKind === 'line')
         ? { cumulative: true }
         : {}),
-      ...(next.height !== undefined && next.height !== 'm' && nextAxisKind
+      // Height only drives the svg geometry BarChart/HBarChart/LineChart
+      // build — a donut is fixed at 240px and a number chart draws no svg.
+      ...(next.height !== undefined &&
+      next.height !== 'm' &&
+      (nextKind === 'bar' || nextKind === 'line')
         ? { height: next.height }
         : {}),
       ...(next.palette !== undefined && nextAxisKind ? { palette: next.palette } : {}),
       ...(next.colorByValue === true && next.palette !== undefined && nextAxisKind
         ? { colorByValue: true }
         : {}),
-      ...(next.hideGrid === true && nextAxisKind && !nextHorizontal ? { hideGrid: true } : {}),
-      ...(next.hideAxis === true && nextAxisKind && !nextHorizontal ? { hideAxis: true } : {}),
-      ...(next.hideLabels === true && nextAxisKind ? { hideLabels: true } : {}),
+      // hideGrid/hideAxis are read only by the Axes path — a vertical bar and
+      // a line. HBarChart labels its own bands and DonutChart has no axis.
+      ...(next.hideGrid === true && ((nextKind === 'bar' && !nextHorizontal) || nextKind === 'line')
+        ? { hideGrid: true }
+        : {}),
+      ...(next.hideAxis === true && ((nextKind === 'bar' && !nextHorizontal) || nextKind === 'line')
+        ? { hideAxis: true }
+        : {}),
+      // hideLabels is read only by the two bar layouts (vertical + horizontal).
+      ...(next.hideLabels === true && nextKind === 'bar' ? { hideLabels: true } : {}),
       ...(next.smooth === true && nextKind === 'line' ? { smooth: true } : {}),
       ...(next.area === true && nextKind === 'line' ? { area: true } : {}),
       ...(next.hideDonutCenter === true && nextKind === 'donut' ? { hideDonutCenter: true } : {}),
@@ -1373,7 +1384,9 @@ function ChartPage({
           />
         </div>
       )}
-      {axisKind && (
+      {/* Height only feeds the svg viewBox BarChart/HBarChart/LineChart share
+          — a donut is a fixed 240px ring and a number chart draws no svg. */}
+      {(kind === 'bar' || kind === 'line') && (
         <div>
           <span className="mb-1 block text-xs font-medium text-n-600">Height</span>
           <SegmentedControl
@@ -1412,12 +1425,15 @@ function ChartPage({
         </div>
       )}
       {/* The hide-flavoured specs invert at the control: the SWITCH says what
-          the user sees ("Grid lines on"), the SPEC stores the deviation. Grid
-          and axis leave on a horizontal bar — HBarChart draws neither, and a
-          switch that changes nothing is a lie. */}
+          the user sees ("Grid lines on"), the SPEC stores the deviation.
+          Grid/Axis labels show only for a vertical bar and a line — the two
+          shapes that draw through Axes. A horizontal bar labels its own
+          bands and a donut has no axis, so neither switch would change
+          anything there. Value labels shows for both bar orientations —
+          BarChart and HBarChart each read hideLabels themselves. */}
       {axisKind && (
         <div className="flex flex-col gap-2 border-t border-n-100 pt-2">
-          {!horizontal && (
+          {((kind === 'bar' && !horizontal) || kind === 'line') && (
             <Switch
               checked={chart.hideGrid !== true}
               onChange={(on) => patch({ ...chart, hideGrid: !on })}
@@ -1425,7 +1441,7 @@ function ChartPage({
               ariaLabel="Grid lines"
             />
           )}
-          {!horizontal && (
+          {((kind === 'bar' && !horizontal) || kind === 'line') && (
             <Switch
               checked={chart.hideAxis !== true}
               onChange={(on) => patch({ ...chart, hideAxis: !on })}
@@ -1433,12 +1449,14 @@ function ChartPage({
               ariaLabel="Axis labels"
             />
           )}
-          <Switch
-            checked={chart.hideLabels !== true}
-            onChange={(on) => patch({ ...chart, hideLabels: !on })}
-            label="Value labels"
-            ariaLabel="Value labels"
-          />
+          {kind === 'bar' && (
+            <Switch
+              checked={chart.hideLabels !== true}
+              onChange={(on) => patch({ ...chart, hideLabels: !on })}
+              label="Value labels"
+              ariaLabel="Value labels"
+            />
+          )}
           {kind === 'line' && (
             <Switch
               checked={chart.smooth === true}

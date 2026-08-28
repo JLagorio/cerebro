@@ -423,6 +423,22 @@ describe('chart controls (M44.2)', () => {
     expect(nextPresentation().chart).toEqual({ horizontal: true, hideLabels: true });
   });
 
+  /** `DonutChart` reads none of `hideGrid`/`hideAxis`/`hideLabels`/`height` —
+   * they only drive the Axes path and the bar/line svg geometry — so
+   * switching a spec that carries all four into a donut must shed them
+   * rather than leave stored words the renderer never looks at. */
+  it('switching to donut drops the settings only bar/line render', () => {
+    const { nextPresentation } = chartSetup({
+      hideGrid: true,
+      hideAxis: true,
+      hideLabels: true,
+      height: 'xl',
+    });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'donut' } });
+    expect(nextPresentation().chart).toEqual({ kind: 'donut' });
+  });
+
   /** The old patch rebuilt from a four-key allowlist, so a hand-edited
    * `sort:`/`height:` was DROPPED the next time any control was touched. */
   it('touching an unrelated control preserves every stored M44.2 key', () => {
