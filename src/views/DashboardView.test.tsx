@@ -207,3 +207,92 @@ describe('DashboardView', () => {
     expect(screen.getByTestId('dashboard-view').getAttribute('data-blocks')).toBe('2');
   });
 });
+
+/**
+ * Rows-native rendering (M44.4 Task 3): heights on the row, weights on the
+ * widget, in row order. These build a `Presentation` directly rather than
+ * through YAML — the parse/migration path is `engine/views.test.ts`'s job;
+ * this file's job is what the rows DRAW.
+ */
+const rowsPresentation = (dashboard: NonNullable<Presentation['dashboard']>): Presentation => ({
+  type: 'dashboard',
+  group: [],
+  sort: [],
+  columns: [],
+  dashboard,
+});
+
+describe('DashboardView rows (M44.4)', () => {
+  const twoRows = (): Presentation =>
+    rowsPresentation({
+      rows: [
+        {
+          id: 'row-1',
+          h: 360,
+          widgets: [
+            { id: 'a', kind: 'number', agg: 'count', w: 2 },
+            { id: 'b', kind: 'number', agg: 'count' },
+          ],
+        },
+        { id: 'row-2', widgets: [{ id: 'c', kind: 'number', agg: 'count' }] },
+      ],
+    });
+
+  it('renders rows in order with widget width weights as flex-grow', () => {
+    const entries = vault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={twoRows()}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const rows = screen.getAllByTestId('dashboard-row');
+    expect(rows).toHaveLength(2);
+    expect(screen.getByTestId('widget-a').style.flexGrow).toBe('2');
+    expect(screen.getByTestId('widget-b').style.flexGrow).toBe('1');
+  });
+
+  it("a row's height lands on the row, and the default is 300", () => {
+    const entries = vault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={twoRows()}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const rows = screen.getAllByTestId('dashboard-row');
+    expect(rows[0].style.height).toBe('360px');
+    expect(rows[1].style.height).toBe('300px');
+  });
+
+  // The number widget must measure through `widgetEntries` — the dashboard's
+  // Global filter, not just the view's own — or a Global filter would be
+  // decoration rather than a real second layer (M44.4 Task 2's contract).
+  it('measures a number widget through widgetEntries — a global filter narrows the count', () => {
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'items/a.md',
+        title: 'Alpha',
+        type: 'Work item',
+        properties: { priority: 'high' },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'Beta',
+        type: 'Work item',
+        properties: { priority: 'low' },
+      }),
+    ];
+    const presentation = rowsPresentation({
+      rows: [{ id: 'row-1', widgets: [{ id: 'a', kind: 'number', agg: 'count' }] }],
+      global: { all: [{ field: 'priority', op: 'not_equals', value: 'low' }] },
+    });
+    render(
+      <DashboardView entries={entries} presentation={presentation} schema={buildSchema(entries)} />,
+    );
+    // Two records total, one filtered out by the global rule.
+    expect(screen.getByTestId('dashboard-number').getAttribute('data-value')).toBe('1');
+  });
+});

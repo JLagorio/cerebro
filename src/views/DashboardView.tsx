@@ -2,13 +2,14 @@ import React from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { columnUniverse } from '@/engine/columns';
-import { dashboardNumber } from '@/engine/dashboard';
+import { dashboardNumber, widgetEntries } from '@/engine/dashboard';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import type { DashboardWidget, Entry, Presentation, Schema } from '@/engine/types';
+import { ROW_HEIGHT_DEFAULT } from '@/engine/types';
+import type { DashboardSpec, DashboardWidget, Entry, Presentation, Schema } from '@/engine/types';
 
 /**
  * Dashboard (M16.28; rows of widgets since M44.4) — each widget a saved view
@@ -36,14 +37,20 @@ export interface DashboardViewProps {
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
+  /** Persists a structural or filter edit back to the view file. Absent (an
+   * embedded/read-only host) means no Edit affordances render at all — Task 5
+   * gates every editing control on this being defined. */
+  onPresentationChange?: (next: Presentation) => void;
 }
 
-function BlockShell({
+function WidgetShell({
+  widget,
   title,
   subtitle,
   testId,
   children,
 }: {
+  widget: DashboardWidget;
   title: string;
   subtitle?: string;
   testId: string;
@@ -51,7 +58,8 @@ function BlockShell({
 }) {
   return (
     <section
-      data-testid={testId}
+      data-testid={`widget-${widget.id}`}
+      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
       className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
       <header className="flex flex-none items-baseline gap-2 border-b border-n-100 px-3 py-2">
@@ -60,36 +68,51 @@ function BlockShell({
           <span className="flex-none text-2xs text-n-400">{subtitle}</span>
         )}
       </header>
-      {children}
+      <div data-testid={testId} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {children}
+      </div>
     </section>
   );
 }
 
 /** A block that cannot draw says what is missing and where it pointed — a
  * blank tile is indistinguishable from a block that is still loading. */
-function BrokenBlock({ title, icon, message }: { title: string; icon: string; message: string }) {
+function BrokenBlock({
+  widget,
+  title,
+  icon,
+  message,
+}: {
+  widget: DashboardWidget;
+  title: string;
+  icon: string;
+  message: string;
+}) {
   return (
-    <BlockShell title={title} testId="dashboard-block">
+    <WidgetShell widget={widget} title={title} testId="dashboard-block">
       <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
         <Icon name={icon} size={14} color="var(--n-400)" />
         {message}
       </p>
-    </BlockShell>
+    </WidgetShell>
   );
 }
 
 function NumberBlock({
-  block,
+  widget,
   entries,
+  spec,
   schema,
 }: {
-  block: Extract<DashboardWidget, { kind: 'number' }>;
+  widget: Extract<DashboardWidget, { kind: 'number' }>;
   entries: Entry[];
+  spec: DashboardSpec;
   schema: Schema;
 }) {
-  const measured = dashboardNumber(entries, block, schema);
+  const measured = dashboardNumber(widgetEntries(entries, spec, widget, schema), widget, schema);
   return (
-    <BlockShell
+    <WidgetShell
+      widget={widget}
       title={measured.label}
       subtitle={`${measured.count} ${measured.count === 1 ? 'record' : 'records'}`}
       testId="dashboard-block"
@@ -111,35 +134,37 @@ function NumberBlock({
           </span>
         )}
       </div>
-    </BlockShell>
+    </WidgetShell>
   );
 }
 
-function ViewBlock({ block }: { block: Extract<DashboardWidget, { kind: 'view' }> }) {
+function ViewBlock({ widget }: { widget: Extract<DashboardWidget, { kind: 'view' }> }) {
   const vault = useVaultStore((s) => s.entries);
   const lists = useVaultStore((s) => s.views);
   const schema = useSchema();
-  const collection = block.collection ?? null;
+  const collection = widget.collection ?? null;
   // Ids are unique per FOLDER, not per vault, so the collection is part of
   // the key — the same rule resolveSurface and ListPage follow.
-  const list = lists.find((l) => l.id === block.list && l.collection === collection) ?? null;
+  const list = lists.find((l) => l.id === widget.list && l.collection === collection) ?? null;
 
   if (list === null) {
     return (
       <BrokenBlock
-        title={block.title ?? block.list}
+        widget={widget}
+        title={widget.title ?? widget.list}
         icon="unlink"
-        message={`This block points at a list called “${block.list}” that is no longer in the vault.`}
+        message={`This block points at a list called “${widget.list}” that is no longer in the vault.`}
       />
     );
   }
 
-  const active = resolveView(list.definition, block.view);
-  const title = block.title ?? `${list.definition.name} · ${active.name}`;
+  const active = resolveView(list.definition, widget.view);
+  const title = widget.title ?? `${list.definition.name} · ${active.name}`;
 
   if (hasBlocks(active.presentation.type)) {
     return (
       <BrokenBlock
+        widget={widget}
         title={title}
         icon="circle-slash"
         message="A dashboard cannot show another dashboard — pick one of its own views instead."
@@ -148,7 +173,7 @@ function ViewBlock({ block }: { block: Extract<DashboardWidget, { kind: 'view' }
   }
 
   const surface = resolveSurface(
-    { kind: 'list', id: block.list, collection, view: block.view },
+    { kind: 'list', id: widget.list, collection, view: widget.view },
     vault,
     schema,
     lists,
@@ -161,14 +186,16 @@ function ViewBlock({ block }: { block: Extract<DashboardWidget, { kind: 'view' }
   );
 
   return (
-    <BlockShell
+    <WidgetShell
+      widget={widget}
       title={title}
       subtitle={viewKind(active.presentation.type).label}
       testId="dashboard-block"
     >
-      {/* Bounded, and its own scroll container: the layouts all expand to fill
-          a page, and a page-tall table inside a tile is not a dashboard. */}
-      <div className="flex h-[300px] min-h-0 flex-col overflow-hidden">
+      {/* The row owns the height now — this wrapper only bounds the scroll,
+          it no longer sets one: the layouts all expand to fill a page, and a
+          page-tall table inside a tile is not a dashboard. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <ViewCanvas
           embedded
           entries={surface.entries}
@@ -176,50 +203,60 @@ function ViewBlock({ block }: { block: Extract<DashboardWidget, { kind: 'view' }
           presentation={surface.presentation}
           schema={schema}
           fields={fields}
-          scope={`dashboard:${block.id}`}
+          scope={`dashboard:${widget.id}`}
           createType={list.definition.source.type ?? undefined}
           filtered={active.filters !== null}
         />
       </div>
-    </BlockShell>
+    </WidgetShell>
   );
 }
 
+// `onPresentationChange` isn't read yet — Task 5 gates every Edit affordance
+// on it being defined. Declared on the props now so ViewCanvas can forward it
+// and callers can pass it without a compile error, per M44.4 Task 3.
 export function DashboardView({ entries, presentation, schema }: DashboardViewProps) {
-  // M44.4 Task 1 shim: the spec is rows of widgets now, flattened here until
-  // Task 3 draws the rows themselves (heights, weights, per-row layout).
-  const widgets = presentation.dashboard?.rows.flatMap((r) => r.widgets) ?? [];
+  const spec: DashboardSpec = presentation.dashboard ?? { rows: [] };
 
   return (
     <div
       data-testid="dashboard-view"
-      data-blocks={widgets.length}
+      data-blocks={spec.rows.reduce((n, r) => n + r.widgets.length, 0)}
       className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
     >
-      {widgets.length === 0 ? (
+      {spec.rows.length === 0 ? (
         <EmptyState
           icon="layout-dashboard"
           title="No blocks yet"
-          description="Add a saved view or a number under Blocks in view settings."
+          description="Add a widget to start — toggle Edit in the corner."
         />
       ) : (
-        // auto-fit rather than a breakpoint: the canvas shares its width with
-        // a detail panel that opens and closes, so the column count has to
-        // follow the container, not the window.
-        <div
-          className="grid items-start gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}
-        >
-          {widgets.map((widget) =>
-            widget.kind === 'number' ? (
-              <NumberBlock key={widget.id} block={widget} entries={entries} schema={schema} />
-            ) : widget.kind === 'view' ? (
-              <ViewBlock key={widget.id} block={widget} />
-            ) : // The four own-scope kinds (table/board/timeline/chart) render in
-            // M44.4 Task 4; until then a rows-native file simply shows fewer
-            // tiles, and nothing saved before M44.4 can hold one.
-            null,
-          )}
+        <div className="flex flex-col gap-3">
+          {spec.rows.map((row) => (
+            <div
+              key={row.id}
+              data-testid="dashboard-row"
+              className="flex min-w-0 gap-3"
+              style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
+            >
+              {row.widgets.map((widget) =>
+                widget.kind === 'number' ? (
+                  <NumberBlock
+                    key={widget.id}
+                    widget={widget}
+                    entries={entries}
+                    spec={spec}
+                    schema={schema}
+                  />
+                ) : widget.kind === 'view' ? (
+                  <ViewBlock key={widget.id} widget={widget} />
+                ) : // The four own-scope kinds (table/board/timeline/chart) render in
+                // M44.4 Task 4; until then a rows-native file simply shows fewer
+                // tiles, and nothing saved before M44.4 can hold one.
+                null,
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

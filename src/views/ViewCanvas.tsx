@@ -230,7 +230,14 @@ export function ViewCanvas({
         />
       );
     case 'dashboard':
-      return <DashboardView entries={entries} presentation={presentation} schema={schema} />;
+      return (
+        <DashboardView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          onPresentationChange={onPresentationChange}
+        />
+      );
     case 'chart':
       return (
         <ChartView
