@@ -5,11 +5,10 @@ import userEvent from '@testing-library/user-event';
 import {
   LayoutEditorDialog,
   draftDirty,
-  draftRoster,
-  overlayVisibility,
   seedDraft,
   updateDraft,
 } from '@/detail/LayoutEditorDialog';
+import { draftRoster, overlayVisibility } from '@/detail/LayoutCanvas';
 import type { TypeLayoutDraft } from '@/app/typeActions';
 import { resetLayers } from '@/components/ui/layers';
 import { DISPLAY_DEFAULTS, type FieldDef, type TypeDef } from '@/engine/types';
