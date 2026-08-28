@@ -214,6 +214,21 @@ describe('DocPage', () => {
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
     });
 
+    it('toggling details keeps the same body editor instance', async () => {
+      const record = await setTypeFrontmatter('layout:\n  heading: [status]\n');
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
+      const editor = screen.getByTestId('markdown-editor');
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      // The same NODE, not merely presence — a remount hands back a new one
+      // (and would re-run the whole load/onReady cycle mid-toggle).
+      expect(screen.getByTestId('markdown-editor')).toBe(editor);
+    });
+
     // The Task 5 ruling's trap: a heading whose one field is empty under
     // hide_when_empty folds the strip to NOTHING — so the stack must render
     // despite `detailsShown` never being touched, or the record's properties

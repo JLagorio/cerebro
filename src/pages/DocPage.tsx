@@ -291,6 +291,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
   const stripShows =
     headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
+  // Render-time derived-state reset (the React-sanctioned pattern): the lens
+  // FORGETS a record it left. A one-slot {path, shown} cache gave a one-deep
+  // memory — A(toggled) → B → A resurrected A's choice while A → B(toggled)
+  // → A reset it — and RecordProperties' keyed `revealed` resets on every
+  // switch, so remembering here was an accident, not a feature.
+  if (details !== null && details.path !== entry.path) setDetails(null);
   const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment

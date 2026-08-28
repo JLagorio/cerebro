@@ -481,6 +481,12 @@ describe('DetailPanel', () => {
       // before the DOM assertion sees it.
       act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
       expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      // …and COMING BACK resets too: the lens forgets a record it left, like
+      // RecordProperties' keyed `revealed`. A one-slot {path, shown} cache
+      // resurrected A's toggle on A→B→A while A→B(toggled)→A reset —
+      // remembering was an accident of whose write survived, not a feature.
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' }));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
     });
 
     it('no layout → no strip, and the stack renders exactly as today', () => {
