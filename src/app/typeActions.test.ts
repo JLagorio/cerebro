@@ -107,6 +107,8 @@ describe('addFieldToType', () => {
 
   it('rejects reserved schema keys', async () => {
     expect(await addFieldToType('Recipe', 'statuses', 'text')).toBe(false);
+    // M45.1: `layout` joined the roster.
+    expect(await addFieldToType('Recipe', 'layout', 'text')).toBe(false);
     expect(patches).toEqual([]);
     expect(toasts[0]).toMatch(/reserved/);
   });

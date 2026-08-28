@@ -144,6 +144,27 @@ export const DISPLAY_DEFAULTS: DisplayConfig = {
   showBody: true,
 };
 
+/** One named panel of properties on the record page (M45.1). Ids mint like
+ * tab ids and matter to the layout editor's drag model, not to any
+ * per-record data. */
+export interface LayoutGroup {
+  id: string;
+  name: string;
+  fields: string[];
+}
+
+/** Where the record page PLACES properties (M45.1). `fields:` declares and
+ * orders; `visibility` discloses; `layout` arranges. Absent = the flat
+ * stack every type rendered before M45. A field name appears at most once
+ * across `heading` + all `groups` — parse drops later claims, so
+ * downstream code never dedups. */
+export interface LayoutConfig {
+  heading: string[];
+  groups: LayoutGroup[];
+}
+
+export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
+
 /** What a record tab renders (M44.5). A closed vocabulary on purpose: an
  * unrecognised kind from hand-edited YAML must not reach the renderer. */
 export const TAB_CONTENTS = ['overview', 'properties', 'sections'] as const;
@@ -175,6 +196,10 @@ export interface TypeDef {
    * type. Always resolved: absent frontmatter yields the defaults, so no
    * consumer null-checks. */
   display: DisplayConfig;
+  /** `layout:` on the Type doc (M45.1) — where the record page places this
+   * type's properties. Always resolved: absent frontmatter yields the
+   * defaults (the flat stack), so no consumer null-checks. */
+  layout: LayoutConfig;
   /** `tabs:` on the Type doc (M44.5) — the record page's tab set. [] means
    * none saved yet; `typeTabs` synthesizes the Overview default. */
   tabs: TabDef[];

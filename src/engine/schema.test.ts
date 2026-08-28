@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STATUSES, buildSchema, serializeDisplayConfig } from './schema';
+import {
+  DEFAULT_STATUSES,
+  buildSchema,
+  parseLayoutConfig,
+  serializeDisplayConfig,
+  serializeLayoutConfig,
+} from './schema';
 import type { DisplayConfig } from './types';
 import { makeEntry } from './testHelpers';
 
@@ -467,5 +473,73 @@ describe('display config (M44.1)', () => {
         }
       }
     }
+  });
+});
+
+describe('layout config (M45.1)', () => {
+  it('absent or non-object layout means the defaults — the flat pre-M45 stack', () => {
+    expect(parseLayoutConfig(undefined)).toEqual({ heading: [], groups: [] });
+    expect(parseLayoutConfig('doc')).toEqual({ heading: [], groups: [] });
+    expect(parseLayoutConfig(['status'])).toEqual({ heading: [], groups: [] });
+  });
+
+  it('heading keeps strings only, trimmed, first claim wins', () => {
+    expect(parseLayoutConfig({ heading: ['status', ' due ', 'status', 7] }).heading).toEqual([
+      'status',
+      'due',
+    ]);
+  });
+
+  it('mints group ids in two passes — a declared id is never stolen', () => {
+    expect(
+      parseLayoutConfig({ groups: [{}, { id: 'group-1', fields: ['a'] }] }).groups.map((g) => g.id),
+    ).toEqual(['group-2', 'group-1']);
+  });
+
+  it('falls back group names and drops later claims across containers', () => {
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [{ name: 'Main', fields: ['status', 'due', 'x'] }, { fields: ['due', 'team'] }],
+    });
+    expect(l.groups[0]).toEqual({ id: 'group-1', name: 'Main', fields: ['due', 'x'] });
+    expect(l.groups[1]).toEqual({ id: 'group-2', name: 'Group 2', fields: ['team'] });
+  });
+
+  it('serializes deviations only — defaults delete the key, empty heading is omitted', () => {
+    expect(serializeLayoutConfig({ heading: [], groups: [] })).toBeNull();
+    expect(serializeLayoutConfig({ heading: ['status'], groups: [] })).toEqual({
+      heading: ['status'],
+    });
+  });
+
+  it('round-trips a parsed layout through the serializer', () => {
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [{ name: 'Main', fields: ['status', 'due', 'x'] }, { fields: ['due', 'team'] }],
+    });
+    expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
+  });
+
+  it('buildSchema resolves layout from the Type doc frontmatter', () => {
+    const doc = makeEntry({
+      path: 'types/work-item.md',
+      type: 'Type',
+      title: 'Work item',
+      properties: {
+        type: 'Type',
+        layout: {
+          heading: ['status'],
+          groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+        },
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+    expect(buildSchema([doc]).types.get('Work item')?.layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+    });
+    expect(buildSchema([typeNote]).types.get('Work item')?.layout).toEqual({
+      heading: [],
+      groups: [],
+    });
   });
 });

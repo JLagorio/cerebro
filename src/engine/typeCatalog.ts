@@ -39,7 +39,17 @@ export const SYSTEM_TYPES: SystemTypeSpec[] = [
     // The meta-type: `type: Type` docs ARE the schema. Fully locked — its
     // reserved frontmatter keys are the schema format itself.
     name: 'Type',
-    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views', 'display', 'tabs'],
+    lockedFields: [
+      'fields',
+      'statuses',
+      'icon',
+      'color',
+      'folder',
+      'views',
+      'display',
+      'tabs',
+      'layout',
+    ],
     fallbackIcon: 'shapes',
     fallbackColor: '#8B7CF6',
   },

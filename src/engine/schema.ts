@@ -5,6 +5,7 @@ import type {
   FieldKind,
   FieldOption,
   FieldVisibility,
+  LayoutConfig,
   ResolvedField,
   Schema,
   StatusDef,
@@ -179,6 +180,84 @@ export function serializeDisplayConfig(d: DisplayConfig): Record<string, unknown
   return Object.keys(out).length === 0 ? null : out;
 }
 
+function asLayoutRecord(raw: unknown): Record<string, unknown> {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
+/** A minted `group-N` id, checked against a `taken` set that already holds
+ * every id ANY group in the list legitimately declares — earlier or later —
+ * so a blind `group-${i + 1}` guess can never steal a declared id (the
+ * parseTabList two-pass shape; ids matter to the layout editor's drag
+ * model). */
+function mintGroupId(i: number, taken: Set<string>): string {
+  let n = i + 1;
+  while (taken.has(`group-${n}`)) n += 1;
+  return `group-${n}`;
+}
+
+/** Field names claimed into `into`, honoring the cross-container claim set:
+ * a name appears at most once across heading + all groups, first claim
+ * wins, so no consumer ever dedups. Non-strings and blanks are dropped —
+ * `layout:` is advisory, like every Type-doc block. */
+function claimFieldNames(raw: unknown, claimed: Set<string>): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim();
+    if (name === '' || claimed.has(name)) continue;
+    claimed.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/** `layout:` is advisory, like every Type-doc block: malformed → defaults. */
+export function parseLayoutConfig(raw: unknown): LayoutConfig {
+  const obj = asLayoutRecord(raw);
+  const claimed = new Set<string>();
+  const heading = claimFieldNames(obj.heading, claimed);
+
+  const items = Array.isArray(obj.groups) ? obj.groups.map((g) => asLayoutRecord(g)) : [];
+  const declaredIds = items.map((g) =>
+    typeof g.id === 'string' && g.id.trim() !== '' ? g.id.trim() : '',
+  );
+  const taken = new Set<string>();
+  const owns = declaredIds.map((id) => {
+    if (id === '' || taken.has(id)) return false;
+    taken.add(id);
+    return true;
+  });
+
+  const groups = items.map((g, i) => {
+    const id = owns[i] ? declaredIds[i] : mintGroupId(i, taken);
+    taken.add(id);
+    return {
+      id,
+      name: typeof g.name === 'string' && g.name.trim() !== '' ? g.name.trim() : `Group ${i + 1}`,
+      fields: claimFieldNames(g.fields, claimed),
+    };
+  });
+
+  return { heading, groups };
+}
+
+/** LayoutConfig → the `layout:` frontmatter value. Deviations only: the
+ * defaults = null (patchFrontmatter deletes the key), an empty heading is
+ * omitted, groups always serialize whole — an empty group is a real drop
+ * target the editor keeps. */
+export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> | null {
+  if (l.heading.length === 0 && l.groups.length === 0) return null;
+  const out: Record<string, unknown> = {};
+  if (l.heading.length > 0) out.heading = [...l.heading];
+  if (l.groups.length > 0) {
+    out.groups = l.groups.map((g) => ({ id: g.id, name: g.name, fields: [...g.fields] }));
+  }
+  return out;
+}
+
 function isEmptyValue(raw: unknown): boolean {
   return (
     raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
@@ -201,6 +280,7 @@ export function buildSchema(entries: Entry[]): Schema {
           : null,
       views: parseViewList((e.properties as Record<string, unknown>).views),
       display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
+      layout: parseLayoutConfig((e.properties as Record<string, unknown>).layout),
       tabs: parseTabList((e.properties as Record<string, unknown>).tabs),
     });
   }
