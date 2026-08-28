@@ -21,7 +21,7 @@ import {
 } from './dates';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
-import { parseViewList } from './views';
+import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -201,6 +201,7 @@ export function buildSchema(entries: Entry[]): Schema {
           : null,
       views: parseViewList((e.properties as Record<string, unknown>).views),
       display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
+      tabs: parseTabList((e.properties as Record<string, unknown>).tabs),
     });
   }
 

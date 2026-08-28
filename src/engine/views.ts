@@ -25,6 +25,7 @@ import type {
   Presentation,
   Scalar,
   SortSpec,
+  TabDef,
   ViewDefinition,
   ViewType,
 } from './types';
@@ -39,6 +40,7 @@ import {
   MAX_ROW_WIDGETS,
   ROW_HEIGHT_MAX,
   ROW_HEIGHT_MIN,
+  TAB_CONTENTS,
   VIEW_TYPES,
 } from './types';
 
@@ -927,6 +929,39 @@ export function serializeViewList(views: ViewDefinition[]): unknown[] {
     filters: v.filters,
     presentation: serializePresentation(v.presentation),
   }));
+}
+
+const TAB_CONTENT_SET = new Set<string>(TAB_CONTENTS);
+
+/**
+ * Tabs persisted on a Type doc (M44.5): an array under `tabs:`, one entry per
+ * record-page tab. Tolerant like every Type-doc block — absent or malformed
+ * means "no saved tabs yet" and the page renders its Overview default.
+ */
+export function parseTabList(raw: unknown): TabDef[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const taken = new Set<string>();
+  return raw.map((r, i) => {
+    const obj = asRecord(r);
+    const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
+    const id = declared !== '' && !taken.has(declared) ? declared : `tab-${i + 1}`;
+    taken.add(id);
+    return {
+      id,
+      name:
+        typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name.trim() : `Tab ${i + 1}`,
+      icon: typeof obj.icon === 'string' && obj.icon.trim() !== '' ? obj.icon.trim() : null,
+      content:
+        typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
+          ? (obj.content as TabDef['content'])
+          : 'sections',
+    };
+  });
+}
+
+/** TabDef[] → the plain objects stored under `tabs:`. Inverse of parseTabList. */
+export function serializeTabList(tabs: TabDef[]): unknown[] {
+  return tabs.map((t) => ({ id: t.id, name: t.name, icon: t.icon, content: t.content }));
 }
 
 /** The view a selection names, or the first tab when it names none. */

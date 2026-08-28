@@ -37,6 +37,7 @@ const RESERVED = new Set([
   'folder',
   'views',
   'display',
+  'tabs',
 ]);
 
 /** Leading underscores are stripped: `_`-prefixed keys are the app-managed

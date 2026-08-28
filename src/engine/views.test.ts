@@ -8,9 +8,11 @@ import {
   newView,
   nextViewId,
   parseListYaml,
+  parseTabList,
   replaceView,
   resolveView,
   serializeList,
+  serializeTabList,
 } from './views';
 import type { FilterGroup, ListDefinition, ListFile, Presentation, SortSpec } from './types';
 
@@ -1512,5 +1514,32 @@ describe('moveView', () => {
   it('the moved tab keeps its whole definition, not just its name', () => {
     const moved = moveView(views, 'two', 0);
     expect(moved[0]).toBe(views[1]);
+  });
+});
+
+describe('tab list on a Type doc (M44.5)', () => {
+  it('round-trips ids, names, icons and content kinds', () => {
+    const tabs = [
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+      { id: 'spec', name: 'Spec', icon: 'file-text', content: 'sections' },
+      { id: 'props', name: 'Fields', icon: null, content: 'properties' },
+    ];
+    expect(parseTabList(serializeTabList(parseTabList(tabs)))).toEqual(parseTabList(tabs));
+  });
+
+  it('mints unique ids and drops a content kind nothing renders', () => {
+    const parsed = parseTabList([
+      { id: 'a', name: 'One', content: 'sections' },
+      { id: 'a', name: 'Two', content: 'activity' },
+      'garbage',
+    ]);
+    expect(parsed.map((t) => t.id)).toEqual(['a', 'tab-2', 'tab-3']);
+    expect(parsed[1].content).toBe('sections');
+    expect(parsed[2]).toEqual({ id: 'tab-3', name: 'Tab 3', icon: null, content: 'sections' });
+  });
+
+  it('absent or malformed means no saved tabs', () => {
+    expect(parseTabList(undefined)).toEqual([]);
+    expect(parseTabList('sideways')).toEqual([]);
   });
 });

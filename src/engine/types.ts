@@ -144,6 +144,20 @@ export const DISPLAY_DEFAULTS: DisplayConfig = {
   showBody: true,
 };
 
+/** What a record tab renders (M44.5). A closed vocabulary on purpose: an
+ * unrecognised kind from hand-edited YAML must not reach the renderer. */
+export const TAB_CONTENTS = ['overview', 'properties', 'sections'] as const;
+export type TabContent = (typeof TAB_CONTENTS)[number];
+
+/** One tab of a type's record page (M44.5) — the same contract a view tab
+ * has: a stable id the selection addresses, a name, an optional icon. */
+export interface TabDef {
+  id: string;
+  name: string;
+  icon: string | null;
+  content: TabContent;
+}
+
 export interface TypeDef {
   name: string;
   icon: string | null;
@@ -161,6 +175,9 @@ export interface TypeDef {
    * type. Always resolved: absent frontmatter yields the defaults, so no
    * consumer null-checks. */
   display: DisplayConfig;
+  /** `tabs:` on the Type doc (M44.5) — the record page's tab set. [] means
+   * none saved yet; `typeTabs` synthesizes the Overview default. */
+  tabs: TabDef[];
 }
 
 export interface ResolvedField {
