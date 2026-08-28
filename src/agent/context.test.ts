@@ -154,6 +154,9 @@ describe('buildSnapshot', () => {
     expect(withTab.selection).toEqual({ kind: 'doc', path: 'a.md', tab: 'spec' });
     const without = buildSnapshot({ selection: { kind: 'doc', path: 'a.md' }, entries, schema });
     expect(without.selection).toEqual({ kind: 'doc', path: 'a.md' });
+    // toEqual ignores undefined-valued keys — the `in` check is what catches
+    // a regression to `tab: undefined`, which would serialize as a real key.
+    expect('tab' in (without.selection ?? {})).toBe(false);
   });
 
   it('says nothing about where the user is when the place chip was removed', () => {

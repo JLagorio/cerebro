@@ -106,6 +106,35 @@ describe('DocPage', () => {
       expect(screen.queryByTestId('page-properties')).toBeNull();
     });
 
+    it('switching between two Overview tabs keeps the live editor (M44.5)', async () => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(
+          '\n---\n',
+          '\ntabs:\n  - { id: brief, name: Brief, content: overview }\n  - { id: build, name: Build, content: overview }\n---\n',
+        ),
+      );
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      const { rerender } = render(
+        <DocPage selection={{ kind: 'doc', path: record.path, tab: 'brief' }} />,
+      );
+      // The side panel's outline placeholder renders exactly while the live
+      // editor is null — wait for onReady to clear it.
+      await waitFor(() => expect(screen.queryByTestId('outline-loading')).toBeNull(), {
+        timeout: 5_000,
+      });
+      // Both tabs render the same MOUNTED editor (one key), so the switch
+      // re-fires no onReady — a reset keyed on the tab id would null the
+      // editor here and strand the outline on its placeholder for good.
+      rerender(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'build' }} />);
+      expect(screen.getByTestId('record-tab-build').getAttribute('aria-selected')).toBe('true');
+      expect(screen.queryByTestId('outline-loading')).toBeNull();
+    });
+
     it('a stale selection.tab falls back to the first tab (M44.5)', async () => {
       const entries = useVaultStore.getState().entries;
       const record = entries.find((e) => e.type === 'Work item');

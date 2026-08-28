@@ -207,13 +207,19 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const tabs = record && entry !== null && entry.type !== null ? typeTabs(entry.type, schema) : [];
   const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
 
+  // Whether the canvas is rendering the body editor at all. The reset below
+  // tracks the editor's MOUNT, not the tab's identity: two Overview tabs share
+  // one mounted editor (one key), so switching between them re-fires no
+  // onReady — nulling on the id would strand the outline on its placeholder.
+  const showsEditor = activeTab === null || activeTab.content === 'overview';
+
   useEffect(() => {
-    // The keyed editor remounts per doc; wait for onReady. The active tab is
-    // a dependency because a non-overview tab unmounts the editor entirely —
-    // holding the stale instance would keep feeding the outline (and the
-    // blank-page bar) a body the canvas no longer shows.
+    // The keyed editor remounts per doc; wait for onReady. `showsEditor` is a
+    // dependency because a sections/properties tab unmounts the editor
+    // entirely — holding the stale instance would keep feeding the outline
+    // (and the blank-page bar) a body the canvas no longer shows.
     setEditor(null);
-  }, [selection.path, reloadGen, activeTab?.id]);
+  }, [selection.path, reloadGen, showsEditor]);
 
   // Blank-page detection drives the floating template bar. Title detection
   // drives the heading below: a doc whose body has no H1 has its title only in
