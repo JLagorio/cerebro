@@ -20,7 +20,7 @@ async function renderReady(
 ): Promise<ReadyInfo> {
   const onReady = vi.fn<(info: ReadyInfo) => void>();
   render(<NoteBodyEditor path={path} debounceMs={20} onReady={onReady} {...props} />);
-  await waitFor(() => expect(onReady).toHaveBeenCalled(), { timeout: 5_000 });
+  await waitFor(() => expect(onReady).toHaveBeenCalled(), DISK_ROUND_TRIP);
   return onReady.mock.calls[0][0];
 }
 
@@ -30,6 +30,25 @@ const appendParagraph = (editor: ReadyInfo['editor'], text: string) => {
 };
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 120));
+
+/**
+ * The budget for any assertion waiting on the debounce → save → rescan chain.
+ *
+ * `waitFor`'s 1s default has no margin for it: a 20ms debounce, an async
+ * mock-fs write, and (where the store's `rescan` is not stubbed) a scan of the
+ * whole mock disk all have to land, on a worker the full suite is running wide
+ * enough to starve. It flaked at roughly one full-suite run in seven once M29's
+ * mermaid modules joined MarkdownEditor's block graph (MarkdownEditor.tsx
+ * registers a `mermaid` block) — but the thin budget was always the defect, and
+ * the added load only found it.
+ *
+ * Named rather than spelled `{ timeout: 5_000 }` per site because it was
+ * spelled per site once and two sites were missed — the title-sync assertion,
+ * which then failed in CI (the worst case: it needs the rescan too, not just
+ * the write), and the save-failure toast, which has the same shape and had not
+ * been reached yet. If an assertion here waits on disk, it takes this.
+ */
+const DISK_ROUND_TRIP = { timeout: 5_000 };
 
 describe('NoteBodyEditor', () => {
   beforeEach(() => {
@@ -56,14 +75,7 @@ describe('NoteBodyEditor', () => {
     const { editor } = await renderReady(PAGE);
     const last = editor.document[editor.document.length - 1];
     editor.insertBlocks([{ type: 'paragraph', content: 'Fresh words' }], last, 'after');
-    // The 5s budget every other disk-write assertion in this file already uses
-    // (lines 95, 103, 168, 182, 204). This one relied on waitFor's 1s default
-    // and flaked at roughly one full-suite run in seven: a 20ms debounce plus
-    // an async mock-fs write has no margin once the suite runs wide enough to
-    // starve this worker. M29's mermaid modules join MarkdownEditor's block
-    // graph (MarkdownEditor.tsx registers a `mermaid` block), so wave 2's added
-    // load is what surfaced it — the thin budget was always the defect.
-    await waitFor(() => expect(fs().get(PAGE)).toContain('Fresh words'), { timeout: 5_000 });
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Fresh words'), DISK_ROUND_TRIP);
     expect(fs().get(PAGE)!.startsWith('---\ntype: Doc\n---\n')).toBe(true);
   });
 
@@ -73,7 +85,7 @@ describe('NoteBodyEditor', () => {
     await waitFor(() => {
       const entry = useVaultStore.getState().entries.find((e) => e.path === PAGE);
       expect(entry?.title).toBe('Renamed page');
-    });
+    }, DISK_ROUND_TRIP);
   });
 
   it('warns when the file holds content the editor would drop', async () => {
@@ -99,7 +111,7 @@ describe('NoteBodyEditor', () => {
     await waitFor(() => expect(screen.getByTestId('lossy-import-banner')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /Edit anyway/ }));
     appendParagraph(editor, 'deliberate edit');
-    await waitFor(() => expect(fs().get(PAGE)).toContain('deliberate edit'), { timeout: 5_000 });
+    await waitFor(() => expect(fs().get(PAGE)).toContain('deliberate edit'), DISK_ROUND_TRIP);
   });
 
   // Autosave used to be entirely invisible — no dirty marker, no saved state.
@@ -107,7 +119,7 @@ describe('NoteBodyEditor', () => {
     const states: SaveState[] = [];
     const { editor } = await renderReady(PAGE, { onSaveState: (s) => states.push(s) });
     appendParagraph(editor, 'Fresh words');
-    await waitFor(() => expect(states).toContain('saved'), { timeout: 5_000 });
+    await waitFor(() => expect(states).toContain('saved'), DISK_ROUND_TRIP);
     expect(states).toContain('dirty');
     expect(states.indexOf('dirty')).toBeLessThan(states.indexOf('saved'));
   });
@@ -121,7 +133,7 @@ describe('NoteBodyEditor', () => {
     editor.insertBlocks([{ type: 'paragraph', content: 'doomed edit' }], last, 'after');
     await waitFor(() => {
       expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't save page");
-    });
+    }, DISK_ROUND_TRIP);
   });
 
   it('surfaces a load failure instead of an empty editor', async () => {
@@ -172,7 +184,7 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     render(
       <NoteBodyEditor path={PAGE} debounceMs={debounceMs} onReady={(i) => void seen.push(i)} />,
     );
-    await waitFor(() => expect(seen.length).toBe(1), { timeout: 5_000 });
+    await waitFor(() => expect(seen.length).toBe(1), DISK_ROUND_TRIP);
     return seen;
   }
 
@@ -186,7 +198,7 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
     at('2026-08-03T10:05:00Z');
 
-    await waitFor(() => expect(seen.length).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
     expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
     // Silently — a dialog on every agent write would be its own bug.
     expect(screen.queryByTestId('external-change-banner')).toBeNull();
@@ -208,7 +220,7 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     expect(bodyOf(seen[0])).toContain('my unsaved sentence');
 
     fireEvent.click(screen.getByTestId('external-change-reload'));
-    await waitFor(() => expect(seen.length).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
     expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
   });
 
