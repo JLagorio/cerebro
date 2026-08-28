@@ -586,6 +586,11 @@ const BLOCKED: Record<
     description:
       'Every record in view is missing it, or holds something that is not a number — so a chart of zeroes would be a claim about the data that is not true.',
   },
+  'all-hidden': {
+    icon: 'chart-column',
+    title: 'Everything is hidden',
+    description: 'Every band is switched off in the legend — click one to bring it back.',
+  },
 };
 
 const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4';

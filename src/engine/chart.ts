@@ -1,4 +1,4 @@
-import { groupTree } from './grouping';
+import { groupEntries, groupTree } from './grouping';
 import { aggregateNumbers, formatNumber } from './properties';
 import { humanize } from './schema';
 import { bandLevels } from './types';
@@ -34,17 +34,51 @@ export interface ChartSlice {
   color: string | null;
   /** Value outside the declared option set. */
   ghost: boolean;
-  /** Records in the band, whatever the measure is. */
+  /** Records in the band, whatever the measure is — the drilldown's honest
+   * number even when `hiddenG` shrinks `value` to the visible stack. */
   count: number;
   /** The measured value the chart draws. */
   value: number;
   /** The value as text, through the measured property's own number format. */
   display: string;
+  /** Pre-filter position — the hue index renderers color by (M44.3). Hiding a
+   * band must not repaint its neighbours. */
+  hue: number;
+  /** The band's rows, the drilldown's subject (M44.3). */
+  entries: Entry[];
+  /** groupBy sub-bands, in series order, `hiddenG` already filtered out.
+   * Absent when no groupBy. */
+  parts?: ChartSlicePart[];
+}
+
+/** One groupBy sub-band of one band — a stacked segment, a series point. */
+export interface ChartSlicePart {
+  key: string;
+  label: string;
+  color: string | null;
+  ghost: boolean;
+  count: number;
+  value: number;
+  display: string;
+  /** The series roster index — the part's colour, stable under hiding. */
+  hue: number;
+}
+
+/** One legend row: a band or a series, hidden ones included. */
+export interface ChartRosterItem {
+  key: string;
+  label: string;
+  color: string | null;
+  hue: number;
+  hidden: boolean;
 }
 
 /** Why a chart has nothing to draw. Never a blank box — each of these becomes
- * a sentence that names the control that fixes it. */
-export type ChartBlocked = 'no-rows' | 'no-group' | 'no-value-field' | 'no-numbers' | null;
+ * a sentence that names the control that fixes it. `all-hidden` is typed
+ * apart from `no-rows` on purpose: "you switched everything off" and "there
+ * is nothing here" need different sentences (M44.3). */
+export type ChartBlocked =
+  'no-rows' | 'no-group' | 'no-value-field' | 'no-numbers' | 'all-hidden' | null;
 
 export interface ChartData {
   slices: ChartSlice[];
@@ -58,6 +92,10 @@ export interface ChartData {
   axis: string;
   /** What the Y axis measures, e.g. 'Count' or 'Sum of Estimate'. */
   measure: string;
+  /** Every band, hidden included — the legend's roster (M44.3). */
+  bands: ChartRosterItem[];
+  /** The groupBy roster, first-seen declared order; [] when no groupBy. */
+  series: ChartRosterItem[];
   blocked: ChartBlocked;
 }
 
@@ -109,13 +147,17 @@ export function computeChart(
   const agg: ChartAgg = chart?.agg ?? 'count';
   const band: GroupSpec | undefined =
     chart?.xField !== undefined ? { field: chart.xField } : bandLevels(presentation.group)[0];
-  const empty = (blocked: ChartBlocked): ChartData => ({
+  // `all-hidden` is the one blocked state with a roster: the legend must
+  // still list what was hidden, or there is no way back.
+  const empty = (blocked: ChartBlocked, bands: ChartRosterItem[] = []): ChartData => ({
     slices: [],
     total: 0,
     totalDisplay: '',
     max: 0,
     axis: band === undefined ? '' : humanize(band.field),
     measure: measureLabel(chart),
+    bands,
+    series: [],
     blocked,
   });
 
@@ -141,6 +183,8 @@ export function computeChart(
         max: n,
         axis: '',
         measure: measureLabel(chart),
+        bands: [],
+        series: [],
         blocked: null,
       };
     }
@@ -156,6 +200,8 @@ export function computeChart(
       max: n,
       axis: '',
       measure: measureLabel(chart),
+      bands: [],
+      series: [],
       blocked: null,
     };
   }
@@ -188,6 +234,10 @@ export function computeChart(
       // A measured property keeps its own format: summing a currency field
       // must not print a bare number beside a column that prints dollars.
       display: def === null ? String(value) : formatNumber(value, def),
+      // The pre-filter index: the roster position this band keeps for good,
+      // so hiding a neighbour never repaints it.
+      hue: slices.length,
+      entries: node.entries,
     });
   }
 
@@ -196,16 +246,90 @@ export function computeChart(
   if (agg !== 'count' && slices.length > 0 && measured === 0) return empty('no-numbers');
   if (slices.length === 0) return empty('no-rows');
 
-  if (chart?.sort === 'value-desc') slices.sort((a, b) => b.value - a.value);
-  else if (chart?.sort === 'value-asc') slices.sort((a, b) => a.value - b.value);
-  else if (chart?.sort === 'label') slices.sort((a, b) => a.label.localeCompare(b.label));
+  // The legend's roster: every band at its stamped hue, hidden ones included.
+  const hiddenBands = new Set(chart?.hidden ?? []);
+  const bands: ChartRosterItem[] = slices.map((s) => ({
+    key: s.key,
+    label: s.label,
+    color: s.color,
+    hue: s.hue,
+    hidden: hiddenBands.has(s.key),
+  }));
 
-  const total = slices.reduce((sum, s) => sum + s.value, 0);
+  // Hiding is arithmetic, not paint: a hidden band leaves the slices, the
+  // total, the max, and the ring. Hiding everything is its own typed state —
+  // "you switched it all off" is not "no rows" — and it carries the roster,
+  // because the legend is the only way back.
+  const visible = slices.filter((s) => !hiddenBands.has(s.key));
+  if (visible.length === 0 && bands.some((b) => b.hidden)) return empty('all-hidden', bands);
+
+  // The second dimension. A donut ignores it — a stacked ring reads as
+  // nothing — and a number chart returned above; it has no bands to split.
+  const series: ChartRosterItem[] = [];
+  const groupBy = chart?.groupBy;
+  if (groupBy !== undefined && kind !== 'donut') {
+    const hiddenSeries = new Set(chart?.hiddenG ?? []);
+    const seriesHue = new Map<string, number>();
+    for (const s of visible) {
+      const parts: ChartSlicePart[] = [];
+      for (const sub of groupEntries(s.entries, groupBy, schema)) {
+        // The roster accumulates first-seen across bands — declared option
+        // order per band, empty declared options included, the way the band
+        // axis keeps empty bands. The hue a series gets here is the hue it
+        // keeps: filtering below never renumbers.
+        let hue = seriesHue.get(sub.key);
+        if (hue === undefined) {
+          hue = series.length;
+          seriesHue.set(sub.key, hue);
+          series.push({
+            key: sub.key,
+            label: sub.label,
+            color: sub.color,
+            hue,
+            hidden: hiddenSeries.has(sub.key),
+          });
+        }
+        // An empty sub-band is no segment, and a hidden series draws nothing.
+        if (sub.entries.length === 0 || hiddenSeries.has(sub.key)) continue;
+        const partValue =
+          agg === 'count'
+            ? sub.entries.length
+            : (aggregateNumbers(
+                sub.entries
+                  .map((e) => e.properties[valueField])
+                  .filter((v) => v !== undefined && v !== null && v !== ''),
+                agg,
+              ) ?? 0);
+        parts.push({
+          key: sub.key,
+          label: sub.label,
+          color: sub.color,
+          ghost: sub.ghost,
+          count: sub.entries.length,
+          value: partValue,
+          display: def === null ? String(partValue) : formatNumber(partValue, def),
+          hue,
+        });
+      }
+      s.parts = parts;
+      // Under groupBy the band draws its visible stack, so the segments and
+      // the total agree — while `count` stays the band's true row count.
+      s.value = parts.reduce((sum, p) => sum + p.value, 0);
+      s.display = def === null ? String(s.value) : formatNumber(s.value, def);
+    }
+  }
+
+  if (chart?.sort === 'value-desc') visible.sort((a, b) => b.value - a.value);
+  else if (chart?.sort === 'value-asc') visible.sort((a, b) => a.value - b.value);
+  else if (chart?.sort === 'label') visible.sort((a, b) => a.label.localeCompare(b.label));
+
+  const total = visible.reduce((sum, s) => sum + s.value, 0);
   // Running totals only where bands have an order to run along — never a
-  // donut, whose whole is the sum and would double-count.
+  // donut, whose whole is the sum and would double-count. The run covers the
+  // visible bands only: what the eye adds up is what the line draws.
   if (chart?.cumulative === true && kind !== 'donut') {
     let run = 0;
-    for (const s of slices) {
+    for (const s of visible) {
       run += s.value;
       s.value = run;
       s.display = def === null ? String(run) : formatNumber(run, def);
@@ -213,12 +337,14 @@ export function computeChart(
   }
 
   return {
-    slices,
+    slices: visible,
     total,
     totalDisplay: def === null ? String(total) : formatNumber(total, def),
-    max: slices.reduce((top, s) => Math.max(top, s.value), 0),
+    max: visible.reduce((top, s) => Math.max(top, s.value), 0),
     axis: humanize(band.field),
     measure: measureLabel(chart),
+    bands,
+    series,
     blocked: null,
   };
 }

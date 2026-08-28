@@ -319,6 +319,191 @@ describe('computeChart', () => {
 });
 
 /**
+ * The second dimension and the interactive legend (M44.3). `groupBy` splits
+ * each band into parts; `hidden`/`hiddenG` filter INSIDE the engine so totals,
+ * max, and the ring reflect the visible set, while `bands`/`series` carry the
+ * full roster — with hue indices stamped BEFORE filtering, because hiding a
+ * band must not repaint its neighbours.
+ */
+describe('computeChart stacks and hides (M44.3)', () => {
+  it('groupBy splits each band into parts that sum to the band value', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.label, p.value, p.count])).toEqual([
+      ['High', 1, 1],
+      ['Low', 1, 1],
+    ]);
+    expect(todo?.parts?.reduce((sum, p) => sum + p.value, 0)).toBe(todo?.value);
+    // Parts carry the sub-band's declared colour and its series hue.
+    expect(todo?.parts?.map((p) => [p.key, p.color, p.hue])).toEqual([
+      ['high', 'red', 0],
+      ['low', 'gray', 1],
+    ]);
+    // A band with rows in only one sub-band carries only that part.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([['high', 1]]);
+  });
+
+  it('groupBy parts run the same aggregation arithmetic as the bands', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 3],
+      ['low', 5],
+    ]);
+    expect(todo?.value).toBe(8);
+  });
+
+  it('lists the series roster in declared order with stable hues', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.series.map((s) => [s.key, s.label, s.color, s.hue, s.hidden])).toEqual([
+      ['high', 'High', 'red', 0, false],
+      ['low', 'Low', 'gray', 1, false],
+    ]);
+  });
+
+  it('bands mirrors the slices and series stays empty without groupBy or hidden', () => {
+    const entries = vault();
+    const data = computeChart(records(entries), view(), buildSchema(entries));
+    expect(data.bands.map((b) => [b.key, b.hue, b.hidden])).toEqual([
+      ['todo', 0, false],
+      ['doing', 1, false],
+      ['done', 2, false],
+    ]);
+    expect(data.series).toEqual([]);
+    expect(data.slices.map((s) => s.hue)).toEqual([0, 1, 2]);
+    expect(data.slices.every((s) => s.parts === undefined)).toBe(true);
+  });
+
+  it('a donut ignores groupBy — a stacked ring reads as nothing', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.slices.every((s) => s.parts === undefined)).toBe(true);
+    expect(data.series).toEqual([]);
+  });
+
+  it('a number chart ignores groupBy — it has no bands to split', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.series).toEqual([]);
+    expect(data.bands).toEqual([]);
+  });
+
+  it('a hidden band leaves the slices but stays in the roster, and the totals shrink', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.slices.map((s) => s.key)).toEqual(['doing', 'done']);
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', true],
+      ['doing', false],
+      ['done', false],
+    ]);
+    // Visible arithmetic: the two hidden rows are gone from total and max.
+    expect(data.total).toBe(1);
+    expect(data.max).toBe(1);
+    // Hue is the PRE-filter index — hiding Todo must not repaint Doing.
+    expect(data.slices.find((s) => s.key === 'doing')?.hue).toBe(1);
+    expect(data.bands.find((b) => b.key === 'doing')?.hue).toBe(1);
+  });
+
+  it('a hidden series filters the parts, and the band value follows the visible stack', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['low'] } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.hue])).toEqual([['high', 0]]);
+    // The stack and the total agree: the band draws only what is visible…
+    expect(todo?.value).toBe(1);
+    expect(data.total).toBe(2);
+    // …while count stays the band's true row count, the drilldown's number.
+    expect(todo?.count).toBe(2);
+    expect(data.series.map((s) => [s.key, s.hidden])).toEqual([
+      ['high', false],
+      ['low', true],
+    ]);
+  });
+
+  it('hiding a series keeps the survivor’s hue — the legend must not repaint', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['high'] } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.hue])).toEqual([['low', 1]]);
+  });
+
+  it('hiding every band is its own blocked state, and the roster survives it', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { hidden: ['todo', 'doing', 'done'] } }),
+      buildSchema(entries),
+    );
+    // "You hid it all" is not "no rows" — the empty state must name the
+    // legend, and the legend needs the roster to offer a way back.
+    expect(data.blocked).toBe('all-hidden');
+    expect(data.slices).toEqual([]);
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', true],
+      ['doing', true],
+      ['done', true],
+    ]);
+  });
+
+  it('cumulative runs over the visible bands only', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', cumulative: true, hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    // Todo (8) is hidden: the running total is Doing (2), then Done (2 + 0).
+    expect(data.slices.map((s) => [s.key, s.value])).toEqual([
+      ['doing', 2],
+      ['done', 2],
+    ]);
+    expect(data.total).toBe(2);
+    expect(data.max).toBe(2);
+  });
+});
+
+/**
  * Every reason a chart cannot draw becomes a sentence naming the control that
  * fixes it. A blank canvas cannot tell "no records" from "you have not chosen
  * what to measure", and both were possible here.

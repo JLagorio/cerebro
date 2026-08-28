@@ -353,14 +353,14 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (typeof obj.xField === 'string' && obj.xField.trim() !== '') spec.xField = obj.xField.trim();
   if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '')
     spec.groupBy = obj.groupBy.trim();
-  // The hidden lists hold band/series KEYS. Only non-empty strings are keys;
+  // The hidden lists hold band/series KEYS. Only non-blank strings are keys;
   // a list that filters to nothing stores nothing (M44.3).
   if (Array.isArray(obj.hidden)) {
-    const keys = obj.hidden.filter((k): k is string => typeof k === 'string' && k !== '');
+    const keys = obj.hidden.filter((k): k is string => typeof k === 'string' && k.trim() !== '');
     if (keys.length > 0) spec.hidden = keys;
   }
   if (Array.isArray(obj.hiddenG)) {
-    const keys = obj.hiddenG.filter((k): k is string => typeof k === 'string' && k !== '');
+    const keys = obj.hiddenG.filter((k): k is string => typeof k === 'string' && k.trim() !== '');
     if (keys.length > 0) spec.hiddenG = keys;
   }
   return Object.keys(spec).length === 0 ? undefined : spec;

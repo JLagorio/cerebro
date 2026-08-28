@@ -1053,7 +1053,7 @@ describe('serializeList', () => {
         ).chart,
       ).toBeUndefined();
       expect(
-        parse("presentation:\n  type: chart\n  chart:\n    hidden: ['ok', 7, '']\n").chart,
+        parse("presentation:\n  type: chart\n  chart:\n    hidden: ['ok', 7, '', '   ']\n").chart,
       ).toEqual({ hidden: ['ok'] });
     });
 

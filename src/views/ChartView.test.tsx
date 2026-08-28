@@ -574,6 +574,8 @@ describe('sliceColor', () => {
     count: 1,
     value: 1,
     display: '1',
+    hue: 0,
+    entries: [],
     ...over,
   });
 
