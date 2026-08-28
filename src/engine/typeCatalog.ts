@@ -239,7 +239,9 @@ function fieldToSpec(def: FieldDef): unknown {
 
 /**
  * FieldDef[] → the `fields:` frontmatter mapping on a Type doc. Inverse of
- * schema.ts parseFields; the write-side used by property configuration.
+ * schema.ts parseFields; the write-side of applyTypeLayout's ADDED path
+ * (M45.1) — existing declarations are merged raw, never round-tripped
+ * through here, so a hand-edited vault's unmodeled keys survive.
  */
 export function serializeFields(fields: FieldDef[]): Record<string, unknown> {
   return Object.fromEntries(fields.map((f) => [f.name, fieldToSpec(f)]));

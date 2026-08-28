@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addFieldToType,
   addPropertyToEntry,
+  applyTypeLayout,
   changeFieldKind,
   findTypeDoc,
   normalizeFieldName,
@@ -13,6 +14,7 @@ import {
   setTypeStatuses,
   setTypeTabs,
   setTypeViews,
+  type TypeLayoutDraft,
 } from '@/app/typeActions';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
@@ -405,6 +407,185 @@ describe('setTypeTabs (M44.5)', () => {
     expect(ok).toBe(true);
     expect(created).toEqual([]);
     expect(patches).toEqual([]);
+  });
+});
+
+describe('applyTypeLayout (M45.1)', () => {
+  // A raw mapping deliberately wider than the model: `foo: bar` is a key we
+  // don't parse, `notes: 'text'` is the bare-string shorthand, and `due`
+  // carries a visibility the draft will clear.
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        due: { kind: 'date', visibility: 'hide', foo: 'bar' },
+        notes: 'text',
+      },
+    } as unknown as typeof typeDoc.properties,
+  };
+  const listing = { name: 'Work item', docPath: 'types/work-item.md' };
+  const blank = (): TypeLayoutDraft => ({
+    display: { showEmpty: false, showFile: false, showBody: true },
+    layout: { heading: [], groups: [] },
+    tabs: [],
+    visibility: {},
+    added: [],
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes the whole draft — display, layout, tabs, merged fields — in ONE patch', async () => {
+    const ok = await applyTypeLayout(listing, {
+      display: { showEmpty: true, showFile: false, showBody: true },
+      layout: {
+        heading: ['status'],
+        groups: [{ id: 'group-1', name: 'Details', fields: ['due'] }],
+      },
+      tabs: [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }],
+      visibility: { notes: 'hide', due: null },
+      added: [{ name: ' Estimate ', kind: 'number' }],
+    });
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: {
+          display: { show_empty: true },
+          layout: {
+            heading: ['status'],
+            groups: [{ id: 'group-1', name: 'Details', fields: ['due'] }],
+          },
+          tabs: [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }],
+          fields: {
+            status: { kind: 'status' },
+            // visibility: null deleted the key; the unmodeled `foo` survived.
+            due: { kind: 'date', foo: 'bar' },
+            // The bare shorthand grew into a mapping to hold the visibility.
+            notes: { kind: 'text', visibility: 'hide' },
+            // Appended last, name normalized.
+            estimate: { kind: 'number' },
+          },
+        },
+      },
+    ]);
+  });
+
+  it('omits fields when the draft stages no field deltas; defaults spell null', async () => {
+    const draft = blank();
+    draft.layout = { heading: ['status'], groups: [] };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: null, layout: { heading: ['status'] }, tabs: null },
+      },
+    ]);
+  });
+
+  it('refuses a reserved added name BEFORE any write — atomic means no partial', async () => {
+    const draft = blank();
+    draft.display = { showEmpty: true, showFile: false, showBody: true };
+    draft.added = [{ name: 'Layout', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([]);
+    expect(toasts[0]).toMatch(/reserved/);
+  });
+
+  it('refuses duplicate added names case-insensitively — existing and staged alike', async () => {
+    const draft = blank();
+    draft.added = [{ name: 'Status', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    const twice = blank();
+    twice.added = [
+      { name: 'points', kind: 'number' },
+      { name: ' Points ', kind: 'text' },
+    ];
+    expect(await applyTypeLayout(listing, twice)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual(['Property already exists', 'Property already exists']);
+  });
+
+  it('drops a staged visibility for a field the doc no longer declares — never declares it', async () => {
+    const draft = blank();
+    draft.visibility = { ghost: 'hide' };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([]);
+  });
+
+  // M44.1-family contract: patchFrontmatter toasts and reverts itself — the
+  // action reads its answer and adds nothing.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({ patchFrontmatter: vi.fn().mockResolvedValue(false) });
+    const draft = blank();
+    draft.tabs = [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+
+  it('toasts and returns false when the write throws', async () => {
+    useVaultStore.setState({ patchFrontmatter: vi.fn().mockRejectedValue(new Error('disk')) });
+    const draft = blank();
+    draft.tabs = [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(toasts[0]).toMatch(/layout/i);
+  });
+
+  it('doc-null and a non-default draft creates the Type doc via ensureTypeDoc', async () => {
+    const draft = blank();
+    draft.tabs = [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }];
+    draft.added = [{ name: 'severity', kind: 'select' }];
+    expect(await applyTypeLayout({ name: 'Ghost Type', docPath: null }, draft)).toBe(true);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: {
+          type: 'Type',
+          fields: { severity: { kind: 'select' } },
+          tabs: [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }],
+        },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and an all-defaults draft returns true and writes nothing', async () => {
+    expect(await applyTypeLayout({ name: 'Ghost Type', docPath: null }, blank())).toBe(true);
+    expect(created).toEqual([]);
+    expect(patches).toEqual([]);
+  });
+
+  // The cheaper honest behavior: deleting three keys the doc never carried is
+  // a whole-file disk round-trip that changes nothing, so it is skipped.
+  it('an all-defaults draft against a doc that never carried the keys writes nothing', async () => {
+    expect(await applyTypeLayout(listing, blank())).toBe(true);
+    expect(patches).toEqual([]);
+  });
+
+  // ...but the moment any of the three IS on disk, reset is a real write.
+  it('an all-defaults draft still resets a doc that carries one of the keys', async () => {
+    useVaultStore.setState({
+      entries: [
+        {
+          ...workItemTypeDoc,
+          properties: {
+            fields: {},
+            display: { show_empty: true },
+          } as unknown as typeof typeDoc.properties,
+        },
+      ],
+    });
+    expect(await applyTypeLayout(listing, blank())).toBe(true);
+    expect(patches).toEqual([
+      { path: 'types/work-item.md', patch: { display: null, layout: null, tabs: null } },
+    ]);
   });
 });
 

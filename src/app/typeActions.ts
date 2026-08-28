@@ -11,15 +11,18 @@
  */
 
 import { kindMeta } from '@/engine/properties';
-import { humanize, serializeDisplayConfig } from '@/engine/schema';
+import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
-import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
+import { isLockedField, serializeFields, serializeOptions } from '@/engine/typeCatalog';
 import { serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
   Entry,
+  FieldDef,
   FieldKind,
   FieldOption,
+  FieldVisibility,
+  LayoutConfig,
   StatusDef,
   TabDef,
   ViewDefinition,
@@ -627,6 +630,135 @@ export async function setTypeTabs(
     }
   } catch {
     toast(`Couldn't update ${listing.name} tabs`);
+    return false;
+  }
+  return true;
+}
+
+/** One staged edit of a type's whole record-page presentation (M45.1) — the
+ * layout editor's Apply. `display`/`layout`/`tabs` are written whole;
+ * `visibility` and `added` are DELTAS merged onto the raw `fields:` mapping,
+ * so declaration order and keys we don't model survive untouched. */
+export interface TypeLayoutDraft {
+  display: DisplayConfig;
+  layout: LayoutConfig;
+  tabs: TabDef[];
+  /** Staged per-field visibility; null clears back to show (key deleted). */
+  visibility: Record<string, FieldVisibility | null>;
+  /** Staged new fields, appended in order. */
+  added: { name: string; kind: FieldKind; config?: Record<string, unknown> }[];
+}
+
+/**
+ * Persist a layout editor draft onto the Type doc in ONE write (M45.1). A
+ * partially applied layout is worse than none, so apply is atomic: every
+ * refusal happens BEFORE anything — the Type doc included — is written, and
+ * a landed patch carries the whole draft: `display`, `layout`, `tabs`
+ * (deviations only; null at defaults, because reset IS the write) plus,
+ * only when the draft stages field deltas, the merged `fields:` mapping.
+ */
+export async function applyTypeLayout(
+  listing: { name: string; docPath: string | null },
+  draft: TypeLayoutDraft,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+
+  const fields = doc !== null ? rawFieldsOf(doc) : {};
+
+  // Vet every added name first — atomic means no partial, so a refusal must
+  // land before any write. Same guards as addFieldToType, plus staged-vs-
+  // staged collisions the one-at-a-time door never sees.
+  const staged: [string, unknown][] = [];
+  for (const add of draft.added) {
+    const name = normalizeFieldName(add.name);
+    if (name === '') {
+      toast('A property needs a name');
+      return false;
+    }
+    if (RESERVED.has(name)) {
+      toast(`"${name}" is a reserved key and can't be a property`);
+      return false;
+    }
+    if (
+      Object.keys(fields).some((k) => k.toLowerCase() === name) ||
+      staged.some(([k]) => k === name)
+    ) {
+      toast('Property already exists');
+      return false;
+    }
+    const def = { ...add.config, name, kind: add.kind } as FieldDef;
+    staged.push([name, serializeFields([def])[name]]);
+  }
+
+  // Merge visibility deltas onto the RAW mapping (the setFieldConfig idiom):
+  // never rebuilt from FieldDef, so a hand-edited vault's unmodeled keys
+  // survive byte-for-byte. A delta for a field the doc no longer declares is
+  // dropped — placing a visibility must never DECLARE a field.
+  let touched = false;
+  for (const [rawName, vis] of Object.entries(draft.visibility)) {
+    const actual = Object.keys(fields).find((k) => k.toLowerCase() === rawName.toLowerCase());
+    if (actual === undefined) continue;
+    const raw = fields[actual];
+    const isMapping = typeof raw === 'object' && raw !== null && !Array.isArray(raw);
+    if (vis === null) {
+      // Clearing back to show deletes the key — a Type doc should not carry
+      // the absence of an opinion. A shorthand has no key to delete.
+      if (!isMapping || (raw as Record<string, unknown>).visibility === undefined) continue;
+      const spec = { ...(raw as Record<string, unknown>) };
+      delete spec.visibility;
+      fields[actual] = spec;
+    } else {
+      // A bare `field: text` shorthand has to grow into a mapping to hold it.
+      const spec: Record<string, unknown> = isMapping
+        ? { ...(raw as Record<string, unknown>) }
+        : { kind: typeof raw === 'string' ? raw : 'text' };
+      spec.visibility = vis;
+      fields[actual] = spec;
+    }
+    touched = true;
+  }
+  for (const [name, spec] of staged) {
+    fields[name] = spec;
+    touched = true;
+  }
+
+  const display = serializeDisplayConfig(draft.display);
+  const layout = serializeLayoutConfig(draft.layout);
+  const tabs = draft.tabs.length === 0 ? null : serializeTabList(draft.tabs);
+  const allDefault = display === null && layout === null && tabs === null && !touched;
+
+  try {
+    if (doc === null) {
+      if (allDefault) return true; // nothing to write and nowhere to write it
+      await ensureTypeDoc(
+        { name: listing.name, docPath: null },
+        {
+          ...(touched ? { fields } : {}),
+          ...(display !== null ? { display } : {}),
+          ...(layout !== null ? { layout } : {}),
+          ...(tabs !== null ? { tabs } : {}),
+        },
+      );
+      return true;
+    }
+    // An all-defaults draft against a doc that never carried the keys would
+    // patch three deletions of nothing — a whole-file disk round-trip that
+    // changes no byte — so the cheaper honest behavior is to skip the write.
+    // The moment any of the three IS on disk, reset is a real write.
+    const props = doc.properties as Record<string, unknown>;
+    const carries = ['display', 'layout', 'tabs'].some((k) => props[k] !== undefined);
+    if (allDefault && !carries) return true;
+    const patch: Record<string, unknown> = { display, layout, tabs };
+    if (touched) patch.fields = fields;
+    if (!(await patchFrontmatter(doc.path, patch))) {
+      // patchFrontmatter toasts and reverts itself — read its answer, add nothing.
+      return false;
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} layout`);
     return false;
   }
   return true;
