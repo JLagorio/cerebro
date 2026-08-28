@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardNumber } from '@/engine/dashboard';
+import {
+  addWidget,
+  dashboardNumber,
+  duplicateWidget,
+  moveToEnd,
+  moveToOwnRow,
+  moveWidget,
+  moveWithinRow,
+  removeWidget,
+  setRowHeight,
+  setWidgetWeight,
+  widgetCount,
+  widgetEntries,
+} from '@/engine/dashboard';
 import { buildSchema } from '@/engine/schema';
+import { ROW_HEIGHT_MAX, ROW_HEIGHT_MIN } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
-import type { DashboardWidget, Entry } from '@/engine/types';
+import type { DashboardSpec, DashboardWidget, Entry, FilterRule } from '@/engine/types';
 
 /**
  * The dashboard's number block (M16.28).
@@ -133,5 +147,201 @@ describe('dashboardNumber', () => {
     expect(tile.value).toBe(0);
     expect(tile.display).toBe('0');
     expect(tile.blocked).toBeNull();
+  });
+});
+
+// --- widgetEntries (M44.4) --------------------------------------------------
+
+const filterFixture = (): Entry[] => [
+  makeEntry({
+    path: 'items/a.md',
+    title: 'A',
+    type: 'Work item',
+    properties: { status: 'doing', priority: 'high' },
+  }),
+  makeEntry({
+    path: 'items/b.md',
+    title: 'B',
+    type: 'Work item',
+    properties: { status: 'doing', priority: 'low' },
+  }),
+  makeEntry({
+    path: 'items/c.md',
+    title: 'C',
+    type: 'Work item',
+    properties: { status: 'done', priority: 'high' },
+  }),
+];
+
+describe('widgetEntries (M44.4)', () => {
+  it('layers global then widget filter, AND semantics', () => {
+    const entries = filterFixture();
+    const schema = buildSchema(entries);
+    const spec: DashboardSpec = {
+      rows: [],
+      global: { all: [{ field: 'priority', op: 'not_equals', value: 'low' }] },
+    };
+    const widget: DashboardWidget = {
+      id: 'a',
+      kind: 'table',
+      filter: { all: [{ field: 'status', op: 'equals', value: 'doing' }] },
+    };
+    const out = widgetEntries(entries, spec, widget, schema);
+    // Only 'a' clears both layers — 'b' fails the global (priority low), 'c'
+    // fails the widget filter (status done).
+    expect(out.map((e) => e.path)).toEqual(['items/a.md']);
+    expect(
+      out.every((e) => e.properties.status === 'doing' && e.properties.priority !== 'low'),
+    ).toBe(true);
+  });
+
+  it('no filters at all means the entries pass through untouched — same reference', () => {
+    const entries = filterFixture();
+    const schema = buildSchema(entries);
+    const spec: DashboardSpec = { rows: [] };
+    const widget: DashboardWidget = { id: 'a', kind: 'table' };
+    expect(widgetEntries(entries, spec, widget, schema)).toBe(entries);
+  });
+});
+
+// --- dashboard structure editors (M44.4) ------------------------------------
+
+const wid = (id: string): DashboardWidget => ({ id, kind: 'table' });
+
+const twoRowSpec = (): DashboardSpec => ({
+  rows: [
+    { id: 'r1', widgets: [wid('a'), wid('b')] },
+    { id: 'r2', widgets: [wid('c')] },
+  ],
+});
+
+const fullRowSpec = (): DashboardSpec => ({
+  rows: [
+    { id: 'r1', widgets: [wid('a'), wid('b'), wid('d'), wid('e')] },
+    { id: 'r2', widgets: [wid('c')] },
+  ],
+});
+
+const twelveWidgetSpec = (): DashboardSpec => ({
+  rows: [
+    { id: 'r1', widgets: ['a1', 'a2', 'a3', 'a4'].map(wid) },
+    { id: 'r2', widgets: ['b1', 'b2', 'b3', 'b4'].map(wid) },
+    { id: 'r3', widgets: ['c1', 'c2', 'c3', 'c4'].map(wid) },
+  ],
+});
+
+describe('dashboard structure editors (M44.4)', () => {
+  it('widgetCount sums every row', () => {
+    expect(widgetCount(twoRowSpec())).toBe(3);
+  });
+
+  it('moveWidget crosses rows and drops the row it empties', () => {
+    const next = moveWidget(twoRowSpec(), 'c', 'r1', 1);
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([
+      ['a', 'c', 'b'],
+    ]);
+  });
+
+  it('moveWidget into a full row refuses with the rule named', () => {
+    const next = moveWidget(fullRowSpec(), 'c', 'r1', 0);
+    expect(next).toEqual({ ok: false, reason: 'A row holds at most four widgets' });
+  });
+
+  it('a move within a full row succeeds — the cap counts without the moving widget', () => {
+    const next = moveWidget(fullRowSpec(), 'a', 'r1', 3);
+    expect(next.ok && next.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b', 'd', 'e', 'a']);
+  });
+
+  it('addWidget refuses a thirteenth widget with the rule named', () => {
+    const next = addWidget(twelveWidgetSpec(), 'r1', wid('n'));
+    expect(next).toEqual({ ok: false, reason: 'A dashboard holds at most twelve widgets' });
+  });
+
+  it('addWidget appends to a fresh row when the target names none', () => {
+    const next = addWidget(twoRowSpec(), 'new-row', wid('n'));
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([
+      ['a', 'b'],
+      ['c'],
+      ['n'],
+    ]);
+  });
+
+  it('removeWidget drops a row it empties', () => {
+    const next = removeWidget(twoRowSpec(), 'c');
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([['a', 'b']]);
+  });
+
+  it('moveToOwnRow splices a new row after the source row', () => {
+    const next = moveToOwnRow(twoRowSpec(), 'b');
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([
+      ['a'],
+      ['b'],
+      ['c'],
+    ]);
+  });
+
+  it('moveToEnd puts the widget onto a fresh trailing row', () => {
+    const next = moveToEnd(twoRowSpec(), 'a');
+    expect(next.ok && next.spec.rows.map((r) => r.widgets.map((w) => w.id))).toEqual([
+      ['b'],
+      ['c'],
+      ['a'],
+    ]);
+  });
+
+  it('moveWithinRow shifts left/right, clamped at the row ends', () => {
+    const right = moveWithinRow(twoRowSpec(), 'a', 1);
+    expect(right.ok && right.spec.rows[0].widgets.map((w) => w.id)).toEqual(['b', 'a']);
+    const clamped = moveWithinRow(twoRowSpec(), 'a', -5);
+    expect(clamped.ok && clamped.spec.rows[0].widgets.map((w) => w.id)).toEqual(['a', 'b']);
+  });
+
+  it('duplicateWidget mints a fresh id beside the source', () => {
+    const next = duplicateWidget(twoRowSpec(), 'a');
+    expect(next.ok && next.spec.rows[0].widgets.length).toBe(3);
+    const ids = next.ok ? next.spec.rows.flatMap((r) => r.widgets.map((w) => w.id)) : [];
+    expect(new Set(ids).size).toBe(4);
+  });
+
+  it("duplicateWidget deep-copies — mutating the copy's filter leaves the source alone", () => {
+    const rule: FilterRule = { field: 'status', op: 'equals', value: 'doing' };
+    const original: DashboardSpec = {
+      rows: [{ id: 'r1', widgets: [{ id: 'a', kind: 'table', filter: { all: [rule] } }] }],
+    };
+    const next = duplicateWidget(original, 'a');
+    if (!next.ok) throw new Error('expected duplicateWidget to succeed');
+    const [source, copy] = next.spec.rows[0].widgets;
+    expect(copy.id).not.toBe(source.id);
+
+    if (copy.filter === undefined || !('all' in copy.filter)) {
+      throw new Error('expected the copy to carry an all-group');
+    }
+    const copyRule = copy.filter.all[0];
+    if (!('field' in copyRule)) throw new Error('expected a rule, not a nested group');
+    copyRule.value = 'mutated';
+
+    if (source.filter === undefined || !('all' in source.filter)) {
+      throw new Error('expected the source to carry an all-group');
+    }
+    const sourceRule = source.filter.all[0];
+    expect('field' in sourceRule && sourceRule.value).toBe('doing');
+  });
+
+  it('setRowHeight clamps into the sane band and rounds', () => {
+    const spec: DashboardSpec = { rows: [{ id: 'r1', widgets: [wid('a')] }] };
+    const over = setRowHeight(spec, 'r1', 9999);
+    expect(over.ok && over.spec.rows[0].h).toBe(ROW_HEIGHT_MAX);
+    const under = setRowHeight(spec, 'r1', 10);
+    expect(under.ok && under.spec.rows[0].h).toBe(ROW_HEIGHT_MIN);
+    const rounded = setRowHeight(spec, 'r1', 321.6);
+    expect(rounded.ok && rounded.spec.rows[0].h).toBe(322);
+  });
+
+  it('setWidgetWeight floors at 1 and rounds to two decimals', () => {
+    const spec: DashboardSpec = { rows: [{ id: 'r1', widgets: [wid('a')] }] };
+    const low = setWidgetWeight(spec, 'a', 0.2);
+    expect(low.ok && low.spec.rows[0].widgets[0].w).toBe(1);
+    const precise = setWidgetWeight(spec, 'a', 1.336);
+    expect(precise.ok && precise.spec.rows[0].widgets[0].w).toBe(1.34);
   });
 });

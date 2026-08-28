@@ -98,7 +98,9 @@ function cloneChart(c: ChartSpec): ChartSpec {
   };
 }
 
-function cloneWidget(w: DashboardWidget): DashboardWidget {
+/** Deep copy of one widget — exported so `dashboard.ts`'s `duplicateWidget`
+ * reuses this instead of a second copy of the same shape-walk. */
+export function cloneWidget(w: DashboardWidget): DashboardWidget {
   return {
     ...w,
     ...(w.filter !== undefined ? { filter: cloneFilters(w.filter) } : {}),
@@ -585,6 +587,11 @@ function nextId(prefix: string, taken: Set<string>, index: number): string {
 export function nextDashboardWidgetId(spec: DashboardSpec): string {
   const widgets = spec.rows.flatMap((r) => r.widgets);
   return nextId('widget', new Set(widgets.map((w) => w.id)), widgets.length);
+}
+
+/** An id no sibling row holds — what a splice-in-a-new-row edit needs. */
+export function nextDashboardRowId(spec: DashboardSpec): string {
+  return nextId('row', new Set(spec.rows.map((r) => r.id)), spec.rows.length);
 }
 
 /**
