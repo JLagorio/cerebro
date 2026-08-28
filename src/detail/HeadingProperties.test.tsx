@@ -41,7 +41,7 @@ describe('HeadingProperties (M45.1)', () => {
     const resolved: FieldDef[] = options.heading.map((name) =>
       roster.find((f) => f.name === name)!,
     );
-    render(
+    return render(
       <HeadingProperties
         entry={entry}
         schema={schema}
@@ -64,8 +64,10 @@ describe('HeadingProperties (M45.1)', () => {
   });
 
   it('renders nothing when the resolved heading is empty — no empty container', () => {
-    setup({ heading: [] });
-    expect(screen.queryByTestId('heading-strip')).toBeNull();
+    // The root of the render, not the testid: an unmarked empty div would
+    // still slip past a queryByTestId null.
+    const { container } = setup({ heading: [] });
+    expect(container.firstChild).toBeNull();
   });
 
   it('the toggle reads View details / Hide details and calls onToggleDetails', () => {
@@ -121,12 +123,12 @@ describe('HeadingProperties (M45.1)', () => {
   });
 
   it('renders null when folding leaves zero cells — even with a toggle handler', () => {
-    setup({
+    const { container } = setup({
       heading: ['due'],
       fieldPatch: { due: { kind: 'date', visibility: 'hide_when_empty' } },
       onToggleDetails: vi.fn(),
     });
-    expect(screen.queryByTestId('heading-strip')).toBeNull();
-    expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+    // Nothing at all — the toggle folds away with the strip it would expand.
+    expect(container.firstChild).toBeNull();
   });
 });
