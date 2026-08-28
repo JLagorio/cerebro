@@ -933,8 +933,10 @@ export function serializeViewList(views: ViewDefinition[]): unknown[] {
 
 const TAB_CONTENT_SET = new Set<string>(TAB_CONTENTS);
 
-/** A minted `tab-N` id, checked against who already answers to it — a blind
- * `tab-${i + 1}` can collide with an id a LATER entry declares explicitly. */
+/** A minted `tab-N` id, checked against a `taken` set that already holds
+ * every id ANY entry in the list legitimately owns — declared earlier or
+ * later — so a blind `tab-${i + 1}` guess can never steal an id another
+ * entry declares. */
 function mintTabId(i: number, taken: Set<string>): string {
   let n = i + 1;
   while (taken.has(`tab-${n}`)) n += 1;
@@ -945,14 +947,31 @@ function mintTabId(i: number, taken: Set<string>): string {
  * Tabs persisted on a Type doc (M44.5): an array under `tabs:`, one entry per
  * record-page tab. Tolerant like every Type-doc block — absent or malformed
  * means "no saved tabs yet" and the page renders its Overview default.
+ *
+ * Two passes, deliberately: a single forward pass would let a blind mint on
+ * entry 1 claim an id entry 3 declares for itself, re-minting the LATER
+ * entry instead — and since a tab's id is what `_sections` keys per-record
+ * content by, that's not a cosmetic collision, it's content silently
+ * reattaching to the wrong tab. Pass one reserves every validly declared id
+ * (first occurrence wins a duplicate, same as before); pass two hands each
+ * entry its reservation or, lacking one, the first `tab-N` nothing already
+ * answers to.
  */
 export function parseTabList(raw: unknown): TabDef[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
+  const items = raw.map((r) => asRecord(r));
+  const declaredIds = items.map((obj) =>
+    typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '',
+  );
   const taken = new Set<string>();
-  return raw.map((r, i) => {
-    const obj = asRecord(r);
-    const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
-    const id = declared !== '' && !taken.has(declared) ? declared : mintTabId(i, taken);
+  const owns = declaredIds.map((id) => {
+    if (id === '' || taken.has(id)) return false;
+    taken.add(id);
+    return true;
+  });
+
+  return items.map((obj, i) => {
+    const id = owns[i] ? declaredIds[i] : mintTabId(i, taken);
     taken.add(id);
     return {
       id,

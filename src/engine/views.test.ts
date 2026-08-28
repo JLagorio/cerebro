@@ -1543,8 +1543,13 @@ describe('tab list on a Type doc (M44.5)', () => {
     expect(parseTabList('sideways')).toEqual([]);
   });
 
-  it('a minted id checks who already answers to it, including a later declared one', () => {
+  it('a minted id skips an id declared earlier in the list', () => {
     const parsed = parseTabList([{ id: 'tab-2', name: 'Two' }, { name: 'x' }]);
     expect(parsed.map((t) => t.id)).toEqual(['tab-2', 'tab-3']);
+  });
+
+  it('a declared id is never stolen by a minted id, even one declared later', () => {
+    const parsed = parseTabList([{ name: 'x' }, { id: 'tab-1', name: 'One' }]);
+    expect(parsed.map((t) => t.id)).toEqual(['tab-2', 'tab-1']);
   });
 });
