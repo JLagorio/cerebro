@@ -60,8 +60,8 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   // M16.10. Revealing folds the hidden rows back into the same list, which
   // also makes the reorder mapping below the identity case. M44.1: show_empty
   // unfolds only what was hidden for BEING EMPTY — a field hidden on purpose
-  // (`visibility: hide`) stays behind the toggle either way, or the upcoming
-  // per-field eye-toggle would be lying about show-empty types.
+  // (`visibility: hide`) stays behind the toggle either way, or the per-field
+  // eye-toggle would be lying about show-empty types.
   const [revealed, setRevealed] = useState(false);
   const { shown, hidden } = splitByVisibility(
     allDeclared,
