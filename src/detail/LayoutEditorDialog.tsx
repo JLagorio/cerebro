@@ -3,12 +3,18 @@ import { applyTypeLayout, type TypeLayoutDraft } from '@/app/typeActions';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
+import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
+import { FieldEditor } from '@/detail/FieldEditor';
+import { HeadingProperties } from '@/detail/HeadingProperties';
+import { PropertyRow } from '@/detail/PropertyRow';
+import { RecordTabs } from '@/detail/RecordTabs';
 import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { TypeDef } from '@/engine/types';
+import type { Entry, FieldDef, TypeDef } from '@/engine/types';
+import { isTemplate } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
-import { useSchema } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
  * Seed the editor's staged draft from a TypeDef (M45.2).
@@ -67,6 +73,30 @@ export function draftDirty(draft: TypeLayoutDraft, seed: TypeLayoutDraft): boole
 }
 
 /**
+ * The stand-in when the type has zero records (locked Decision): a synthetic
+ * in-memory Entry the canvas can render — NEVER written, never in the store.
+ * Empty properties mean every cell previews as blank, which is exactly what
+ * a fresh record of the type would show.
+ */
+function syntheticEntry(type: string): Entry {
+  return {
+    path: '',
+    filename: '',
+    folder: '',
+    project: null,
+    title: `New ${type}`,
+    type,
+    properties: {},
+    relationships: {},
+    outgoingLinks: [],
+    snippet: '',
+    createdAt: '',
+    modifiedAt: '',
+    parseError: null,
+  };
+}
+
+/**
  * The Customize-layout screen (M45.2, spec §3.2): one fullscreen Dialog
  * mounted once at App level, raised by `uiStore.layoutEditor`. Everything
  * edits a staged `TypeLayoutDraft`; `applyTypeLayout` is the only write and
@@ -98,6 +128,7 @@ function LayoutEditorCard({ type }: { type: string }) {
 
 function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   const schema = useSchema();
+  const entries = useVaultStore((s) => s.entries);
   const closeLayoutEditor = useUiStore((s) => s.closeLayoutEditor);
   // The seed is captured at mount: dirty means "differs from what the editor
   // opened on", not from wherever the schema has drifted since.
@@ -105,6 +136,18 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   const [draft, setDraft] = useState(seed);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The preview roster: the type's records, surface.ts's own membership test
+  // (templates declare a type so new pages inherit it; they are not records
+  // of it — M3.1), sorted by title. `picked` resets when the signal retargets
+  // because LayoutEditorCard keys this component by type; a picked record
+  // deleted mid-session falls back to the first, and an empty roster to the
+  // synthetic stand-in.
+  const [picked, setPicked] = useState<string | null>(null);
+  const roster = entries
+    .filter((e) => e.type === typeDef.name && !isTemplate(e))
+    .sort((a, b) => a.title.localeCompare(b.title));
+  const previewEntry =
+    roster.find((e) => e.path === picked) ?? roster[0] ?? syntheticEntry(typeDef.name);
   /** The ONE door for every rail control — nothing else touches the draft. */
   const update = (patch: Partial<TypeLayoutDraft>) => setDraft((d) => updateDraft(d, patch));
 
@@ -144,6 +187,22 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
   };
 
   const style = typeStyle(typeDef.name, schema);
+
+  // The canvas renders from the DRAFT — not RecordProperties, which resolves
+  // the LIVE typeDef's `layout:`/`display` and would keep previewing the
+  // vault while the user edits the stage. Same visual grammar, draft-driven.
+  const previewLayout = resolveLayout(draft.layout, typeDef.fields);
+  const previewRow = (f: FieldDef) => (
+    <PropertyRow
+      key={f.name}
+      kind={f.kind}
+      name={f.name}
+      align={f.kind === 'checkbox' ? 'center' : 'start'}
+    >
+      <FieldEditor entry={previewEntry} def={f} schema={schema} />
+    </PropertyRow>
+  );
+
   return (
     <>
       <Dialog open fullscreen onClose={maybeClose} title={`Customize ${typeDef.name} layout`}>
@@ -156,7 +215,19 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
               <Icon name={style.icon} size={14} />
             </span>
             <span className="text-sm font-medium text-n-800">{typeDef.name}</span>
-            {/* Preview: <record> picker mounts here (Task 4). */}
+            {roster.length > 0 && (
+              <span className="ml-3 flex items-center gap-1.5 text-xs text-n-400">
+                Preview:
+                <Select
+                  testId="layout-preview-picker"
+                  ariaLabel="Preview record"
+                  size="sm"
+                  options={roster.map((e) => ({ value: e.path, label: e.title }))}
+                  value={previewEntry.path}
+                  onChange={(e) => setPicked(e.target.value)}
+                />
+              </span>
+            )}
             <span className="flex-1" />
             <Button testId="layout-cancel" onClick={maybeClose}>
               Cancel
@@ -171,8 +242,65 @@ function LayoutEditorBody({ typeDef }: { typeDef: TypeDef }) {
             </Button>
           </div>
           <div className="flex min-h-0 flex-1">
-            {/* The inert preview canvas renders here (Task 4). */}
-            <div data-testid="layout-preview" className="min-w-0 flex-1 overflow-auto" />
+            {/* Live editors render here but can never FIRE: `inert` (React 19
+                forwards the attribute) blanks every pointer, key and focus
+                path in the subtree, so the draft — not the vault — is on
+                stage. No aria-hidden alongside it: inert already removes the
+                subtree from the a11y tree, and a second claim could only
+                drift from the first. */}
+            <div data-testid="layout-preview" inert className="min-w-0 flex-1 overflow-auto p-6">
+              <div className="mx-auto flex max-w-2xl flex-col">
+                {draft.tabs.length > 0 && (
+                  <RecordTabs
+                    tabs={draft.tabs}
+                    activeId={draft.tabs[0].id}
+                    // No-ops: intent can never leave an inert strip anyway.
+                    onSelect={() => undefined}
+                    onChange={() => undefined}
+                  />
+                )}
+                <HeadingProperties
+                  entry={previewEntry}
+                  schema={schema}
+                  fields={previewLayout.heading}
+                />
+                <div className="flex flex-col gap-[7px]">
+                  {previewLayout.groups.map((g) => (
+                    <div
+                      key={g.id}
+                      data-testid="property-group"
+                      data-group={g.id}
+                      className="flex flex-col gap-[7px]"
+                    >
+                      <div className="px-1 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+                        {g.name}
+                      </div>
+                      {g.fields.map(previewRow)}
+                    </div>
+                  ))}
+                  {/* Rest LAST and headerless, RecordProperties' own order. */}
+                  {previewLayout.rest.length > 0 && (
+                    <div className="flex flex-col gap-[7px]">
+                      {previewLayout.rest.map(previewRow)}
+                    </div>
+                  )}
+                </div>
+                {draft.display.showBody && (
+                  // The body as a placeholder block: the preview stages the
+                  // page's SHAPE, and a real body would need a real read.
+                  <div data-testid="layout-preview-body" className="mt-5">
+                    <div className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+                      Description
+                    </div>
+                    <div className="mt-2 flex flex-col gap-2">
+                      <div className="h-2.5 w-11/12 rounded-sm bg-n-100" />
+                      <div className="h-2.5 w-4/5 rounded-sm bg-n-100" />
+                      <div className="h-2.5 w-3/5 rounded-sm bg-n-100" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
             <div
               data-testid="layout-rail"
               className="w-72 flex-none overflow-auto border-l border-n-100 p-3"

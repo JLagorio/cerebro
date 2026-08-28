@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   LayoutEditorDialog,
@@ -21,14 +21,15 @@ const DOC = 'types/work-item.md';
  * idiom), so the fixture seeds one whose `layout:` carries a dead pointer —
  * the seed-prunes-on-Apply path needs it. `display.show_file` deviates from
  * the defaults so Apply always has a real patch to send. `tabs` opts a test
- * into the saved-tabs seed (Tabbed active at open). */
+ * into the saved-tabs seed (Tabbed active at open). `notes` stays unplaced by
+ * `layout:` so the preview canvas has a REST field to render headerless. */
 function typeDoc(tabs?: unknown[]) {
   return makeEntry({
     path: DOC,
     title: 'Work item',
     type: 'Type',
     properties: {
-      fields: { status: 'text', priority: 'text' },
+      fields: { status: 'text', priority: 'text', notes: 'text' },
       display: { show_file: true },
       layout: {
         heading: ['status', 'ghost'],
@@ -395,5 +396,117 @@ describe('the Page settings rail (M45.2 Task 3)', () => {
     expect(screen.queryByText('Discard layout changes?')).toBeNull();
     expect(useUiStore.getState().layoutEditor).toBeNull();
     expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+});
+
+describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  /** Deliberately out of title order: the roster must sort, not inherit. */
+  const RECORDS = [
+    makeEntry({
+      path: 'items/beta.md',
+      title: 'Beta record',
+      type: 'Work item',
+      properties: { status: 'doing', priority: 'low' },
+    }),
+    makeEntry({
+      path: 'items/alpha.md',
+      title: 'Alpha record',
+      type: 'Work item',
+      properties: { status: 'todo', priority: 'high' },
+    }),
+  ];
+  /** Sorts FIRST by title — if the isTemplate filter were missing, this
+   * would become the default preview record, not just an extra option. */
+  const TEMPLATE = makeEntry({
+    path: 'templates/work-item.md',
+    title: 'A work item template',
+    type: 'Work item',
+  });
+
+  const recordSetup = () => setup({ entries: [typeDoc(), ...RECORDS, TEMPLATE] });
+
+  it('renders the draft on the first record by title — heading cell, group, rest', () => {
+    recordSetup();
+    const preview = within(screen.getByTestId('layout-preview'));
+    // Draft heading (pruned to survivors): the status cell, with Alpha's value.
+    const strip = preview.getByTestId('heading-strip');
+    expect(strip.querySelector('[data-field="status"]')).toBeTruthy();
+    expect(strip.textContent).toContain('todo');
+    // The draft group renders as a container with the quiet caps label.
+    const group = preview.getByTestId('property-group');
+    expect(group.getAttribute('data-group')).toBe('g1');
+    expect(group.textContent).toContain('Planning');
+    expect(group.textContent).toContain('high');
+    // The unplaced field lands after the groups, headerless.
+    expect(preview.getByText('Notes')).toBeTruthy();
+  });
+
+  it('the picker lists the roster by title, template excluded, first as default', () => {
+    recordSetup();
+    const picker = screen.getByTestId('layout-preview-picker') as HTMLSelectElement;
+    const labels = within(picker)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(labels).toEqual(['Alpha record', 'Beta record']);
+    expect(picker.value).toBe('items/alpha.md');
+  });
+
+  it('switching the preview record re-renders the values', async () => {
+    const user = userEvent.setup();
+    recordSetup();
+    const picker = screen.getByTestId('layout-preview-picker');
+    await user.selectOptions(picker, 'items/beta.md');
+    const preview = within(screen.getByTestId('layout-preview'));
+    expect(preview.queryByText('todo')).toBeNull();
+    expect(preview.getByTestId('heading-strip').textContent).toContain('doing');
+    expect(preview.getByTestId('property-group').textContent).toContain('low');
+  });
+
+  it('Show body gates the body block live — the draft is the single source', async () => {
+    const user = userEvent.setup();
+    recordSetup();
+    // The fixture leaves show_body at its default (true).
+    expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
+    await user.click(screen.getByRole('switch', { name: 'Show body' }));
+    expect(screen.queryByTestId('layout-preview-body')).toBeNull();
+    await user.click(screen.getByRole('switch', { name: 'Show body' }));
+    expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
+  });
+
+  it('the tab strip renders only while the draft has tabs', async () => {
+    const user = userEvent.setup();
+    recordSetup();
+    expect(screen.queryByTestId('record-tabs')).toBeNull();
+    await user.click(screen.getByTestId('layout-structure-tabbed'));
+    expect(screen.getByTestId('record-tabs')).toBeTruthy();
+    await user.click(screen.getByTestId('layout-structure-simple'));
+    expect(screen.queryByTestId('record-tabs')).toBeNull();
+  });
+
+  it('the canvas is inert, with no aria-hidden belt-and-suspenders', () => {
+    recordSetup();
+    const preview = screen.getByTestId('layout-preview');
+    expect(preview.hasAttribute('inert')).toBe(true);
+    // inert already removes the subtree from the a11y tree; a second claim
+    // via aria-hidden could only drift from the first (plan Decision).
+    expect(preview.hasAttribute('aria-hidden')).toBe(false);
+  });
+
+  it('zero records renders the synthetic preview — no crash, no picker, no store write', () => {
+    // Default setup: the Type doc only, no records of the type.
+    const { patchFrontmatter } = setup();
+    expect(screen.getByTestId('layout-preview')).toBeTruthy();
+    expect(screen.queryByTestId('layout-preview-picker')).toBeNull();
+    // The synthetic entry lives in memory only — never written, never stored.
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(useVaultStore.getState().entries).toHaveLength(1);
   });
 });
