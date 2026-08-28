@@ -4,7 +4,13 @@ import { ChartView, sliceColor } from '@/views/ChartView';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { ChartSlice } from '@/engine/chart';
-import type { Entry, Presentation } from '@/engine/types';
+import type { Entry, FilterGroup, Presentation, ViewDefinition } from '@/engine/types';
+
+// The drilldown opens records through the app's one routing law (see
+// useOpenPath) — mocked whole, the RecordChipOverlay convention, so a spec can
+// assert the call without standing up the nav stores.
+const { openPathSpy } = vi.hoisted(() => ({ openPathSpy: vi.fn() }));
+vi.mock('@/app/useOpenPath', () => ({ useOpenPath: () => openPathSpy }));
 
 /**
  * The chart's rendering (M16.27).
@@ -1194,6 +1200,315 @@ describe('ChartView hover tooltip (M44.3)', () => {
       Object.defineProperty(HTMLElement.prototype, 'offsetWidth', width!);
       Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height!);
     }
+  });
+});
+
+/**
+ * The drilldown (M44.3): a click on any band shape opens the band's records in
+ * a Dialog, a record row opens the record itself, and "Save as view" mints the
+ * band as a saved List view whose filters keep BOTH the tab's existing filters
+ * and the band's own rule. Records are openable through the app's one routing
+ * law, so the dialog always opens; Save is the host-gated affordance —
+ * an embedded dashboard chart passes no `onSaveView` and offers no Save.
+ */
+describe('ChartView drilldown (M44.3)', () => {
+  afterEach(() => {
+    openPathSpy.mockClear();
+  });
+
+  it('clicking a bar opens the drilldown titled by the band, listing its records', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getByRole('dialog', { name: 'Todo' })).toBeTruthy();
+    const rows = screen.getAllByTestId('drilldown-record');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('A');
+    expect(rows[0].textContent).toContain('items/a.md');
+    expect(rows[1].textContent).toContain('B');
+  });
+
+  it('a donut arc drills the same way a bar does', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-testid="chart-arc"][data-label="Doing"]')!);
+    expect(screen.getByRole('dialog', { name: 'Doing' })).toBeTruthy();
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(1);
+  });
+
+  it('a 10-plus band lists nine records and is honest about the remainder', () => {
+    const entries: Entry[] = [
+      vault()[0],
+      ...Array.from({ length: 11 }, (_, i) =>
+        makeEntry({
+          path: `items/i${i}.md`,
+          title: `Item ${i}`,
+          type: 'Work item',
+          properties: { status: 'todo' },
+        }),
+      ),
+    ];
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(9);
+    expect(screen.getByText('…and 2 more')).toBeTruthy();
+  });
+
+  it('clicking a record opens it and closes the dialog', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('drilldown-record').find((r) => r.textContent?.includes('A'))!,
+    );
+    expect(openPathSpy).toHaveBeenCalledWith('items/a.md');
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+  });
+
+  it('Save as view mints a List view whose filters keep the tab’s rules AND the band rule', () => {
+    const entries = vault();
+    const onSaveView = vi.fn();
+    const viewFilters: FilterGroup = { all: [{ field: 'estimate', op: 'gt', value: 1 }] };
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered
+        viewFilters={viewFilters}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    // The name input arrives seeded "<axis>: <band>".
+    const input = screen.getByTestId('drilldown-view-name') as HTMLInputElement;
+    expect(input.value).toBe('Status: Todo');
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    expect(onSaveView).toHaveBeenCalledTimes(1);
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.name).toBe('Status: Todo');
+    expect(saved.filters).toEqual({
+      all: [
+        { field: 'estimate', op: 'gt', value: 1 },
+        { field: 'status', op: 'equals', value: 'todo' },
+      ],
+    });
+    // A LIST presentation — and carryOver drops the chart spec on the way.
+    expect(saved.presentation.type).toBe('list');
+    expect(saved.presentation.chart).toBeUndefined();
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+  });
+
+  it('the seeded name is editable before saving', () => {
+    const entries = vault();
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    fireEvent.change(screen.getByTestId('drilldown-view-name'), {
+      target: { value: 'Still open' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    expect((onSaveView.mock.calls[0][0] as ViewDefinition).name).toBe('Still open');
+  });
+
+  it('without onSaveView the records still open, but no Save affordance renders', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getByTestId('chart-drilldown')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save as view' })).toBeNull();
+    expect(screen.queryByTestId('drilldown-view-name')).toBeNull();
+  });
+
+  it('a stacked segment drills its sub-band: part rows, band · series title, both rules', () => {
+    const entries = stacked();
+    const onSaveView = vi.fn();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="chart-bar-segment"][data-label="Todo"][data-series="High"]',
+      )!,
+    );
+    expect(screen.getByRole('dialog', { name: 'Todo · High' })).toBeTruthy();
+    const rows = screen.getAllByTestId('drilldown-record');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('A');
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({
+      all: [
+        { field: 'status', op: 'equals', value: 'todo' },
+        { field: 'priority', op: 'equals', value: 'high' },
+      ],
+    });
+  });
+
+  it('the no-value band saves as an is-empty rule — null is a band a filter CAN name', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({ path: 'items/n.md', title: 'N', type: 'Work item', properties: {} }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'No status')!,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({ all: [{ field: 'status', op: 'is_empty', value: '' }] });
+  });
+
+  it('a multiselect band saves as any_of — equality would claim a scalar the field never holds', () => {
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            tags: {
+              kind: 'multiselect',
+              options: [{ id: 'infra' }, { id: 'sensor' }],
+            },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { tags: ['infra', 'sensor'] },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { tags: ['sensor'] },
+      }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'tags' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Infra')!,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    // Membership, not equality: grouping bands a multi-value record by its
+    // FIRST value, and any_of catches every record the band holds.
+    expect(saved.filters).toEqual({ all: [{ field: 'tags', op: 'any_of', value: ['infra'] }] });
+  });
+
+  it('an undeclared field disables Save with the reason — a quiet refusal, not a missing button', () => {
+    // No Type doc declares `flavor`, so its kind — and therefore which filter
+    // op could restate the band — is unknowable.
+    const entries: Entry[] = [
+      vault()[0],
+      makeEntry({
+        path: 'items/x.md',
+        title: 'X',
+        type: 'Work item',
+        properties: { status: 'todo', flavor: 'sweet' },
+      }),
+    ];
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'flavor' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'sweet')!,
+    );
+    const save = screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByText(/No filter can express this band/)).toBeTruthy();
   });
 });
 

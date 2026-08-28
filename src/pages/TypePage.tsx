@@ -378,6 +378,24 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M44.3: the chart drilldown's Save-as-view. The view arrives fully
+          // seeded (the same seedView chain createView uses, band rule already
+          // merged into these filters); only the id is re-keyed here, against
+          // the roster it actually joins — mirroring addView's re-key on the
+          // List side.
+          viewFilters={activeView.filters}
+          onSaveView={(view) => {
+            const seeded = {
+              ...view,
+              id: nextViewId(
+                view.name,
+                savedViews.map((v) => v.id),
+              ),
+            };
+            void (async () => {
+              if (await setTypeViews(listing, [...savedViews, seeded])) openTab(seeded.id);
+            })();
+          }}
           // M29.48: where a whiteboard tab keeps its canvas. A Type screen's
           // saved views are real views (M12.3), so its whiteboards land beside
           // the Type doc that owns them. A GHOST type — a name only records

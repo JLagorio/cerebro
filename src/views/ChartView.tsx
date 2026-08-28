@@ -2,15 +2,25 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Dialog } from '@/components/ui/Dialog';
+import { Input } from '@/components/ui/Input';
+import { seedView } from '@/app/viewActions';
+import { useOpenPath } from '@/app/useOpenPath';
 import { computeChart, niceCeiling } from '@/engine/chart';
+import { bandKind, bandValueFor, NO_VALUE_KEY } from '@/engine/grouping';
+import { filterOpsFor } from '@/engine/viewFilters';
 import type { ChartData, ChartRosterItem, ChartSlice, ChartSlicePart } from '@/engine/chart';
 import type {
   ChartHeight,
   ChartKind,
   ChartSpec,
+  Entry,
+  FieldKind,
+  FilterGroup,
+  FilterRule,
   Presentation,
   Schema,
-  Entry,
+  ViewDefinition,
 } from '@/engine/types';
 
 /**
@@ -39,6 +49,14 @@ export interface ChartViewProps {
   /** Persists a legend toggle into the view's chart spec (M44.3). Absent —
    * an embedded dashboard chart — the legend renders static. */
   onChartChange?: (next: ChartSpec) => void;
+  /** The open tab's filter group, which a drilldown's saved view must keep —
+   * the band rule NARROWS what the chart shows, and the chart shows the
+   * filtered set (M44.3). */
+  viewFilters?: FilterGroup | null;
+  /** Appends a drilldown-minted view to the host's tab roster and opens it
+   * (M44.3). Absent — an embedded dashboard chart — the drilldown still lists
+   * and opens records, but offers no Save. */
+  onSaveView?: (view: ViewDefinition) => void;
 }
 
 const W = 640;
@@ -240,21 +258,26 @@ function XLabels({ slices, band, plotH }: { slices: ChartSlice[]; band: number; 
   );
 }
 
-/** Hover wiring every band shape shares (M44.3): enter and move report the
- * band under the pointer, leave clears it. A stacked segment reports its whole
- * BAND — the tooltip's per-series rows disambiguate, and the card holding
- * still while the pointer crosses segments beats it flickering per stripe. */
-interface HoverProps {
+/** Pointer wiring every band shape shares (M44.3): enter and move report the
+ * band under the pointer, leave clears it, and CLICK opens the drilldown. A
+ * stacked segment HOVERS as its whole BAND — the tooltip's per-series rows
+ * disambiguate, and the card holding still while the pointer crosses segments
+ * beats it flickering per stripe — but CLICKS as its own sub-band: a click is
+ * an aimed act, and the segment is what was aimed at. */
+interface SliceEvents {
   onHover: (slice: ChartSlice, e: ReactMouseEvent) => void;
   onLeave: () => void;
+  onOpen: (slice: ChartSlice, part?: ChartSlicePart) => void;
 }
 
-/** The three handler attributes, spread onto each shape. */
-function hoverAttrs(hover: HoverProps, slice: ChartSlice) {
+/** The handler attributes, spread onto each shape. Segments pass their part. */
+function shapeAttrs(events: SliceEvents, slice: ChartSlice, part?: ChartSlicePart) {
   return {
-    onMouseEnter: (e: ReactMouseEvent) => hover.onHover(slice, e),
-    onMouseMove: (e: ReactMouseEvent) => hover.onHover(slice, e),
-    onMouseLeave: hover.onLeave,
+    onMouseEnter: (e: ReactMouseEvent) => events.onHover(slice, e),
+    onMouseMove: (e: ReactMouseEvent) => events.onHover(slice, e),
+    onMouseLeave: events.onLeave,
+    onClick: () => events.onOpen(slice, part),
+    className: 'cursor-pointer',
   };
 }
 
@@ -274,12 +297,12 @@ function BarChart({
   data,
   chart,
   plotH,
-  hover,
+  events,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   plotH: number;
-  hover: HoverProps;
+  events: SliceEvents;
 }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
@@ -320,7 +343,7 @@ function BarChart({
                     width={width}
                     height={(part.value / top) * plotH}
                     fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
-                    {...hoverAttrs(hover, s)}
+                    {...shapeAttrs(events, s, part)}
                   />
                 ),
               )
@@ -337,7 +360,7 @@ function BarChart({
                 height={Math.max(height, s.value > 0 ? 1 : 0)}
                 rx={3}
                 fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
-                {...hoverAttrs(hover, s)}
+                {...shapeAttrs(events, s)}
               />
             )}
             {chart?.hideLabels !== true && band > 34 && (
@@ -369,12 +392,12 @@ function HBarChart({
   data,
   chart,
   h,
-  hover,
+  events,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   h: number;
-  hover: HoverProps;
+  events: SliceEvents;
 }) {
   const plotW = W - HPAD.left - HPAD.right;
   const plotH = h - HPAD.top - HPAD.bottom;
@@ -423,7 +446,7 @@ function HBarChart({
                     width={(part.value / top) * plotW}
                     height={barH}
                     fill={sliceColor(part, part.hue, colorOpts(chart, data, s))}
-                    {...hoverAttrs(hover, s)}
+                    {...shapeAttrs(events, s, part)}
                   />
                 ),
               )
@@ -438,7 +461,7 @@ function HBarChart({
                 height={barH}
                 rx={3}
                 fill={sliceColor(s, s.hue, colorOpts(chart, data, s))}
-                {...hoverAttrs(hover, s)}
+                {...shapeAttrs(events, s)}
               />
             )}
             {chart?.hideLabels !== true && (
@@ -468,12 +491,12 @@ function LineChart({
   data,
   chart,
   plotH,
-  hover,
+  events,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
   plotH: number;
-  hover: HoverProps;
+  events: SliceEvents;
 }) {
   const top = niceCeiling(data.max);
   const band = PLOT_W / data.slices.length;
@@ -557,7 +580,7 @@ function LineChart({
                     fill="var(--n-0)"
                     stroke={seriesStroke}
                     strokeWidth={2}
-                    {...hoverAttrs(hover, p.s)}
+                    {...shapeAttrs(events, p.s, p.part)}
                   />
                 ))}
               </g>
@@ -611,7 +634,7 @@ function LineChart({
             chart?.palette !== undefined ? sliceColor(s, s.hue, colorOpts(chart, data, s)) : stroke
           }
           strokeWidth={2}
-          {...hoverAttrs(hover, s)}
+          {...shapeAttrs(events, s)}
         />
       ))}
       {chart?.hideAxis !== true && <XLabels slices={data.slices} band={band} plotH={plotH} />}
@@ -641,11 +664,11 @@ function arcs(data: ChartData, circumference: number) {
 function DonutChart({
   data,
   chart,
-  hover,
+  events,
 }: {
   data: ChartData;
   chart: ChartSpec | undefined;
-  hover: HoverProps;
+  events: SliceEvents;
 }) {
   const c = DONUT.size / 2;
   const circumference = 2 * Math.PI * DONUT.r;
@@ -687,7 +710,7 @@ function DonutChart({
               strokeWidth={DONUT.stroke}
               strokeDasharray={`${length} ${circumference - length}`}
               strokeDashoffset={-start}
-              {...hoverAttrs(hover, s)}
+              {...shapeAttrs(events, s)}
             />
           ),
         )}
@@ -950,12 +973,182 @@ const BLOCKED: Record<
 
 const ROOT_CLASSES = 'box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4';
 
+/** How many records the drilldown lists before the remainder line takes over. */
+const DRILL_CAP = 9;
+
+/**
+ * The one filter rule that restates "this record sits in `key`'s band of
+ * `field`" — the drilldown's Save-as-view subject (M44.3). `null` means no
+ * operator can say it, and the Save button renders disabled rather than
+ * minting a view whose filters silently mean something else.
+ *
+ * The choices lean on the same M20.1 pair the board's create path uses:
+ * `bandKind` resolves the field the way grouping resolved it, and
+ * `bandValueFor` says what value the band stands for — with two deviations,
+ * both because a FILTER matches what the scanner READS, not what a write
+ * would put on disk. Person/relation bands filter by the bare stem (the
+ * scanner strips brackets into `entry.relationships`, and that is what
+ * `evaluateFilters` compares); a multiselect band is `any_of [key]` — exact
+ * membership — because its family offers no `equals`, and `contains` is
+ * substring matching that would also catch 'darkred' in a 'red' band.
+ */
+function bandRule(field: string, key: string, kind: FieldKind | undefined): FilterRule | null {
+  // "No <field>" is a band a filter CAN name, whatever the kind — `is_empty`
+  // is in every family's op set, undeclared fields included.
+  if (key === NO_VALUE_KEY) return { field, op: 'is_empty', value: '' };
+  // An undeclared field has no family, so no operator can be TRUSTED to
+  // restate the band: the quiet-refusal path.
+  if (kind === undefined) return null;
+  const ops = filterOpsFor(kind);
+  if (kind === 'multiselect') {
+    // Grouping bands a multi-value record by its FIRST value, so membership
+    // catches every record the band holds (first implies member) — plus any
+    // record holding the value later in its list. The one direction a saved
+    // view must not err in is LOSING a drilled record, and this one cannot.
+    return ops.includes('any_of') ? { field, op: 'any_of', value: [key] } : null;
+  }
+  const value = kind === 'person' || kind === 'relation' ? key : bandValueFor(key, kind);
+  if (value === undefined || value === null) return null;
+  return ops.includes('equals') ? { field, op: 'equals', value } : null;
+}
+
+/**
+ * The drilldown (M44.3): what a clicked band holds, one Dialog.
+ *
+ * Records open through `useOpenPath` — the app's one routing law, the same
+ * call every other view canvas makes — so the list is always live and the
+ * dialog always earns its click. Save is the HOST-gated half: without
+ * `onSaveView` (an embedded dashboard chart) there is no name input, no
+ * footer, no dead affordance. The minted view is seeded through the SAME
+ * `seedView` chain the tab bar uses — with an empty `taken`, because the
+ * chart cannot see its sibling tabs; the host re-keys the id against the
+ * roster it appends to (addView already does; TypePage mirrors it).
+ */
+function DrilldownDialog({
+  slice,
+  part,
+  data,
+  chart,
+  presentation,
+  entries,
+  schema,
+  viewFilters,
+  onSaveView,
+  onClose,
+}: {
+  slice: ChartSlice;
+  part: ChartSlicePart | undefined;
+  data: ChartData;
+  chart: ChartSpec | undefined;
+  presentation: Presentation;
+  entries: Entry[];
+  schema: Schema;
+  viewFilters: FilterGroup | null | undefined;
+  onSaveView: ((view: ViewDefinition) => void) | undefined;
+  onClose: () => void;
+}) {
+  const openPath = useOpenPath('in-place');
+  // A segment drills its own sub-band; a whole shape drills the band.
+  const rows = part === undefined ? slice.entries : part.entries;
+  const title = part === undefined ? slice.label : `${slice.label} · ${part.label}`;
+  const [name, setName] = useState(`${data.axis}: ${title}`);
+
+  // The click as filter rules — the band's, plus the series' for a segment.
+  const rules: (FilterRule | null)[] = [
+    bandRule(data.axisField, slice.key, bandKind(entries, data.axisField, schema)),
+  ];
+  if (part !== undefined) {
+    const groupBy = chart?.groupBy ?? '';
+    rules.push(bandRule(groupBy, part.key, bandKind(entries, groupBy, schema)));
+  }
+  const expressible = rules.every((r): r is FilterRule => r !== null);
+
+  const save = () => {
+    if (onSaveView === undefined || !expressible) return;
+    // The tab's own filters travel WHOLE, the band rule(s) appended — the
+    // chart drew the filtered set, so the saved view must keep saying so.
+    // The same spread ListPage's onFilterField uses: an `all` group merges
+    // flat, anything else nests.
+    const merged: FilterGroup = {
+      all: [
+        ...(viewFilters === null || viewFilters === undefined
+          ? []
+          : 'all' in viewFilters
+            ? viewFilters.all
+            : [viewFilters]),
+        ...(rules as FilterRule[]),
+      ],
+    };
+    onSaveView(seedView(name, 'list', [], presentation, merged));
+    onClose();
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={title}
+      width={480}
+      {...(onSaveView !== undefined
+        ? {
+            primaryAction: { label: 'Save as view', onClick: save, disabled: !expressible },
+            secondaryAction: { label: 'Cancel', onClick: onClose },
+            // The disabled state says why, in place — a quiet refusal.
+            ...(expressible
+              ? {}
+              : { footerNote: 'No filter can express this band, so the view cannot be saved.' }),
+          }
+        : {})}
+    >
+      <div data-testid="chart-drilldown" className="flex flex-col">
+        {rows.length === 0 && (
+          // A cumulative plateau segment: the run persisting, not rows.
+          <p className="m-0 py-1 text-sm text-n-500">No records land in this band.</p>
+        )}
+        {rows.slice(0, DRILL_CAP).map((e) => (
+          <button
+            key={e.path}
+            type="button"
+            data-testid="drilldown-record"
+            onClick={() => {
+              openPath(e.path);
+              onClose();
+            }}
+            className="flex cursor-pointer items-baseline justify-between gap-3 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-800 hover:bg-n-50"
+          >
+            <span className="min-w-0 truncate">{e.title}</span>
+            <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
+              {e.path}
+            </span>
+          </button>
+        ))}
+        {rows.length > DRILL_CAP && (
+          <p className="m-0 px-2 pt-1 text-xs text-n-500">…and {rows.length - DRILL_CAP} more</p>
+        )}
+        {onSaveView !== undefined && (
+          <div className="pt-3">
+            <Input
+              ariaLabel="View name"
+              testId="drilldown-view-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              width="100%"
+            />
+          </div>
+        )}
+      </div>
+    </Dialog>
+  );
+}
+
 export function ChartView({
   entries,
   presentation,
   schema,
   filtered,
   onChartChange,
+  viewFilters,
+  onSaveView,
 }: ChartViewProps) {
   const data = computeChart(entries, presentation, schema);
   const chart = presentation.chart;
@@ -970,12 +1163,23 @@ export function ChartView({
   // The band under the pointer and where the pointer is, figure-relative.
   const figureRef = useRef<HTMLElement>(null);
   const [hovered, setHovered] = useState<{ slice: ChartSlice; x: number; y: number } | null>(null);
-  const hover: HoverProps = {
+  // The band a click drilled into — the dialog's subject (M44.3).
+  const [drill, setDrill] = useState<{
+    slice: ChartSlice;
+    part: ChartSlicePart | undefined;
+  } | null>(null);
+  const events: SliceEvents = {
     onHover: (slice, e) => {
       const box = figureRef.current?.getBoundingClientRect();
       setHovered({ slice, x: e.clientX - (box?.left ?? 0), y: e.clientY - (box?.top ?? 0) });
     },
     onLeave: () => setHovered(null),
+    onOpen: (slice, part) => {
+      // The scrim swallows mouseleave, so the hover card is cleared here or
+      // it survives underneath the dialog.
+      setHovered(null);
+      setDrill({ slice, part });
+    },
   };
 
   return (
@@ -1030,7 +1234,7 @@ export function ChartView({
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (
-              <DonutChart data={data} chart={chart} hover={hover} />
+              <DonutChart data={data} chart={chart} events={events} />
             )
           ) : (
             <svg
@@ -1042,11 +1246,11 @@ export function ChartView({
               aria-label={`${data.measure} by ${data.axis}`}
             >
               {horizontal ? (
-                <HBarChart data={data} chart={chart} h={H} hover={hover} />
+                <HBarChart data={data} chart={chart} h={H} events={events} />
               ) : kind === 'line' ? (
-                <LineChart data={data} chart={chart} plotH={PLOT_H} hover={hover} />
+                <LineChart data={data} chart={chart} plotH={PLOT_H} events={events} />
               ) : (
-                <BarChart data={data} chart={chart} plotH={PLOT_H} hover={hover} />
+                <BarChart data={data} chart={chart} plotH={PLOT_H} events={events} />
               )}
             </svg>
           )}
@@ -1067,6 +1271,20 @@ export function ChartView({
             />
           )}
         </figure>
+      )}
+      {drill !== null && (
+        <DrilldownDialog
+          slice={drill.slice}
+          part={drill.part}
+          data={data}
+          chart={chart}
+          presentation={presentation}
+          entries={entries}
+          schema={schema}
+          viewFilters={viewFilters}
+          onSaveView={onSaveView}
+          onClose={() => setDrill(null)}
+        />
       )}
     </div>
   );

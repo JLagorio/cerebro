@@ -947,3 +947,47 @@ describe('aggregateNumbers', () => {
     expect(computeRollup(owner, { ...noneNumeric, calculate: 'max' }, entries)).toBe('');
   });
 });
+
+/**
+ * What the drilldown reads (M44.3): the raw axis field beside the humanized
+ * `axis`, and each part carrying its sub-band's rows the way the band slice
+ * already carries its own.
+ */
+describe('computeChart drilldown carriers (M44.3)', () => {
+  it('axisField is the raw band field at every construction site', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    expect(computeChart(records(entries), view(), schema).axisField).toBe('status');
+    expect(
+      computeChart(records(entries), view({ group: [], chart: { xField: 'priority' } }), schema)
+        .axisField,
+    ).toBe('priority');
+    // The blocked empty() site still names the field it would have banded by.
+    expect(computeChart([], view(), schema).axisField).toBe('status');
+    // A number chart has no axis at all — '' both here and in `axis`.
+    expect(
+      computeChart(records(entries), view({ group: [], chart: { kind: 'number' } }), schema)
+        .axisField,
+    ).toBe('');
+  });
+
+  it('parts carry their sub-band rows, and a plateau part carries none', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const data = computeChart(records(entries), view({ chart: { groupBy: 'priority' } }), schema);
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.entries.map((e) => e.path)])).toEqual([
+      ['high', ['items/a.md']],
+      ['low', ['items/b.md']],
+    ]);
+    // Under cumulative, Doing lacks `low` and gets a synthesized plateau —
+    // the run persisting, not rows arriving — so its entries are [].
+    const cum = computeChart(
+      records(entries),
+      view({ chart: { groupBy: 'priority', cumulative: true } }),
+      schema,
+    );
+    const doing = cum.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.find((p) => p.key === 'low')?.entries).toEqual([]);
+  });
+});

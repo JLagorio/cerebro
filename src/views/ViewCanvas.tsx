@@ -1,7 +1,14 @@
 import React, { useEffect, useMemo } from 'react';
 import type { ColumnDef } from '@/engine/columns';
 import type { Zoom } from '@/engine/schedule';
-import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
+import type {
+  ColumnSpec,
+  Entry,
+  FilterGroup,
+  Presentation,
+  Schema,
+  ViewDefinition,
+} from '@/engine/types';
 import { BoardView } from '@/views/BoardView';
 import { CalendarView } from '@/views/CalendarView';
 import { ChartView } from '@/views/ChartView';
@@ -63,6 +70,14 @@ export interface ViewCanvasProps {
   onZoomChange?: (zoom: Zoom) => void;
   /** M12.4b: adds a starter filter rule for a field to the open view. */
   onFilterField?: (field: string) => void;
+  /** The open tab's filter group — what the chart drilldown's saved view must
+   * keep beside the band rule (M44.3). `filtered` above is the boolean shadow
+   * of this; the drilldown needs the rules themselves. */
+  viewFilters?: FilterGroup | null;
+  /** Appends a chart-drilldown-minted view to the host's tab roster and opens
+   * it (M44.3). Page hosts pass their createView internals; a dashboard's
+   * embedded canvas passes nothing and its charts offer no Save. */
+  onSaveView?: (view: ViewDefinition) => void;
   /** Overridable "today" for deterministic tests. */
   today?: string;
   /**
@@ -99,6 +114,8 @@ export function ViewCanvas({
   onOrderBy,
   onZoomChange,
   onFilterField,
+  viewFilters,
+  onSaveView,
   today,
   embedded = false,
   whiteboardHost,
@@ -229,6 +246,10 @@ export function ViewCanvas({
               ? undefined
               : (chart) => onPresentationChange({ ...presentation, chart })
           }
+          // The drilldown's Save half (M44.3): the tab's own rules travel into
+          // the minted view beside the band rule, and the append is the host's.
+          viewFilters={viewFilters}
+          onSaveView={onSaveView}
         />
       );
     case 'gallery':

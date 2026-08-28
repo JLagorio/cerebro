@@ -63,6 +63,9 @@ export interface ChartSlicePart {
   display: string;
   /** The series roster index — the part's colour, stable under hiding. */
   hue: number;
+  /** The sub-band's rows, the segment drilldown's subject (M44.3). A
+   * cumulative plateau carries [] — the run persisting is not rows arriving. */
+  entries: Entry[];
 }
 
 /** One legend row: a band or a series, hidden ones included. */
@@ -91,6 +94,8 @@ export interface ChartData {
   max: number;
   /** The field the X axis bands by, humanized; '' when there is none. */
   axis: string;
+  /** The same field RAW — what a drilldown's filter rule names (M44.3). */
+  axisField: string;
   /** What the Y axis measures, e.g. 'Count' or 'Sum of Estimate'. */
   measure: string;
   /** Every band, hidden included — the legend's roster (M44.3). */
@@ -160,6 +165,7 @@ export function computeChart(
     totalDisplay: '',
     max: 0,
     axis: band === undefined ? '' : humanize(band.field),
+    axisField: band === undefined ? '' : band.field,
     measure: measureLabel(chart),
     bands,
     series,
@@ -187,6 +193,7 @@ export function computeChart(
         totalDisplay: def === null ? String(n) : formatNumber(n, def),
         max: n,
         axis: '',
+        axisField: '',
         measure: measureLabel(chart),
         bands: [],
         series: [],
@@ -204,6 +211,7 @@ export function computeChart(
       totalDisplay: def === null ? String(n) : formatNumber(n, def),
       max: n,
       axis: '',
+      axisField: '',
       measure: measureLabel(chart),
       bands: [],
       series: [],
@@ -334,6 +342,7 @@ export function computeChart(
           value: partValue,
           display: def === null ? String(partValue) : formatNumber(partValue, def),
           hue,
+          entries: sub.entries,
         });
       }
       // Parts order by hue, always: a text-field groupBy alphabetizes
@@ -394,6 +403,7 @@ export function computeChart(
             value: r,
             display: def === null ? String(r) : formatNumber(r, def),
             hue: item.hue,
+            entries: [],
           });
         }
         // Plateaus append at the end; restore the hue order the build pass
@@ -415,6 +425,7 @@ export function computeChart(
     totalDisplay: def === null ? String(total) : formatNumber(total, def),
     max: visible.reduce((top, s) => Math.max(top, s.value), 0),
     axis: humanize(band.field),
+    axisField: band.field,
     measure: measureLabel(chart),
     bands,
     series,
