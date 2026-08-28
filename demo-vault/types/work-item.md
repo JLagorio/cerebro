@@ -32,6 +32,10 @@ fields:
       - { id: XL }
   epic: { kind: relation, target: Epic }
   blocked_by: { kind: relation, target: Work item }
+layout:
+  heading: [status, priority]
+  groups:
+    - { id: planning, name: Planning, fields: [assignee, due, estimate] }
 ---
 
 # Work item

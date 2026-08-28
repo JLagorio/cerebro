@@ -53,6 +53,9 @@ describe('DocPage', () => {
     const record = entries.find((e) => e.type === 'Work item');
     if (record === undefined) throw new Error('fixture vault has no Work item');
     render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+    // M45.2 Task 6 (2026-08-28 plan): the corpus Work item wears `layout:`
+    // now, so the stack opens behind the strip's View details toggle.
+    fireEvent.click(screen.getByTestId('view-details-toggle'));
     expect(screen.getByTestId('page-properties')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Docs' })).toBeNull();
     cleanup();
@@ -92,6 +95,9 @@ describe('DocPage', () => {
       if (record === undefined) throw new Error('fixture vault has no Work item');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.getByTestId('record-tabs')).toBeTruthy();
+      // M45.2 Task 6 (2026-08-28 plan): the corpus layout folds the stack
+      // behind the strip's toggle.
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
       expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
@@ -104,7 +110,9 @@ describe('DocPage', () => {
       if (record === undefined) throw new Error('fixture vault has no Work item');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.queryByTestId('record-tabs')).toBeNull();
-      // The synthesized Overview still runs the canvas: properties render.
+      // The synthesized Overview still runs the canvas: properties render —
+      // behind the corpus layout's strip toggle (M45.2 Task 6, 2026-08-28 plan).
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
       expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
@@ -167,6 +175,10 @@ describe('DocPage', () => {
       // No saved tabs: the synthesized set is [overview], and 'gone' is a tab
       // a deleted-tab history entry might still carry.
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'gone' }} />);
+      // M45.2 Task 6 (2026-08-28 plan): the corpus layout folds the stack
+      // behind the strip's toggle — which only Overview renders, so its
+      // presence already IS the fallback.
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
       expect(screen.getByTestId('page-properties')).toBeTruthy();
       expect(screen.queryByTestId('tab-sections')).toBeNull();
     });
@@ -182,10 +194,27 @@ describe('DocPage', () => {
     // closing fence, rescan, pick a Work item. The splice lands right after
     // the `fields:` mapping, so a two-space-indented first line can grow the
     // roster before the top-level keys start.
+    //
+    // M45.2 Task 6 (2026-08-28 plan): the golden corpus gave Work item a real
+    // `layout:`, and these cases stage their OWN — so the corpus block is
+    // stripped first, or the splice would mint a duplicate `layout:` key and
+    // fail the whole frontmatter parse. The tripwire keeps the strip honest
+    // when the corpus block drifts.
+    const CORPUS_LAYOUT =
+      'layout:\n' +
+      '  heading: [status, priority]\n' +
+      '  groups:\n' +
+      '    - { id: planning, name: Planning, fields: [assignee, due, estimate] }\n';
     const setTypeFrontmatter = async (frontmatter: string) => {
       const typeDoc = fs().get(TYPE_DOC);
       if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
-      fs().set(TYPE_DOC, typeDoc.replace('\n---\n', `\n${frontmatter}---\n`));
+      if (!typeDoc.includes(CORPUS_LAYOUT)) {
+        throw new Error('work-item.md corpus layout drifted — update CORPUS_LAYOUT here');
+      }
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(CORPUS_LAYOUT, '').replace('\n---\n', `\n${frontmatter}---\n`),
+      );
       await useVaultStore.getState().rescan();
       const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
       if (record === undefined) throw new Error('fixture vault has no Work item');
@@ -230,9 +259,10 @@ describe('DocPage', () => {
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
     });
 
-    it('no layout → no strip, and the stack renders exactly as today', () => {
-      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
-      if (record === undefined) throw new Error('fixture vault has no Work item');
+    it('no layout → no strip, and the stack renders exactly as today', async () => {
+      // M45.2 Task 6 (2026-08-28 plan): the corpus doc carries a layout now,
+      // so this case stages its no-layout baseline explicitly.
+      const record = await setTypeFrontmatter('');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
       expect(screen.getByTestId('page-properties')).toBeTruthy();
