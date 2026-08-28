@@ -202,6 +202,10 @@ describe('computeChart', () => {
     expect(data.totalDisplay).toMatch(/^\$/);
   });
 
+  // The fixture's declared status order (todo, doing, done) already sums to
+  // [8, 2, 0] — descending by coincidence. Asserting exact labels here, next
+  // to the value-asc twin below that reverses them, gives a broken comparator
+  // somewhere to fail: value-desc alone would pass even with `sort` ignored.
   it('sorts bands by value when asked, biggest first', () => {
     const entries = vault();
     const data = computeChart(
@@ -209,8 +213,19 @@ describe('computeChart', () => {
       view({ chart: { agg: 'sum', value: 'estimate', sort: 'value-desc' } }),
       buildSchema(entries),
     );
-    const values = data.slices.map((s) => s.value);
-    expect(values).toEqual([...values].sort((a, b) => b - a));
+    expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+    expect(data.slices.map((s) => s.value)).toEqual([8, 2, 0]);
+  });
+
+  it('sorts bands by value ascending when asked, reversing the coincidental order', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', sort: 'value-asc' } }),
+      buildSchema(entries),
+    );
+    expect(data.slices.map((s) => s.label)).toEqual(['Done', 'Doing', 'Todo']);
+    expect(data.slices.map((s) => s.value)).toEqual([0, 2, 8]);
   });
 
   it('sorts bands A→Z when asked', () => {
