@@ -120,6 +120,16 @@ describe('serializeFields', () => {
     const spec = serializeFields([{ name: 'due', kind: 'date' }]).due as Record<string, unknown>;
     expect(spec).toEqual({ kind: 'date' });
   });
+
+  // An EXPLICIT default is still the default: absent already means
+  // 'show' / 'short' / '12', and a Type doc should not carry the absence of
+  // an opinion — same rule as the `format !== 'plain'` guard.
+  it('normalizes explicit defaults to no key on disk', () => {
+    const spec = serializeFields([
+      { name: 'due', kind: 'date', dateFormat: 'short', timeFormat: '12', visibility: 'show' },
+    ]).due as Record<string, unknown>;
+    expect(spec).toEqual({ kind: 'date' });
+  });
 });
 
 describe('typeStyle', () => {

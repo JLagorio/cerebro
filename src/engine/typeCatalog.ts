@@ -10,6 +10,7 @@
  */
 
 import { isTemplate } from '@/lib/templates';
+import { DEFAULT_TIME_FORMAT } from './dates';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -223,11 +224,16 @@ function fieldToSpec(def: FieldDef): unknown {
   if (def.format !== undefined && def.format !== 'plain') spec.format = def.format;
   if (def.precision !== undefined) spec.precision = def.precision;
   // Deviations only, like parseFieldDef's defaults: absent visibility = show,
-  // absent formats = 'short' / '12'. Dropping a set one here loses data on
-  // every round-trip (M45.1: applyTypeLayout serializes ADDED fields with this).
-  if (def.dateFormat !== undefined) spec.dateFormat = def.dateFormat;
-  if (def.timeFormat !== undefined) spec.timeFormat = def.timeFormat;
-  if (def.visibility !== undefined) spec.visibility = def.visibility;
+  // absent formats = 'short' / '12'. Dropping a set NON-default here loses
+  // data on every round-trip (M45.1: applyTypeLayout serializes ADDED fields
+  // with this) — but an explicit default normalizes to NO key, same rule as
+  // `format !== 'plain'` above: a Type doc should not carry the absence of
+  // an opinion.
+  if (def.dateFormat !== undefined && def.dateFormat !== 'short') spec.dateFormat = def.dateFormat;
+  if (def.timeFormat !== undefined && def.timeFormat !== DEFAULT_TIME_FORMAT) {
+    spec.timeFormat = def.timeFormat;
+  }
+  if (def.visibility !== undefined && def.visibility !== 'show') spec.visibility = def.visibility;
   return spec;
 }
 
