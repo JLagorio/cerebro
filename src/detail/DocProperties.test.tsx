@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { DocProperties } from '@/detail/DocProperties';
@@ -224,5 +224,83 @@ describe('DocProperties display config (M44.1 follow-up)', () => {
     // only, so it stays folded and the toggle reappears counting it alone.
     expect(screen.queryByText('Internal')).toBeNull();
     expect(screen.getByTestId('hidden-properties-toggle')).toBeTruthy();
+  });
+});
+describe('DocProperties layout groups (M45.1)', () => {
+  afterEach(cleanup);
+
+  // Mirrors RecordProperties.test.tsx's M45.1 block with this file's typed
+  // fixture mechanics: mutate the work-item Type doc, render fld-1. The Type
+  // row, Convert flow, and undeclared keys stay exactly as the flat panel
+  // renders them — layout arranges only the declared stack.
+  const setupLayout = (
+    layout: Record<string, unknown>,
+    mutate?: (fields: Record<string, unknown>) => void,
+  ) => {
+    const entries = fixtureVault();
+    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+    const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+    mutate?.(typeProps.fields as Record<string, unknown>);
+    typeProps.layout = layout;
+    useVaultStore.setState({ entries, vaultPath: '/vault' });
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    render(<DocProperties entry={entry} schema={buildSchema(entries)} />);
+  };
+
+  const rowNames = () =>
+    screen.getAllByTestId('property-row').map((r) => r.getAttribute('data-property'));
+
+  it('places fields in their groups, rest after, heading claims out — Type row untouched', () => {
+    setupLayout({
+      heading: ['status'],
+      groups: [{ id: 'g-main', name: 'Main', fields: ['priority'] }],
+    });
+    const group = screen.getByTestId('property-group');
+    expect(group.getAttribute('data-group')).toBe('g-main');
+    expect(within(group).getByText('Main')).toBeTruthy();
+    expect(within(group).getByText('Priority')).toBeTruthy();
+    // Heading-claimed fields live in the strip, not this stack.
+    expect(screen.queryByText('Status')).toBeNull();
+    // Type row first as ever; rest headerless after the group; undeclared
+    // scalars (key, channel) after everything.
+    expect(rowNames()).toEqual(['Type', 'priority', 'assignee', 'due', 'key', 'channel']);
+  });
+
+  it('pools hidden fields from every container into the one expander', () => {
+    setupLayout(
+      {
+        heading: ['due'],
+        groups: [{ id: 'g-main', name: 'Main', fields: ['internal', 'priority'] }],
+      },
+      (fields) => {
+        fields.due = { kind: 'date', visibility: 'hide_when_empty' };
+        fields.internal = { kind: 'text', visibility: 'hide' };
+        fields.archived = { kind: 'checkbox', visibility: 'hide' };
+      },
+    );
+    const toggle = screen.getByTestId('hidden-properties-toggle');
+    expect(toggle.textContent).toContain('3 hidden properties');
+    expect(screen.queryByText('Due')).toBeNull();
+    fireEvent.click(toggle);
+    // Heading folds open at the stack top (under the Type row), the group's
+    // inside the group, rest's in rest.
+    expect(rowNames()).toEqual([
+      'Type',
+      'due',
+      'internal',
+      'priority',
+      'status',
+      'assignee',
+      'archived',
+      'key',
+      'channel',
+    ]);
+    expect(within(screen.getByTestId('property-group')).getByText('Internal')).toBeTruthy();
+  });
+
+  it('grouped mode renders no reorder grips', () => {
+    setupLayout({ groups: [{ id: 'g-main', name: 'Main', fields: ['priority'] }] });
+    expect(screen.getByTestId('property-group')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Reorder/ })).toBeNull();
   });
 });
