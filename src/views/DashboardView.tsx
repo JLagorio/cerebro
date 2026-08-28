@@ -1,4 +1,13 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -11,7 +20,9 @@ import {
   DASHBOARD_FULL,
   dashboardNumber,
   duplicateWidget,
+  moveToEnd,
   moveToOwnRow,
+  moveWidget,
   moveWithinRow,
   removeWidget,
   updateWidget,
@@ -34,6 +45,7 @@ import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { MAX_DASHBOARD_WIDGETS, MAX_ROW_WIDGETS, ROW_HEIGHT_DEFAULT } from '@/engine/types';
+import type { DragEndEvent } from '@dnd-kit/core';
 import type { ContextMenuItem } from '@/components/ui/ContextMenu';
 import type { DashboardEdit } from '@/engine/dashboard';
 import type {
@@ -104,6 +116,82 @@ function defaultWidgetTitle(widget: OwnScopeWidget): string {
  * the embedded view's empty state reads to say WHY nothing is here. */
 function widgetFiltered(spec: DashboardSpec, widget: DashboardWidget): boolean {
   return spec.global !== undefined || widget.filter !== undefined;
+}
+
+/** Row-of-widget-ids matrices ONLY — row ids stay out on purpose: `moveToEnd`
+ * mints a fresh row id even when the widget was already alone at the end, and
+ * an identical layout under a new row id is still an identity drop. */
+function sameStructure(a: DashboardSpec, b: DashboardSpec): boolean {
+  return (
+    a.rows.length === b.rows.length &&
+    a.rows.every(
+      (r, i) =>
+        r.widgets.length === b.rows[i].widgets.length &&
+        r.widgets.every((w, j) => w.id === b.rows[i].widgets[j].id),
+    )
+  );
+}
+
+/** Resolves a `slot:<rowId>:<index>` target into a `moveWidget` call. */
+function moveToSlot(spec: DashboardSpec, id: string, over: string): DashboardEdit {
+  // Greedy up to the LAST colon: a hand-edited row id may itself carry one.
+  const m = over.match(/^slot:(.+):(\d+)$/);
+  if (m === null) return { ok: true, spec }; // malformed target — identity, no commit
+  const rowId = m[1];
+  let slot = Number(m[2]);
+  // Slot indices count the row WITH the dragged widget still in place, but
+  // moveWidget removes first and inserts second — so a same-row drop past the
+  // widget's own position is one slot ahead of where the gap sat on screen.
+  const from = spec.rows.find((r) => r.id === rowId)?.widgets.findIndex((w) => w.id === id) ?? -1;
+  if (from !== -1 && from < slot) slot -= 1;
+  return moveWidget(spec, id, rowId, slot);
+}
+
+/**
+ * Drop resolution, pure and exported for direct testing — the BoardView
+ * `handleDragEnd` pattern. Slot ids are `slot:<rowId>:<index>` (0 through
+ * widgets.length) plus one `slot:new-row` after the last row — globally
+ * unique by construction, because dnd-kit's droppable registry is a Map and
+ * a duplicate id silently kills a target. Anything else under the pointer
+ * (a widget, nothing at all) is not a target. A cap refusal toasts the pure
+ * editor's own sentence; an identity drop commits nothing.
+ */
+export function handleWidgetDragEnd(
+  event: DragEndEvent,
+  args: {
+    spec: DashboardSpec;
+    commit: (next: DashboardSpec) => void;
+    toast: (msg: string) => void;
+  },
+): void {
+  const over = event.over === null ? null : String(event.over.id);
+  if (over === null || !over.startsWith('slot:')) return;
+  const id = String(event.active.id);
+  const edit = over === 'slot:new-row' ? moveToEnd(args.spec, id) : moveToSlot(args.spec, id, over);
+  if (!edit.ok) {
+    args.toast(edit.reason);
+    return;
+  }
+  if (sameStructure(edit.spec, args.spec)) return;
+  args.commit(edit.spec);
+}
+
+/** A droppable insertion point (Edit mode only). Invisible until a drag
+ * hovers it — then it paints itself as the insertion line, the repo's own
+ * inset-line style rather than a DragOverlay. */
+function WidgetSlot({ id, wide = false }: { id: string; wide?: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      data-testid="dashboard-slot"
+      data-slot={id}
+      className={[
+        wide ? 'h-1.5 w-full flex-none rounded' : 'w-1.5 flex-none self-stretch rounded',
+        isOver ? 'bg-cortex-500' : 'bg-transparent',
+      ].join(' ')}
+    />
+  );
 }
 
 export interface DashboardViewProps {
@@ -353,13 +441,41 @@ function WidgetShell({
 }) {
   const edit = useContext(EditContext);
   const hasCustom = widget.title !== undefined && widget.title !== '';
+  // Registered even outside Edit mode (a hook cannot be conditional) but
+  // disabled then — and dnd-kit's default context makes the hook a no-op when
+  // no DndContext is mounted, so a read-only host pays nothing. The GRIP is
+  // the draggable node, not the whole tile: its small rect tracks the pointer
+  // into the thin slot strips, and the menu button and rename input keep
+  // their clicks — the listeners never touch them.
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: widget.id,
+    disabled: edit === null,
+  });
   return (
     <section
       data-testid={`widget-${widget.id}`}
-      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
+      style={{
+        flexGrow: widget.w ?? 1,
+        flexBasis: 0,
+        minWidth: 280,
+        // The source dims in place; no DragOverlay (BoardView precedent).
+        opacity: isDragging ? 0.6 : undefined,
+      }}
       className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
       <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
+        {edit !== null && (
+          <span
+            ref={setNodeRef}
+            data-testid="widget-grip"
+            {...attributes}
+            {...listeners}
+            aria-label={`Drag ${title}`}
+            className="flex h-6 w-4 flex-none cursor-grab touch-none items-center justify-center rounded text-n-400 hover:bg-n-100 hover:text-n-700"
+          >
+            <Icon name="grip-vertical" size={12} />
+          </span>
+        )}
         {edit !== null && edit.renamingId === widget.id ? (
           <RenameWidget
             name={title}
@@ -903,6 +1019,16 @@ export function DashboardView({
   const addRef = useRef<HTMLButtonElement>(null);
 
   const canEdit = onPresentationChange !== undefined;
+  const live = editing && canEdit;
+
+  // BoardView's exact sensors: distance-4 keeps the grip's press from eating
+  // ordinary clicks; Space picks up and drops, arrows move, Escape cancels.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space'] },
+    }),
+  );
 
   const write = useCallback(
     (next: DashboardSpec) => onPresentationChange?.({ ...presentation, dashboard: next }),
@@ -939,7 +1065,7 @@ export function DashboardView({
   );
 
   return (
-    <EditContext.Provider value={editing && canEdit ? api : null}>
+    <EditContext.Provider value={live ? api : null}>
       <div
         data-testid="dashboard-view"
         data-blocks={spec.rows.reduce((n, r) => n + r.widgets.length, 0)}
@@ -1048,68 +1174,81 @@ export function DashboardView({
             }
           />
         ) : (
-          <div className="flex flex-col gap-3">
-            {spec.rows.map((row) => (
-              // One over-wide row scrolls alone inside its own wrapper — wide
-              // content never drags the whole dashboard sideways (AGENTS.md).
-              // The height stays on the inner flex row, which keeps the
-              // `dashboard-row` testid; the wrapper only scrolls.
-              <div key={row.id} className="min-w-0 overflow-x-auto">
-                <div
-                  data-testid="dashboard-row"
-                  className="flex gap-3"
-                  style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
-                >
-                  {row.widgets.map((widget) =>
-                    widget.kind === 'number' ? (
-                      <NumberBlock
-                        key={widget.id}
-                        widget={widget}
-                        entries={entries}
-                        spec={spec}
-                        schema={schema}
-                      />
-                    ) : widget.kind === 'view' ? (
-                      <ViewBlock key={widget.id} widget={widget} spec={spec} />
-                    ) : widget.kind === 'table' ? (
-                      <TableWidget
-                        key={widget.id}
-                        widget={widget}
-                        entries={entries}
-                        spec={spec}
-                        schema={schema}
-                        sort={presentation.sort}
-                      />
-                    ) : widget.kind === 'board' ? (
-                      <BoardWidget
-                        key={widget.id}
-                        widget={widget}
-                        entries={entries}
-                        spec={spec}
-                        schema={schema}
-                      />
-                    ) : widget.kind === 'timeline' ? (
-                      <TimelineWidget
-                        key={widget.id}
-                        widget={widget}
-                        entries={entries}
-                        spec={spec}
-                        schema={schema}
-                      />
-                    ) : (
-                      <ChartWidget
-                        key={widget.id}
-                        widget={widget}
-                        entries={entries}
-                        spec={spec}
-                        schema={schema}
-                      />
-                    ),
-                  )}
+          // The DndContext stands whether or not Edit is on — a conditional
+          // wrapper would remount every widget on the Edit toggle. With Edit
+          // off there is nothing to drag (grips absent, draggables disabled)
+          // and nothing to hit (slots unrendered), so it is inert chrome.
+          <DndContext
+            sensors={sensors}
+            onDragEnd={(event) => handleWidgetDragEnd(event, { spec, commit: write, toast })}
+          >
+            <div className="flex flex-col gap-3">
+              {spec.rows.map((row) => (
+                // One over-wide row scrolls alone inside its own wrapper —
+                // wide content never drags the whole dashboard sideways
+                // (AGENTS.md). The height stays on the inner flex row, which
+                // keeps the `dashboard-row` testid; the wrapper only scrolls.
+                // dnd-kit measures droppable rects at drag START, so
+                // scrolling this wrapper MID-drag leaves the row's slot rects
+                // stale until the next drag — accepted; the alternative is
+                // continuous re-measure for a gesture most rows never need.
+                <div key={row.id} className="min-w-0 overflow-x-auto">
+                  <div
+                    data-testid="dashboard-row"
+                    className="flex gap-3"
+                    style={{ height: row.h ?? ROW_HEIGHT_DEFAULT }}
+                  >
+                    {live && <WidgetSlot id={`slot:${row.id}:0`} />}
+                    {row.widgets.map((widget, i) => (
+                      <React.Fragment key={widget.id}>
+                        {widget.kind === 'number' ? (
+                          <NumberBlock
+                            widget={widget}
+                            entries={entries}
+                            spec={spec}
+                            schema={schema}
+                          />
+                        ) : widget.kind === 'view' ? (
+                          <ViewBlock widget={widget} spec={spec} />
+                        ) : widget.kind === 'table' ? (
+                          <TableWidget
+                            widget={widget}
+                            entries={entries}
+                            spec={spec}
+                            schema={schema}
+                            sort={presentation.sort}
+                          />
+                        ) : widget.kind === 'board' ? (
+                          <BoardWidget
+                            widget={widget}
+                            entries={entries}
+                            spec={spec}
+                            schema={schema}
+                          />
+                        ) : widget.kind === 'timeline' ? (
+                          <TimelineWidget
+                            widget={widget}
+                            entries={entries}
+                            spec={spec}
+                            schema={schema}
+                          />
+                        ) : (
+                          <ChartWidget
+                            widget={widget}
+                            entries={entries}
+                            spec={spec}
+                            schema={schema}
+                          />
+                        )}
+                        {live && <WidgetSlot id={`slot:${row.id}:${i + 1}`} />}
+                      </React.Fragment>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+              {live && <WidgetSlot id="slot:new-row" wide />}
+            </div>
+          </DndContext>
         )}
       </div>
     </EditContext.Provider>

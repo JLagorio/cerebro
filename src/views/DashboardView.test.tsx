@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { DashboardView } from '@/views/DashboardView';
+import { DashboardView, handleWidgetDragEnd } from '@/views/DashboardView';
+import type { DragEndEvent } from '@dnd-kit/core';
 import { buildSchema } from '@/engine/schema';
 import { parseListYaml } from '@/engine/views';
 import { useUiStore } from '@/stores/uiStore';
@@ -884,5 +885,132 @@ describe('DashboardView edit mode (M44.4)', () => {
     const widget = lastDashboard(onChange).rows[0].widgets[0];
     // Seeded from the embed's List: its first declared field, not `zzz`.
     expect(widget.filter).toMatchObject({ all: [{ field: 'status' }] });
+  });
+});
+
+/**
+ * Cross-row drag-and-drop (M44.4 Task 6). The handler is pure and tested by
+ * synthesizing DragEndEvents directly — the BoardView `handleDragEnd` pattern;
+ * no DOM drag. Slot ids are `slot:<rowId>:<index>` plus one `slot:new-row`
+ * after the last row, globally unique because dnd-kit's droppable registry is
+ * a Map and a duplicate id silently kills a target.
+ */
+describe('handleWidgetDragEnd (M44.4)', () => {
+  const drag = (activeId: string, overId: string | null): DragEndEvent =>
+    ({
+      active: { id: activeId },
+      over: overId === null ? null : { id: overId },
+    }) as unknown as DragEndEvent;
+
+  const twoRowSpec = (): DashboardSpec => ({
+    rows: [
+      { id: 'r1', widgets: [countWidget('a'), countWidget('b')] },
+      { id: 'r2', widgets: [countWidget('c')] },
+    ],
+  });
+
+  const ids = (spec: DashboardSpec) => spec.rows.map((r) => r.widgets.map((w) => w.id));
+
+  it('drops into a slot across rows and commits the moved shape', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    handleWidgetDragEnd(drag('c', 'slot:r1:1'), { spec: twoRowSpec(), commit, toast });
+    expect(toast).not.toHaveBeenCalled();
+    // c lands between a and b; the row it emptied does not survive.
+    expect(ids(commit.mock.calls[0][0] as DashboardSpec)).toEqual([['a', 'c', 'b']]);
+  });
+
+  it('a full row toasts the exact rule sentence and commits nothing', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    const full: DashboardSpec = {
+      rows: [
+        { id: 'full', widgets: ['a', 'b', 'c', 'd'].map(countWidget) },
+        { id: 'r2', widgets: [countWidget('e')] },
+      ],
+    };
+    handleWidgetDragEnd(drag('e', 'slot:full:0'), { spec: full, commit, toast });
+    expect(commit).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('A row holds at most four widgets');
+  });
+
+  it('the end-of-dashboard slot puts the widget alone in a trailing row', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    handleWidgetDragEnd(drag('a', 'slot:new-row'), { spec: twoRowSpec(), commit, toast });
+    expect(ids(commit.mock.calls[0][0] as DashboardSpec)).toEqual([['b'], ['c'], ['a']]);
+  });
+
+  it('no drop target, or one that is not a slot, is a no-op', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    handleWidgetDragEnd(drag('a', null), { spec: twoRowSpec(), commit, toast });
+    // A widget under the pointer is not a target — only slots are.
+    handleWidgetDragEnd(drag('a', 'b'), { spec: twoRowSpec(), commit, toast });
+    expect(commit).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('an identity drop — either slot flanking the widget — commits nothing', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    handleWidgetDragEnd(drag('a', 'slot:r1:0'), { spec: twoRowSpec(), commit, toast });
+    handleWidgetDragEnd(drag('a', 'slot:r1:1'), { spec: twoRowSpec(), commit, toast });
+    // The last lone widget dragged to the trailing strip lands where it
+    // already was — same widget matrix, even though moveToEnd mints a fresh
+    // row id for it.
+    handleWidgetDragEnd(drag('c', 'slot:new-row'), { spec: twoRowSpec(), commit, toast });
+    expect(commit).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('a same-row forward drop lands where the gap was, not one past it', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    const spec: DashboardSpec = { rows: [{ id: 'r1', widgets: ['a', 'b', 'c'].map(countWidget) }] };
+    // Slot 2 is the gap between b and c ON SCREEN (the dragged widget still
+    // counts); remove-then-insert would land one past it unadjusted.
+    handleWidgetDragEnd(drag('a', 'slot:r1:2'), { spec, commit, toast });
+    expect(ids(commit.mock.calls[0][0] as DashboardSpec)).toEqual([['b', 'a', 'c']]);
+  });
+
+  it('an out-of-range slot index clamps to the row end', () => {
+    const commit = vi.fn();
+    const toast = vi.fn();
+    handleWidgetDragEnd(drag('c', 'slot:r1:99'), { spec: twoRowSpec(), commit, toast });
+    expect(ids(commit.mock.calls[0][0] as DashboardSpec)).toEqual([['a', 'b', 'c']]);
+  });
+});
+
+describe('DashboardView drag chrome (M44.4)', () => {
+  it('grips and slots render only in Edit mode', () => {
+    const entries = editVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a'), countWidget('b')])}
+        schema={buildSchema(entries)}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryAllByTestId('widget-grip')).toHaveLength(0);
+    expect(screen.queryAllByTestId('dashboard-slot')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    expect(screen.getAllByTestId('widget-grip')).toHaveLength(2);
+    // One row of two widgets: slots 0..2 inside it, plus the new-row strip.
+    expect(screen.getAllByTestId('dashboard-slot')).toHaveLength(4);
+  });
+
+  it('a read-only host renders neither grips nor slots', () => {
+    const entries = editVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a')])}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.queryAllByTestId('widget-grip')).toHaveLength(0);
+    expect(screen.queryAllByTestId('dashboard-slot')).toHaveLength(0);
   });
 });
