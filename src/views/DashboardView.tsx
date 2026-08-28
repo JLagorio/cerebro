@@ -1,36 +1,84 @@
 import React from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
 import { dashboardNumber, widgetEntries } from '@/engine/dashboard';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
+import { BoardView } from '@/views/BoardView';
+import { ChartView } from '@/views/ChartView';
+import { TableView } from '@/views/TableView';
+import { TimelineView } from '@/views/TimelineView';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { ROW_HEIGHT_DEFAULT } from '@/engine/types';
-import type { DashboardSpec, DashboardWidget, Entry, Presentation, Schema } from '@/engine/types';
+import type {
+  DashboardSpec,
+  DashboardWidget,
+  Entry,
+  ListSource,
+  Presentation,
+  Schema,
+} from '@/engine/types';
 
 /**
- * Dashboard (M16.28; rows of widgets since M44.4) — each widget a saved view
- * or a single number, with four own-scope kinds arriving in M44.4 Task 4.
+ * Dashboard (M16.28; rows of widgets since M44.4) — each widget a saved view,
+ * a single number, or one of the four own-scope layouts (table, board,
+ * timeline, chart).
  *
- * The two block kinds read different data ON PURPOSE, and that is the whole
- * design:
+ * The widget kinds read two different data flows ON PURPOSE, and that is the
+ * whole design:
  *
- * - A NUMBER measures this dashboard's own rows, so the view's filters scope
- *   it. A number that ignored them would be a constant.
  * - A VIEW embeds a saved view from anywhere in the vault, resolved through
  *   `resolveSurface` — the same function the List page calls. That is what a
  *   dashboard is for: several sources on one screen. It stores a REFERENCE,
  *   never a copy, so editing the List updates every dashboard showing it, and
  *   a deleted List produces one honest missing-block tile rather than a stale
  *   duplicate of a query that no longer exists.
+ * - EVERY OTHER KIND reads this dashboard's own rows through `widgetEntries`,
+ *   so the view's filters, the Global filter, and the widget's own filter all
+ *   scope it. A number that ignored them would be a constant; the own-scope
+ *   layouts render the existing view components DIRECTLY over that scoped set
+ *   with a locally composed presentation — never through `resolveSurface`,
+ *   which stays the view-embed's path.
  *
  * A block cannot embed another dashboard. `hasBlocks` is the guard, asked of
  * the kind rather than compared against the string here, so a second
  * block-composed layout is caught by the same check on the day it exists.
  */
+
+/** The dashboard never learns its List's source — only its rows arrive — so
+ * the own-scope widgets' column universe is the union of the types PRESENT in
+ * the scoped rows: `columnUniverse`'s own typeless-List fallback. */
+const OWN_SCOPE_SOURCE: ListSource = { type: null, project: null };
+
+type OwnScopeWidget = Extract<DashboardWidget, { kind: 'table' | 'board' | 'timeline' | 'chart' }>;
+
+/** The widget header's name: the stored title when there is one, else a
+ * computed default per kind — the chart's is its measure, the same words
+ * ChartView itself uses. (`view` and `number` widgets compute theirs from the
+ * embedded List and the aggregation label respectively.) */
+function widgetTitle(widget: OwnScopeWidget): string {
+  if (widget.title !== undefined && widget.title !== '') return widget.title;
+  switch (widget.kind) {
+    case 'table':
+      return 'Table';
+    case 'board':
+      return 'Board';
+    case 'timeline':
+      return 'Timeline';
+    case 'chart':
+      return measureLabel(widget.chart);
+  }
+}
+
+/** Whether an own-scope widget's rows are narrower than the surface's — what
+ * the embedded view's empty state reads to say WHY nothing is here. */
+function widgetFiltered(spec: DashboardSpec, widget: DashboardWidget): boolean {
+  return spec.global !== undefined || widget.filter !== undefined;
+}
 
 export interface DashboardViewProps {
   /** The dashboard view's own rows — filtered and sorted by the caller. */
@@ -134,6 +182,106 @@ function NumberBlock({
           </span>
         )}
       </div>
+    </WidgetShell>
+  );
+}
+
+interface OwnScopeProps<K extends OwnScopeWidget['kind']> {
+  widget: Extract<DashboardWidget, { kind: K }>;
+  entries: Entry[];
+  spec: DashboardSpec;
+  schema: Schema;
+}
+
+function TableWidget({
+  widget,
+  entries,
+  spec,
+  schema,
+  sort,
+}: OwnScopeProps<'table'> & { sort: Presentation['sort'] }) {
+  const scoped = widgetEntries(entries, spec, widget, schema);
+  const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
+  return (
+    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+      <TableView
+        entries={scoped}
+        presentation={{ type: 'table', group: [], sort, columns: [] }}
+        schema={schema}
+        fields={fields}
+        filtered={widgetFiltered(spec, widget)}
+      />
+    </WidgetShell>
+  );
+}
+
+function BoardWidget({ widget, entries, spec, schema }: OwnScopeProps<'board'>) {
+  const scoped = widgetEntries(entries, spec, widget, schema);
+  const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
+  // The stored band, else the first status-kind field of the scoped rows —
+  // the same question `hasStatusField` asks for the seed paths. Neither
+  // resolving is a CONFIGURATION gap, not an empty collection, so the tile
+  // must ask for a band rather than claim there is no data.
+  const band = widget.group ?? fields.find((f) => f.kind === 'status')?.name;
+  if (band === undefined) {
+    return (
+      <BrokenBlock
+        widget={widget}
+        title={widgetTitle(widget)}
+        icon="square-kanban"
+        message="Pick a property to band by in the widget's settings."
+      />
+    );
+  }
+  return (
+    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+      <BoardView
+        entries={scoped}
+        presentation={{ type: 'board', group: [{ field: band }], sort: [], columns: [] }}
+        schema={schema}
+        filtered={widgetFiltered(spec, widget)}
+        scope={`dashboard:${widget.id}`}
+      />
+    </WidgetShell>
+  );
+}
+
+function TimelineWidget({ widget, entries, spec, schema }: OwnScopeProps<'timeline'>) {
+  const scoped = widgetEntries(entries, spec, widget, schema);
+  const fields = columnUniverse(OWN_SCOPE_SOURCE, scoped, schema, []);
+  return (
+    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+      <TimelineView
+        entries={scoped}
+        presentation={{ type: 'timeline', group: [], sort: [], columns: [] }}
+        schema={schema}
+        fields={fields}
+        filtered={widgetFiltered(spec, widget)}
+        scope={`dashboard:${widget.id}`}
+      />
+    </WidgetShell>
+  );
+}
+
+function ChartWidget({ widget, entries, spec, schema }: OwnScopeProps<'chart'>) {
+  const scoped = widgetEntries(entries, spec, widget, schema);
+  return (
+    <WidgetShell widget={widget} title={widgetTitle(widget)} testId="dashboard-block">
+      {/* No `onChartChange`/`onSaveView`: an embedded chart is static by
+          decision. The chart's own typed empty states answer misconfiguration
+          — a group-less widget gets its no-group refusal, not a new one. */}
+      <ChartView
+        entries={scoped}
+        presentation={{
+          type: 'chart',
+          group: widget.group !== undefined ? [{ field: widget.group }] : [],
+          sort: [],
+          columns: [],
+          ...(widget.chart !== undefined ? { chart: widget.chart } : {}),
+        }}
+        schema={schema}
+        filtered={widgetFiltered(spec, widget)}
+      />
     </WidgetShell>
   );
 }
@@ -250,10 +398,40 @@ export function DashboardView({ entries, presentation, schema }: DashboardViewPr
                   />
                 ) : widget.kind === 'view' ? (
                   <ViewBlock key={widget.id} widget={widget} />
-                ) : // The four own-scope kinds (table/board/timeline/chart) render in
-                // M44.4 Task 4; until then a rows-native file simply shows fewer
-                // tiles, and nothing saved before M44.4 can hold one.
-                null,
+                ) : widget.kind === 'table' ? (
+                  <TableWidget
+                    key={widget.id}
+                    widget={widget}
+                    entries={entries}
+                    spec={spec}
+                    schema={schema}
+                    sort={presentation.sort}
+                  />
+                ) : widget.kind === 'board' ? (
+                  <BoardWidget
+                    key={widget.id}
+                    widget={widget}
+                    entries={entries}
+                    spec={spec}
+                    schema={schema}
+                  />
+                ) : widget.kind === 'timeline' ? (
+                  <TimelineWidget
+                    key={widget.id}
+                    widget={widget}
+                    entries={entries}
+                    spec={spec}
+                    schema={schema}
+                  />
+                ) : (
+                  <ChartWidget
+                    key={widget.id}
+                    widget={widget}
+                    entries={entries}
+                    spec={spec}
+                    schema={schema}
+                  />
+                ),
               )}
             </div>
           ))}

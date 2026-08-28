@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { DashboardView } from '@/views/DashboardView';
 import { buildSchema } from '@/engine/schema';
 import { parseListYaml } from '@/engine/views';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import type { Entry, ListFile, Presentation } from '@/engine/types';
+import type { DashboardWidget, Entry, ListFile, Presentation } from '@/engine/types';
 
 /**
  * The dashboard (M16.28).
@@ -294,5 +294,203 @@ describe('DashboardView rows (M44.4)', () => {
     );
     // Two records total, one filtered out by the global rule.
     expect(screen.getByTestId('dashboard-number').getAttribute('data-value')).toBe('1');
+  });
+});
+
+/**
+ * The four own-scope widget kinds (M44.4 Task 4): table, board, timeline,
+ * chart. Each renders the EXISTING view component directly over
+ * `widgetEntries(entries, spec, widget, schema)` — the dashboard's own rows
+ * through the Global filter through the widget's own — with a locally
+ * composed presentation. `resolveSurface` stays the view-embed's path.
+ */
+const ownVault = (): Entry[] => [
+  makeEntry({
+    path: 'types/work-item.md',
+    title: 'Work item',
+    type: 'Type',
+    properties: {
+      fields: { status: { kind: 'status' }, estimate: { kind: 'number' }, due: { kind: 'date' } },
+      statuses: [
+        { id: 'todo', group: 'active', color: 'blue' },
+        { id: 'doing', group: 'active', color: 'green' },
+      ],
+    } as unknown as Entry['properties'],
+  }),
+  makeEntry({
+    path: 'items/a.md',
+    title: 'Alpha',
+    type: 'Work item',
+    properties: { status: 'todo', estimate: 3, due: '2026-08-20' },
+  }),
+  makeEntry({
+    path: 'items/b.md',
+    title: 'Beta',
+    type: 'Work item',
+    properties: { status: 'doing', estimate: 5, due: '2026-08-22' },
+  }),
+];
+
+const oneWidget = (widget: DashboardWidget): Presentation =>
+  rowsPresentation({ rows: [{ id: 'row-1', widgets: [widget] }] });
+
+describe('DashboardView own-scope widgets (M44.4)', () => {
+  it("a table widget lists the dashboard's own rows through its filter", () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({
+          id: 't',
+          kind: 'table',
+          filter: { all: [{ field: 'status', op: 'equals', value: 'doing' }] },
+        })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-t');
+    expect(widget.querySelector('[data-testid="table-view"]')).toBeTruthy();
+    // The filter narrows to Beta; Alpha is in the view's rows but not the widget's.
+    expect(within(widget).getByText('Beta')).toBeTruthy();
+    expect(within(widget).queryByText('Alpha')).toBeNull();
+  });
+
+  it('a board widget bands by its group field', () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({ id: 'bd', kind: 'board', group: 'status' })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-bd');
+    expect(widget.querySelector('[data-testid="board-view"]')).toBeTruthy();
+    expect(within(widget).getAllByTestId('board-column')).toHaveLength(2);
+    expect(within(widget).getByText('Alpha')).toBeTruthy();
+    expect(within(widget).getByText('Beta')).toBeTruthy();
+  });
+
+  it('a board widget with no group bands by the first status-kind field', () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({ id: 'bd', kind: 'board' })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(
+      screen.getByTestId('widget-bd').querySelector('[data-testid="board-view"]'),
+    ).toBeTruthy();
+  });
+
+  it('a board widget with no resolvable band asks for configuration, not "no data"', () => {
+    // No status-kind field anywhere: the vault() fixture's Type is absent and
+    // the records carry only plain text properties.
+    const entries: Entry[] = [
+      makeEntry({ path: 'items/a.md', title: 'Alpha', type: null, properties: { note: 'x' } }),
+    ];
+    render(
+      <DashboardView
+        entries={entries}
+        presentation={oneWidget({ id: 'bd', kind: 'board' })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-bd');
+    expect(widget.querySelector('[data-testid="board-view"]')).toBeNull();
+    expect(
+      within(widget).getByText("Pick a property to band by in the widget's settings."),
+    ).toBeTruthy();
+  });
+
+  it('a timeline widget renders read-only', () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({ id: 'tl', kind: 'timeline' })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-tl');
+    const timeline = widget.querySelector('[data-testid="timeline-view"]');
+    expect(timeline).toBeTruthy();
+    // The scoped rows carry a date-kind field, so the timeline places bars —
+    // it did not fall into its "nothing here carries a date" state.
+    expect(timeline?.getAttribute('data-date-field')).toBe('due');
+  });
+
+  it('a chart widget draws with its own spec, horizontal included', () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({
+          id: 'ch',
+          kind: 'chart',
+          group: 'status',
+          chart: { horizontal: true },
+        })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const widget = screen.getByTestId('widget-ch');
+    const chart = widget.querySelector('[data-testid="chart-view"]');
+    expect(chart).toBeTruthy();
+    expect(chart?.getAttribute('data-chart-kind')).toBe('bar');
+    expect(widget.querySelector('[data-testid="chart-empty"]')).toBeNull();
+  });
+
+  it("a chart widget with no group shows the chart's own no-group refusal", () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneWidget({ id: 'ch', kind: 'chart' })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    const empty = screen.getByTestId('widget-ch').querySelector('[data-testid="chart-empty"]');
+    expect(empty).toBeTruthy();
+    expect(empty?.getAttribute('data-reason')).toBe('no-group');
+  });
+
+  it("every widget's title computes per kind, and an override wins", () => {
+    const entries = ownVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={rowsPresentation({
+          rows: [
+            {
+              id: 'row-1',
+              widgets: [
+                { id: 't', kind: 'table' },
+                { id: 'tl', kind: 'timeline' },
+                {
+                  id: 'ch',
+                  kind: 'chart',
+                  group: 'status',
+                  chart: { agg: 'sum', value: 'estimate' },
+                },
+                { id: 'bd', kind: 'board', group: 'status', title: 'My board' },
+              ],
+            },
+          ],
+        })}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(within(screen.getByTestId('widget-t')).getByText('Table')).toBeTruthy();
+    expect(within(screen.getByTestId('widget-tl')).getByText('Timeline')).toBeTruthy();
+    // The chart's computed title is its measure, the same words ChartView
+    // uses — which is why this reads the HEADER, not the whole tile: the
+    // chart's own axis repeats them.
+    const chartHeader = screen.getByTestId('widget-ch').querySelector('header');
+    expect(chartHeader?.textContent).toContain('Sum of Estimate');
+    expect(within(screen.getByTestId('widget-bd')).getByText('My board')).toBeTruthy();
+    expect(within(screen.getByTestId('widget-bd')).queryByText('Board')).toBeNull();
   });
 });
