@@ -613,6 +613,96 @@ describe('computeChart stacks and hides (M44.3)', () => {
     // And total stays the real (pre-cumulative) sum, as it always has.
     expect(data.total).toBe(14);
   });
+
+  // Decision A (M44.3): a cumulative stack never dips. A band that lacks a
+  // series carries that series' run forward as a synthesized plateau part —
+  // count 0, because no rows arrived there; the height is the run persisting —
+  // so every band's stack is the sum of all visible series' runs, monotonic
+  // non-decreasing.
+  it('cumulative synthesizes a plateau for a series a band lacks, so the stack never dips', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high' },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'low' },
+      }),
+      // Doing holds no rows at all; Done holds only the high series.
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'done', priority: 'high' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', cumulative: true } }),
+      buildSchema(entries),
+    );
+    // The empty middle band is all plateau: its stack equals the previous
+    // band's stack, and both series' segments are present with count 0.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 1, 0],
+      ['low', 1, 0],
+    ]);
+    // Done adds a high row (count 1) while low plateaus at its run (count 0).
+    const done = data.slices.find((s) => s.key === 'done');
+    expect(done?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 2, 1],
+      ['low', 1, 0],
+    ]);
+    // Stacks: 2, 2 (plateau), 3 — monotonic, and band value = stack.
+    expect(data.slices.map((s) => s.value)).toEqual([2, 2, 3]);
+    // A plateau's display is formatted from the run, like any other segment.
+    expect(done?.parts?.find((p) => p.key === 'low')?.display).toBe('1');
+  });
+
+  it('no plateau before a series first appears — a zero run is absence, not zero', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high' },
+      }),
+      // The low series begins in Doing; Todo must not synthesize it.
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'high' },
+      }),
+      makeEntry({
+        path: 'items/d.md',
+        title: 'D',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'low' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', cumulative: true } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => p.key)).toEqual(['high']);
+    expect(todo?.value).toBe(1);
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 2],
+      ['low', 1],
+    ]);
+  });
 });
 
 /**

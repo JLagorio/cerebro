@@ -271,6 +271,9 @@ export function computeChart(
   // The second dimension. A donut ignores it — a stacked ring reads as
   // nothing — and a number chart returned above; it has no bands to split.
   const series: ChartRosterItem[] = [];
+  // Ghost-ness by series key, for the plateau parts the cumulative pass
+  // synthesizes below — the roster itself does not carry it.
+  const seriesGhost = new Map<string, boolean>();
   const groupBy = chart?.groupBy;
   if (groupBy !== undefined && kind !== 'donut') {
     const hiddenSeries = new Set(chart?.hiddenG ?? []);
@@ -291,6 +294,7 @@ export function computeChart(
         if (seriesHue.has(sub.key)) continue;
         const hue = series.length;
         seriesHue.set(sub.key, hue);
+        seriesGhost.set(sub.key, sub.ghost);
         series.push({
           key: sub.key,
           label: sub.label,
@@ -350,8 +354,7 @@ export function computeChart(
   // visible bands only: what the eye adds up is what the line draws. A
   // stacked run cumulates PER SERIES — each segment becomes its own series'
   // running total at that band, so the stack's height is the cumulated band
-  // total and every segment stays honest. A series absent from a band draws
-  // no segment there; its run resumes where it next appears.
+  // total and every segment stays honest.
   if (chart?.cumulative === true && kind !== 'donut') {
     let run = 0;
     const seriesRun = new Map<string, number>();
@@ -363,6 +366,32 @@ export function computeChart(
           p.value = r;
           p.display = def === null ? String(r) : formatNumber(r, def);
         }
+        // A band that lacks a series must not dip the stack: the run is
+        // carried forward as a synthesized plateau part — `count: 0`, because
+        // no rows arrived here; the height is the run persisting — so every
+        // band's stack is the sum of all visible series' runs, monotonic
+        // non-decreasing. Only a series already begun gets one: before its
+        // first value a zero run is absence, and absent is never zero.
+        for (const item of series) {
+          if (item.hidden) continue;
+          const r = seriesRun.get(item.key) ?? 0;
+          if (r === 0) continue;
+          if (s.parts.some((p) => p.key === item.key)) continue;
+          s.parts.push({
+            key: item.key,
+            label: item.label,
+            color: item.color,
+            ghost: seriesGhost.get(item.key) ?? false,
+            count: 0,
+            value: r,
+            display: def === null ? String(r) : formatNumber(r, def),
+            hue: item.hue,
+          });
+        }
+        // A plateau must sit at its series' own stack level, so under
+        // cumulative the parts order by hue — for declared options that IS
+        // the per-band order they already had.
+        s.parts.sort((a, b) => a.hue - b.hue);
         s.value = s.parts.reduce((sum, p) => sum + p.value, 0);
         s.display = def === null ? String(s.value) : formatNumber(s.value, def);
       } else {
