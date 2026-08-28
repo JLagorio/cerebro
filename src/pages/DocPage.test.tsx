@@ -74,12 +74,37 @@ describe('DocPage', () => {
     const TYPE_DOC = 'types/work-item.md';
     const DOC_UNTYPED = 'inbox/welcome.md';
 
+    // M45.2 amendment (docs/superpowers/plans/2026-08-28-m45.2-layout-editor-shell.md
+    // Task 5): the strip needs SAVED tabs now, so the fixture declares them —
+    // the case keeps asserting that a record page shows its type's tabs.
     it("a record page shows its type tabs, and Overview is today's layout (M44.5)", async () => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(
+          '\n---\n',
+          '\ntabs:\n  - { id: overview, name: Overview, content: overview }\n---\n',
+        ),
+      );
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.getByTestId('record-tabs')).toBeTruthy();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+    });
+
+    // M45.2 (docs/superpowers/plans/2026-08-28-m45.2-layout-editor-shell.md
+    // Task 5): Simple means NO strip — a type that declares no `tabs:` renders
+    // no strip at all; the synthesized Overview drives only the content swap.
+    it('a type with no saved tabs renders no strip (M45.2)', async () => {
       const entries = useVaultStore.getState().entries;
       const record = entries.find((e) => e.type === 'Work item');
       if (record === undefined) throw new Error('fixture vault has no Work item');
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
-      expect(screen.getByTestId('record-tabs')).toBeTruthy();
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+      // The synthesized Overview still runs the canvas: properties render.
       expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 

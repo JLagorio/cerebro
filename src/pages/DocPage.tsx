@@ -208,6 +208,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // `selection.tab` — a tab deleted while history still names it — falls back
   // to the first tab rather than rendering nothing.
   const tabs = record && entry !== null && entry.type !== null ? typeTabs(entry.type, schema) : [];
+  // M45.2 (spec §3.5): Simple means NO strip — the strip mounts only on SAVED
+  // tabs, while the content swap keeps consuming `typeTabs` so the synthesized
+  // Overview still drives the canvas.
+  const savedTabs =
+    record && entry !== null && entry.type !== null
+      ? (schema.types.get(entry.type)?.tabs ?? [])
+      : [];
   const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
 
   // Whether the canvas is rendering the body editor at all. The reset below
@@ -675,8 +682,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
           {/* M44.5 — the tab strip is a flex-none sibling ABOVE the scroll
               container: it survives the diffOpen canvas swap and stays out of
-              the 820px content measure. */}
-          {tabs.length > 0 && (
+              the 820px content measure. M45.2 gates it on SAVED tabs: the
+              synthesized Overview renders content, never a one-tab strip. */}
+          {savedTabs.length > 0 && (
             <RecordTabs
               tabs={tabs}
               activeId={activeTab?.id ?? tabs[0].id}
