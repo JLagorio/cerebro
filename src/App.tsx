@@ -11,6 +11,7 @@ import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog'
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
 import { AgentsPage } from '@/pages/AgentsPage';
 import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
@@ -422,6 +423,9 @@ function App() {
         />
       )}
       <QuickOpen />
+      {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
+          and this single App-level dialog is the only reader. */}
+      <LayoutEditorDialog />
       <ToastHost />
       <RemindersHost />
       <CheckpointHost />

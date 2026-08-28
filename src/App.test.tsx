@@ -294,6 +294,19 @@ describe('App boot flow', () => {
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
   });
 
+  // M45.2 — one mount, one signal: the layout editor lives beside the other
+  // global overlays and only the uiStore signal raises it.
+  it('mounts the layout editor at the root, driven by the signal', async () => {
+    vi.mocked(ipc.scanVault).mockResolvedValueOnce(fixtureVault());
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    expect(screen.queryByTestId('layout-editor')).toBeNull();
+    act(() => useUiStore.getState().openLayoutEditor('Work item'));
+    expect(screen.getByTestId('layout-editor')).toBeTruthy();
+    act(() => useUiStore.getState().closeLayoutEditor());
+    expect(screen.queryByTestId('layout-editor')).toBeNull();
+  });
+
   // M3.5: "New project" is gone — the sidebar's + builds a saved view, and a
   // project is one of those (Work items scoped to a folder).
   // M10: the sidebar + names a Collection — the container — rather than
