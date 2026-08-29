@@ -7,9 +7,9 @@ import { Input } from '@/components/ui/Input';
 import { MenuBack, MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
-import { draftRoster, overlayVisibility } from '@/detail/LayoutCanvas';
+import { draftRoster, overlayVisibility, stageNewSection } from '@/detail/LayoutCanvas';
 import { VISIBILITIES } from '@/detail/PropertyMenu';
-import { addGroup, moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
+import { moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
 import { resolveLayout } from '@/engine/layout';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
@@ -201,16 +201,10 @@ export function GroupEditorPopover({
     setMenuFor(null);
   };
 
-  const addSection = () => {
-    const minted = addGroup(
-      draft.layout,
-      draft.layout.groups.map((g) => g.id),
-    );
-    update({ layout: minted.layout });
-    // Open the fresh group's editor — addGroup reports its id for exactly
-    // this hand-off; the canvas remounts us keyed by the new container.
-    onOpenGroup(minted.id);
-  };
+  // The staging lives with the canvas's + button (M45.5 Task 3): two doors,
+  // one editor. `onOpenGroup` is the hand-off addGroup reports its id for —
+  // the canvas remounts us keyed by the new container.
+  const addSection = () => stageNewSection(draft, update, onOpenGroup);
 
   const eyeRow = (f: FieldDef) => {
     const label = humanize(f.name);

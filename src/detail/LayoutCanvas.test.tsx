@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { handleLayoutDragEnd } from '@/detail/LayoutCanvas';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
@@ -424,5 +425,85 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
     // ShellEmptyHint no longer repeats the label — the shell header carries it.
     expect(within(heading).getAllByText('Heading')).toHaveLength(1);
     expect(heading.textContent).toContain('No properties yet');
+  });
+});
+
+// M45.5 Task 3 — Notion's circular + below the last block. It walks the SAME
+// staging the popover footer's "Add section" walks (two doors, one editor),
+// so the assertions are the popover suite's: the fresh shell stands, its
+// editor opens on it, and Apply carries the group.
+describe('the add-section button (M45.5 Task 3)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  const addButton = () => screen.getByRole('button', { name: 'Add section' });
+  const blocks = () =>
+    screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+
+  it('stages a group into the draft and opens ITS editor', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(addButton());
+    // The fresh shell stands …
+    expect(blocks()).toContain('group-1');
+    // … and the editor opened on the NEW group, rename box ready.
+    const name = within(screen.getByTestId('group-editor')).getByRole('textbox', {
+      name: 'Section name',
+    });
+    expect((name as HTMLInputElement).value).toBe('New group');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    // Staged, not written, until Apply.
+    fireEvent.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    expect((patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout).toEqual({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Planning', fields: ['priority'] },
+        { id: 'group-1', name: 'New group', fields: [] },
+      ],
+    });
+  });
+
+  it('mints past the ids the draft already took', async () => {
+    const user = userEvent.setup();
+    setup([
+      typeDoc({
+        heading: [],
+        groups: [
+          { id: 'group-1', name: 'One', fields: [] },
+          { id: 'group-3', name: 'Three', fields: [] },
+        ],
+      }),
+      RECORD,
+    ]);
+    await user.click(addButton());
+    // mintGroupId fills the hole rather than appending group-4.
+    expect(blocks()).toContain('group-2');
+  });
+
+  it('is a real button, keyboard reachable, standing after the last group slot', async () => {
+    const user = userEvent.setup();
+    setup();
+    const btn = addButton();
+    expect(btn.tagName).toBe('BUTTON');
+    // Between the last block slot and the rest shell — Notion's position.
+    const lastSlot = bySlot('groupslot:1');
+    const rest = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'rest');
+    if (lastSlot === null || rest === undefined) throw new Error('canvas anatomy missing');
+    expect(lastSlot.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(btn.compareDocumentPosition(rest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // A real button activates on Enter — the whole reason it is not a div.
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+    await user.keyboard('{Enter}');
+    expect(blocks()).toContain('group-1');
   });
 });

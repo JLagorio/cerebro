@@ -17,7 +17,7 @@ import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { resolveLayout } from '@/engine/layout';
-import { moveField, moveGroup } from '@/engine/layoutEdit';
+import { addGroup, moveField, moveGroup } from '@/engine/layoutEdit';
 import { foldsWhenUnset, splitByVisibility } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import type { Entry, FieldDef, LayoutConfig, Schema, TabDef, TypeDef } from '@/engine/types';
@@ -70,6 +70,27 @@ export function draftRoster(fields: FieldDef[], added: TypeLayoutDraft['added'])
     ...fields,
     ...added.map((a) => ({ ...a.config, name: a.name, kind: a.kind }) as FieldDef),
   ];
+}
+
+/**
+ * Add section's ONE staging, shared by the canvas's + button and the group
+ * editor's footer entry (M45.5 Task 3 — two doors, one editor, so the doors
+ * cannot drift): mint against EVERY draft group id (mintGroupId's contract),
+ * append, and hand the minted id to whoever opens editors. Exported here
+ * rather than beside `addGroup` because the door it feeds is a UI door: the
+ * engine editor stays roster-blind and draft-blind.
+ */
+export function stageNewSection(
+  draft: TypeLayoutDraft,
+  update: (patch: Partial<TypeLayoutDraft>) => void,
+  openEditor: (id: string) => void,
+): void {
+  const minted = addGroup(
+    draft.layout,
+    draft.layout.groups.map((g) => g.id),
+  );
+  update({ layout: minted.layout });
+  openEditor(minted.id);
 }
 
 /**
@@ -368,6 +389,24 @@ export function LayoutCanvas({
               );
             })}
             <DropSlot id={`groupslot:${previewLayout.groups.length}`} size="block" />
+            {/* Notion's circular + below the last block (M45.5 Task 3), the
+                canvas door onto the same staging the group editor's footer
+                entry walks — two doors, one editor, one `stageNewSection`.
+                A real <button>, so Tab reaches it and Enter fires it; the
+                cortex fill is AddPropertyPanel's primary idiom verbatim,
+                hover included (its cortex-600 dark base is a recorded DS
+                debt — the 700 hover is what keeps it legible there). */}
+            <div className="flex justify-center pb-3">
+              <button
+                type="button"
+                aria-label="Add section"
+                data-testid="layout-add-section"
+                onClick={() => stageNewSection(draft, update, setEditing)}
+                className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-n-0 hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+              >
+                <Icon name="plus" size={16} />
+              </button>
+            </div>
             {/* Rest LAST and headerless, RecordProperties' own order.
                 Its shell says "Properties" — the block's Notion name,
                 since headerless content has no label of its own. */}
