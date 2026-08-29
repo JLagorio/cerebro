@@ -21,6 +21,7 @@
 // comparison here. viewKinds is pure capability data over engine types (no
 // React), so the edge carries no UI into the engine.
 import { hasBlocks } from '@/views/viewKinds';
+import { isLibraryType } from './library';
 import type {
   Entry,
   FieldDef,
@@ -152,6 +153,13 @@ export function resolveViewTab(
   let surface: Surface;
 
   if ('type' in source) {
+    // A library type (Skill/Agent) is excluded from listTypes by M18 doctrine
+    // — it EXISTS but was never a database, so "no longer in the vault" would
+    // claim a history it never had. Checked first: the membership test below
+    // can only mourn it.
+    if (isLibraryType(source.type)) {
+      return broken(`“${source.type}” is a library type — it doesn’t hold database records.`);
+    }
     // Alive = the catalog lists it: declared types, system types, and ghost
     // types records still reference — the same membership the picker offers.
     if (!listTypes(entries, schema).some((t) => t.name === source.type)) {
@@ -160,6 +168,9 @@ export function resolveViewTab(
       );
     }
     const tabs = typeViews(source.type, schema);
+    // This pick has a twin in resolveSurface's type arm; viewTab.test.ts pins
+    // their agreement on a dead view id, so a lone fallback change fails
+    // loudly there instead of shipping a label that contradicts its rows.
     active = (tab.view != null ? tabs.find((v) => v.id === tab.view) : undefined) ?? tabs[0];
     sourceName = source.type;
     sourceType = source.type;
@@ -182,6 +193,9 @@ export function resolveViewTab(
         `This tab points at a list called “${source.list}” that is no longer in the vault.`,
       );
     }
+    // resolveSurface's list arm repeats this resolveView call on the same
+    // input; viewTab.test.ts pins the agreement on a dead view id, so a lone
+    // fallback change fails loudly instead of splitting label from rows.
     active = resolveView(list.definition, tab.view);
     sourceName = list.definition.name;
     sourceType = list.definition.source.type;

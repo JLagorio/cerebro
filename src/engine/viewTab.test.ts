@@ -245,6 +245,108 @@ describe('resolveViewTab', () => {
     });
   });
 
+  it('a library type is named for what it is, not mourned as deleted', () => {
+    const { entries, schema, host } = setup();
+    // Skill/Agent exist as files but are excluded from listTypes by M18
+    // doctrine — "no longer in the vault" would overclaim a history the type
+    // never had. The sentence must say what is true instead.
+    const res = resolveViewTab(viewTab({ source: { type: 'Agent' } }), host, entries, schema, []);
+    expect(res).toEqual({
+      kind: 'broken',
+      reason: '“Agent” is a library type — it doesn’t hold database records.',
+    });
+    const skill = resolveViewTab(viewTab({ source: { type: 'Skill' } }), host, entries, schema, []);
+    expect(skill.kind).toBe('broken');
+    if (skill.kind !== 'broken') return;
+    expect(skill.reason).toBe('“Skill” is a library type — it doesn’t hold database records.');
+  });
+
+  it('a dead view id on a TYPE source falls back in agreement — both picks land on the first view', () => {
+    // The pick (`find ?? first`) is computed in resolveViewTab AND again
+    // inside resolveSurface's type arm: hasBlocks/filtered/sourceLabel come
+    // from one copy, the rows and presentation from the other. This test
+    // pins the AGREEMENT: with a dead view id, all five facts must come from
+    // the FIRST saved view — if either fallback changes alone, it fails here
+    // instead of silently shipping a label that contradicts its rows.
+    const entries = fixture().map((e) =>
+      e.path === 'types/task.md'
+        ? {
+            ...e,
+            properties: {
+              ...(e.properties as Record<string, unknown>),
+              views: [
+                {
+                  id: 'atlas-board',
+                  name: 'Atlas board',
+                  filters: {
+                    all: [{ field: 'project', op: 'any_of', value: ['atlas', 'Atlas'] }],
+                  },
+                  presentation: { type: 'board' },
+                },
+                { id: 'plain', name: 'Plain', presentation: { type: 'table' } },
+              ],
+            } as never,
+          }
+        : e,
+    );
+    const schema = buildSchema(entries);
+    const host = entries.find((e) => e.path === 'projects/atlas.md')!;
+    const res = resolveViewTab(
+      viewTab({ source: { type: 'Task' }, view: 'ghost' }),
+      host,
+      entries,
+      schema,
+      [],
+    );
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    // viewTab's copy fell to the first view (label + filtered judged there)…
+    expect(res.sourceLabel).toBe('Task · Atlas board');
+    expect(res.filtered).toBe(true);
+    // …and resolveSurface's copy fell to the SAME view: its presentation and
+    // its filters shaped the surface. A second-view fallback in either copy
+    // would render a table labeled Board, or unfiltered rows called filtered.
+    expect(res.surface.presentation.type).toBe('board');
+    expect(res.surface.entries.map((e) => e.path).sort()).toEqual(['tasks/t1.md', 'tasks/t2.md']);
+  });
+
+  it('a dead view id on a LIST source falls back in agreement — both picks land on the first view', () => {
+    // Same pin as the type arm: resolveViewTab calls resolveView itself and
+    // resolveSurface's list arm calls it again — two picks over one input.
+    const { entries, schema, host } = setup();
+    const list = makeList({
+      views: [
+        {
+          id: 'atlas-board',
+          name: 'Atlas board',
+          icon: null,
+          filters: { all: [{ field: 'project', op: 'any_of', value: ['atlas', 'Atlas'] }] },
+          presentation: { type: 'board', group: [], sort: [], columns: [] },
+        },
+        {
+          id: 'plain',
+          name: 'Plain',
+          icon: null,
+          filters: null,
+          presentation: { type: 'table', group: [], sort: [], columns: [] },
+        },
+      ],
+    });
+    const res = resolveViewTab(
+      viewTab({ source: { list: 'work', collection: null }, view: 'ghost' }),
+      host,
+      entries,
+      schema,
+      [list],
+    );
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.sourceLabel).toBe('Work · Atlas board');
+    expect(res.filtered).toBe(true);
+    expect(res.surface.presentation.type).toBe('board');
+    expect(res.surface.entries.map((e) => e.path).sort()).toEqual(['tasks/t1.md', 'tasks/t2.md']);
+  });
+
   it('refuses a dashboard source — a record tab cannot show one', () => {
     const { entries, schema, host } = setup();
     const list = makeList({
