@@ -183,3 +183,127 @@ test('layout editor: strip to vault bytes, inert preview, and the eye folds the 
   expect(estimateBlock).toContain('kind: select');
   expect(estimateBlock).toContain('visibility: hide');
 });
+
+/**
+ * M45.5 — the two headline parity defects, live browser to vault bytes.
+ *
+ * Epic is the corpus type wearing `tabs:` (Overview + the M45.4 "Work items"
+ * view), so the editor's strip has something real to edit; Work item, the
+ * other spec's subject, is tabless and would only ever render the Simple
+ * canvas. `view-tabs.spec.ts` opens Epic too, but as a full PAGE and without
+ * writing its Type doc, so the two never see each other's state.
+ *
+ * Three claims only a real browser can make:
+ *
+ * 1. Defect 2 — the zone boundaries are PERSISTENT. jsdom can read a class
+ *    list; it cannot tell you what the pixel does, and `toBeVisible` alone
+ *    would have passed on the old `opacity-0` chip just as happily (Playwright
+ *    counts a transparent element as visible). The assertion is the COMPUTED
+ *    opacity with the pointer parked off the canvas, plus a real border width
+ *    on the block — the two halves of "visible without hover".
+ * 2. Defect 1 — heading first, tabs second. The user's words were "tabs are on
+ *    top"; the DOM order of the block shells is that sentence's negation.
+ * 3. Defects 1 and 3 to the disk: rename a tab IN the editor's strip and mint
+ *    a section with the + button, and one Apply later the Type doc's own bytes
+ *    carry both. Every joint is covered in jsdom; only this covers the chain —
+ *    two different draft slices (`tabs` and `layout.groups`) staged through
+ *    the same door and landing in one atomic write.
+ */
+test('layout editor: the strip renames a tab, the + mints a section, both land in the bytes', async ({
+  page,
+}) => {
+  await boot(page);
+
+  // -- Open an Epic in the record panel --------------------------------
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Epic' }).first().click();
+  const row = page.getByTestId('table-row').first();
+  await row.hover();
+  await row.getByRole('button', { name: /^Open / }).click();
+  const panel = page.getByTestId('detail-panel');
+  await expect(panel).toBeVisible();
+
+  // -- ⋯ → Customize layout raises the fullscreen editor ---------------
+  await panel.getByRole('button', { name: 'Record actions' }).click();
+  await page.getByTestId('record-customize-layout').click();
+  const editor = page.getByTestId('layout-editor');
+  await expect(editor).toBeVisible();
+  const preview = page.getByTestId('layout-preview');
+
+  // -- Defect 2: every zone is bounded and named, with nothing hovered --
+  // Park the pointer in the dialog's corner first — the press that opened
+  // the editor left it wherever that menu item was, which may well be over a
+  // block, and a hover would make the assertion vacuous.
+  await page.mouse.move(0, 0);
+  const tabsBlock = preview.locator('[data-block="tabs"]');
+  await expect(tabsBlock).toHaveCSS('border-top-width', '1px');
+  await expect(tabsBlock).toHaveCSS('border-top-style', 'solid');
+  const tabsLabel = tabsBlock.getByTestId('layout-block-label');
+  await expect(tabsLabel).toHaveText('Tabs');
+  await expect(tabsLabel).toHaveCSS('opacity', '1');
+  // Not the tabs shell alone — the heading's chip rode the same opacity-0.
+  await expect(
+    preview.locator('[data-block="heading"]').getByTestId('layout-block-label'),
+  ).toHaveCSS('opacity', '1');
+
+  // -- Defect 1a: heading first, tabs second (Notion's order) ----------
+  const order = await preview
+    .getByTestId('layout-block')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-block')));
+  expect(order.slice(0, 2)).toEqual(['heading', 'tabs']);
+
+  // -- Defect 1b: the strip EDITS — rename Overview in place -----------
+  const strip = preview.getByTestId('record-tabs');
+  const overview = strip.getByTestId('record-tab-overview');
+  await expect(overview).toHaveText('Overview');
+  // Pressing the tab you are standing on opens its menu — the strip's own
+  // idiom, unchanged inside the canvas.
+  await overview.click();
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
+  const tabName = strip.getByRole('textbox', { name: 'Tab name' });
+  await tabName.fill('Summary');
+  // Enter blurs the input, and the blur is what commits (RenameTab). A
+  // synthetic blur event would not fire React's handler; a real key press
+  // through a real input does.
+  await tabName.press('Enter');
+  await expect(overview).toHaveText('Summary');
+
+  // -- Defect 3: the + button mints a section and opens its editor -----
+  await preview.getByTestId('layout-add-section').click();
+  const groupEditor = page.getByTestId('group-editor');
+  await expect(groupEditor).toBeVisible();
+  const sectionName = groupEditor.getByRole('textbox', { name: 'Section name' });
+  await expect(sectionName).toHaveValue('New group');
+  await sectionName.fill('Delivery');
+  await sectionName.press('Enter');
+  // The canvas grew a bordered zone wearing the new name.
+  await expect(
+    preview.getByTestId('layout-block-label').filter({ hasText: 'Delivery' }),
+  ).toBeVisible();
+
+  // -- Nothing has been written yet ------------------------------------
+  const before = await readMockFile(page, 'types/epic.md');
+  expect(before).toContain('name: Overview');
+  expect(before).not.toContain('Delivery');
+
+  // -- Apply lands the whole draft in one write ------------------------
+  // The group editor is still open; the press reaches Apply through its
+  // dismiss, the same mechanics the first spec rides.
+  await page.getByTestId('layout-apply').click();
+  await expect(editor).toHaveCount(0);
+
+  // -- The Type doc's bytes carry the rename AND the new section -------
+  const typeDoc = await readMockFile(page, 'types/epic.md');
+  // The rename is a NAME edit: the id the records' section content hangs
+  // off is untouched, and the sibling view tab is still there.
+  expect(typeDoc).toContain('name: Summary');
+  expect(typeDoc).not.toContain('name: Overview');
+  expect(typeDoc).toContain('id: overview');
+  expect(typeDoc).toContain('id: work-items');
+  // The minted section: a group under `layout:`, empty because nothing was
+  // put in it — which is what "add a section" alone means. Scoped to the
+  // layout block first, so a `name:` from the tab list can never stand in
+  // for the group's (the capture guard the eye assertion above uses).
+  const layoutBlock = typeDoc.match(/\nlayout:\n((?: {2,}.*\n)*)/)?.[1] ?? '';
+  expect(layoutBlock).toContain('groups:');
+  expect(layoutBlock).toContain('name: Delivery');
+});
