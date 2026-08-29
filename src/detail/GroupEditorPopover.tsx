@@ -187,8 +187,10 @@ export function GroupEditorPopover({
 
   /** Discard a staged addition. The sweep is threefold (review obligation):
    * the `added` entry, every layout pointer — Apply must never persist a
-   * dead pointer — and any staged eye, which names a field Apply would just
-   * drop. A full sweep leaves the draft exactly as the add found it. */
+   * dead pointer — and any staged eye: an eye on a KEPT addition lands in
+   * the write (M45.3), so one left aimed at a discarded name would be a
+   * dead delta Apply silently drops. A full sweep leaves the draft exactly
+   * as the add found it. */
   const discardNew = (name: string) => {
     const { [name]: _dropped, ...visibility } = draft.visibility;
     update({

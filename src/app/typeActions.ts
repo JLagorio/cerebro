@@ -676,11 +676,21 @@ export async function applyTypeLayout(
     staged.push([name, serializeFields([def])[name]]);
   }
 
+  // The staged additions merge in BEFORE the visibility walk (M45.3): the
+  // walk only sees fields the mapping declares, so merging after it silently
+  // dropped a staged eye on a staged-added field — the canvas previewed it
+  // folded while the vault wrote it visible. Appends land last, so the
+  // declaration-order pin below survives the reorder.
+  let touched = false;
+  for (const [name, spec] of staged) {
+    fields[name] = spec;
+    touched = true;
+  }
+
   // Merge visibility deltas onto the RAW mapping (the setFieldConfig idiom):
   // never rebuilt from FieldDef, so a hand-edited vault's unmodeled keys
-  // survive byte-for-byte. A delta for a field the doc no longer declares is
-  // dropped — placing a visibility must never DECLARE a field.
-  let touched = false;
+  // survive byte-for-byte. A delta for a field neither the doc nor the draft
+  // declares is dropped — placing a visibility must never DECLARE a field.
   for (const [rawName, vis] of Object.entries(draft.visibility)) {
     const actual = Object.keys(fields).find((k) => k.toLowerCase() === rawName.toLowerCase());
     if (actual === undefined) continue;
@@ -701,10 +711,6 @@ export async function applyTypeLayout(
       spec.visibility = vis;
       fields[actual] = spec;
     }
-    touched = true;
-  }
-  for (const [name, spec] of staged) {
-    fields[name] = spec;
     touched = true;
   }
 

@@ -441,6 +441,19 @@ describe('applyTypeLayout (M45.1)', () => {
     expect(toasts).toEqual(['Property already exists', 'Property already exists']);
   });
 
+  // The additions merge in BEFORE the visibility walk (M45.3): a staged eye
+  // on a staged-added field must land, not silently drop — the canvas
+  // previewed it folded, so the vault has to write what the preview showed.
+  it('a staged eye on a staged-added field survives Apply', async () => {
+    const draft = blank();
+    draft.added = [{ name: 'estimate', kind: 'number' }];
+    draft.visibility = { estimate: 'hide' };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches[0].patch.fields).toMatchObject({
+      estimate: { kind: 'number', visibility: 'hide' },
+    });
+  });
+
   it('drops a staged visibility for a field the doc no longer declares — never declares it', async () => {
     const draft = blank();
     draft.visibility = { ghost: 'hide' };
