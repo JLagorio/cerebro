@@ -61,8 +61,11 @@ export function GroupEditorPopover({
   const title = isGroup ? group.name : container === 'heading' ? 'Heading' : 'Properties';
 
   // The DRAFT roster with the DRAFT's visibility overlaid — the same lens the
-  // canvas renders through, minus its fold: the editor never folds a row.
-  const overlaid = overlayVisibility(draftRoster(typeDef.fields, draft.added), draft.visibility);
+  // canvas renders through, minus its fold: the editor never folds a row. The
+  // un-overlaid roster survives for the staging guard, which needs to know
+  // what the DOC says apart from what the draft stages over it.
+  const roster = draftRoster(typeDef.fields, draft.added);
+  const overlaid = overlayVisibility(roster, draft.visibility);
   const resolved = resolveLayout(draft.layout, overlaid);
   const fields =
     container === 'heading'
@@ -92,10 +95,22 @@ export function GroupEditorPopover({
   );
   const menuDef = menuFor === null ? null : (overlaid.find((f) => f.name === menuFor) ?? null);
 
-  const stageVisibility = (name: string, value: FieldDef['visibility'] | null) =>
+  const stageVisibility = (name: string, value: FieldDef['visibility'] | null) => {
     // null for the default (PropertyMenu's idiom): Apply DELETES the doc's
     // visibility key, so a Type doc never carries the absence of an opinion.
+    // But when the doc never HELD an opinion — the RESOLVED def's visibility
+    // is absent or show — a staged null would be a phantom edit: deepEqual's
+    // exact-key-set rule would dirty the draft over a hide→show round-trip
+    // that changed nothing, and Cancel would ask to discard a no-op. The key
+    // deletes instead (the discard sweep's idiom); null survives only where
+    // Apply has a real clear to write.
+    if (value === null && (roster.find((f) => f.name === name)?.visibility ?? 'show') === 'show') {
+      const { [name]: _dropped, ...visibility } = draft.visibility;
+      update({ visibility });
+      return;
+    }
     update({ visibility: { ...draft.visibility, [name]: value ?? null } });
+  };
 
   const moveTo = (name: string, to: 'heading' | 'rest') =>
     update({

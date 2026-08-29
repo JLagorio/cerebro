@@ -176,6 +176,37 @@ describe('eyes and the three-state menu', () => {
     expect(patch.fields).toEqual({ status: 'text', priority: { kind: 'text' }, notes: 'text' });
   });
 
+  it('an eye round-trip on a clean field leaves no phantom edit', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByRole('button', { name: 'Hide Priority' }));
+    await user.click(editor().getByRole('button', { name: 'Show Priority' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // The doc never carried a visibility, so hide→show changed NOTHING —
+    // a staged null here would trip deepEqual's exact-key-set rule and make
+    // Cancel ask to discard a no-op. The key deletes instead.
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+  });
+
+  it('hide→show on a doc-hidden field keeps the null — a real clear Apply writes', async () => {
+    const user = userEvent.setup();
+    setup([
+      typeDoc({ status: 'text', priority: { kind: 'text', visibility: 'hide' }, notes: 'text' }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByRole('button', { name: 'Show Priority' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // The doc DOES carry `visibility: hide`, so the staged null is an edit
+    // with a destination (Apply deletes the key) — the draft is dirty and
+    // Cancel must confirm.
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.getByText('Discard layout changes?')).toBeTruthy();
+  });
+
   it('the row ⋯ offers the three-state vocabulary verbatim and stages Hide when empty', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter } = setup();
