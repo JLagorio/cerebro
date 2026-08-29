@@ -1553,3 +1553,140 @@ describe('tab list on a Type doc (M44.5)', () => {
     expect(parsed.map((t) => t.id)).toEqual(['tab-2', 'tab-1']);
   });
 });
+
+describe('view tabs on a Type doc (M45.4)', () => {
+  it('parses both source shapes, the view id and the scope', () => {
+    const parsed = parseTabList([
+      {
+        id: 'tasks',
+        name: 'Tasks',
+        content: 'view',
+        source: { type: 'Task' },
+        view: 'board',
+        scope: 'related',
+      },
+      {
+        id: 'log',
+        name: 'Log',
+        content: 'view',
+        source: { list: 'tracker', collection: 'delivery' },
+      },
+    ]);
+    expect(parsed[0]).toEqual({
+      id: 'tasks',
+      name: 'Tasks',
+      icon: null,
+      content: 'view',
+      source: { type: 'Task' },
+      view: 'board',
+      scope: 'related',
+    });
+    expect(parsed[1].source).toEqual({ list: 'tracker', collection: 'delivery' });
+    expect(parsed[1].view).toBeUndefined();
+    expect(parsed[1].scope).toBeUndefined();
+  });
+
+  it('round-trips a type source, a list source, view and scope', () => {
+    const tabs = [
+      {
+        id: 'tasks',
+        name: 'Tasks',
+        icon: null,
+        content: 'view',
+        source: { type: 'Task' },
+        view: 'board',
+        scope: 'related',
+      },
+      {
+        id: 'log',
+        name: 'Log',
+        icon: 'list',
+        content: 'view',
+        source: { list: 'tracker', collection: 'delivery' },
+      },
+      { id: 'bare', name: 'Bare', icon: null, content: 'view', source: { list: 'tracker' } },
+    ];
+    expect(parseTabList(serializeTabList(parseTabList(tabs)))).toEqual(parseTabList(tabs));
+  });
+
+  it('a view tab missing its source is KEPT, source null — dropping would eat the declared id', () => {
+    const parsed = parseTabList([{ id: 'tasks', name: 'Tasks', content: 'view' }]);
+    expect(parsed).toEqual([
+      { id: 'tasks', name: 'Tasks', icon: null, content: 'view', source: null },
+    ]);
+  });
+
+  it('a null source serializes as NO source key, and parse regains null from the absence', () => {
+    const [tab] = parseTabList([{ id: 'v', name: 'V', content: 'view' }]);
+    const [raw] = serializeTabList([tab]) as Record<string, unknown>[];
+    expect('source' in raw).toBe(false);
+    expect(parseTabList([raw])[0].source).toBeNull();
+  });
+
+  it('a list source without a collection serializes without a collection key', () => {
+    const [raw] = serializeTabList(
+      parseTabList([{ id: 'v', name: 'V', content: 'view', source: { list: 'tracker' } }]),
+    ) as { source: Record<string, unknown> }[];
+    expect(raw.source).toEqual({ list: 'tracker' });
+    expect('collection' in raw.source).toBe(false);
+  });
+
+  it('judges the source by value: garbage shapes become null, never a crash or a drop', () => {
+    const parsed = parseTabList([
+      { id: 'a', name: 'A', content: 'view', source: 42 },
+      { id: 'b', name: 'B', content: 'view', source: { type: '' } },
+      { id: 'c', name: 'C', content: 'view', source: { list: 3 } },
+      { id: 'd', name: 'D', content: 'view', source: [{ type: 'Task' }] },
+    ]);
+    expect(parsed.map((t) => t.source)).toEqual([null, null, null, null]);
+    expect(parsed.map((t) => t.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('a source declaring both type and list is a type source — type wins', () => {
+    const parsed = parseTabList([
+      { id: 'v', name: 'V', content: 'view', source: { type: 'Task', list: 'tracker' } },
+    ]);
+    expect(parsed[0].source).toEqual({ type: 'Task' });
+  });
+
+  it('tolerates garbage per key: a blank view id and a foreign scope word are absent', () => {
+    const parsed = parseTabList([
+      { id: 'v', name: 'V', content: 'view', source: { type: 'Task' }, view: '  ', scope: 'ALL' },
+      { id: 'w', name: 'W', content: 'view', source: { type: 'Task' }, view: 7, scope: true },
+    ]);
+    for (const tab of parsed) {
+      expect(tab.view).toBeUndefined();
+      expect(tab.scope).toBeUndefined();
+    }
+  });
+
+  it('a NON-view tab sheds stray pointer keys — noise, not signal', () => {
+    const parsed = parseTabList([
+      {
+        id: 's',
+        name: 'S',
+        content: 'sections',
+        source: { type: 'Task' },
+        view: 'board',
+        scope: 'related',
+      },
+    ]);
+    expect(parsed[0]).toEqual({ id: 's', name: 'S', icon: null, content: 'sections' });
+    expect('source' in parsed[0]).toBe(false);
+    expect('view' in parsed[0]).toBe(false);
+    expect('scope' in parsed[0]).toBe(false);
+  });
+
+  it('the two-pass mint is indifferent to the pointer keys', () => {
+    const parsed = parseTabList([
+      { name: 'x', content: 'view', source: { type: 'Task' } },
+      { id: 'tab-1', name: 'One', content: 'view', source: { list: 'tracker' }, scope: 'related' },
+    ]);
+    expect(parsed.map((t) => t.id)).toEqual(['tab-2', 'tab-1']);
+    expect(parsed[0].source).toEqual({ type: 'Task' });
+    expect(parsed[1]).toMatchObject({
+      source: { list: 'tracker', collection: null },
+      scope: 'related',
+    });
+  });
+});

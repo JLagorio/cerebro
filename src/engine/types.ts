@@ -166,9 +166,18 @@ export interface LayoutConfig {
 export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
 
 /** What a record tab renders (M44.5). A closed vocabulary on purpose: an
- * unrecognised kind from hand-edited YAML must not reach the renderer. */
-export const TAB_CONTENTS = ['overview', 'properties', 'sections'] as const;
+ * unrecognised kind from hand-edited YAML must not reach the renderer.
+ * `'view'` (M45.4) embeds a database view by reference. */
+export const TAB_CONTENTS = ['overview', 'properties', 'sections', 'view'] as const;
 export type TabContent = (typeof TAB_CONTENTS)[number];
+
+/** Where a `content: 'view'` tab's rows come from (M45.4) — a reference,
+ * never a copy, the same doctrine the dashboard `view` widget's comment
+ * states on DashboardBlock below: the tab carries the pointer and editing
+ * the source updates every record page showing it. A type IS a database
+ * (M39); a list id is unique per FOLDER, so `collection` rides along
+ * (the surface.ts location doctrine). */
+export type ViewTabSource = { type: string } | { list: string; collection?: string | null };
 
 /** One tab of a type's record page (M44.5) — the same contract a view tab
  * has: a stable id the selection addresses, a name, an optional icon. */
@@ -177,6 +186,18 @@ export interface TabDef {
   name: string;
   icon: string | null;
   content: TabContent;
+  /** `content: 'view'` only. Always present on a parsed view tab; `null`
+   * means the tab declared no readable source — the tab is KEPT (its id may
+   * key per-record `_sections` content) and the renderer shows the broken
+   * state, because unavailable is never empty. */
+  source?: ViewTabSource | null;
+  /** `content: 'view'` only: a saved view id on the source. Absent = the
+   * source's first view. */
+  view?: string;
+  /** `content: 'view'` only: scope rows to those related to THIS record via
+   * a relation field on the source type targeting the host's type (M45.4).
+   * Absent = all rows. */
+  scope?: 'related';
 }
 
 export interface TypeDef {
