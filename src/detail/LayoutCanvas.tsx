@@ -227,8 +227,10 @@ export function LayoutCanvas({
           BlockShells inside it, and the `inert` that used to sit here moved
           inward — see InertContent for the boundary's rationale. */}
       <div data-testid="layout-preview" className="min-w-0 flex-1 overflow-auto p-6">
-        {/* gap-3 keeps the persistent panel borders (M45.5) from fusing and
-            gives each shell's overhanging -top-2 label chip its headroom. */}
+        {/* gap-3 spaces the OUTER column's bordered shells (M45.5) — heading,
+            tabs, the group stack, content — so borders never fuse and the
+            overhanging -top-2 label chips keep headroom; INSIDE the group
+            stack the block-size DropSlots do that same job. */}
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {/* Every property container keeps its shell even when folding empties
               it (Task 4 review ruling: "the editor is where hidden things stay
@@ -309,7 +311,7 @@ export function LayoutCanvas({
               return (
                 <Fragment key={g.id}>
                   {/* Block-reorder targets bracket every group shell. */}
-                  <DropSlot id={`groupslot:${i}`} />
+                  <DropSlot id={`groupslot:${i}`} size="block" />
                   <BlockShell
                     container={g.id}
                     label={g.name}
@@ -348,7 +350,7 @@ export function LayoutCanvas({
                 </Fragment>
               );
             })}
-            <DropSlot id={`groupslot:${previewLayout.groups.length}`} />
+            <DropSlot id={`groupslot:${previewLayout.groups.length}`} size="block" />
             {/* Rest LAST and headerless, RecordProperties' own order.
                 Its shell says "Properties" — the block's Notion name,
                 since headerless content has no label of its own. */}
@@ -462,7 +464,7 @@ function ShellEmptyHint({ structural }: { structural: boolean }) {
  * One inert preview FRAGMENT — where the boundary lives now. Task 4 took
  * `inert` off the whole canvas and onto each block's single content div;
  * Task 6 moved it once more, onto each fragment of preview (the heading
- * strip, a group's label, each field row, an empty hint), because the drag
+ * strip, each field row, an empty hint), because the drag
  * layer's slots and grips must interleave WITH the rows, and a droppable or
  * draggable inside an inert subtree renders but can never fire — inert
  * blanks every pointer, key and focus path beneath it. The claim is
@@ -482,9 +484,12 @@ function InertContent({ children }: { children: ReactNode }) {
 
 /** A droppable insertion point between rows or group shells — WidgetSlot's
  * idiom: invisible until a drag hovers it, then it paints itself as the
- * insertion line (the repo's inset-line style, no DragOverlay). Its 6px
- * height doubles as the stack's row gap. */
-function DropSlot({ id }: { id: string }) {
+ * insertion line (the repo's inset-line style, no DragOverlay). Two sizes:
+ * the `row` default's 6px doubles as a group's row gap, while `block` slots
+ * between bordered shells stand 12px — a shell's label chip overhangs its
+ * border by 8px (M45.5), and the slot's height is what keeps that chip off
+ * the block above. Hover paint is identical for both. */
+function DropSlot({ id, size = 'row' }: { id: string; size?: 'row' | 'block' }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
     <div
@@ -492,7 +497,8 @@ function DropSlot({ id }: { id: string }) {
       data-testid="layout-slot"
       data-slot={id}
       className={[
-        'h-1.5 w-full flex-none rounded',
+        size === 'block' ? 'h-3' : 'h-1.5',
+        'w-full flex-none rounded',
         isOver ? 'bg-cortex-500' : 'bg-transparent',
       ].join(' ')}
     />

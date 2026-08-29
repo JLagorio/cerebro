@@ -889,7 +889,7 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
       const container = shell.getAttribute('data-block');
       // At least one inert fragment inside each shell, editor or chrome —
       // Task 6 split the single content div into per-fragment wrappers
-      // (label, rows, strip, hint) so the drag layer can interleave.
+      // (rows, strip, hint) so the drag layer can interleave.
       expect(within(shell).getAllByTestId('layout-preview-content').length).toBeGreaterThanOrEqual(
         1,
       );

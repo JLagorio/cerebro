@@ -396,6 +396,16 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
     expect(labels[0].closest('[data-testid="layout-preview-content"]')).toBeNull();
   });
 
+  it('block slots stand taller than row slots — the chip overhang needs the headroom', () => {
+    setup();
+    // Between bordered shells only 6px would leave the -top-2 chip (8px
+    // overhang) colliding with the block above; in-group row slots have no
+    // chip hanging over them and keep the 6px row gap.
+    expect(bySlot('groupslot:0')?.className).toContain('h-3');
+    expect(bySlot('groupslot:1')?.className).toContain('h-3');
+    expect(bySlot('slot:g1:0')?.className).toContain('h-1.5');
+  });
+
   it('an empty zone keeps ONE label and only the bare hint sentence', () => {
     setup([typeDoc({ heading: [], groups: [] }), RECORD]);
     const heading = screen
