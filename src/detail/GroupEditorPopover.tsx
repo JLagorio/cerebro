@@ -20,8 +20,9 @@ import { useSortableList } from '@/hooks/useSortableList';
  * The editor behind a canvas shell (M45.3, spec §3.3): click a container and
  * this popover stages everything about its fields — visibility (the eye and
  * the ⋯'s three-state vocabulary), placement (Move to heading / Move to
- * page), the group's name, and the section's existence. Every edit walks
- * through the draft's one `update` door; nothing here touches the vault.
+ * page), order (the row grips, within the container), the group's name, and
+ * the section's existence. Every edit walks through the draft's one `update`
+ * door; nothing here touches the vault.
  *
  * The rows list EVERY field of the container, hidden included — the canvas
  * folds what the page folds, and the editor is where hidden things stay
@@ -103,8 +104,20 @@ export function GroupEditorPopover({
    * while the config keeps its slot — so the Nth row is not the Nth slot. The
    * landing is named by its NEIGHBOUR instead: the row that will follow it,
    * read back as that neighbour's own config index. Nothing following means
-   * the config end. moveField returns the same reference on a no-op, so an
-   * identity landing stages nothing.
+   * the config end.
+   *
+   * That divergence is NARROW but real: seedDraft resolves the config and
+   * maps the defs back to names, so no draft ever STARTS with a dead pointer,
+   * and discardNew sweeps the one it could otherwise create. It opens when
+   * the Type doc changes under an open dialog — the draft is seeded once, the
+   * roster is re-read every render — which is the case the popover suite
+   * drives, and the same divergence the canvas handles with
+   * `cfg.fields.indexOf`.
+   *
+   * A landing that resolves to the row's own slot never reaches moveField:
+   * useSortableList drops a `to === from` release before calling back. (The
+   * editor would return the same reference there anyway, so `update` would
+   * stage an unchanged layout rather than a wrong one.)
    */
   const reorderRow = (name: string, to: number) => {
     const follower = shown.map((f) => f.name).filter((n) => n !== name)[to];
@@ -267,16 +280,22 @@ export function GroupEditorPopover({
             there, so a drag could move the icon and nothing else. The
             affordance is absent because the capability is. (A filtered list
             is the other case — see `canReorder`.) */}
-        {canReorder && (
+        {canReorder ? (
           <span
             {...grip}
             onKeyDown={(e) => {
               grip.onKeyDown(e);
-              // MenuSurface moves roving focus on ArrowUp/ArrowDown. While a
-              // GRIP holds focus those keys are the reorder's, so they stop
-              // here — otherwise one press both moved the row and threw
-              // focus off it.
-              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.stopPropagation();
+              // Both arrows belong to the GRIP while it holds focus, whether
+              // or not they moved anything. MenuSurface would otherwise take
+              // them for roving focus — a span role=button matches none of
+              // its FOCUSABLE selectors, so `at` is -1 and it jumps to the
+              // top of the menu. preventDefault too, because the hook returns
+              // early at the list's ends without calling it, and the arrow
+              // would fall through to scrolling the popover.
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+              }
             }}
             data-testid="group-editor-grip"
             // Opacity, not `hidden`: a hidden grip leaves the tab order, and
@@ -285,6 +304,12 @@ export function GroupEditorPopover({
           >
             <Icon name="grip-vertical" size={12} />
           </span>
+        ) : (
+          // The cell is the layout; the grip is only its occupant
+          // (OptionListEditor's rule). Held empty where no grip renders, so a
+          // row does not jump 18px left the moment the search box filters —
+          // and so rest's rows line up with every other container's.
+          <span className="h-4 w-3 flex-none" />
         )}
         <Icon name={kindMeta(f.kind).icon} size={13} color="var(--n-400)" />
         <span className="min-w-0 flex-1 truncate text-sm text-n-800">{label}</span>

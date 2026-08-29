@@ -16,6 +16,7 @@ import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { resolveLayout } from '@/engine/layout';
 import { addGroup, moveField, moveGroup } from '@/engine/layoutEdit';
 import { foldsWhenUnset, splitByVisibility } from '@/engine/properties';
@@ -401,20 +402,28 @@ export function LayoutCanvas({
             {/* Notion's circular + below the last block (M45.5 Task 3), the
                 canvas door onto the same staging the group editor's footer
                 entry walks — two doors, one editor, one `stageNewSection`.
-                A real <button>, so Tab reaches it and Enter fires it; the
-                cortex fill is AddPropertyPanel's primary idiom verbatim,
-                hover included (its cortex-600 dark base is a recorded DS
-                debt — the 700 hover is what keeps it legible there). */}
+                A real <button>, so Tab reaches it and Enter fires it, and
+                tooltipped because IconButton's rule is label AND tooltip for
+                anything icon-only.
+
+                The glyph is `text-inverse` (#ffffff in both themes), NOT
+                `text-n-0`: the neutral ramp inverts, so on this cortex-600
+                fill a dark-theme n-0 measured 2.4:1 — at rest the button read
+                as a dark disc with a plus-shaped hole, on the one control
+                whose whole job is being found. Hover (cortex-700, a light
+                tint in dark) was never the problem; the resting state was. */}
             <div className="flex justify-center pb-3">
-              <button
-                type="button"
-                aria-label="Add section"
-                data-testid="layout-add-section"
-                onClick={() => stageNewSection(draft, update, setEditing)}
-                className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-n-0 hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
-              >
-                <Icon name="plus" size={16} />
-              </button>
+              <Tooltip label="Add section">
+                <button
+                  type="button"
+                  aria-label="Add section"
+                  data-testid="layout-add-section"
+                  onClick={() => stageNewSection(draft, update, setEditing)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-inverse hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+                >
+                  <Icon name="plus" size={16} />
+                </button>
+              </Tooltip>
             </div>
             {/* Rest LAST and headerless, RecordProperties' own order.
                 Its shell says "Properties" — the block's Notion name,

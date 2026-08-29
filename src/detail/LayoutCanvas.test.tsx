@@ -487,6 +487,17 @@ describe('the add-section button (M45.5 Task 3)', () => {
     expect(blocks()).toContain('group-2');
   });
 
+  it('paints its glyph in theme-stable ink, not the inverting neutral', () => {
+    setup();
+    const btn = addButton();
+    // --text-inverse is #ffffff in BOTH themes; --n-0 inverts to #15181f, and
+    // on this cortex-600 fill that measured 2.4:1 in dark — the resting state
+    // of the one control whose whole job is being found.
+    expect(btn.className).toContain('text-inverse');
+    expect(btn.className).not.toContain('text-n-0');
+    expect(btn.className).toContain('bg-cortex-600');
+  });
+
   it('is a real button, keyboard reachable, standing after the last group slot', async () => {
     const user = userEvent.setup();
     setup();

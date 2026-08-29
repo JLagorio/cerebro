@@ -699,24 +699,38 @@ describe('panel rows reorder within their container (M45.5 Task 4)', () => {
     expect(useUiStore.getState().layoutEditor).toBeNull();
   });
 
-  it('a DEAD config pointer never shifts the landing — the neighbour names it', async () => {
+  it('a config pointer the roster STOPS declaring never shifts the landing', async () => {
     const user = userEvent.setup();
-    setup([
-      // `ghost` is not declared in `fields:`, so resolveLayout drops the row
-      // but the config keeps its slot (pointer hygiene waits for Apply). The
-      // second visible row is the THIRD config slot.
-      typeDoc(undefined, {
-        heading: [],
-        groups: [{ id: 'g1', name: 'Planning', fields: ['ghost', 'priority', 'notes'] }],
-      }),
-      RECORD,
-    ]);
+    // A dead pointer cannot be seeded: seedDraft resolves the config and maps
+    // the DEFS back to names, so a doc pointing at an undeclared field starts
+    // the draft already pruned. It arises exactly one way — the Type doc
+    // changes under an open dialog (the draft is seeded once; the roster is
+    // re-read every render) — so that is what this drives, and it is the case
+    // the space conversion exists for.
+    const fields = { status: 'text', priority: 'text', notes: 'text', legacy: 'text' };
+    const withLegacy = {
+      heading: [],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['legacy', 'priority', 'notes', 'status'] }],
+    };
+    setup([typeDoc(fields, withLegacy), RECORD]);
+    // Seeded whole: four config slots, four rows.
+    expect(groupOrder('g1')).toEqual(['legacy', 'priority', 'notes', 'status']);
+    // The doc drops `legacy` from `fields:` mid-session. The row goes; the
+    // draft's config pointer stays, so slot 0 is now dead.
+    const { legacy: _dropped, ...survivors } = fields;
+    act(() => {
+      useVaultStore.setState({ entries: [typeDoc(survivors, withLegacy), RECORD] });
+    });
+    expect(groupOrder('g1')).toEqual(['priority', 'notes', 'status']);
+
     await user.click(shellOf('g1'));
-    expect(groupOrder('g1')).toEqual(['priority', 'notes']);
-    gripFor('Notes').focus();
-    await user.keyboard('{ArrowUp}');
-    // Landed before Priority, not at the config index the visual slot names.
-    expect(groupOrder('g1')).toEqual(['notes', 'priority']);
+    // Forward, from the first VISIBLE row, with the dead slot before it: the
+    // visual landing (1) and the config landing (2) differ, which is what
+    // makes this discriminate. Dropping the conversion — or decrementing on
+    // top of it — resolves to the row's own slot and moveField no-ops.
+    gripFor('Priority').focus();
+    await user.keyboard('{ArrowDown}');
+    expect(groupOrder('g1')).toEqual(['notes', 'priority', 'status']);
   });
 
   it('a FILTERED list shows no grips — its visible slots are not the data’s', async () => {
