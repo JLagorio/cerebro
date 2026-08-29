@@ -348,3 +348,62 @@ describe('the view-tab placeholder (M45.4)', () => {
     expect(screen.queryByTestId('layout-preview-viewtab')).toBeNull();
   });
 });
+
+// M45.5 Task 1 — Notion's canvas anatomy: the heading stands FIRST with the
+// tab strip below it, and every block wears its zone boundary OPENLY — a
+// persistent border and an always-visible header label — with the cortex
+// ring kept as the hover/focus upgrade. One label per zone: the shell header
+// IS the label, so no GroupLabel renders inside canvas content (the real
+// record page keeps its own).
+describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  it('the heading renders FIRST; the tab strip second', () => {
+    setup([typeDoc(undefined, [{ id: 's1', name: 'Notes', content: 'sections' }]), RECORD]);
+    const ids = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+    expect(ids.slice(0, 2)).toEqual(['heading', 'tabs']);
+  });
+
+  it('every block wears a persistent border and an always-visible label chip', () => {
+    setup([typeDoc(undefined, [{ id: 's1', name: 'Notes', content: 'sections' }]), RECORD]);
+    const shells = screen.getAllByTestId('layout-block');
+    expect(shells.length).toBeGreaterThan(0);
+    for (const shell of shells) {
+      expect(shell.className).toContain('border-n-200');
+      const chip = within(shell).getByTestId('layout-block-label');
+      expect(chip.className).not.toContain('opacity-0');
+      // The ring stays the hover/focus UPGRADE — never part of the resting look.
+      expect(shell.className).toContain('hover:ring-1');
+      expect(shell.className.split(' ')).not.toContain('ring-1');
+    }
+  });
+
+  it('one label per zone — the shell header is THE label, no inner GroupLabel', () => {
+    setup();
+    const g1 = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'g1');
+    if (g1 === undefined) throw new Error('g1 shell missing');
+    const labels = within(g1).getAllByText('Planning');
+    expect(labels).toHaveLength(1);
+    // The one label is chrome, standing outside the inert preview.
+    expect(labels[0].closest('[data-testid="layout-preview-content"]')).toBeNull();
+  });
+
+  it('an empty zone keeps ONE label and only the bare hint sentence', () => {
+    setup([typeDoc({ heading: [], groups: [] }), RECORD]);
+    const heading = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'heading');
+    if (heading === undefined) throw new Error('heading shell missing');
+    // ShellEmptyHint no longer repeats the label — the shell header carries it.
+    expect(within(heading).getAllByText('Heading')).toHaveLength(1);
+    expect(heading.textContent).toContain('No properties yet');
+  });
+});

@@ -13,7 +13,6 @@ import type { TypeLayoutDraft } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
-import { GroupLabel } from '@/detail/GroupLabel';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
@@ -228,36 +227,9 @@ export function LayoutCanvas({
           BlockShells inside it, and the `inert` that used to sit here moved
           inward — see InertContent for the boundary's rationale. */}
       <div data-testid="layout-preview" className="min-w-0 flex-1 overflow-auto p-6">
-        <div className="mx-auto flex max-w-2xl flex-col">
-          {draft.tabs.length > 0 && (
-            <BlockShell container="tabs" label="Tabs">
-              <InertContent>
-                <RecordTabs
-                  tabs={draft.tabs}
-                  activeId={draft.tabs[0].id}
-                  // No-ops: intent can never leave an inert strip anyway.
-                  onSelect={() => undefined}
-                  onChange={() => undefined}
-                />
-                {/* M45.4 — the canvas does not live-embed a view tab (plan
-                    Decision: weight without fidelity), so the ACTIVE view tab
-                    gets a quiet placeholder instead. First tab only, by
-                    DECISION: activeId is pinned to draft.tabs[0] above and
-                    the canvas holds no tab-selection state — adding one for
-                    a placeholder is scope creep this late (M45.4 Task 4,
-                    recorded in the slice write-back). Tabs stay edited on
-                    the real record page either way. */}
-                {draft.tabs[0].content === 'view' && (
-                  <div
-                    data-testid="layout-preview-viewtab"
-                    className="px-1 pb-1.5 pt-2 text-xs text-n-400"
-                  >
-                    {viewTabPlaceholder(draft.tabs[0])}
-                  </div>
-                )}
-              </InertContent>
-            </BlockShell>
-          )}
+        {/* gap-3 keeps the persistent panel borders (M45.5) from fusing and
+            gives each shell's overhanging -top-2 label chip its headroom. */}
+        <div className="mx-auto flex max-w-2xl flex-col gap-3">
           {/* Every property container keeps its shell even when folding empties
               it (Task 4 review ruling: "the editor is where hidden things stay
               visible") — a fold-emptied container must stay clickable, or the
@@ -291,11 +263,42 @@ export function LayoutCanvas({
                     showEmpty={draft.display.showEmpty}
                   />
                 ) : (
-                  <ShellEmptyHint label="Heading" structural={previewLayout.heading.length === 0} />
+                  <ShellEmptyHint structural={previewLayout.heading.length === 0} />
                 )}
               </InertContent>
             </AreaDrop>
           </BlockShell>
+          {/* Notion's canvas order (M45.5): heading first, THEN the tab strip,
+              then the groups. Simple structure (no tabs) renders no strip. */}
+          {draft.tabs.length > 0 && (
+            <BlockShell container="tabs" label="Tabs">
+              <InertContent>
+                <RecordTabs
+                  tabs={draft.tabs}
+                  activeId={draft.tabs[0].id}
+                  // No-ops: intent can never leave an inert strip anyway.
+                  onSelect={() => undefined}
+                  onChange={() => undefined}
+                />
+                {/* M45.4 — the canvas does not live-embed a view tab (plan
+                    Decision: weight without fidelity), so the ACTIVE view tab
+                    gets a quiet placeholder instead. First tab only, by
+                    DECISION: activeId is pinned to draft.tabs[0] above and
+                    the canvas holds no tab-selection state — adding one for
+                    a placeholder is scope creep this late (M45.4 Task 4,
+                    recorded in the slice write-back). Tabs stay edited on
+                    the real record page either way. */}
+                {draft.tabs[0].content === 'view' && (
+                  <div
+                    data-testid="layout-preview-viewtab"
+                    className="px-1 pb-1.5 pt-2 text-xs text-n-400"
+                  >
+                    {viewTabPlaceholder(draft.tabs[0])}
+                  </div>
+                )}
+              </InertContent>
+            </BlockShell>
+          )}
           <div className="flex flex-col">
             {previewLayout.groups.map((g, i) => {
               // resolveLayout maps config groups 1:1 in order, so the CONFIG
@@ -323,15 +326,15 @@ export function LayoutCanvas({
                       // drop target must too.
                       <>
                         <InertContent>
-                          <ShellEmptyHint label={g.name} structural={g.fields.length === 0} />
+                          <ShellEmptyHint structural={g.fields.length === 0} />
                         </InertContent>
                         <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
                       </>
                     ) : (
+                      // No inner GroupLabel here (M45.5): the shell's
+                      // always-visible header IS the zone's one label. The
+                      // real record page keeps its GroupLabel — canvas only.
                       <div data-testid="property-group" data-group={g.id} className="flex flex-col">
-                        <InertContent>
-                          <GroupLabel name={g.name} />
-                        </InertContent>
                         {rows.map((f) => (
                           <Fragment key={f.name}>
                             <DropSlot id={`slot:${g.id}:${cfg.fields.indexOf(f.name)}`} />
@@ -369,10 +372,7 @@ export function LayoutCanvas({
                   </div>
                 ) : (
                   <InertContent>
-                    <ShellEmptyHint
-                      label="Properties"
-                      structural={previewLayout.rest.length === 0}
-                    />
+                    <ShellEmptyHint structural={previewLayout.rest.length === 0} />
                   </InertContent>
                 )}
               </AreaDrop>
@@ -383,7 +383,9 @@ export function LayoutCanvas({
               {/* The body as a placeholder block: the preview stages the page's
                   SHAPE, and a real body would need a real read. */}
               <InertContent>
-                <div data-testid="layout-preview-body" className="mt-5">
+                {/* No top margin of its own since M45.5 — the bordered shell's
+                    padding and the column gap own the spacing now. */}
+                <div data-testid="layout-preview-body">
                   <div className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                     Description
                   </div>
@@ -402,7 +404,7 @@ export function LayoutCanvas({
             // never faked — no path, no row.
             <div
               data-testid="layout-preview-file"
-              className="mt-4 truncate font-mono text-2xs text-n-400"
+              className="truncate font-mono text-2xs text-n-400"
               title={previewEntry.path}
             >
               {previewEntry.path}
@@ -443,18 +445,16 @@ function viewTabPlaceholder(tab: TabDef): string {
   return `View of ${name} — shown on the record page`;
 }
 
-/** The persistent shell's stand-in content when no row renders: the block's
- * quiet caps label plus which KIND of empty this is — structurally empty
- * ("No properties yet") or emptied by folding ("All properties hidden").
- * Two hints because "hidden" and "absent" are different sentences. */
-function ShellEmptyHint({ label, structural }: { label: string; structural: boolean }) {
+/** The persistent shell's stand-in content when no row renders: which KIND
+ * of empty this is — structurally empty ("No properties yet") or emptied by
+ * folding ("All properties hidden"). Two hints because "hidden" and "absent"
+ * are different sentences. Just the sentence, no label of its own (M45.5):
+ * the shell's always-visible header already names the zone. */
+function ShellEmptyHint({ structural }: { structural: boolean }) {
   return (
-    <>
-      <GroupLabel name={label} />
-      <div className="px-1 pb-1.5 text-xs text-n-400">
-        {structural ? 'No properties yet' : 'All properties hidden'}
-      </div>
-    </>
+    <div className="px-1 pb-1.5 text-xs text-n-400">
+      {structural ? 'No properties yet' : 'All properties hidden'}
+    </div>
   );
 }
 
@@ -545,10 +545,11 @@ function FieldRow({ name, children }: { name: string; children: ReactNode }) {
 /**
  * One canvas block: an interactive SHELL around inert content (M45.3, plan
  * Decision "block chrome is the shell's"). The chrome idiom is WidgetShell's
- * shell-owns-the-chrome anatomy wearing Notion's block hover grammar in DS
- * tokens: the cortex ring on hover/focus (CalendarView's drag ring) and the
- * quiet name chip top-left (StructureTile's active cortex palette), revealed
- * by the named-group hover the sidebar controls use.
+ * shell-owns-the-chrome anatomy wearing Notion's titled-panel grammar in DS
+ * tokens (M45.5): a PERSISTENT quiet border with padding so content never
+ * touches it, the name chip top-left (StructureTile's active cortex palette)
+ * always visible and overlapping the border, and the cortex ring on
+ * hover/focus (CalendarView's drag ring) kept as the upgrade.
  *
  * The shell no longer wraps its children in the inert content div — Task 6
  * interleaves live drag controls (slots, grips) with inert preview inside
@@ -617,11 +618,14 @@ function BlockShell({
             }
       }
       className={[
-        'group/block relative rounded-md ring-cortex-500 hover:ring-1',
+        'group/block relative rounded-md border border-n-200 px-3 py-2 ring-cortex-500 hover:ring-1',
         interactive ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-1' : '',
       ].join(' ')}
     >
-      <span className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700 opacity-0 group-hover/block:opacity-100 group-focus-visible/block:opacity-100">
+      <span
+        data-testid="layout-block-label"
+        className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700"
+      >
         {label}
       </span>
       {dragId !== undefined && (

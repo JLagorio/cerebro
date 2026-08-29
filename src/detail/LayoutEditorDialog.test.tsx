@@ -529,11 +529,14 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     const strip = preview.getByTestId('heading-strip');
     expect(strip.querySelector('[data-field="status"]')).toBeTruthy();
     expect(strip.textContent).toContain('todo');
-    // The draft group renders as a container with the quiet caps label.
+    // The draft group renders as a container; its name lives on the SHELL's
+    // always-visible header, not inside the content (M45.5 one label per zone).
     const group = preview.getByTestId('property-group');
     expect(group.getAttribute('data-group')).toBe('g1');
-    expect(group.textContent).toContain('Planning');
+    expect(group.textContent).not.toContain('Planning');
     expect(group.textContent).toContain('high');
+    const shell = group.closest('[data-testid="layout-block"]');
+    expect(shell?.textContent).toContain('Planning');
     // The unplaced field lands after the groups, headerless.
     expect(preview.getByText('Notes')).toBeTruthy();
   });
@@ -880,7 +883,8 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     const user = userEvent.setup();
     shellSetup();
     await user.click(screen.getByTestId('layout-structure-tabbed'));
-    expect(blockIds()).toEqual(['tabs', 'heading', 'g1', 'rest', 'content']);
+    // Notion's canvas order (M45.5): heading first, THEN the tab strip.
+    expect(blockIds()).toEqual(['heading', 'tabs', 'g1', 'rest', 'content']);
     for (const shell of screen.getAllByTestId('layout-block')) {
       const container = shell.getAttribute('data-block');
       // At least one inert fragment inside each shell, editor or chrome —
@@ -907,7 +911,7 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     const user = userEvent.setup();
     shellSetup();
     await user.click(screen.getByTestId('layout-structure-tabbed'));
-    expect(blockIds()).toEqual(['tabs', 'heading', 'g1', 'rest', 'content']);
+    expect(blockIds()).toEqual(['heading', 'tabs', 'g1', 'rest', 'content']);
     const tabsShell = screen
       .getAllByTestId('layout-block')
       .find((b) => b.getAttribute('data-block') === 'tabs');
@@ -920,7 +924,7 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     ).toBeTruthy();
   });
 
-  it('the name chip is shell chrome — outside the content div, naming the block', () => {
+  it('the name chip is persistent shell chrome — outside the content div, naming the block', () => {
     shellSetup();
     const shells = screen.getAllByTestId('layout-block');
     const chipOf = (container: string, text: string) => {
@@ -930,11 +934,15 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
         .getAllByText(text)
         .filter((el) => el.closest('[data-testid="layout-preview-content"]') === null);
       expect(hits).toHaveLength(1);
+      // Always-visible titled-panel anatomy (M45.5): the chip must not hide
+      // behind a hover reveal.
+      expect(hits[0].className).not.toContain('opacity-0');
       return shell;
     };
     expect(chipOf('heading', 'Heading').getAttribute('aria-label')).toBe('Heading');
-    // The group's chip wears the group NAME — 'Planning' also lives inside
-    // the content (GroupLabel), so the filter is what isolates the chrome.
+    // The group's chip wears the group NAME — and since M45.5 it is the
+    // zone's ONLY label (the inner GroupLabel left the canvas); the filter
+    // proves the chip is chrome, standing outside the inert preview.
     expect(chipOf('g1', 'Planning').getAttribute('aria-label')).toBe('Planning');
     expect(chipOf('rest', 'Properties').getAttribute('aria-label')).toBe('Properties');
     // Content keeps its chip but no aria-label: a label with no role labels
