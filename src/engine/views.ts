@@ -1019,6 +1019,10 @@ export function parseTabList(raw: unknown): TabDef[] {
     // Non-view tabs SHED stray pointer keys: no arm reads a source on a
     // sections tab, so persisting one would be noise the serializer writes
     // back forever — normalize-on-parse, same as the content fallback.
+    // Latent hazard this shed creates: no UI path changes `content` on an
+    // existing tab today, but a future one must carry/restore the pointer
+    // keys itself — flip to sections → serialize → parse sheds → flip back
+    // leaves the tab pointerless after one disk round-trip.
     return tab;
   });
 }

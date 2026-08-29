@@ -173,7 +173,7 @@ export type TabContent = (typeof TAB_CONTENTS)[number];
 
 /** Where a `content: 'view'` tab's rows come from (M45.4) — a reference,
  * never a copy, the same doctrine the dashboard `view` widget's comment
- * states on DashboardBlock below: the tab carries the pointer and editing
+ * states on DashboardWidget below: the tab carries the pointer and editing
  * the source updates every record page showing it. A type IS a database
  * (M39); a list id is unique per FOLDER, so `collection` rides along
  * (the surface.ts location doctrine). */
