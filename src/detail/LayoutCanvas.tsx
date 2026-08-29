@@ -154,6 +154,11 @@ export function LayoutCanvas({
   // on a container whose shell mounts in the same commit (Add section)
   // still measures against the real node.
   const [editing, setEditing] = useState<string | null>(null);
+  // Which tab the canvas is standing on (M45.5 Task 2). An id, not a def, so
+  // an edit to the tab set flows straight through it — and the derivation
+  // below falls back to the first tab when the id names none, because a
+  // deleted (or reseeded) tab must never strand the canvas on nothing.
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const shells = useRef(new Map<string, HTMLDivElement>());
   const anchorRef = useMemo(
     () => ({
@@ -203,6 +208,12 @@ export function LayoutCanvas({
       <FieldEditor entry={previewEntry} def={f} schema={schema} />
     </PropertyRow>
   );
+
+  // Simple structure (`tabs: []`) has no tab to stand on, and no strip.
+  const activeTab =
+    draft.tabs.length === 0
+      ? null
+      : (draft.tabs.find((t) => t.id === selectedTab) ?? draft.tabs[0]);
 
   const openEditor = (container: string) => () => setEditing(container);
   const registerShell = (container: string) => (el: HTMLDivElement | null) => {
@@ -272,33 +283,39 @@ export function LayoutCanvas({
           </BlockShell>
           {/* Notion's canvas order (M45.5): heading first, THEN the tab strip,
               then the groups. Simple structure (no tabs) renders no strip. */}
-          {draft.tabs.length > 0 && (
+          {activeTab !== null && (
             <BlockShell container="tabs" label="Tabs">
-              <InertContent>
-                <RecordTabs
-                  tabs={draft.tabs}
-                  activeId={draft.tabs[0].id}
-                  // No-ops: intent can never leave an inert strip anyway.
-                  onSelect={() => undefined}
-                  onChange={() => undefined}
-                />
-                {/* M45.4 — the canvas does not live-embed a view tab (plan
-                    Decision: weight without fidelity), so the ACTIVE view tab
-                    gets a quiet placeholder instead. First tab only, by
-                    DECISION: activeId is pinned to draft.tabs[0] above and
-                    the canvas holds no tab-selection state — adding one for
-                    a placeholder is scope creep this late (M45.4 Task 4,
-                    recorded in the slice write-back). Tabs stay edited on
-                    the real record page either way. */}
-                {draft.tabs[0].content === 'view' && (
+              {/* LIVE, and so OUTSIDE every inert fragment (M45.5 Task 2, the
+                  2026-08-29 user directive reversing M45.4's one-surface
+                  ruling): the strip's own rename, delete, reorder, duplicate,
+                  "+ Tab" and "Change source…" all report the whole next tab
+                  set, and it stages through the draft's one door — landing
+                  with everything else on Apply. The record page's strip stays
+                  the VAULT's editing surface; the two stage into different
+                  stores and never race. `hostType` is the type being edited,
+                  which is what a new view tab's related-scope toggle gates on. */}
+              <RecordTabs
+                tabs={draft.tabs}
+                activeId={activeTab.id}
+                onSelect={setSelectedTab}
+                onChange={(next) => update({ tabs: next })}
+                hostType={typeDef.name}
+              />
+              {/* M45.4 — the canvas does not live-embed a view tab (plan
+                  Decision: weight without fidelity), so the ACTIVE view tab
+                  gets a quiet placeholder instead. It follows the SELECTION
+                  since the strip went live; the placeholder is preview, so it
+                  keeps its inert fragment while the strip above does not. */}
+              {activeTab.content === 'view' && (
+                <InertContent>
                   <div
                     data-testid="layout-preview-viewtab"
                     className="px-1 pb-1.5 pt-2 text-xs text-n-400"
                   >
-                    {viewTabPlaceholder(draft.tabs[0])}
+                    {viewTabPlaceholder(activeTab)}
                   </div>
-                )}
-              </InertContent>
+                </InertContent>
+              )}
             </BlockShell>
           )}
           <div className="flex flex-col">
@@ -435,11 +452,13 @@ export function LayoutCanvas({
 
 /** The view-tab placeholder's one line (M45.4): the source named straight off
  * the POINTER — type name or list id. Not resolved, for two real reasons:
- * LayoutCanvas is props-pure (a draft and a type def in, no vault
- * subscription), so the entries/schema/views a resolution reads are not in
- * reach — and a dead list pointer has no title to offer, so the id fallback
- * is needed regardless. A sourceless tab says what the record page will
- * show: the broken card, never an empty view. */
+ * the canvas takes a draft and a type def, not the entries and list files a
+ * resolution would read (M45.5 note — the live strip's own "View of"
+ * drill-in DOES subscribe to the vault for its roster, but that read is
+ * RecordTabs', inside the strip, and the canvas still has none of it) — and a
+ * dead list pointer has no title to offer, so the id fallback is needed
+ * regardless. A sourceless tab says what the record page will show: the
+ * broken card, never an empty view. */
 function viewTabPlaceholder(tab: TabDef): string {
   const source = tab.source ?? null;
   if (source === null) return 'View of a missing source — shown broken on the record page';
@@ -567,10 +586,13 @@ function FieldRow({ name, children }: { name: string; children: ReactNode }) {
  * whose Space belongs to the KeyboardSensor, not to opening the editor.
  *
  * `tabs` and `content` pass no `interactive` and are DEMOTED to plain chrome
- * (Task 5 review ruling): no group editor exists for either, and a
- * role=button that Enter cannot activate is a promise the a11y tree has no
- * way to keep. They keep the hover ring, the name chip and `data-block`, so
- * the canvas grammar — and the tests' addressing — stay uniform.
+ * (Task 5 review ruling): neither has a group editor for a press to open,
+ * and a role=button that Enter cannot activate is a promise the a11y tree
+ * has no way to keep. That is a claim about the SHELL, not its content —
+ * since M45.5 Task 2 the tabs shell frames a LIVE strip that edits the draft
+ * through its own controls. They keep the hover ring, the name chip and
+ * `data-block`, so the canvas grammar — and the tests' addressing — stay
+ * uniform.
  */
 function BlockShell({
   container,

@@ -889,10 +889,14 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
       const container = shell.getAttribute('data-block');
       // At least one inert fragment inside each shell, editor or chrome —
       // Task 6 split the single content div into per-fragment wrappers
-      // (rows, strip, hint) so the drag layer can interleave.
-      expect(within(shell).getAllByTestId('layout-preview-content').length).toBeGreaterThanOrEqual(
-        1,
-      );
+      // (rows, strip, hint) so the drag layer can interleave. The tabs shell
+      // is the exception since M45.5 Task 2: its whole content is the LIVE
+      // strip, and only an active view tab's placeholder is preview at all.
+      if (container !== 'tabs') {
+        expect(
+          within(shell).getAllByTestId('layout-preview-content').length,
+        ).toBeGreaterThanOrEqual(1);
+      }
       if (container === 'tabs' || container === 'content') {
         // No group editor exists for these two, so they are DEMOTED to plain
         // chrome (Task 5 review ruling): a role=button that Enter cannot
@@ -916,12 +920,11 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
       .getAllByTestId('layout-block')
       .find((b) => b.getAttribute('data-block') === 'tabs');
     if (tabsShell === undefined) throw new Error('tabs shell missing');
-    // The strip itself renders INSIDE the shell's inert content.
-    expect(
-      within(tabsShell)
-        .getByTestId('layout-preview-content')
-        .querySelector('[data-testid="record-tabs"]'),
-    ).toBeTruthy();
+    // The strip renders inside the shell but OUTSIDE every inert fragment
+    // (M45.5 Task 2): it is the editor's tab-editing surface, not preview,
+    // and an inert strip could never take a press.
+    const strip = within(tabsShell).getByTestId('record-tabs');
+    expect(strip.closest('[data-testid="layout-preview-content"]')).toBeNull();
   });
 
   it('the name chip is persistent shell chrome — outside the content div, naming the block', () => {
@@ -982,5 +985,151 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     expect(empty.textContent).toContain('No properties yet');
     // The populated sibling still renders its rows as before.
     expect(screen.getByTestId('property-group').textContent).toContain('high');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M45.5 Task 2 — the editor's strip is LIVE against the draft (2026-08-29
+// user directive, reversing M45.4's "one tab-editing surface" ruling): add,
+// rename, remove, reorder and Change source all stage into `draft.tabs` and
+// land on Apply. The record page's strip still writes the vault; the two
+// surfaces stage into different stores and never race.
+
+describe('the live tab strip (M45.5 Task 2)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  const OVERVIEW = { id: 'overview', name: 'Overview', icon: null, content: 'overview' };
+  const tabbedSetup = (tabs: unknown[] = [OVERVIEW]) => setup({ entries: [typeDoc(tabs)] });
+
+  /** Apply, then the patch it sent — the draft's only way onto disk. */
+  const applied = async (patchFrontmatter: ReturnType<typeof vi.fn>) => {
+    fireEvent.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    return patchFrontmatter.mock.calls[0][1] as Record<string, unknown>;
+  };
+
+  it('renaming a tab stages the draft — nothing writes until Apply', async () => {
+    const { patchFrontmatter } = tabbedSetup();
+    // Pressing the ACTIVE tab opens its menu (RecordTabs' own idiom).
+    fireEvent.click(screen.getByTestId('record-tab-overview'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = screen.getByLabelText('Tab name');
+    fireEvent.change(input, { target: { value: '  Summary ' } });
+    fireEvent.blur(input);
+    expect(screen.getByTestId('record-tab-overview').textContent).toContain('Summary');
+    // The strip stages like every other control — the vault stays untouched.
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(await applied(patchFrontmatter)).toEqual({
+      ...FIXTURE_PATCH,
+      tabs: [{ ...OVERVIEW, name: 'Summary' }],
+    });
+  });
+
+  it('"+ Tab" stages a new tab; Apply carries it', async () => {
+    const { patchFrontmatter } = tabbedSetup();
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    fireEvent.change(screen.getByLabelText('Tab name'), { target: { value: 'Notes' } });
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    expect(screen.getByTestId('record-tabs').textContent).toContain('Notes');
+    expect(await applied(patchFrontmatter)).toEqual({
+      ...FIXTURE_PATCH,
+      tabs: [OVERVIEW, { id: 'notes', name: 'Notes', icon: null, content: 'sections' }],
+    });
+  });
+
+  it('Move right stages the reorder', async () => {
+    const { patchFrontmatter } = tabbedSetup([
+      OVERVIEW,
+      { id: 'notes', name: 'Notes', content: 'sections' },
+    ]);
+    fireEvent.click(screen.getByTestId('record-tab-overview'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
+    const patch = await applied(patchFrontmatter);
+    expect((patch.tabs as { id: string }[]).map((t) => t.id)).toEqual(['notes', 'overview']);
+  });
+
+  it('deleting the ACTIVE tab stages the removal and hands the canvas a survivor', async () => {
+    const { patchFrontmatter } = tabbedSetup([
+      OVERVIEW,
+      { id: 'blocked', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
+    ]);
+    // Stand on the view tab — its placeholder is what the canvas shows.
+    fireEvent.click(screen.getByTestId('record-tab-blocked'));
+    expect(screen.getByTestId('layout-preview-viewtab')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('record-tab-blocked'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete tab' }));
+    // The confirm Dialog stacks OVER the fullscreen editor (the layer system,
+    // not DOM nesting) — its primary button is reachable from here.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete tab' }));
+    // A deleted tab strands nothing: the survivor is active, and being no
+    // view tab it puts the placeholder down with it.
+    expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByTestId('layout-preview-viewtab')).toBeNull();
+    expect(await applied(patchFrontmatter)).toEqual({ ...FIXTURE_PATCH, tabs: [OVERVIEW] });
+  });
+
+  it('a selection whose tab died falls back to the first — no stranded canvas', () => {
+    tabbedSetup([OVERVIEW, { id: 'notes', name: 'Notes', content: 'sections' }]);
+    fireEvent.click(screen.getByTestId('record-tab-notes'));
+    expect(screen.getByTestId('record-tab-notes').getAttribute('aria-selected')).toBe('true');
+    // Simple empties the draft's tabs and Tabbed seeds a FRESH Overview, so
+    // the held selection now names a tab that does not exist.
+    fireEvent.click(screen.getByTestId('layout-structure-simple'));
+    expect(screen.queryByTestId('record-tabs')).toBeNull();
+    fireEvent.click(screen.getByTestId('layout-structure-tabbed'));
+    expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('a new view tab is gated on the HOST type — the toggle, and the scope it stages', async () => {
+    const { patchFrontmatter } = setup({
+      entries: [
+        typeDoc([OVERVIEW]),
+        // Task stores a relation aimed at Work item: the one source whose
+        // rows a Work item record can scope.
+        makeEntry({
+          path: 'types/task.md',
+          title: 'Task',
+          type: 'Type',
+          properties: {
+            fields: { item: { kind: 'relation', target: 'Work item' } },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    fireEvent.click(screen.getByTestId('new-tab-kind-view'));
+    // A source storing no relation at the host offers no toggle…
+    fireEvent.change(screen.getByTestId('view-tab-source'), {
+      target: { value: 'type:Work item' },
+    });
+    expect(screen.queryByRole('switch', { name: 'Only related to this record' })).toBeNull();
+    // …and one that does offers it default-ON. Both answers come from
+    // `hostType`, which only the canvas can supply.
+    fireEvent.change(screen.getByTestId('view-tab-source'), { target: { value: 'type:Task' } });
+    const toggle = screen.getByRole('switch', {
+      name: 'Only related to this record',
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    expect(await applied(patchFrontmatter)).toEqual({
+      ...FIXTURE_PATCH,
+      tabs: [
+        OVERVIEW,
+        {
+          id: 'task',
+          name: 'Task',
+          icon: null,
+          content: 'view',
+          source: { type: 'Task' },
+          scope: 'related',
+        },
+      ],
+    });
   });
 });

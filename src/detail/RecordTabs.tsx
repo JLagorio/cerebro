@@ -29,11 +29,14 @@ import { uniqueName } from '@/views/ViewTabs';
  *
  * Controlled on purpose: the strip renders `tabs` and reports intent — a
  * press through `onSelect`, every structural edit as the whole next tab set
- * through `onChange` — while the HOST owns persistence (`setTypeTabs` writes
- * the Type doc) and the selection (the open tab rides `{ kind: 'doc', tab }`
- * so the back button returns to it). One ambient exception (M45.4): the
- * add/change drill-in reads the vault catalog (entries/views/schema) straight
- * from the store — rosters are lookups, not contract state.
+ * through `onChange` — while the HOST decides what that intent means. Two
+ * hosts since M45.5: the record page WRITES it (`setTypeTabs` patches the
+ * Type doc) and owns the selection (the open tab rides `{ kind: 'doc', tab }`
+ * so the back button returns to it), while the layout editor's canvas STAGES
+ * it into its draft and lands the whole draft on Apply. One ambient exception
+ * (M45.4): the add/change drill-in reads the vault catalog
+ * (entries/views/schema) straight from the store — rosters are lookups, not
+ * contract state.
  */
 
 /** What a new tab can render — a tile catalog, `VIEW_KINDS`' little sibling.
@@ -70,7 +73,8 @@ export interface RecordTabsProps {
   tabs: TabDef[];
   activeId: string;
   onSelect: (id: string) => void;
-  /** The whole next tab set — the host persists it (setTypeTabs). */
+  /** The whole next tab set — the host persists it (`setTypeTabs`) or stages
+   * it (the layout editor's draft). */
   onChange: (next: TabDef[]) => void;
   /** The RECORD's own type (M45.4) — what a view tab's related-scope toggle
    * is gated on: it exists iff the picked source stores a relation aimed at

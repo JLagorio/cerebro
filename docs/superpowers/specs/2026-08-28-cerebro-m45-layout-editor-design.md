@@ -106,6 +106,10 @@ it.
   canvas renders the strip inert with a first-tab placeholder, and the
   Structure tiles keep their M45.2 seeding role. The original "editable
   against the draft" wording was reversed to avoid a second editing surface.)
+  (RE-AMENDED 2026-08-29: user directive — the editor's strip is LIVE against
+  the draft: add, rename, remove, reorder, and source changes all stage into
+  `draft.tabs`. The record page's strip remains the vault's editing surface;
+  the "one tab-editing surface" ruling is reversed by the product owner.)
 - **Simple** collapses to one scroll (draft `tabs: []` → the synthesized
   Overview; the strip hides when only Overview exists).
 - **View tabs**: "+" offers "Link existing data source" → name input +

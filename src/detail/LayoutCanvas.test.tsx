@@ -289,10 +289,10 @@ describe('the drag layer on the canvas (M45.3 Task 6)', () => {
 });
 
 // M45.4 — the canvas does NOT live-embed a view tab (plan Decision: weight
-// without fidelity); an ACTIVE first view tab gets a quiet placeholder naming
-// its source straight off the pointer, no resolution. First-tab-only: the
-// strip's activeId is pinned to draft.tabs[0] and the canvas holds no
-// tab-selection state — the recorded M45.4 decision.
+// without fidelity); the ACTIVE view tab gets a quiet placeholder naming its
+// source straight off the pointer, no resolution. M45.5 Task 2 retired the
+// first-tab-only pin: the strip is live and the canvas holds the selection,
+// so "active" is whichever tab was last pressed.
 describe('the view-tab placeholder (M45.4)', () => {
   beforeEach(() => {
     resetLayers();
@@ -302,7 +302,7 @@ describe('the view-tab placeholder (M45.4)', () => {
     useUiStore.setState({ layoutEditor: null });
   });
 
-  it('an active first view tab names its source, inert, inside the tabs block', () => {
+  it('the active view tab names its source, inert, inside the tabs block', () => {
     setup([
       typeDoc(undefined, [
         { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
@@ -336,7 +336,7 @@ describe('the view-tab placeholder (M45.4)', () => {
     );
   });
 
-  it('a first NON-view tab renders no placeholder — first-tab-only by decision', () => {
+  it('the placeholder follows the ACTIVE tab, not the first (M45.5 Task 2)', () => {
     setup([
       typeDoc(undefined, [
         { id: 'o1', name: 'Overview', content: 'overview' },
@@ -344,7 +344,16 @@ describe('the view-tab placeholder (M45.4)', () => {
       ]),
       RECORD,
     ]);
+    // Standing on the non-view first tab: nothing to place.
     expect(screen.getByTestId('record-tabs')).toBeTruthy();
+    expect(screen.queryByTestId('layout-preview-viewtab')).toBeNull();
+    // Pressing the view tab selects it — and the placeholder is ITS source.
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
+      'View of Work item — shown on the record page',
+    );
+    // And back: the placeholder belongs to the active tab, never the first.
+    fireEvent.click(screen.getByTestId('record-tab-o1'));
     expect(screen.queryByTestId('layout-preview-viewtab')).toBeNull();
   });
 });
