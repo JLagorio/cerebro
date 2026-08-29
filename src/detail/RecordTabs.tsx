@@ -31,7 +31,9 @@ import { uniqueName } from '@/views/ViewTabs';
  * press through `onSelect`, every structural edit as the whole next tab set
  * through `onChange` — while the HOST owns persistence (`setTypeTabs` writes
  * the Type doc) and the selection (the open tab rides `{ kind: 'doc', tab }`
- * so the back button returns to it).
+ * so the back button returns to it). One ambient exception (M45.4): the
+ * add/change drill-in reads the vault catalog (entries/views/schema) straight
+ * from the store — rosters are lookups, not contract state.
  */
 
 /** What a new tab can render — a tile catalog, `VIEW_KINDS`' little sibling.
@@ -464,16 +466,6 @@ function sourceFacts(
   };
 }
 
-/** `list:${collection ?? ''}::${id}` → the source pointer; inverse of the
- * roster option value below. The composite is the dashboard "Saved view…"
- * submenu's keying — ids are unique per FOLDER, so the collection rides. */
-const parseListValue = (raw: string): ViewTabSource => {
-  const key = raw.slice('list:'.length);
-  const at = key.indexOf('::');
-  const collection = key.slice(0, at);
-  return { list: key.slice(at + 2), ...(collection === '' ? {} : { collection }) };
-};
-
 /**
  * The "View of" drill-in (M45.4): every database in the vault — types via
  * `listTypes` (which already turns the library's away), then Lists — an
@@ -503,28 +495,45 @@ function ViewSourcePicker({
   const roster = [
     { value: '', label: 'Choose a database…' },
     ...listTypes(entries, schema).map((t) => ({ value: `type:${t.name}`, label: t.name })),
-    ...lists.map((l) => ({
-      value: `list:${l.collection ?? ''}::${l.id}`,
-      label: l.definition.name,
-    })),
+    // Labeled the way the dashboard "Saved view…" submenu labels them, but
+    // VALUED by roster index: option values are UI-transient, and a
+    // `collection::id` composite would have to be parsed back apart — which
+    // breaks on a collection path legally containing `::`.
+    ...lists.map((l, i) => ({ value: `list:${i}`, label: l.definition.name })),
   ];
+  const src = value.source;
   const sourceValue =
-    value.source === null
+    src === null
       ? ''
-      : 'type' in value.source
-        ? `type:${value.source.type}`
-        : `list:${value.source.collection ?? ''}::${value.source.list}`;
+      : 'type' in src
+        ? `type:${src.type}`
+        : // -1 (a dead pointer under "Change source…") matches no option, so
+          // the select falls back to the placeholder row.
+          `list:${lists.findIndex(
+            (l) => l.id === src.list && (l.collection ?? null) === (src.collection ?? null),
+          )}`;
 
   const facts = sourceFacts(value.source, lists, schema);
 
   const pick = (raw: string) => {
-    if (raw === '') {
+    let source: ViewTabSource | null = null;
+    if (raw.startsWith('type:')) {
+      source = { type: raw.slice('type:'.length) };
+    } else if (raw.startsWith('list:')) {
+      // The pointer comes off the roster ROW itself — the index is never a
+      // fact about the source, only a ticket back to it.
+      const list = lists[Number(raw.slice('list:'.length))];
+      if (list !== undefined) {
+        source = {
+          list: list.id,
+          ...(list.collection === null ? {} : { collection: list.collection }),
+        };
+      }
+    }
+    if (source === null) {
       onChange(NO_SOURCE);
       return;
     }
-    const source: ViewTabSource = raw.startsWith('type:')
-      ? { type: raw.slice('type:'.length) }
-      : parseListValue(raw);
     const next = sourceFacts(source, lists, schema);
     onChange({
       source,
@@ -679,7 +688,9 @@ function NewTabForm({
             }}
             width="100%"
           />
-          <div className="mt-2 grid grid-cols-3 gap-1">
+          {/* 2×2 since the View tile made four: three columns left it
+              orphaned on its own row, and four don't fit 260px. */}
+          <div className="mt-2 grid grid-cols-2 gap-1">
             {TAB_KINDS.map((k) => (
               <button
                 key={k.value}

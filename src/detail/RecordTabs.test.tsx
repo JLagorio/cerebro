@@ -147,17 +147,19 @@ describe('RecordTabs keyboard contract (M44.5)', () => {
 // M45.4 — a new tab can be a view of any database.
 // ---------------------------------------------------------------------------
 
-/** Project ← Task (Task holds the relation), plus a relation-less Note and a
- * typeless "everything" List — one qualifying source, two that never offer
- * the related toggle. Task saves TWO views so the view picker has a reason
- * to exist; Note's synthesized single default keeps it hidden. */
-const READING_LIST: ListFile = {
-  id: 'reading',
-  collection: 'crm',
+/** Project ← Task (Task holds the relation), plus a relation-less Note and
+ * two typeless "everything" Lists — one qualifying source, the rest never
+ * offer the related toggle. Task saves TWO views so the view picker has a
+ * reason to exist; Note's synthesized single default keeps it hidden. The
+ * second list's collection legally contains `::` — the case that broke a
+ * composite-keyed option value and keeps the roster index-keyed. */
+const makeList = (id: string, collection: string, name: string): ListFile => ({
+  id,
+  collection,
   project: null,
-  path: 'crm/reading.list.yml',
+  path: `${collection}/${id}.list.yml`,
   definition: {
-    name: 'Reading list',
+    name,
     icon: null,
     color: null,
     order: null,
@@ -172,7 +174,10 @@ const READING_LIST: ListFile = {
       },
     ],
   },
-};
+});
+
+const READING_LIST = makeList('reading', 'crm', 'Reading list');
+const CLIPS_LIST = makeList('clips', 'notes::archive', 'Clips');
 
 function seedVault() {
   useVaultStore.setState({
@@ -192,7 +197,7 @@ function seedVault() {
       }),
       makeEntry({ path: 'types/note.md', title: 'Note', type: 'Type' }),
     ],
-    views: [READING_LIST],
+    views: [READING_LIST, CLIPS_LIST],
   });
 }
 
@@ -235,7 +240,8 @@ describe('RecordTabs view tabs (M45.4)', () => {
     fireEvent.click(screen.getByTestId('new-tab-kind-view'));
     const select = screen.getByTestId('view-tab-source') as HTMLSelectElement;
     // Types first (listTypes' sorted catalog), then Lists labeled by their
-    // definition name and keyed `collection::id` — the dashboard idiom.
+    // definition name (the dashboard submenu's labeling) and VALUED by roster
+    // index — UI-transient keys that never need parsing back apart.
     expect([...select.options].map((o) => o.text)).toEqual([
       'Choose a database…',
       'Note',
@@ -243,6 +249,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
       'Task',
       'Type',
       'Reading list',
+      'Clips',
     ]);
     expect([...select.options].map((o) => o.value)).toEqual([
       '',
@@ -250,7 +257,8 @@ describe('RecordTabs view tabs (M45.4)', () => {
       'type:Project',
       'type:Task',
       'type:Type',
-      'list:crm::reading',
+      'list:0',
+      'list:1',
     ]);
     // No source yet — nothing to add a view of.
     const create = screen.getByTestId('create-record-tab') as HTMLButtonElement;
@@ -319,7 +327,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
   it('creates the minimal view TabDef: list source, default view, no scope keys', () => {
     const props = setup({ hostType: 'Project' });
     openViewForm();
-    pickSource('list:crm::reading');
+    pickSource('list:0');
     // One view, typeless source: no picker, no toggle.
     expect(screen.queryByTestId('view-tab-view')).toBeNull();
     expect(screen.queryByRole('switch')).toBeNull();
@@ -331,6 +339,23 @@ describe('RecordTabs view tabs (M45.4)', () => {
       icon: null,
       content: 'view',
       source: { list: 'reading', collection: 'crm' },
+    });
+  });
+
+  it('a collection legally containing :: survives the index-keyed pick intact', () => {
+    const props = setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('list:1');
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    // The pointer is read off the roster ROW, never parsed out of the option
+    // value — the collection path comes through whole, the id unglued.
+    expect(next[2]).toEqual({
+      id: 'clips',
+      name: 'Clips',
+      icon: null,
+      content: 'view',
+      source: { list: 'clips', collection: 'notes::archive' },
     });
   });
 
@@ -366,7 +391,7 @@ describe('RecordTabs view tabs (M45.4)', () => {
     expect((screen.getByTestId('view-tab-source') as HTMLSelectElement).value).toBe('type:Task');
     expect((screen.getByTestId('view-tab-view') as HTMLSelectElement).value).toBe('open');
     expect((screen.getByRole('switch') as HTMLInputElement).checked).toBe(true);
-    pickSource('list:crm::reading');
+    pickSource('list:0');
     fireEvent.click(screen.getByTestId('change-source-save'));
     // The old pointer's view/scope never survive a source change: the new
     // source has one view and no type, so both keys are GONE, not stale.
