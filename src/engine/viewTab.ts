@@ -37,8 +37,7 @@ import { resolveView } from './views';
 import { resolveTarget } from './wikilink';
 
 export type ViewTabResolution =
-  | { kind: 'ok'; surface: Surface; sourceLabel: string }
-  | { kind: 'broken'; reason: string };
+  { kind: 'ok'; surface: Surface; sourceLabel: string } | { kind: 'broken'; reason: string };
 
 const broken = (reason: string): ViewTabResolution => ({ kind: 'broken', reason });
 
