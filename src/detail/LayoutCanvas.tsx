@@ -430,10 +430,12 @@ export function LayoutCanvas({
 }
 
 /** The view-tab placeholder's one line (M45.4): the source named straight off
- * the POINTER — type name or list id — honest and cheap. Resolving here would
- * re-run the record page's work for an inert preview; the id-not-title trade
- * for a list source is deliberate and priced in. A sourceless tab says what
- * the record page will show: the broken card, never an empty view. */
+ * the POINTER — type name or list id. Not resolved, for two real reasons:
+ * LayoutCanvas is props-pure (a draft and a type def in, no vault
+ * subscription), so the entries/schema/views a resolution reads are not in
+ * reach — and a dead list pointer has no title to offer, so the id fallback
+ * is needed regardless. A sourceless tab says what the record page will
+ * show: the broken card, never an empty view. */
 function viewTabPlaceholder(tab: TabDef): string {
   const source = tab.source ?? null;
   if (source === null) return 'View of a missing source — shown broken on the record page';

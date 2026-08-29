@@ -361,9 +361,12 @@ describe('DocPage', () => {
       expect(screen.getByTestId('view-tab-broken').textContent).toContain(
         'This tab points at a type called “Ghost” that is no longer in the vault.',
       );
-      // Broken is a sentence, not an empty view ("No items yet" would read as
-      // measured-at-zero) and not the property stack.
+      // Broken is a sentence, not an empty view (an empty-state line would
+      // read as measured-at-zero) and not the property stack. Both spellings:
+      // the table this dead source would default to says "No records yet";
+      // "No items yet" is BoardView's.
       expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+      expect(screen.queryByText('No records yet')).toBeNull();
       expect(screen.queryByText('No items yet')).toBeNull();
       expect(screen.queryByTestId('table-row')).toBeNull();
       expect(screen.queryByTestId('page-properties')).toBeNull();
