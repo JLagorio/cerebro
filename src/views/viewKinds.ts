@@ -357,9 +357,11 @@ const NEVER_SEEDED: ReadonlySet<string> = new Set(['whiteboard']);
  * grouping, limit — travels always.
  *
  * This lives here rather than beside `newView` because the capability catalog
- * is here: `engine/` is the pure domain core and does not import the view
- * layer, and a second copy of the table in the engine is exactly the drift
- * M16.3 spent a commit deleting.
+ * is here, and a second copy of the table in the engine is exactly the drift
+ * M16.3 spent a commit deleting. One engine module does import this file —
+ * engine/viewTab.ts takes `hasBlocks`, which is pure capability data over
+ * engine types (no React, no cycle) — and that edge is deliberately singular:
+ * a second engine consumer is the signal to move the registry into engine/.
  */
 export function carryOver(base: Presentation, type: ViewType): Presentation {
   const kind = viewKind(type);

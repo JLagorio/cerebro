@@ -251,6 +251,75 @@ describe('resolveViewTab', () => {
     expect(res.surface.entries.map((e) => e.path).sort()).toEqual(['tasks/t1.md', 'tasks/t2.md']);
   });
 
+  it('a shadowed stem cannot over-sweep the related rows', () => {
+    // `resolveTarget` is first-match on filename stems (wikilink.ts): with a
+    // decoy `archive/atlas.md` sitting BEFORE the host in vault order, the
+    // spelling `atlas` resolves to the DECOY — so a task authored
+    // `[[atlas]]` is the decoy's, not the host's, and must DROP. This is
+    // the test that kills the naive alias seeding — `values = [host title,
+    // host stem]` with no resolution check — which sweeps that task in and
+    // passes every other test in this file.
+    const entries = [
+      makeEntry({ path: 'types/project.md', title: 'Project', type: 'Type' }),
+      makeEntry({
+        path: 'types/task.md',
+        title: 'Task',
+        type: 'Type',
+        properties: { fields: { project: { kind: 'relation', target: 'Project' } } } as never,
+      }),
+      // The decoy: same stem as the host, earlier in the array.
+      makeEntry({ path: 'archive/atlas.md', title: 'Atlas (archived)' }),
+      makeEntry({ path: 'projects/atlas.md', title: 'Atlas Program', type: 'Project' }),
+      makeEntry({
+        path: 'tasks/shadowed.md',
+        title: 'Shadowed',
+        type: 'Task',
+        relationships: { project: ['atlas'] }, // resolves to the decoy
+      }),
+      makeEntry({
+        path: 'tasks/titled.md',
+        title: 'Titled',
+        type: 'Task',
+        relationships: { project: ['Atlas Program'] }, // title pass → the host
+      }),
+    ];
+    const schema = buildSchema(entries);
+    const host = entries.find((e) => e.path === 'projects/atlas.md')!;
+    const res = resolveViewTab(
+      viewTab({ source: { type: 'Task' }, scope: 'related' }),
+      host,
+      entries,
+      schema,
+      [],
+    );
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.surface.entries.map((e) => e.path)).toEqual(['tasks/titled.md']);
+  });
+
+  it('refuses a dashboard saved on the TYPE itself, through the same guard', () => {
+    // typeViews reads the Type doc's `views:` — a dashboard saved there is
+    // reachable through the type arm, not only through a list.
+    const entries = [
+      ...fixture(),
+      makeEntry({
+        path: 'types/report.md',
+        title: 'Report',
+        type: 'Type',
+        properties: {
+          views: [{ id: 'dash', name: 'Overview', presentation: { type: 'dashboard' } }],
+        } as never,
+      }),
+    ];
+    const schema = buildSchema(entries);
+    const host = entries.find((e) => e.path === 'projects/atlas.md')!;
+    const res = resolveViewTab(viewTab({ source: { type: 'Report' } }), host, entries, schema, []);
+    expect(res).toEqual({
+      kind: 'broken',
+      reason: 'A record tab cannot show a dashboard — pick one of its own views instead.',
+    });
+  });
+
   it('related with no inbound rows is empty — never silently all', () => {
     const { entries, lists } = setup();
     const zeus = entries.find((e) => e.path === 'projects/zeus.md')!;
@@ -287,7 +356,7 @@ describe('resolveViewTab', () => {
     expect(res).toEqual({
       kind: 'broken',
       reason:
-        'This tab scopes to related records, but “Project” has no relation pointing at “Project”.',
+        'This tab scopes to related records, but “Project” has no stored relation pointing at “Project”.',
     });
   });
 

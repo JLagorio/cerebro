@@ -79,10 +79,10 @@ export function relationFieldTargeting(
 /**
  * The rows of `surface` whose `field` points at `host`.
  *
- * The injected rule is the M44.3 drilldown family — `bandRule`'s
- * `{ field, op: 'any_of', value: [...] }` for the relation/person kinds,
- * built as a literal here because that construction lives inline in
- * ChartView's DrilldownDialog. What differs is where the VALUES come from:
+ * The injected rule is the M44.3 drilldown family — module-scope `bandRule`
+ * in ChartView.tsx emits `{ field, op: 'any_of', value: [...] }` for the
+ * relation/person kinds, and it is private to that module, so the literal is
+ * built here rather than imported. What differs is where the VALUES come from:
  * `evaluateFilters` intersects strictly (case-sensitively) against the
  * scanner's bracket-stripped AUTHORED wikilink targets in
  * `entry.relationships[field]` — not paths, not necessarily the host's
@@ -205,8 +205,11 @@ export function resolveViewTab(
     }
     const field = relationFieldTargeting(sourceType, host.type, schema);
     if (field === null) {
+      // "STORED relation": the derived side of a two-way pair renders as a
+      // relation but never gates (it holds no values to filter) — to a user
+      // looking at that column, plain "no relation" would read as false.
       return broken(
-        `This tab scopes to related records, but “${sourceType}” has no relation pointing at “${host.type}”.`,
+        `This tab scopes to related records, but “${sourceType}” has no stored relation pointing at “${host.type}”.`,
       );
     }
     return {
