@@ -305,6 +305,20 @@ describe('rename and delete (groups only)', () => {
     });
   });
 
+  // renameGroup no-ops the empty commit, but the LOCAL draft was showing ""
+  // — an input that keeps displaying a name the commit refused is lying, so
+  // the no-op blur falls back to the standing name (M45.3).
+  it('an empty rename no-ops and the input falls back to the standing name', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    const input = editor().getByRole('textbox', { name: 'Section name' });
+    await user.clear(input);
+    fireEvent.blur(input);
+    expect((input as HTMLInputElement).value).toBe('Planning');
+    expect(shellOf('g1').textContent).toContain('Planning');
+  });
+
   it('Escape abandons the rename — unmounting never fires blur', async () => {
     const user = userEvent.setup();
     setup();

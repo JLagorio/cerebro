@@ -497,7 +497,9 @@ export function GroupEditorPopover({
  * closes the popover FIRST, and unmounting never fires blur, so Escape
  * abandons by construction (PropertyMenu's rename rationale, verbatim).
  * `renameGroup` no-ops the empty and unchanged commits, so the common
- * nothing-changed blur never dirties the draft. */
+ * nothing-changed blur never dirties the draft — but the LOCAL draft has to
+ * follow the ruling: an emptied box snaps back to the standing name on blur
+ * (M45.3), and a committed name shows the trimmed form the commit stored. */
 function SectionNameInput({ name, onCommit }: { name: string; onCommit: (next: string) => void }) {
   const [draft, setDraft] = useState(name);
   return (
@@ -506,7 +508,11 @@ function SectionNameInput({ name, onCommit }: { name: string; onCommit: (next: s
       ariaLabel="Section name"
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onCommit(draft)}
+      onBlur={() => {
+        const trimmed = draft.trim();
+        onCommit(draft);
+        setDraft(trimmed === '' ? name : trimmed);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
