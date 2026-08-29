@@ -70,11 +70,19 @@ export default defineConfig({
       // M34.1 measured 80.34 / 80.34 / 75.52 / 83.61 — the grant, capability,
       // and prompt work arrived tested, so the floor follows it up. Ratchets
       // only tighten.
+      // M45.5 measured 82.24 statements / 84.56 branches / 76.65 functions /
+      // 82.24 lines: M44's dashboards and views and M45's layout editor all
+      // arrived with their own suites, and two points of headroom is a floor
+      // that would let the next surface rot while still reporting green.
+      // Branches gets the wider margin on purpose — statements, lines and
+      // functions reported the same denominator on two consecutive runs while
+      // the branch total moved (19864 → 19861, 84.56 → 84.55), and a ratchet
+      // that trips on its own measurement noise is a broken gate, not a floor.
       thresholds: {
-        lines: 80.4,
-        statements: 80.4,
-        functions: 75.4,
-        branches: 83.6,
+        lines: 82.2,
+        statements: 82.2,
+        functions: 76.6,
+        branches: 84.4,
       },
     },
   },
