@@ -109,7 +109,8 @@ it.
   (RE-AMENDED 2026-08-29: user directive — the editor's strip is LIVE against
   the draft: add, rename, remove, reorder, and source changes all stage into
   `draft.tabs`. The record page's strip remains the vault's editing surface;
-  the "one tab-editing surface" ruling is reversed by the product owner.)
+  the "one tab-editing surface" ruling is reversed by the product owner, and
+  the placeholder follows the ACTIVE tab, not the first.)
 - **Simple** collapses to one scroll (draft `tabs: []` → the synthesized
   Overview; the strip hides when only Overview exists).
 - **View tabs**: "+" offers "Link existing data source" → name input +

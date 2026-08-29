@@ -179,7 +179,15 @@ export function LayoutCanvas({
   // an edit to the tab set flows straight through it — and the derivation
   // below falls back to the first tab when the id names none, because a
   // deleted (or reseeded) tab must never strand the canvas on nothing.
-  const [selectedTab, setSelectedTab] = useState<string | null>(null);
+  //
+  // Seeded with the first tab's id rather than null, because the strip only
+  // reports a press that CHANGES the tab (pressing the active one opens its
+  // menu): a `null` standing for "nothing chosen yet" would be resolved by
+  // the same fallback that serves a dead id, so reordering the tab you are
+  // standing on — Move right, or a grip drag into slot 0 — would silently
+  // move the canvas onto whatever tab took first place. The id is the
+  // answer; the fallback is for when it stops being one.
+  const [selectedTab, setSelectedTab] = useState<string | null>(() => draft.tabs[0]?.id ?? null);
   const shells = useRef(new Map<string, HTMLDivElement>());
   const anchorRef = useMemo(
     () => ({

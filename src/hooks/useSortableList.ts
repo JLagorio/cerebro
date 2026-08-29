@@ -3,11 +3,18 @@ import React, { useCallback, useRef, useState } from 'react';
 /**
  * One reorderable list, operable by pointer AND keyboard (M16.2).
  *
- * Three unrelated drag systems preceded this: `@dnd-kit/core` (imported by
- * exactly one component, BoardView), HTML5 `dataTransfer` (FileTree, the
- * inbox file drop), and hand-rolled `pointermove` (ResizeHandle, the table's
- * column resize and reorder, and the view settings property list, whose
- * comment says outright that it is a copy of the table's).
+ * Three unrelated drag systems preceded this: `@dnd-kit/core`, HTML5
+ * `dataTransfer` (FileTree, the inbox file drop), and hand-rolled
+ * `pointermove` (ResizeHandle, the table's column resize and reorder, and the
+ * view settings property list, whose comment says outright that it is a copy
+ * of the table's). No census of who imports which — that list has already
+ * rotted once; what is load-bearing is the MECHANISM.
+ *
+ * This hook is the third kind: its own pointer and key handlers on the grip,
+ * no provider and no shared context. That is what lets a list built on it sit
+ * INSIDE a dnd-kit `DndContext` without the two ever seeing each other's
+ * gestures — the layout editor's canvas holds one around the live tab strip,
+ * whose tabs reorder through this hook.
  *
  * Only `ResizeHandle` could be driven from a keyboard. That is the gap this
  * closes: the grip is a real button, and arrow keys move the item one slot

@@ -889,10 +889,14 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
       const container = shell.getAttribute('data-block');
       // At least one inert fragment inside each shell, editor or chrome —
       // Task 6 split the single content div into per-fragment wrappers
-      // (rows, strip, hint) so the drag layer can interleave. The tabs shell
-      // is the exception since M45.5 Task 2: its whole content is the LIVE
-      // strip, and only an active view tab's placeholder is preview at all.
-      if (container !== 'tabs') {
+      // (rows, strip, hint) so the drag layer can interleave.
+      if (container === 'tabs') {
+        // The one shell that holds NO preview (M45.5 Task 2): standing on a
+        // non-view tab, its whole content is the live strip. The other half
+        // of the claim — an active VIEW tab's placeholder is inert — is
+        // asserted in LayoutCanvas.test.tsx.
+        expect(within(shell).queryAllByTestId('layout-preview-content')).toHaveLength(0);
+      } else {
         expect(
           within(shell).getAllByTestId('layout-preview-content').length,
         ).toBeGreaterThanOrEqual(1);
@@ -1043,13 +1047,20 @@ describe('the live tab strip (M45.5 Task 2)', () => {
     });
   });
 
-  it('Move right stages the reorder', async () => {
+  it('Move right stages the reorder and keeps the tab you are standing on', async () => {
     const { patchFrontmatter } = tabbedSetup([
       OVERVIEW,
       { id: 'notes', name: 'Notes', content: 'sections' },
     ]);
     fireEvent.click(screen.getByTestId('record-tab-overview'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
+    // Moving the tab you are ON must not move you OFF it. The selection is
+    // an id the user never pressed (pressing the active tab opens its menu,
+    // so nothing calls onSelect here) — held as a null "nothing chosen yet"
+    // it would resolve through the first-tab fallback and follow whichever
+    // tab the reorder pushed into slot 0.
+    expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('record-tab-notes').getAttribute('aria-selected')).toBe('false');
     const patch = await applied(patchFrontmatter);
     expect((patch.tabs as { id: string }[]).map((t) => t.id)).toEqual(['notes', 'overview']);
   });
