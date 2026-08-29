@@ -25,8 +25,14 @@ import { boot, readMockFile } from './boot';
  *    suite can only assert where the attribute sits. A real browser's
  *    hit-test is the thing under test: a click at a live FieldEditor chip's
  *    coordinates must open nothing and write nothing.
+ * 3. The group editor's eye, stage to page fold (M45.3 Task 7): a shell
+ *    click opens the Planning editor, its eye hides `estimate`, and one
+ *    Apply later the record panel folds the row behind the expander while
+ *    the Type doc's bytes carry the verdict.
  */
-test('layout editor: strip to vault bytes, and the preview stays inert', async ({ page }) => {
+test('layout editor: strip to vault bytes, inert preview, and the eye folds the page', async ({
+  page,
+}) => {
   await boot(page);
 
   // -- Open a Work item in the record panel ----------------------------
@@ -101,6 +107,12 @@ test('layout editor: strip to vault bytes, and the preview stays inert', async (
   await page.waitForTimeout(250);
   await expect(page.getByRole('listbox')).toHaveCount(0);
   expect(await readMockFile(page, previewedPath)).toBe(before);
+  // The swallowed click has a SECOND life since Task 5: hit-testing skips
+  // the inert content, so the heading SHELL received it and its group
+  // editor sits open now (deliberate — the chip stayed dead, which was the
+  // claim). The rail press below dismisses it in passing: outside
+  // pointerdown closes the popover, and the click still lands on the rail.
+  await expect(page.getByRole('dialog', { name: 'Edit Heading' })).toBeVisible();
 
   // -- Stage Show file path; nothing lands before Apply ----------------
   const fileSwitch = page.getByRole('switch', { name: 'Show file path' });
@@ -122,4 +134,52 @@ test('layout editor: strip to vault bytes, and the preview stays inert', async (
   // The golden-corpus layout survived the round trip alongside it.
   expect(typeDoc).toContain('- status');
   expect(typeDoc).toContain('name: Planning');
+
+  // -- Act two (M45.3 Task 7): the eye's verdict lands in the vault ----
+  // Precondition, or the fold below proves nothing: the open record HAS an
+  // estimate, so its row stands before the eye acts. (Nearly every corpus
+  // work item carries one; this pins the assumption to the one on stage.)
+  const estimateRow = panel.locator('[data-testid="property-row"][data-property="estimate"]');
+  await expect(estimateRow).toHaveCount(1);
+  // The expander's count BEFORE — the eye must grow it by exactly one. A
+  // record with every field set has no expander at all; that reads as zero.
+  const expander = panel.getByTestId('hidden-properties-toggle');
+  const hiddenBefore =
+    (await expander.count()) === 0
+      ? 0
+      : Number(((await expander.textContent()) ?? '').match(/\d+/)?.[0]);
+  expect(Number.isNaN(hiddenBefore)).toBe(false);
+
+  // -- Reopen the editor; the Planning SHELL opens its group editor ----
+  await panel.getByRole('button', { name: 'Record actions' }).click();
+  await page.getByTestId('record-customize-layout').click();
+  await expect(editor).toBeVisible();
+  // Anywhere inside the block lands on the live shell (the inert fragments
+  // are unhittable, as act one proved) and click-to-edit opens the editor.
+  await preview.locator('[data-block="planning"]').click();
+  const groupEditor = page.getByTestId('group-editor');
+  await expect(groupEditor).toBeVisible();
+
+  // -- Eye OFF estimate: staged only, nothing in the vault yet ---------
+  await groupEditor.getByRole('button', { name: 'Hide Estimate' }).click();
+  // The eye reads its own stage back — hide flips the label to Show.
+  await expect(groupEditor.getByRole('button', { name: 'Show Estimate' })).toBeVisible();
+  expect(await readMockFile(page, 'types/work-item.md')).not.toContain('visibility');
+
+  // -- Apply: the editor closes and the record surface folds the row ---
+  // The popover is still open; the press reaches Apply THROUGH its
+  // dismiss — outside pointerdown closes the layer, the click still lands
+  // (the same mechanics the rail press rode in act one).
+  await page.getByTestId('layout-apply').click();
+  await expect(editor).toHaveCount(0);
+  await expect(estimateRow).toHaveCount(0);
+  await expect(expander).toContainText(`${hiddenBefore + 1} hidden`);
+
+  // -- …because the Type doc's estimate spec carries the verdict -------
+  const after = await readMockFile(page, 'types/work-item.md');
+  const estimateBlock = after.match(/\n {2}estimate:\n((?: {3,}.*\n)*)/)?.[1] ?? '';
+  // Capture guard first: an empty match would pass a bare toContain
+  // vacuously. The block is estimate's — then the verdict sits inside it.
+  expect(estimateBlock).toContain('kind: select');
+  expect(estimateBlock).toContain('visibility: hide');
 });
