@@ -37,7 +37,21 @@ import { resolveView } from './views';
 import { resolveTarget } from './wikilink';
 
 export type ViewTabResolution =
-  { kind: 'ok'; surface: Surface; sourceLabel: string } | { kind: 'broken'; reason: string };
+  | {
+      kind: 'ok';
+      surface: Surface;
+      sourceLabel: string;
+      /** The source's record type — what keys the embed's column universe and
+       * quick-create (M45.4 Task 4). Null for a typeless ("everything") list.
+       * A renderer fact, but an ENGINE answer: deriving it outside would mean
+       * a second list lookup, and the resolution happens exactly once. */
+      sourceType: string | null;
+      /** Whether the rows were narrowed beyond the source — the saved view's
+       * own filters or the related scope — so the embed's empty state can say
+       * "nothing matches" rather than "no items yet" (the M16.35 rule). */
+      filtered: boolean;
+    }
+  | { kind: 'broken'; reason: string };
 
 const broken = (reason: string): ViewTabResolution => ({ kind: 'broken', reason });
 
@@ -188,6 +202,7 @@ export function resolveViewTab(
   }
 
   const sourceLabel = `${sourceName} · ${active.name}`;
+  const filtered = active.filters !== null;
 
   if (tab.scope === 'related') {
     if (host.type === null || host.type === '') {
@@ -216,8 +231,11 @@ export function resolveViewTab(
       kind: 'ok',
       surface: { ...surface, entries: relatedEntries(surface, field.name, host, entries, schema) },
       sourceLabel,
+      sourceType,
+      // Related IS a narrowing, whatever the saved view declares.
+      filtered: true,
     };
   }
 
-  return { kind: 'ok', surface, sourceLabel };
+  return { kind: 'ok', surface, sourceLabel, sourceType, filtered };
 }

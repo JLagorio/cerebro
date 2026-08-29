@@ -43,6 +43,7 @@ import { countRules } from '@/views/FilterChips';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
 import { ViewCanvas } from '@/views/ViewCanvas';
+import { BrokenNotice } from '@/views/ViewTabEmbed';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -790,7 +791,10 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
 }
 
 /** A block that cannot draw says what is missing and where it pointed — a
- * blank tile is indistinguishable from a block that is still loading. */
+ * blank tile is indistinguishable from a block that is still loading. The
+ * sentence body is `BrokenNotice`, shared with the record page's view-tab
+ * card (M45.4) — a second copy of it is the review-blocking defect the plan
+ * names; this shell only adds the widget chrome around it. */
 function BrokenBlock({
   widget,
   title,
@@ -806,10 +810,7 @@ function BrokenBlock({
 }) {
   return (
     <WidgetShell widget={widget} title={title} defaultTitle={defaultTitle} testId="dashboard-block">
-      <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
-        <Icon name={icon} size={14} color="var(--n-400)" />
-        {message}
-      </p>
+      <BrokenNotice icon={icon} message={message} />
     </WidgetShell>
   );
 }

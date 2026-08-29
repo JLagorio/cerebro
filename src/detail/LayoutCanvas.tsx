@@ -21,7 +21,7 @@ import { resolveLayout } from '@/engine/layout';
 import { moveField, moveGroup } from '@/engine/layoutEdit';
 import { foldsWhenUnset, splitByVisibility } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
-import type { Entry, FieldDef, LayoutConfig, Schema, TypeDef } from '@/engine/types';
+import type { Entry, FieldDef, LayoutConfig, Schema, TabDef, TypeDef } from '@/engine/types';
 
 /**
  * The layout editor's preview canvas (M45.3), split out of LayoutEditorDialog
@@ -239,6 +239,22 @@ export function LayoutCanvas({
                   onSelect={() => undefined}
                   onChange={() => undefined}
                 />
+                {/* M45.4 — the canvas does not live-embed a view tab (plan
+                    Decision: weight without fidelity), so the ACTIVE view tab
+                    gets a quiet placeholder instead. First tab only, by
+                    DECISION: activeId is pinned to draft.tabs[0] above and
+                    the canvas holds no tab-selection state — adding one for
+                    a placeholder is scope creep this late (M45.4 Task 4,
+                    recorded in the slice write-back). Tabs stay edited on
+                    the real record page either way. */}
+                {draft.tabs[0].content === 'view' && (
+                  <div
+                    data-testid="layout-preview-viewtab"
+                    className="px-1 pb-1.5 pt-2 text-xs text-n-400"
+                  >
+                    {viewTabPlaceholder(draft.tabs[0])}
+                  </div>
+                )}
               </InertContent>
             </BlockShell>
           )}
@@ -411,6 +427,18 @@ export function LayoutCanvas({
       </div>
     </DndContext>
   );
+}
+
+/** The view-tab placeholder's one line (M45.4): the source named straight off
+ * the POINTER — type name or list id — honest and cheap. Resolving here would
+ * re-run the record page's work for an inert preview; the id-not-title trade
+ * for a list source is deliberate and priced in. A sourceless tab says what
+ * the record page will show: the broken card, never an empty view. */
+function viewTabPlaceholder(tab: TabDef): string {
+  const source = tab.source ?? null;
+  if (source === null) return 'View of a missing source — shown broken on the record page';
+  const name = 'type' in source ? source.type : source.list;
+  return `View of ${name} — shown on the record page`;
 }
 
 /** The persistent shell's stand-in content when no row renders: the block's

@@ -143,6 +143,11 @@ describe('resolveViewTab', () => {
       'tasks/t3.md',
       'tasks/t4.md',
     ]);
+    // The renderer's facts ride the ok arm (M45.4 Task 4): the source type
+    // keys the embed's column universe and quick-create; a filterless,
+    // unscoped tab is NOT filtered — its empty state may say "no items yet".
+    expect(res.sourceType).toBe('Task');
+    expect(res.filtered).toBe(false);
   });
 
   it('resolves a list source by id AND collection, honoring the saved view id', () => {
@@ -177,6 +182,34 @@ describe('resolveViewTab', () => {
     expect(res.sourceLabel).toBe('Work · Board');
     expect(res.surface.presentation.type).toBe('board');
     expect(res.surface.entries).toHaveLength(4);
+    // The list's declared type rides through for the embed's wiring.
+    expect(res.sourceType).toBe('Task');
+    expect(res.filtered).toBe(false);
+  });
+
+  it('a saved view with its own filters resolves filtered — the empty state must say so', () => {
+    const { entries, schema, host } = setup();
+    const list = makeList({
+      views: [
+        {
+          id: 'main',
+          name: 'Atlas only',
+          icon: null,
+          filters: { all: [{ field: 'project', op: 'any_of', value: ['atlas'] }] },
+          presentation: { type: 'table', group: [], sort: [], columns: [] },
+        },
+      ],
+    });
+    const res = resolveViewTab(
+      viewTab({ source: { list: 'work', collection: null } }),
+      host,
+      entries,
+      schema,
+      [list],
+    );
+    expect(res.kind).toBe('ok');
+    if (res.kind !== 'ok') return;
+    expect(res.filtered).toBe(true);
   });
 
   it('is broken, in words, when the tab declares no source', () => {
@@ -249,6 +282,9 @@ describe('resolveViewTab', () => {
     // both survive the strict any_of; zeus's task and the unlinked task do
     // not. This is the filter matching resolution semantics, not luck.
     expect(res.surface.entries.map((e) => e.path).sort()).toEqual(['tasks/t1.md', 'tasks/t2.md']);
+    // Related IS a narrowing: the embed's empty state must say "nothing
+    // matches", never "no items yet".
+    expect(res.filtered).toBe(true);
   });
 
   it('a shadowed stem cannot over-sweep the related rows', () => {

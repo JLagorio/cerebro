@@ -23,7 +23,9 @@ import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
 import { isRecordEntry, typeTabs } from '@/engine/typeCatalog';
+import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
+import { ViewTabEmbed } from '@/views/ViewTabEmbed';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
@@ -174,6 +176,7 @@ const SAVE_LABEL: Record<SaveState, string | null> = {
 export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
   const entries = useVaultStore((s) => s.entries);
+  const views = useVaultStore((s) => s.views);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const createItem = useVaultStore((s) => s.createItem);
@@ -745,8 +748,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       {/* M38.2 — the property surface the peek shows, on the
                           page. The SAME component: one property editor, two
                           geometries, so a field added here is a field added
-                          there. */}
+                          there. M45.4: view tabs skip it too — the embedded
+                          database IS the tab's content, and a stack above it
+                          would be the Overview leaking through. */}
                       {activeTab.content !== 'sections' &&
+                        activeTab.content !== 'view' &&
                         (activeTab.content === 'properties' || !stripShows || detailsShown) && (
                           <div data-testid="page-properties" className="mb-4">
                             <RecordProperties
@@ -762,6 +768,18 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           key={`${entry.path}#${activeTab.id}`}
                           entry={entry}
                           tabId={activeTab.id}
+                        />
+                      )}
+                      {/* M45.4 — the fourth arm: resolve the tab's pointer
+                          (the dashboard ViewBlock path, per render like the
+                          dashboard's) and render the embed, or the broken
+                          card — never an empty view for a dead pointer. */}
+                      {activeTab.content === 'view' && (
+                        <ViewTabEmbed
+                          resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+                          entries={entries}
+                          schema={schema}
+                          scope={`viewtab:${activeTab.id}`}
                         />
                       )}
                     </>

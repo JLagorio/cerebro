@@ -299,6 +299,87 @@ describe('DocPage', () => {
     });
   });
 
+  // M45.4 — the fourth swap arm: a record tab backed by a database view. The
+  // tab IS the content — no property stack, no body editor — and a dead
+  // pointer renders the broken card, never an empty database.
+  describe('view tabs (M45.4)', () => {
+    const TYPE_DOC = 'types/work-item.md';
+    // syn-6 is the host: syn-7 and syn-10 declare `blocked_by: [[syn-6]]`,
+    // fld-9 is blocked by syn-8 — related scoping must keep the first two and
+    // drop the third.
+    const HOST = 'projects/offline-sync-hardening/items/syn-6.md';
+    // The heading-strip suite's tripwire, reused: these cases strip the
+    // corpus `layout:` so `stripShows` is FALSE — which makes the
+    // page-properties assertions bite: without the view-tab gate,
+    // `!stripShows` alone would render the stack on a view tab.
+    const CORPUS_LAYOUT =
+      'layout:\n' +
+      '  heading: [status, priority]\n' +
+      '  groups:\n' +
+      '    - { id: planning, name: Planning, fields: [assignee, due, estimate] }\n';
+    const setTabs = async (tabsYaml: string) => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      if (!typeDoc.includes(CORPUS_LAYOUT)) {
+        throw new Error('work-item.md corpus layout drifted — update CORPUS_LAYOUT here');
+      }
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(CORPUS_LAYOUT, '').replace('\n---\n', `\n${tabsYaml}---\n`),
+      );
+      await useVaultStore.getState().rescan();
+    };
+    const VIEW_TABS =
+      'tabs:\n' +
+      '  - { id: overview, name: Overview, content: overview }\n' +
+      '  - { id: blocked, name: Blocked, content: view, source: { type: Work item }, scope: related }\n';
+
+    it('a view tab shows its database scoped to the host — only the related rows', async () => {
+      await setTabs(VIEW_TABS);
+      render(<DocPage selection={{ kind: 'doc', path: HOST, tab: 'blocked' }} />);
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      // The two items blocked BY this host…
+      expect(screen.getByText('Hold both versions instead of discarding')).toBeTruthy();
+      expect(screen.getByText('Instrument conflict rate separately from sync errors')).toBeTruthy();
+      // …and not the one blocked by a different record.
+      expect(screen.queryByText('Recover gracefully from the first failed sync')).toBeNull();
+      expect(screen.getAllByTestId('table-row')).toHaveLength(2);
+      // The tab IS the content: no stack (the layout is stripped, so
+      // `!stripShows` would render it without the view gate) and no body
+      // editor — `showsEditor` stays false, the M44.5 reset key untouched.
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      expect(screen.queryByTestId('markdown-editor')).toBeNull();
+    });
+
+    it('a dead source renders the card — the sentence, never an empty database', async () => {
+      await setTabs(
+        'tabs:\n' +
+          '  - { id: overview, name: Overview, content: overview }\n' +
+          '  - { id: ghost, name: Ghost, content: view, source: { type: Ghost } }\n',
+      );
+      render(<DocPage selection={{ kind: 'doc', path: HOST, tab: 'ghost' }} />);
+      expect(screen.getByTestId('view-tab-broken').textContent).toContain(
+        'This tab points at a type called “Ghost” that is no longer in the vault.',
+      );
+      // Broken is a sentence, not an empty view ("No items yet" would read as
+      // measured-at-zero) and not the property stack.
+      expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+      expect(screen.queryByText('No items yet')).toBeNull();
+      expect(screen.queryByTestId('table-row')).toBeNull();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+    });
+
+    it('a stale selection.tab still falls back to the first tab (M44.5 unchanged)', async () => {
+      await setTabs(VIEW_TABS);
+      render(<DocPage selection={{ kind: 'doc', path: HOST, tab: 'gone' }} />);
+      // The fallback is Overview — the editor mounts, and no embed renders.
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
+      expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+    });
+  });
+
   it('the panel toggle hides and shows the side panel', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     expect(screen.getByTestId('doc-side-panel')).toBeTruthy();

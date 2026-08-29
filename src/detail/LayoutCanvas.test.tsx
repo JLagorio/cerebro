@@ -139,6 +139,7 @@ function typeDoc(
     heading: ['status'],
     groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
   },
+  tabs?: unknown,
 ) {
   return makeEntry({
     path: DOC,
@@ -147,6 +148,7 @@ function typeDoc(
     properties: {
       fields: { status: 'text', priority: 'text', notes: 'text' },
       layout,
+      ...(tabs !== undefined ? { tabs } : {}),
     } as unknown as ReturnType<typeof makeEntry>['properties'],
   });
 }
@@ -283,5 +285,66 @@ describe('the drag layer on the canvas (M45.3 Task 6)', () => {
     // Nothing renders a row here (status sits in the heading, priority is
     // folded, rest is empty) — so no grips, but the targets stand.
     expect(screen.queryAllByTestId('layout-grip')).toHaveLength(0);
+  });
+});
+
+// M45.4 — the canvas does NOT live-embed a view tab (plan Decision: weight
+// without fidelity); an ACTIVE first view tab gets a quiet placeholder naming
+// its source straight off the pointer, no resolution. First-tab-only: the
+// strip's activeId is pinned to draft.tabs[0] and the canvas holds no
+// tab-selection state — the recorded M45.4 decision.
+describe('the view-tab placeholder (M45.4)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  it('an active first view tab names its source, inert, inside the tabs block', () => {
+    setup([
+      typeDoc(undefined, [
+        { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
+        { id: 's1', name: 'Notes', content: 'sections' },
+      ]),
+      RECORD,
+    ]);
+    const tabsBlock = screen
+      .getAllByTestId('layout-block')
+      .find((b) => b.getAttribute('data-block') === 'tabs');
+    if (tabsBlock === undefined) throw new Error('tabs shell missing');
+    const placeholder = within(tabsBlock).getByTestId('layout-preview-viewtab');
+    expect(placeholder.textContent).toBe('View of Work item — shown on the record page');
+    // Preview, not surface: the placeholder lives inside an inert fragment.
+    expect(placeholder.closest('[data-testid="layout-preview-content"]')).not.toBeNull();
+  });
+
+  it('a list-source tab names the list id; a sourceless one says so', () => {
+    setup([
+      typeDoc(undefined, [{ id: 'v1', name: 'Work', content: 'view', source: { list: 'work' } }]),
+      RECORD,
+    ]);
+    expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
+      'View of work — shown on the record page',
+    );
+    cleanup();
+    resetLayers();
+    setup([typeDoc(undefined, [{ id: 'v1', name: 'Broken', content: 'view' }]), RECORD]);
+    expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
+      'View of a missing source — shown broken on the record page',
+    );
+  });
+
+  it('a first NON-view tab renders no placeholder — first-tab-only by decision', () => {
+    setup([
+      typeDoc(undefined, [
+        { id: 'o1', name: 'Overview', content: 'overview' },
+        { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
+      ]),
+      RECORD,
+    ]);
+    expect(screen.getByTestId('record-tabs')).toBeTruthy();
+    expect(screen.queryByTestId('layout-preview-viewtab')).toBeNull();
   });
 });
