@@ -6,6 +6,7 @@ import {
   moveGroup,
   removeGroup,
   renameGroup,
+  setGroupTab,
 } from '@/engine/layoutEdit';
 import type { LayoutConfig } from '@/engine/types';
 
@@ -160,6 +161,72 @@ describe('addGroup', () => {
   it('mints group-1 against an empty draft', () => {
     const { id } = addGroup(freezeLayout({ heading: [], groups: [] }), Object.freeze([]) as []);
     expect(id).toBe('group-1');
+  });
+
+  it('mints a section that already belongs to a tab (M45.6)', () => {
+    const next = addGroup(base(), ['group-1', 'group-3'], 'spec').layout;
+    expect(next.groups[2]).toEqual({ id: 'group-2', name: 'New group', fields: [], tab: 'spec' });
+  });
+
+  it('mints an UNTABBED section for a blank or null tab — the key stays absent', () => {
+    for (const tab of [null, '', '   ', undefined]) {
+      const next = addGroup(base(), ['group-1', 'group-3'], tab).layout;
+      expect(Object.keys(next.groups[2])).toEqual(['id', 'name', 'fields']);
+    }
+  });
+});
+
+describe('setGroupTab (M45.6)', () => {
+  it('assigns the trimmed tab, rebuilding only that group', () => {
+    const layout = base();
+    const next = setGroupTab(layout, 'group-1', '  spec  ');
+    expect(next.groups[0]).toEqual({
+      id: 'group-1',
+      name: 'Planning',
+      fields: ['due', 'estimate'],
+      tab: 'spec',
+    });
+    expect(next.groups[0].fields).toBe(layout.groups[0].fields);
+    expect(next.groups[1]).toBe(layout.groups[1]);
+    expect(next.heading).toBe(layout.heading);
+  });
+
+  it('clears back to untabbed on null — the key is REMOVED, not set undefined', () => {
+    const tabbed = setGroupTab(base(), 'group-1', 'spec');
+    const cleared = setGroupTab(tabbed, 'group-1', null);
+    expect(Object.keys(cleared.groups[0])).toEqual(['id', 'name', 'fields']);
+  });
+
+  it('treats a blank string as clearing — the parse door spells absent the same way', () => {
+    const tabbed = setGroupTab(base(), 'group-1', 'spec');
+    expect(Object.keys(setGroupTab(tabbed, 'group-1', '   ').groups[0])).toEqual([
+      'id',
+      'name',
+      'fields',
+    ]);
+  });
+
+  it('is a no-op setting the tab a group already wears', () => {
+    const tabbed = setGroupTab(base(), 'group-1', 'spec');
+    expect(setGroupTab(tabbed, 'group-1', 'spec')).toBe(tabbed);
+    expect(setGroupTab(tabbed, 'group-1', ' spec ')).toBe(tabbed);
+  });
+
+  it('is a no-op clearing an already untabbed group', () => {
+    const layout = base();
+    expect(setGroupTab(layout, 'group-1', null)).toBe(layout);
+    expect(setGroupTab(layout, 'group-1', '')).toBe(layout);
+  });
+
+  it('is a no-op against an unknown id', () => {
+    const layout = base();
+    expect(setGroupTab(layout, 'group-9', 'spec')).toBe(layout);
+  });
+
+  it('names a tab it has never seen — tab-roster-blind, dead pointers fall back on render', () => {
+    // resolveLayout shows a section whose tab died on the DEFAULT tab; the
+    // editor never has to know which tabs exist to write one.
+    expect(setGroupTab(base(), 'group-3', 'not-a-tab').groups[1].tab).toBe('not-a-tab');
   });
 });
 

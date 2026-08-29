@@ -544,6 +544,53 @@ describe('layout config (M45.1)', () => {
     expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
   });
 
+  it('reads a group tab tolerantly — a non-string or a blank is ABSENT, not a tab', () => {
+    // Absent is the default tab (M45.6), which is what every group had before
+    // the key existed — so garbage degrading to absent degrades to today.
+    const l = parseLayoutConfig({
+      groups: [
+        { id: 'a', name: 'A', fields: [], tab: '  spec  ' },
+        { id: 'b', name: 'B', fields: [], tab: 7 },
+        { id: 'c', name: 'C', fields: [], tab: true },
+        { id: 'd', name: 'D', fields: [], tab: '   ' },
+        { id: 'e', name: 'E', fields: [], tab: ['spec'] },
+        { id: 'f', name: 'F', fields: [], tab: null },
+      ],
+    });
+    expect(l.groups[0].tab).toBe('spec');
+    for (const g of l.groups.slice(1)) expect(g.tab).toBeUndefined();
+    // Not merely undefined-valued: the key must be gone, or the deviations-only
+    // serializer would round-trip `tab: undefined` into the vault bytes.
+    expect(Object.keys(l.groups[1])).toEqual(['id', 'name', 'fields']);
+  });
+
+  it('serializes tab only when set — an untabbed group is byte-identical to pre-M45.6', () => {
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }] });
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: ['due'], tab: 'spec' }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'], tab: 'spec' }] });
+  });
+
+  it('round-trips a tabbed layout', () => {
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Main', fields: ['due'], tab: 'spec' },
+        { id: 'g2', name: 'Loose', fields: ['team'] },
+      ],
+    });
+    expect(l.groups.map((g) => g.tab)).toEqual(['spec', undefined]);
+    expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
+  });
+
   it('buildSchema resolves layout from the Type doc frontmatter', () => {
     const doc = makeEntry({
       path: 'types/work-item.md',

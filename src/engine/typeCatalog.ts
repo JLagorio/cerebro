@@ -11,6 +11,7 @@
 
 import { isTemplate } from '@/lib/templates';
 import { DEFAULT_TIME_FORMAT } from './dates';
+import type { LayoutTab } from './layout';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -302,4 +303,43 @@ export function typeTabs(typeName: string, schema: Schema): TabDef[] {
   const saved = schema.types.get(typeName)?.tabs ?? [];
   if (saved.length > 0) return saved;
   return [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
+}
+
+/**
+ * Does this tab render the property stack at all (M45.6)? `sections` and
+ * `view` tabs ARE their content — free text, an embedded database — and the
+ * record surfaces already skip the stack on both, so a section assigned to
+ * one would be invisible. The layout editor's "Move to tab…" offers exactly
+ * the tabs this answers true for.
+ */
+export function tabBearsProperties(tab: TabDef): boolean {
+  return tab.content === 'overview' || tab.content === 'properties';
+}
+
+/**
+ * The `LayoutTab` seam `resolveLayout` takes (M45.6) — built HERE because
+ * this module owns the tab roster and `layout.ts` deliberately does not.
+ * Two facts, one place:
+ *
+ * - **default** = the first PROPERTY-BEARING tab. Untabbed sections — every
+ *   section in every vault written before M45.6 — call it home.
+ * - **live** = the type still declares that tab id, so `resolveLayout` can
+ *   tell a section on another tab from a section on a DELETED one.
+ *
+ * Both failure modes fail VISIBLE: a roster with no property-bearing tab
+ * falls back to the first tab, and an `activeId` no tab wears (a stale
+ * selection the caller did not resolve) counts as the default. Untabbed
+ * sections always have exactly one home, because a section with none is a
+ * section the user cannot recover.
+ */
+export function layoutTabScope(tabs: TabDef[], activeId: string): LayoutTab {
+  const fallback = tabs.find(tabBearsProperties) ?? tabs[0];
+  return {
+    id: activeId,
+    isDefault:
+      fallback === undefined || !tabs.some((t) => t.id === activeId)
+        ? true
+        : activeId === fallback.id,
+    isLive: (tabId) => tabs.some((t) => t.id === tabId),
+  };
 }

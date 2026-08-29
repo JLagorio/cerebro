@@ -241,11 +241,21 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
   const groups = items.map((g, i) => {
     const id = owns[i] ? declaredIds[i] : mintGroupId(i, taken);
     taken.add(id);
-    return {
+    const base = {
       id,
       name: typeof g.name === 'string' && g.name.trim() !== '' ? g.name.trim() : `Group ${i + 1}`,
       fields: claimFieldNames(g.fields, claimed),
     };
+    // M45.6 — `tab:` is tolerant BY VALUE like every other key here: a
+    // number, a bool, an array, a blank string all degrade to ABSENT, which
+    // means the default tab, which is what the group did before the key
+    // existed. The key is OMITTED rather than set to undefined so the
+    // deviations-only serializer round-trips it out of the vault bytes.
+    // Liveness is NOT checked here: the parser has no tab roster, and a
+    // section pointing at a deleted tab must survive to fall back visibly
+    // on render (resolveLayout owns that), not be erased at the door.
+    const tab = typeof g.tab === 'string' && g.tab.trim() !== '' ? g.tab.trim() : null;
+    return tab === null ? base : { ...base, tab };
   });
 
   return { heading, groups };
@@ -254,12 +264,18 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
 /** LayoutConfig → the `layout:` frontmatter value. Deviations only: the
  * defaults = null (patchFrontmatter deletes the key), an empty heading is
  * omitted, groups always serialize whole — an empty group is a real drop
- * target the editor keeps. */
+ * target the editor keeps — and `tab:` is written only when the section
+ * names one (M45.6), so an untabbed group's bytes are exactly what they were
+ * before the key existed. */
 export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   if (l.heading.length !== LAYOUT_DEFAULTS.heading.length) out.heading = [...l.heading];
   if (l.groups.length !== LAYOUT_DEFAULTS.groups.length) {
-    out.groups = l.groups.map((g) => ({ id: g.id, name: g.name, fields: [...g.fields] }));
+    out.groups = l.groups.map((g) => {
+      const group: Record<string, unknown> = { id: g.id, name: g.name, fields: [...g.fields] };
+      if (typeof g.tab === 'string' && g.tab !== '') group.tab = g.tab;
+      return group;
+    });
   }
   return Object.keys(out).length === 0 ? null : out;
 }

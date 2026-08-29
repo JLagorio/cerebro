@@ -151,11 +151,22 @@ export interface LayoutGroup {
   id: string;
   name: string;
   fields: string[];
+  /** Which tab of the type's `tabs:` this section belongs to (M45.6). ABSENT
+   * is the DEFAULT tab — the first property-bearing one (`typeCatalog`'s
+   * `layoutTabScope` decides which that is) — and absent is what every group
+   * wore before this key existed, so no vault migrates and a hand-written
+   * `layout:` with no tabs still renders exactly as it did. A DEAD pointer
+   * (a tab the type no longer declares) resolves onto the default tab,
+   * visible: a section the user cannot see is a section they cannot
+   * recover. */
+  tab?: string;
 }
 
-/** Where the record page PLACES properties (M45.1). `fields:` declares and
- * orders; `visibility` discloses; `layout` arranges. Absent = the flat
- * stack every type rendered before M45. A field name appears at most once
+/** Where the record page PLACES properties (M45.1) and, since M45.6, on WHICH
+ * TAB. `fields:` declares and orders; `visibility` discloses; `layout`
+ * arranges. Absent = the flat stack every type rendered before M45. The
+ * heading strip stays global — it renders above the tab strip, on every tab
+ * — while a GROUP may name its tab. A field name appears at most once
  * across `heading` + all `groups` — parse drops later claims, so
  * downstream code never dedups. */
 export interface LayoutConfig {

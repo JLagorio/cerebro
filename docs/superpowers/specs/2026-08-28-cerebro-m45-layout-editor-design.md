@@ -133,12 +133,18 @@ layout:
   heading: [status, assignee, priority, due]   # the key-property strip
   groups:
     - { id: group-1, name: Property group, fields: [start, progress, team] }
-    - { id: group-2, name: Budget, fields: [budget, attach_file] }
+    - { id: group-2, name: Budget, fields: [budget, attach_file], tab: spec }
 ```
 
 - New reserved key on Type docs (`RESERVED` grows; parse tolerant by value,
   serializer deviations-only, absent = today's flat rendering — zero
   migration).
+- `tab:` on a group (added M45.6) names which of the type's `tabs:` the
+  section belongs to; absent = the DEFAULT tab (the first property-bearing
+  one), which is what every group written before M45.6 has, so no vault
+  migrates. A `tab:` naming a tab the type no longer declares renders the
+  section on the default tab, visible — the opposite of a dead FIELD
+  pointer, because the section still holds real properties.
 - Fields in no group and not in `heading` render in the DEFAULT group
   (declaration order), so a hand-edited vault never loses a property.
 - A field named in `layout` that no longer exists is skipped on render and
