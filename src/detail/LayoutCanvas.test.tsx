@@ -227,6 +227,22 @@ describe('the drag layer on the canvas (M45.3 Task 6)', () => {
     }
   });
 
+  it('every FieldEditor-bearing row sits INSIDE an inert fragment — the boundary from the other side', () => {
+    setup();
+    // The complement of the live-layer case above: grips and slots stand
+    // outside every inert fragment, and the preview rows — each one a live
+    // FieldEditor that would write the vault if it could fire — stand inside
+    // one. Both halves, or the boundary is only half-proved.
+    const rows = screen
+      .getAllByTestId('layout-preview')
+      .flatMap((p) => [...p.querySelectorAll('[data-testid="property-row"]')]) as Element[];
+    // Vacuity guard: the fixture renders priority (g1) and notes (rest).
+    expect(rows.map((r) => r.getAttribute('data-property')).sort()).toEqual(['notes', 'priority']);
+    for (const row of rows) {
+      expect(row.closest('[inert]')).not.toBeNull();
+    }
+  });
+
   it('keys on a focused grip never open the group editor — the shell guards its own target', () => {
     setup();
     const grip = screen.getAllByTestId('layout-grip')[0];

@@ -257,9 +257,12 @@ export function LayoutCanvas({
             {/* The heading's one droppable APPENDS (config-end index): its
                 cells render inside HeadingProperties' own strip markup — no
                 seam for per-index slots without restructuring a shared
-                component — and in-heading order is the group editor's moves.
-                It stands even when the strip is empty, because this is
-                §3.4's promote target and the shell persists (Task 6). */}
+                component — so in-heading order is ARRIVAL order. Nothing
+                reorders within the strip (no per-cell grips, no editor-row
+                affordance); rearranging means removing and re-adding — the
+                row ⋯'s "Move to page", then promote it back. It stands even
+                when the strip is empty, because this is §3.4's promote
+                target and the shell persists (Task 6). */}
             <AreaDrop id={`slot:heading:${draft.layout.heading.length}`}>
               <InertContent>
                 {headingShown ? (
