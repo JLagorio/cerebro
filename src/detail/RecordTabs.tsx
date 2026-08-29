@@ -3,11 +3,23 @@ import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { useSortableList } from '@/hooks/useSortableList';
-import type { TabContent, TabDef } from '@/engine/types';
+import { listTypes, typeViews } from '@/engine/typeCatalog';
+import type {
+  ListFile,
+  Schema,
+  TabContent,
+  TabDef,
+  ViewDefinition,
+  ViewTabSource,
+} from '@/engine/types';
+import { relationFieldTargeting } from '@/engine/viewTab';
 import { nextViewId, slugifyViewId } from '@/engine/views';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { uniqueName } from '@/views/ViewTabs';
 
 /**
@@ -22,11 +34,15 @@ import { uniqueName } from '@/views/ViewTabs';
  * so the back button returns to it).
  */
 
-/** What a new tab can render — a tile catalog, `VIEW_KINDS`' little sibling. */
+/** What a new tab can render — a tile catalog, `VIEW_KINDS`' little sibling.
+ * Sections stays first because it is the default (a new tab is almost always
+ * a place to write); View sits last because it is the one tile that opens a
+ * second step instead of finishing the form (M45.4). */
 const TAB_KINDS: { value: TabContent; label: string; icon: string }[] = [
   { value: 'sections', label: 'Sections', icon: 'text' },
   { value: 'properties', label: 'Properties', icon: 'list' },
   { value: 'overview', label: 'Overview', icon: 'layout-grid' },
+  { value: 'view', label: 'View', icon: 'table' },
 ];
 
 const kindIcon = (content: TabContent): string =>
@@ -54,12 +70,18 @@ export interface RecordTabsProps {
   onSelect: (id: string) => void;
   /** The whole next tab set — the host persists it (setTypeTabs). */
   onChange: (next: TabDef[]) => void;
+  /** The RECORD's own type (M45.4) — what a view tab's related-scope toggle
+   * is gated on: it exists iff the picked source stores a relation aimed at
+   * this type. Optional so pre-M45.4 call sites compile; absent = no toggle. */
+  hostType?: string | null;
 }
 
-export function RecordTabs({ tabs, activeId, onSelect, onChange }: RecordTabsProps) {
+export function RecordTabs({ tabs, activeId, onSelect, onChange, hostType }: RecordTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // A view tab being re-pointed through "Change source…" (M45.4).
+  const [changingSource, setChangingSource] = useState<string | null>(null);
   // A tab points at per-record section content, and removing the pointer is
   // one click from an ordinary tab click — the app has no undo, so ask.
   const [deleting, setDeleting] = useState<TabDef | null>(null);
@@ -140,6 +162,17 @@ export function RecordTabs({ tabs, activeId, onSelect, onChange }: RecordTabsPro
   const menuItems = (tab: TabDef, index: number): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
       { icon: 'pencil', label: 'Rename', onSelect: () => setRenaming(tab.id) },
+      // Only a view tab HAS a source — every other kind omits the item
+      // entirely, the same no-dead-items rule as the edge moves below.
+      ...(tab.content === 'view'
+        ? [
+            {
+              icon: 'database',
+              label: 'Change source…',
+              onSelect: () => setChangingSource(tab.id),
+            },
+          ]
+        : []),
       // Edge positions omit their move rather than offering a dead item —
       // the ContextMenu primitive has no disabled state, deliberately.
       ...(index > 0
@@ -285,6 +318,17 @@ export function RecordTabs({ tabs, activeId, onSelect, onChange }: RecordTabsPro
                       only one whose menu opens without leaving where you are. */}
                   {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
                 </button>
+                {changingSource === tab.id && (
+                  <ChangeSourceForm
+                    tab={tab}
+                    hostType={hostType ?? null}
+                    onCancel={() => setChangingSource(null)}
+                    onCommit={(value) => {
+                      setChangingSource(null);
+                      onChange(tabs.map((t) => (t.id === tab.id ? rewireTab(t, value) : t)));
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -304,19 +348,19 @@ export function RecordTabs({ tabs, activeId, onSelect, onChange }: RecordTabsPro
           {creating && (
             <NewTabForm
               takenNames={tabs.map((t) => t.name)}
+              hostType={hostType ?? null}
               onCancel={() => setCreating(false)}
-              onCreate={(name, content) => {
+              onCreate={(spec) => {
                 setCreating(false);
                 onChange([
                   ...tabs,
                   {
                     id: mintTabId(
-                      name,
+                      spec.name,
                       tabs.map((t) => t.id),
                     ),
-                    name,
                     icon: null,
-                    content,
+                    ...spec,
                   },
                 ]);
               }}
@@ -375,28 +419,222 @@ function RenameTab({
   );
 }
 
+/** What the add form reports up — RecordTabs mints the id and appends. The
+ * optional keys ride only on `content: 'view'`, and only when set (M45.4). */
+type NewTabSpec = Pick<TabDef, 'name' | 'content'> &
+  Partial<Pick<TabDef, 'source' | 'view' | 'scope'>>;
+
+/**
+ * The "View of" drill-in's whole answer (M45.4): the pointer, the saved view
+ * (null = the source's first — stored absent), the scope (null = all rows —
+ * stored absent), and the picked source's display name for the suggested tab
+ * name. One value so a source change can rewrite ALL of it atomically —
+ * view/scope must never survive a re-point by accident.
+ */
+interface ViewSourceValue {
+  source: ViewTabSource | null;
+  view: string | null;
+  scope: 'related' | null;
+  sourceName: string | null;
+}
+
+const NO_SOURCE: ViewSourceValue = { source: null, view: null, scope: null, sourceName: null };
+
+/** What the picked source IS: display name, record type (null for a typeless
+ * "everything" list), saved views. Null when nothing is picked or the pointer
+ * is dead — the roster offers only live sources, but "Change source…" may
+ * open on a tab whose list has since died. */
+function sourceFacts(
+  source: ViewTabSource | null,
+  lists: ListFile[],
+  schema: Schema,
+): { name: string; typeName: string | null; views: ViewDefinition[] } | null {
+  if (source === null) return null;
+  if ('type' in source) {
+    return { name: source.type, typeName: source.type, views: typeViews(source.type, schema) };
+  }
+  const list = lists.find(
+    (l) => l.id === source.list && (l.collection ?? null) === (source.collection ?? null),
+  );
+  if (list === undefined) return null;
+  return {
+    name: list.definition.name,
+    typeName: list.definition.source.type,
+    views: list.definition.views,
+  };
+}
+
+/** `list:${collection ?? ''}::${id}` → the source pointer; inverse of the
+ * roster option value below. The composite is the dashboard "Saved view…"
+ * submenu's keying — ids are unique per FOLDER, so the collection rides. */
+const parseListValue = (raw: string): ViewTabSource => {
+  const key = raw.slice('list:'.length);
+  const at = key.indexOf('::');
+  const collection = key.slice(0, at);
+  return { list: key.slice(at + 2), ...(collection === '' ? {} : { collection }) };
+};
+
+/**
+ * The "View of" drill-in (M45.4): every database in the vault — types via
+ * `listTypes` (which already turns the library's away), then Lists — an
+ * optional saved-view picker, and the related-scope toggle. The toggle is
+ * capability-gated on `relationFieldTargeting` and defaults ON when offered;
+ * when the gate says no it is OMITTED, never grayed.
+ */
+function ViewSourcePicker({
+  value,
+  hostType,
+  onChange,
+}: {
+  value: ViewSourceValue;
+  hostType: string | null;
+  onChange: (next: ViewSourceValue) => void;
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  const lists = useVaultStore((s) => s.views);
+  const schema = useSchema();
+
+  const offersRelated = (typeName: string | null) =>
+    typeName !== null &&
+    hostType !== null &&
+    hostType !== '' &&
+    relationFieldTargeting(typeName, hostType, schema) !== null;
+
+  const roster = [
+    { value: '', label: 'Choose a database…' },
+    ...listTypes(entries, schema).map((t) => ({ value: `type:${t.name}`, label: t.name })),
+    ...lists.map((l) => ({
+      value: `list:${l.collection ?? ''}::${l.id}`,
+      label: l.definition.name,
+    })),
+  ];
+  const sourceValue =
+    value.source === null
+      ? ''
+      : 'type' in value.source
+        ? `type:${value.source.type}`
+        : `list:${value.source.collection ?? ''}::${value.source.list}`;
+
+  const facts = sourceFacts(value.source, lists, schema);
+
+  const pick = (raw: string) => {
+    if (raw === '') {
+      onChange(NO_SOURCE);
+      return;
+    }
+    const source: ViewTabSource = raw.startsWith('type:')
+      ? { type: raw.slice('type:'.length) }
+      : parseListValue(raw);
+    const next = sourceFacts(source, lists, schema);
+    onChange({
+      source,
+      // A new source starts on its first view…
+      view: null,
+      // …and scoped to this record when it can be — Notion's project→tasks
+      // default, the reason the toggle exists at all.
+      scope: next !== null && offersRelated(next.typeName) ? 'related' : null,
+      sourceName: next?.name ?? null,
+    });
+  };
+
+  return (
+    <div className="mt-2">
+      <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+        View of
+      </div>
+      <Select
+        size="sm"
+        width="100%"
+        ariaLabel="View of"
+        testId="view-tab-source"
+        options={roster}
+        value={sourceValue}
+        onChange={(e) => pick(e.target.value)}
+      />
+      {facts !== null && facts.views.length > 1 && (
+        <Select
+          size="sm"
+          width="100%"
+          ariaLabel="Saved view"
+          testId="view-tab-view"
+          className="mt-1.5"
+          options={facts.views.map((v) => ({ value: v.id, label: v.name }))}
+          value={value.view ?? facts.views[0].id}
+          onChange={(e) => onChange({ ...value, view: e.target.value })}
+        />
+      )}
+      {facts !== null && offersRelated(facts.typeName) && (
+        <Switch
+          className="mt-2"
+          checked={value.scope === 'related'}
+          onChange={(on) => onChange({ ...value, scope: on ? 'related' : null })}
+          label="Only related to this record"
+        />
+      )}
+    </div>
+  );
+}
+
+/** The rewritten tab after "Change source…": rebuilt key by key so the old
+ * pointer's `view`/`scope` are re-stated from the form or GONE — a spread
+ * would carry them stale across the source change. */
+function rewireTab(tab: TabDef, value: ViewSourceValue): TabDef {
+  return {
+    id: tab.id,
+    name: tab.name,
+    icon: tab.icon,
+    content: tab.content,
+    source: value.source,
+    ...(value.view !== null ? { view: value.view } : {}),
+    ...(value.scope !== null ? { scope: value.scope } : {}),
+  };
+}
+
 /**
  * Create a tab: name it and pick what it renders, in one step — the
  * `NewViewForm` shape. Sections is the default because a NEW tab is almost
  * always a place to write; Overview and Properties re-arrange what the page
- * already shows.
+ * already shows; View (M45.4) opens the drill-in below the tiles.
  */
 function NewTabForm({
   takenNames,
+  hostType,
   onCreate,
   onCancel,
 }: {
   takenNames: string[];
-  onCreate: (name: string, content: TabContent) => void;
+  hostType: string | null;
+  onCreate: (spec: NewTabSpec) => void;
   onCancel: () => void;
 }) {
   const [content, setContent] = useState<TabContent>('sections');
   const [name, setName] = useState('');
   const [touched, setTouched] = useState(false);
+  const [value, setValue] = useState<ViewSourceValue>(NO_SOURCE);
 
-  // Until you type, the name is "Tab", then "Tab 2" if there already is one.
-  const suggested = uniqueName('Tab', takenNames);
+  // Until you type, the name is "Tab" ("Tab 2" if taken) — or, once a source
+  // is picked, the SOURCE's name: a view of Tasks is called Tasks, not Tab 5.
+  const base = content === 'view' && value.sourceName !== null ? value.sourceName : 'Tab';
+  const suggested = uniqueName(base, takenNames);
   const effective = touched && name.trim() !== '' ? name.trim() : suggested;
+
+  // A view tab without a source would be born broken — hold the door.
+  const ready = content !== 'view' || value.source !== null;
+
+  const commit = () => {
+    if (!ready) return;
+    if (content === 'view' && value.source !== null) {
+      onCreate({
+        name: effective,
+        content,
+        source: value.source,
+        ...(value.view !== null ? { view: value.view } : {}),
+        ...(value.scope !== null ? { scope: value.scope } : {}),
+      });
+    } else {
+      onCreate({ name: effective, content });
+    }
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -437,7 +675,7 @@ function NewTabForm({
               setName(e.target.value);
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') onCreate(effective, content);
+              if (e.key === 'Enter') commit();
             }}
             width="100%"
           />
@@ -461,6 +699,9 @@ function NewTabForm({
               </button>
             ))}
           </div>
+          {content === 'view' && (
+            <ViewSourcePicker value={value} hostType={hostType} onChange={setValue} />
+          )}
           <div className="mt-2 flex justify-end gap-1.5">
             <button
               type="button"
@@ -472,10 +713,85 @@ function NewTabForm({
             <button
               type="button"
               data-testid="create-record-tab"
-              onClick={() => onCreate(effective, content)}
-              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600"
+              disabled={!ready}
+              onClick={commit}
+              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600 disabled:cursor-default disabled:opacity-50"
             >
-              Create
+              {content === 'view' ? 'Add view' : 'Create'}
+            </button>
+          </div>
+        </div>
+      </FixedBelowAnchor>
+    </>
+  );
+}
+
+/**
+ * "Change source…" (M45.4): the add flow's drill-in reopened on an EXISTING
+ * view tab, prefilled from its pointer and anchored below it. Committing
+ * hands the rewired tab back through the strip's onChange — the host
+ * persists, same as every other structural edit.
+ */
+function ChangeSourceForm({
+  tab,
+  hostType,
+  onCommit,
+  onCancel,
+}: {
+  tab: TabDef;
+  hostType: string | null;
+  onCommit: (value: ViewSourceValue) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState<ViewSourceValue>({
+    source: tab.source ?? null,
+    view: tab.view ?? null,
+    scope: tab.scope ?? null,
+    sourceName: null, // only the ADD flow names a tab after its source
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close change source"
+        onClick={onCancel}
+        onWheel={onCancel}
+        className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+      />
+      <FixedBelowAnchor>
+        <div
+          data-testid="change-source-form"
+          className="z-50 w-[260px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
+        >
+          <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+            Change source
+          </div>
+          <ViewSourcePicker value={value} hostType={hostType} onChange={setValue} />
+          <div className="mt-2 flex justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-md border border-n-200 bg-transparent px-2.5 py-1 text-xs text-n-700 hover:bg-n-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="change-source-save"
+              disabled={value.source === null}
+              onClick={() => onCommit(value)}
+              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600 disabled:cursor-default disabled:opacity-50"
+            >
+              Save
             </button>
           </div>
         </div>

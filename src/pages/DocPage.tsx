@@ -688,6 +688,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             <RecordTabs
               tabs={tabs}
               activeId={activeTab?.id ?? tabs[0].id}
+              hostType={entry.type}
               onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
               onChange={(next) => {
                 if (entry.type !== null)
