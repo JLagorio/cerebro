@@ -18,8 +18,9 @@ import { boot, readMockFile } from './boot';
  *    the mock vault carries the bit. jsdom covers every joint; only e2e
  *    covers the chain.
  * 2. The block CONTENT is inert. M45.3 moved the boundary inward — the
- *    canvas and its block shells are live; each block's content div carries
- *    the `inert`. jsdom does not implement the attribute's behavior (its
+ *    canvas, its block shells, and Task 6's drag layer are live; each
+ *    preview FRAGMENT (the heading strip here, a group label, a field row)
+ *    carries the `inert`. jsdom does not implement the attribute's behavior (its
  *    clicks are synthetic dispatches that ignore hit-testing), so the unit
  *    suite can only assert where the attribute sits. A real browser's
  *    hit-test is the thing under test: a click at a live FieldEditor chip's

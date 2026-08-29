@@ -660,10 +660,14 @@ describe('the inert preview canvas + record picker (M45.2 Task 4)', () => {
     expect(strip().textContent).toContain('todo');
   });
 
-  it('the inert boundary sits at each block CONTENT — the canvas and shells are live', () => {
+  it('the inert boundary sits at each preview FRAGMENT — canvas, shells and drag layer are live', () => {
     recordSetup();
-    // The boundary moved inward (M45.3): the container hosts interactive
-    // shells now, so it must not be inert itself.
+    // The boundary moved inward twice (M45.3): Task 4 took it off the canvas
+    // onto each block's content, and Task 6 split that content into
+    // per-fragment wrappers so drag slots and grips could stand LIVE between
+    // them. The claim is unchanged in spirit: everything preview is inert,
+    // everything interactive is not (the drag layer's own placement is
+    // asserted in LayoutCanvas.test.tsx).
     expect(screen.getByTestId('layout-preview').hasAttribute('inert')).toBe(false);
     const contents = screen.getAllByTestId('layout-preview-content');
     expect(contents.length).toBeGreaterThan(0);
@@ -879,8 +883,12 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     expect(blockIds()).toEqual(['tabs', 'heading', 'g1', 'rest', 'content']);
     for (const shell of screen.getAllByTestId('layout-block')) {
       const container = shell.getAttribute('data-block');
-      // Exactly one inert content div inside each shell, editor or chrome.
-      expect(within(shell).getAllByTestId('layout-preview-content')).toHaveLength(1);
+      // At least one inert fragment inside each shell, editor or chrome —
+      // Task 6 split the single content div into per-fragment wrappers
+      // (label, rows, strip, hint) so the drag layer can interleave.
+      expect(within(shell).getAllByTestId('layout-preview-content').length).toBeGreaterThanOrEqual(
+        1,
+      );
       if (container === 'tabs' || container === 'content') {
         // No group editor exists for these two, so they are DEMOTED to plain
         // chrome (Task 5 review ruling): a role=button that Enter cannot
