@@ -14,6 +14,7 @@ import { resolveLayout } from '@/engine/layout';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import type { FieldDef, FieldKind, TypeDef } from '@/engine/types';
+import { useSortableList } from '@/hooks/useSortableList';
 
 /**
  * The editor behind a canvas shell (M45.3, spec §3.3): click a container and
@@ -81,6 +82,45 @@ export function GroupEditorPopover({
       : fields.filter(
           (f) => humanize(f.name).toLowerCase().includes(q) || f.name.toLowerCase().includes(q),
         );
+
+  // Reordering is real only where the CONFIG owns the order and the rows on
+  // screen ARE the rows in the data (M45.5 Task 4): `rest` is derived and
+  // roster-ordered — moveField ignores its index — and a filtered list's
+  // visible slots are not the data's slots (useSortableList's own rule).
+  const canReorder = container !== 'rest' && q === '';
+  // The container's CONFIG order, which a reorder rewrites. `rest` has none.
+  const configFields = container === 'heading' ? draft.layout.heading : (group?.fields ?? []);
+
+  /**
+   * A row released at `to` — the index it takes in the resulting order.
+   * useSortableList has ALREADY applied the past-source decrement that
+   * `handleLayoutDragEnd` has to apply by hand (dnd-kit reports a raw visual
+   * gap; this primitive reports a post-removal index), so a second decrement
+   * here would carry the row one slot too far.
+   *
+   * What still has to be converted is the index SPACE: a config may point at
+   * a field the roster no longer declares, and resolveLayout drops that row
+   * while the config keeps its slot — so the Nth row is not the Nth slot. The
+   * landing is named by its NEIGHBOUR instead: the row that will follow it,
+   * read back as that neighbour's own config index. Nothing following means
+   * the config end. moveField returns the same reference on a no-op, so an
+   * identity landing stages nothing.
+   */
+  const reorderRow = (name: string, to: number) => {
+    const follower = shown.map((f) => f.name).filter((n) => n !== name)[to];
+    const without = configFields.filter((n) => n !== name);
+    // A follower is one of this container's own resolved rows, so its config
+    // index is real; `undefined` is the only other case, and it means the end.
+    const index = follower === undefined ? without.length : without.indexOf(follower);
+    update({ layout: moveField(draft.layout, name, { container, index }) });
+  };
+
+  const sortable = useSortableList({
+    ids: shown.map((f) => f.name),
+    labelFor: humanize,
+    disabled: !canReorder,
+    onReorder: reorderRow,
+  });
 
   // One ⋯ menu at a time, anchored to the row button that opened it. The map
   // is read lazily so the anchor resolves AFTER the row has (re)rendered.
@@ -206,16 +246,46 @@ export function GroupEditorPopover({
   // the canvas remounts us keyed by the new container.
   const addSection = () => stageNewSection(draft, update, onOpenGroup);
 
-  const eyeRow = (f: FieldDef) => {
+  const eyeRow = (f: FieldDef, i: number) => {
     const label = humanize(f.name);
     const hidden = (f.visibility ?? 'show') === 'hide';
+    const grip = sortable.gripProps(f.name, i);
     return (
       <div
         key={f.name}
         data-testid="group-editor-row"
         data-property={f.name}
-        className="flex items-center gap-1.5 rounded-sm px-1 py-[2px] hover:bg-n-25"
+        style={sortable.dropIndicator(i)}
+        className={[
+          'group/row flex items-center gap-1.5 rounded-sm px-1 py-[2px] hover:bg-n-25',
+          sortable.dragging === f.name ? 'opacity-40' : '',
+        ].join(' ')}
       >
+        {/* No grip where a reorder would be a promise the model cannot keep
+            (M45.5 Task 4). `rest` is DERIVED: its order is the roster's
+            declaration order and moveField ignores the index it is given
+            there, so a drag could move the icon and nothing else. The
+            affordance is absent because the capability is. (A filtered list
+            is the other case — see `canReorder`.) */}
+        {canReorder && (
+          <span
+            {...grip}
+            onKeyDown={(e) => {
+              grip.onKeyDown(e);
+              // MenuSurface moves roving focus on ArrowUp/ArrowDown. While a
+              // GRIP holds focus those keys are the reorder's, so they stop
+              // here — otherwise one press both moved the row and threw
+              // focus off it.
+              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.stopPropagation();
+            }}
+            data-testid="group-editor-grip"
+            // Opacity, not `hidden`: a hidden grip leaves the tab order, and
+            // arrow-key reordering is the primitive's whole point.
+            className="flex h-4 w-3 flex-none cursor-grab touch-none items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100"
+          >
+            <Icon name="grip-vertical" size={12} />
+          </span>
+        )}
         <Icon name={kindMeta(f.kind).icon} size={13} color="var(--n-400)" />
         <span className="min-w-0 flex-1 truncate text-sm text-n-800">{label}</span>
         <IconButton
@@ -269,7 +339,18 @@ export function GroupEditorPopover({
             width="100%"
           />
         </div>
-        {shown.map(eyeRow)}
+        {/* The rows get their OWN container: useSortableList measures
+            `containerRef.current.children` as the rows, and the empty-state
+            lines and the footer menu below are siblings — dropping the ref on
+            the outer column would make a MenuItem a droppable slot
+            (OptionListEditor's lesson, verbatim). */}
+        <div
+          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+          data-testid="group-editor-rows"
+          className="flex flex-col"
+        >
+          {shown.map((f, i) => eyeRow(f, i))}
+        </div>
         {fields.length === 0 && (
           <div className="px-2 py-1.5 text-xs text-n-400">No properties yet</div>
         )}

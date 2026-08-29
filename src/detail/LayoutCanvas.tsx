@@ -279,12 +279,13 @@ export function LayoutCanvas({
             {/* The heading's one droppable APPENDS (config-end index): its
                 cells render inside HeadingProperties' own strip markup — no
                 seam for per-index slots without restructuring a shared
-                component — so in-heading order is ARRIVAL order. Nothing
-                reorders within the strip (no per-cell grips, no editor-row
-                affordance); rearranging means removing and re-adding — the
-                row ⋯'s "Move to page", then promote it back. It stands even
-                when the strip is empty, because this is §3.4's promote
-                target and the shell persists (Task 6). */}
+                component — so a drop ONTO the strip lands at its end. What
+                the canvas cannot offer, the panel now does: M45.5 Task 4 put
+                a drag grip on every group-editor row, heading rows included,
+                so in-heading order is arranged THERE and is no longer
+                arrival order. The droppable stands even when the strip is
+                empty, because this is §3.4's promote target and the shell
+                persists (Task 6). */}
             <AreaDrop id={`slot:heading:${draft.layout.heading.length}`}>
               <InertContent>
                 {headingShown ? (

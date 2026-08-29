@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
 import { resetLayers } from '@/components/ui/layers';
@@ -63,6 +63,15 @@ const shellOf = (container: string) => {
 };
 
 const editor = () => within(screen.getByTestId('group-editor'));
+
+/** jsdom has no layout, so give the popover's rows heights for
+ * useSortableList to measure midpoints against (its own test's recipe). */
+const fakeRects = () => {
+  const rows = [...screen.getByTestId('group-editor-rows').children] as HTMLElement[];
+  rows.forEach((r, i) => {
+    r.getBoundingClientRect = () => ({ top: i * 20, height: 20, left: 0, width: 200 }) as DOMRect;
+  });
+};
 
 const apply = async (patchFrontmatter: ReturnType<typeof vi.fn>) => {
   fireEvent.click(screen.getByTestId('layout-apply'));
@@ -574,5 +583,156 @@ describe('Add section (rest/heading footers only)', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     await user.click(shellOf('heading'));
     expect(editor().getByTestId('group-editor-add-section')).toBeTruthy();
+  });
+});
+
+// M45.5 Task 4 — the user's fourth parity defect: "that's also how we move
+// properties within a section, on hover there's a draggable icon". The panel
+// rows carry hover grips that reorder WITHIN their container through
+// moveField. This closes M45.3's recorded within-heading-reorder limitation:
+// the strip is no longer arrival order.
+describe('panel rows reorder within their container (M45.5 Task 4)', () => {
+  const gripFor = (label: string) =>
+    editor().getByRole('button', { name: new RegExp(`^Reorder ${label},`) });
+
+  const groupOrder = (id: string) =>
+    [
+      ...screen
+        .getByTestId('layout-preview')
+        .querySelectorAll(`[data-group="${id}"] [data-testid="property-row"]`),
+    ].map((r) => r.getAttribute('data-property'));
+
+  it('a group row moves down a slot; the canvas and Apply both carry it', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([
+      typeDoc(undefined, {
+        heading: ['status'],
+        groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'notes'] }],
+      }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    expect(groupOrder('g1')).toEqual(['priority', 'notes']);
+    gripFor('Priority').focus();
+    await user.keyboard('{ArrowDown}');
+    expect(groupOrder('g1')).toEqual(['notes', 'priority']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(patch.layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['notes', 'priority'] }],
+    });
+  });
+
+  it('a HEADING row reorders too — the M45.3 arrival-order limitation closes', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([
+      typeDoc(undefined, { heading: ['status', 'priority'], groups: [] }),
+      RECORD,
+    ]);
+    await user.click(shellOf('heading'));
+    gripFor('Status').focus();
+    await user.keyboard('{ArrowDown}');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(patch.layout).toEqual({ heading: ['priority', 'status'] });
+  });
+
+  it('rest rows carry NO grip — its order is the roster’s, not the config’s', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('rest'));
+    expect(editor().queryAllByTestId('group-editor-grip')).toHaveLength(0);
+    // Vacuity guard: a group's rows do carry one, so the absence above is
+    // about rest and not about the grips failing to render at all.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await user.click(shellOf('g1'));
+    expect(editor().getAllByTestId('group-editor-grip').length).toBeGreaterThan(0);
+  });
+
+  it('a pointer drag past the next row commits the move', async () => {
+    const user = userEvent.setup();
+    setup([
+      typeDoc(undefined, {
+        heading: ['status'],
+        groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'notes'] }],
+      }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    fakeRects();
+    // useSortableList's jsdom recipe: its listeners are native window
+    // handlers and jsdom implements no PointerEvent, so a MouseEvent carries
+    // the coordinates the handler actually reads.
+    fireEvent.pointerDown(gripFor('Priority'), { button: 0 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 45 }));
+      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 45 }));
+    });
+    expect(groupOrder('g1')).toEqual(['notes', 'priority']);
+  });
+
+  it('a drop back on its own slot commits nothing — the draft stays clean', async () => {
+    const user = userEvent.setup();
+    setup([
+      typeDoc(undefined, {
+        heading: ['status'],
+        groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'notes'] }],
+      }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    fakeRects();
+    fireEvent.pointerDown(gripFor('Priority'), { button: 0 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 5 }));
+      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 5 }));
+    });
+    expect(groupOrder('g1')).toEqual(['priority', 'notes']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    // The strongest no-op assertion available: an identity drop staged
+    // nothing, so Cancel closes without asking to discard anything.
+    await user.click(screen.getByTestId('layout-cancel'));
+    expect(screen.queryByText('Discard layout changes?')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+  });
+
+  it('a DEAD config pointer never shifts the landing — the neighbour names it', async () => {
+    const user = userEvent.setup();
+    setup([
+      // `ghost` is not declared in `fields:`, so resolveLayout drops the row
+      // but the config keeps its slot (pointer hygiene waits for Apply). The
+      // second visible row is the THIRD config slot.
+      typeDoc(undefined, {
+        heading: [],
+        groups: [{ id: 'g1', name: 'Planning', fields: ['ghost', 'priority', 'notes'] }],
+      }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    expect(groupOrder('g1')).toEqual(['priority', 'notes']);
+    gripFor('Notes').focus();
+    await user.keyboard('{ArrowUp}');
+    // Landed before Priority, not at the config index the visual slot names.
+    expect(groupOrder('g1')).toEqual(['notes', 'priority']);
+  });
+
+  it('a FILTERED list shows no grips — its visible slots are not the data’s', async () => {
+    const user = userEvent.setup();
+    setup([
+      typeDoc(undefined, {
+        heading: [],
+        groups: [{ id: 'g1', name: 'Planning', fields: ['priority', 'notes', 'status'] }],
+      }),
+      RECORD,
+    ]);
+    await user.click(shellOf('g1'));
+    expect(editor().getAllByTestId('group-editor-grip')).toHaveLength(3);
+    await user.type(editor().getByRole('textbox', { name: 'Search properties' }), 'ot');
+    // The grips leave with the slots they addressed — an inert grip would
+    // promise a reorder the filtered list cannot place.
+    expect(editor().queryAllByTestId('group-editor-grip')).toHaveLength(0);
   });
 });
