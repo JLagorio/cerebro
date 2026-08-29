@@ -100,9 +100,12 @@ DetailPanel), not just the preview — the editor is only the way to arrange
 it.
 
 ### 3.5 Tabbed structure + view tabs (screenshots 3–4)
-- **Structure: Tabbed** shows the M44.5 tab strip in the preview; tabs are
-  editable there (add/rename/reorder — RecordTabs' own editing, driven
-  against the draft).
+- **Structure: Tabbed** shows the M44.5 tab strip in the preview. (AMENDED
+  2026-08-28, M45.4 plan ruling: tabs are NOT edited inside the editor — the
+  real record page's strip stays the ONE tab-editing surface; the editor's
+  canvas renders the strip inert with a first-tab placeholder, and the
+  Structure tiles keep their M45.2 seeding role. The original "editable
+  against the draft" wording was reversed to avoid a second editing surface.)
 - **Simple** collapses to one scroll (draft `tabs: []` → the synthesized
   Overview; the strip hides when only Overview exists).
 - **View tabs**: "+" offers "Link existing data source" → name input +
