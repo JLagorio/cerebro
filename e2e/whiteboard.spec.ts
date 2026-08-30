@@ -46,20 +46,17 @@ async function boot(page: Page): Promise<void> {
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 }
 
-/** Expand a Collection row in the sidebar tree. */
-async function expand(page: Page, name: string): Promise<void> {
-  const caret = page.getByRole('button', { name: `Expand ${name}` });
-  if (await caret.isVisible()) await caret.click();
-}
-
-/** Open the Delivery schedule List — a Work item list inside the Delivery collection. */
+/** Open the Delivery schedule view of the Work item database. */
 async function openDeliverySchedule(page: Page): Promise<void> {
-  await expand(page, 'Delivery');
-  await page
-    .getByTestId('collection-node-list')
-    .filter({ hasText: 'Delivery schedule' })
-    .getByRole('button', { name: 'Delivery schedule', exact: true })
-    .click();
+  // M47.5: "Delivery schedule" was a `*.list.yml` in the Delivery collection
+  // and is a saved VIEW of the Work item database now. Same view, same
+  // presentation, reached through the database that owns it.
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
+  const tab = page.getByTestId('view-tabs').getByRole('tab', { name: 'Delivery schedule' });
+  await expect(tab).toBeVisible();
+  // Pressing the tab you are already on opens its menu, whose backdrop then
+  // swallows the rest of the test.
+  if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
 }
 
 /** + → Whiteboard → Create, the same idiom collections.spec uses for a board. */
@@ -70,9 +67,19 @@ async function addWhiteboardTab(page: Page): Promise<void> {
 }
 
 /** Every `.mmd` the whiteboard machinery could have created for this List. */
+/**
+ * The canvases this spec creates.
+ *
+ * `whiteboards/` sits beside the file that OWNS the view. That was
+ * `delivery/` while "Delivery schedule" was a `*.list.yml`; since M47.5 the
+ * view lives on `types/work-item.md`, so its canvases land in
+ * `types/whiteboards/`. Matched by shape rather than by a pinned folder, so
+ * this follows the owner instead of having to be re-pinned each time it moves
+ * — the corpus ships no `.mmd` under `whiteboards/`, so the match stays exact.
+ */
 const canvasFiles = (page: Page): Promise<string[]> =>
   page.evaluate(() =>
-    [...window.__cerebroMockFs.keys()].filter((k) => /^delivery\/whiteboards\/.+\.mmd$/.test(k)),
+    [...window.__cerebroMockFs.keys()].filter((k) => /(^|\/)whiteboards\/.+\.mmd$/.test(k)),
   );
 
 test('whiteboard: a tab creates its canvas, takes a record, and opens it', async ({ page }) => {
@@ -87,8 +94,9 @@ test('whiteboard: a tab creates its canvas, takes a record, and opens it', async
   await addWhiteboardTab(page);
 
   // -- Create-on-open: the canvas exists ON DISK, once ---------------------
-  // `<host folder>/whiteboards/<view-slug>.mmd` — the Delivery collection's
-  // own folder, because that is where the `.list.yml` lives.
+  // `<host folder>/whiteboards/<view-slug>.mmd` — beside the file that owns
+  // the view, which is the Type doc since M47.5. The path is DISCOVERED
+  // rather than asserted, so this follows the owner wherever it lives.
   await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => canvasFiles(page), { timeout: 10_000 }).toHaveLength(1);
   const mmdPath = (await canvasFiles(page))[0];
@@ -105,7 +113,8 @@ test('whiteboard: a tab creates its canvas, takes a record, and opens it', async
   // data, so it round-trips through `serializePresentation`'s allowlist.
   const readList = () =>
     page.evaluate(
-      () => window.__cerebroMockFs.get('delivery/delivery-schedule.list.yml') ?? '',
+      // The view lives on the DATABASE's Type doc now, not in a list file.
+      () => window.__cerebroMockFs.get('types/work-item.md') ?? '',
     ) as Promise<string>;
   await expect.poll(readList, { timeout: 10_000 }).toContain('whiteboard:');
   expect(await readList()).toContain(mmdPath);

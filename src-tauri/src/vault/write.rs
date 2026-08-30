@@ -823,10 +823,40 @@ pub fn list_collections(vault: &Path) -> Result<Vec<CollectionYaml>, String> {
 /// The Collection a path belongs to: the nearest ANCESTOR folder holding a
 /// `collection.yml`. Same containment rule projects already use, so a List in a
 /// sub-folder belongs to the Collection above it without restating it.
+/// True when this folder's own note declares it a Collection (M47.5).
+///
+/// `delivery/delivery.md` carrying `type: Collection` is what a
+/// `collection.yml` used to be. Only the FOLDER NOTE speaks for its folder —
+/// a page of that type sitting anywhere else describes nothing but itself.
+fn declared_by_page(dir: &Path) -> bool {
+    let Some(name) = dir.file_name() else {
+        return false;
+    };
+    let note = dir.join(format!("{}.md", name.to_string_lossy()));
+    let Ok(text) = std::fs::read_to_string(&note) else {
+        return false;
+    };
+    // Frontmatter only: a `type: Collection` mentioned in prose is prose.
+    let Some(rest) = text.strip_prefix("---\n") else {
+        return false;
+    };
+    let Some(end) = rest.find("\n---") else {
+        return false;
+    };
+    rest[..end].lines().any(|l| {
+        l.trim_start().starts_with("type:")
+            && l.split(':').nth(1).map(str::trim) == Some("Collection")
+    })
+}
+
 fn collection_of(vault: &Path, file: &Path) -> Option<String> {
     let mut dir = file.parent();
     while let Some(current) = dir {
-        if current.join(COLLECTION_MARKER).is_file() {
+        // Either marker counts. A vault mid-conversion has both shapes in it,
+        // and a List whose container declared itself with a PAGE must not be
+        // reported as living at the vault root — the app would then look for
+        // it under a collection it does not have and find nothing.
+        if current.join(COLLECTION_MARKER).is_file() || declared_by_page(current) {
             return rel_path(vault, current).ok();
         }
         if current == vault {
@@ -1281,6 +1311,53 @@ mod tests {
             read(&vault, "items/crlf-title.md"),
             "# New title\r\n\r\nBody stays.\r\n"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_list_belongs_to_the_collection_its_folder_note_declares() {
+        // M47.5. A container used to be a folder holding `collection.yml`; it
+        // is a folder whose own PAGE says `type: Collection` now. A List in
+        // such a folder must report that folder as its collection — reported
+        // as root-level, the app looks for it under a collection it does not
+        // have and renders "This list no longer exists" on a list it just
+        // created. Found exactly that way, on a freshly converted vault.
+        let vault = testutil::temp_vault("wfm-collection-page");
+        std::fs::create_dir_all(vault.join("delivery")).unwrap();
+        std::fs::write(
+            vault.join("delivery/delivery.md"),
+            "---\ntype: Collection\nicon: rocket\n---\n\n# Delivery\n",
+        )
+        .unwrap();
+        std::fs::write(
+            vault.join("delivery/smoke.list.yml"),
+            "name: Smoke\npresentation:\n  type: table\n",
+        )
+        .unwrap();
+
+        let views = list_views(&vault).unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].collection.as_deref(), Some("delivery"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_page_of_that_type_elsewhere_does_not_declare_a_collection() {
+        // Only the FOLDER NOTE speaks for its folder. A page merely carrying
+        // the type would otherwise let any file rename a container it is not
+        // even in.
+        let vault = testutil::temp_vault("wfm-collection-stray");
+        std::fs::create_dir_all(vault.join("inbox")).unwrap();
+        std::fs::write(
+            vault.join("inbox/delivery.md"),
+            "---\ntype: Collection\n---\n\n# Delivery\n",
+        )
+        .unwrap();
+        std::fs::write(vault.join("inbox/smoke.list.yml"), "name: Smoke\n").unwrap();
+
+        let views = list_views(&vault).unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].collection, None);
         let _ = std::fs::remove_dir_all(&vault);
     }
 

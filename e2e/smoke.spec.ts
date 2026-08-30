@@ -138,6 +138,10 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await expect(deliveryRow).toBeVisible();
   await deliveryRow.hover();
   await page.getByRole('button', { name: 'Add to Delivery' }).click();
+  // M47.5: the `+` offers New page / New database / New list. It went
+  // straight to this dialog before, which is why a Collection could hold
+  // nothing but Lists.
+  await page.getByRole('menuitem', { name: 'New list' }).click();
   await page.getByLabel('List name').fill('Smoke board');
   await page.getByRole('button', { name: 'Save view' }).click();
 

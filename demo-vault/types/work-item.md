@@ -37,6 +37,28 @@ layout:
   groups:
     - { id: planning, name: Planning, fields: [assignee, due, estimate] }
 views:
+  # The database's DEFAULT, and deliberately unfiltered (M47.5). A view named
+  # by nothing — a `/database` block with no `view:`, a record tab whose
+  # source names only the type — takes the first one, so the first one should
+  # mean "all of them". Before this the corpus led with At risk, and "show me
+  # Work item" quietly meant "show me the urgent ones still moving".
+  - id: all
+    name: All
+    icon: null
+    filters: null
+    presentation:
+      type: table
+      group:
+        - field: status
+      sort:
+        - field: due
+          dir: asc
+      columns:
+        - field: status
+        - field: priority
+        - field: assignee
+        - field: due
+        - field: estimate
   - id: at-risk-work
     name: At risk
     icon: null
