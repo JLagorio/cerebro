@@ -1351,6 +1351,13 @@ describe('DashboardView drag chrome (M44.4)', () => {
       const ghost = screen.getByTestId('drag-ghost');
       expect(ghost.style.opacity).toBe('0.4');
       expect(ghost.children).toHaveLength(1);
+      // A widget is a flex ITEM — `flex-grow`, `flex-basis: 0`, and a height
+      // its row fixes — and none of that survives the move to a plain block
+      // parent. The copy is made to fill the measured box instead, or it
+      // would collapse to its content and stop being the shape it stands for.
+      const copy = ghost.children[0] as HTMLElement;
+      expect(copy.style.width).toBe('100%');
+      expect(copy.style.height).toBe('100%');
       // Ours dimmed the tile to 0.6 and left a hole where it had been
       // (baseline §D3). The tile stays, at full strength.
       expect(source.style.opacity).toBe('');

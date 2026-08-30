@@ -119,6 +119,20 @@ function depersonalise(root: HTMLElement): void {
   for (const el of [root, ...root.querySelectorAll('*')]) {
     for (const attr of CLONE_STRIPS) el.removeAttribute(attr);
   }
+  /**
+   * And made to fill the box, which is the source's own border box.
+   *
+   * A copy is lifted out of the layout that sized it: a dashboard widget is a
+   * flex item (`flex-grow`, `flex-basis: 0`) whose row fixes its height, and
+   * none of that survives the move to a plain block parent — the clone would
+   * fall back to its content's size and stop being the same shape as the thing
+   * it stands for. `box-sizing: border-box` is global here, so 100%/100% of a
+   * box measured with `getBoundingClientRect` is exactly the source's box, and
+   * the margins that sat OUTSIDE it are not part of what was measured.
+   */
+  root.style.width = '100%';
+  root.style.height = '100%';
+  root.style.margin = '0';
 }
 
 /**
