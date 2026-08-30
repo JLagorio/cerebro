@@ -582,11 +582,16 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     expect(bySlot('groupslot:3')).toBeTruthy();
     expect(bySlot('groupslot:1')).toBeNull();
 
-    // End to end over the SAME config the canvas rendered from: dragging the
-    // second visible section into the gap before the first must put it there
-    // GLOBALLY, without disturbing the tab it does not belong to.
+    // End to end over the SAME config the canvas rendered from, through the
+    // id the canvas actually PRINTED — read back off the DOM rather than
+    // retyped here, so a slot that starts lying fails this case instead of
+    // agreeing with a duplicate literal. Dragging the second visible section
+    // into the gap before the first must put it there GLOBALLY, without
+    // disturbing the tab it does not belong to.
+    const firstGap = bySlot('groupslot:0')?.getAttribute('data-slot');
+    if (firstGap === undefined || firstGap === null) throw new Error('leading block slot missing');
     const commit = vi.fn();
-    handleLayoutDragEnd(drag('group:g3', 'groupslot:0'), {
+    handleLayoutDragEnd(drag('group:g3', firstGap), {
       layout: INTERLEAVED as LayoutConfig,
       commit,
     });

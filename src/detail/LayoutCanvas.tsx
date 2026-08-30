@@ -136,6 +136,16 @@ export function handleLayoutDragEnd(
     let slot = Number(m[1]);
     const from = args.layout.groups.findIndex((g) => g.id === id);
     if (from !== -1 && from < slot) slot -= 1;
+    // KNOWN, and accepted (M45.6 review): the identity guard below is a
+    // CONFIG identity, and since the canvas filters by tab those two can
+    // part. Dropping a section into the gap drawn just after itself is an
+    // identity only while the next config slot is the next VISIBLE one — put
+    // another tab's section in between and the same gesture lands a real
+    // reorder whose visible result is unchanged on every tab. Nothing the
+    // user can see moves; the draft goes dirty, so closing asks to discard.
+    // Making it a true no-op means resolving the preview in here — the tab
+    // roster, the scope, the filter — to answer a question about a gesture
+    // that changes nothing. Recorded instead of paid for.
     const next = moveGroup(args.layout, id, slot);
     if (next !== args.layout) args.commit(next);
     return;
