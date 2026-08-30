@@ -8,7 +8,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { CollisionDetection, DragEndEvent } from '@dnd-kit/core';
 import type { TypeLayoutDraft } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
@@ -17,6 +17,7 @@ import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
 import { useDndGesture } from '@/hooks/useDragGesture';
+import { resolveDropTarget, type DropTarget } from '@/hooks/dropPartition';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { resolveLayout } from '@/engine/layout';
 import { addGroup, moveField, moveGroup } from '@/engine/layoutEdit';
@@ -153,6 +154,62 @@ export function handleLayoutDragEnd(
 }
 
 /**
+ * Which targets a drag is allowed to land on — the same two-grammar rule
+ * `handleLayoutDragEnd` resolves with, said once so the LIT target and the
+ * COMMITTED target can never be different things. A field over a group gap
+ * used to light up and then commit nothing.
+ */
+export function canDropOn(activeId: string, targetId: string): boolean {
+  if (activeId.startsWith('group:')) return targetId.startsWith('groupslot:');
+  if (activeId.startsWith('field:')) return targetId.startsWith('slot:');
+  return false;
+}
+
+/**
+ * The canvas's drop targeting (M46.2 Task 3).
+ *
+ * dnd-kit's default is `rectIntersection`: a droppable wins by OVERLAPPING
+ * the dragged element's rect. Our targets are 6px and 12px slots at a 33px
+ * pitch, dragged by a 24px grip, so consecutive slots' live bands missed each
+ * other by 3px and the indicator blinked out twice in a 90px sweep — measured
+ * in `docs/superpowers/specs/2026-08-29-cerebro-drag-baseline.md` §D7/D9.
+ *
+ * So targeting is no longer about touching a rect. The eligible targets
+ * PARTITION the column and the pointer is always in exactly one region of it
+ * (`dropPartition.ts` carries the rule and the reason it cannot come apart
+ * again). Two consequences worth naming:
+ *
+ * - the flip between two slots is now the midpoint between them, which is
+ *   Notion's own above/below rule rather than an artefact of how thick we
+ *   happened to draw the gap;
+ * - the POINTER's y decides, and nothing else does. The field grips sit in a
+ *   gutter 20px left of the slots they aim at, so any rule that asked about x
+ *   — `rectIntersection` included — was asking about a coordinate that never
+ *   overlapped its target;
+ * - the keyboard sensor reports no pointer, so a keyboard drag falls back to
+ *   the centre of the rect it is moving, the only coordinate that gesture has.
+ */
+export const canvasCollision: CollisionDetection = ({
+  active,
+  collisionRect,
+  droppableRects,
+  droppableContainers,
+  pointerCoordinates,
+}) => {
+  const activeId = String(active.id);
+  const targets: DropTarget[] = [];
+  for (const container of droppableContainers) {
+    const id = String(container.id);
+    if (!canDropOn(activeId, id)) continue;
+    const rect = droppableRects.get(container.id);
+    if (rect !== undefined) targets.push({ id, rect });
+  }
+  const y = pointerCoordinates?.y ?? collisionRect.top + collisionRect.height / 2;
+  const hit = resolveDropTarget(y, targets);
+  return hit === null ? [] : [{ id: hit }];
+};
+
+/**
  * The canvas renders from the DRAFT — not RecordProperties, which resolves
  * the LIVE typeDef's `layout:`/`display` and would keep previewing the
  * vault while the user edits the stage. Same visual grammar, draft-driven —
@@ -275,7 +332,7 @@ export function LayoutCanvas({
     // The DndContext stands UNCONDITIONALLY (DashboardView's lesson: a
     // conditional wrapper remounts every shell — and here every open
     // popover — the moment it appears).
-    <DndContext sensors={sensors} {...gesture}>
+    <DndContext sensors={sensors} collisionDetection={canvasCollision} {...gesture}>
       {/* The canvas container is LIVE (M45.3): interactivity belongs to the
           BlockShells inside it, and the `inert` that used to sit here moved
           inward — see InertContent for the boundary's rationale. */}

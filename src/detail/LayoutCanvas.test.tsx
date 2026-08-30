@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { handleLayoutDragEnd } from '@/detail/LayoutCanvas';
+import { canvasCollision, handleLayoutDragEnd } from '@/detail/LayoutCanvas';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { useUiStore } from '@/stores/uiStore';
@@ -127,6 +127,109 @@ describe('handleLayoutDragEnd (M45.3 Task 6)', () => {
     handleLayoutDragEnd(drag('group:g1', 'groupslot:1'), { layout: base(), commit });
     handleLayoutDragEnd(drag('group:ghost', 'groupslot:0'), { layout: base(), commit });
     expect(commit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The canvas's drop TARGETING (M46.2 Task 3), driven the way
+ * `handleLayoutDragEnd` is: synthetic geometry, because jsdom lays nothing
+ * out. The partition itself is proved in `dropPartition.test.ts` — what these
+ * cases hold is the wiring, and the id grammar the wiring filters by.
+ */
+describe('canvasCollision (M46.2 Task 3)', () => {
+  /** The real stack: 6px slots at the measured 33px pitch. */
+  const slots = (ids: string[], start = 245) =>
+    ids.map((id, i) => ({
+      id,
+      rect: {
+        top: start + i * 33,
+        bottom: start + i * 33 + 6,
+        left: 0,
+        right: 600,
+        width: 600,
+        height: 6,
+      },
+    }));
+
+  const args = (
+    activeId: string,
+    targets: ReturnType<typeof slots>,
+    pointer: { x: number; y: number } | null,
+    grip: { top: number; left: number; width: number; height: number },
+    rects: Map<string, unknown> = new Map(targets.map((t) => [t.id, t.rect])),
+  ) =>
+    ({
+      active: { id: activeId },
+      collisionRect: { ...grip, bottom: grip.top + grip.height, right: grip.left + grip.width },
+      droppableRects: rects,
+      droppableContainers: targets.map((t) => ({ id: t.id })),
+      pointerCoordinates: pointer,
+    }) as unknown as Parameters<typeof canvasCollision>[0];
+
+  const collide = (
+    activeId: string,
+    targets: ReturnType<typeof slots>,
+    pointer: { x: number; y: number } | null,
+    grip = { top: 245, left: 20, width: 16, height: 24 },
+  ) => canvasCollision(args(activeId, targets, pointer, grip)).map((c) => String(c.id));
+
+  it('the measured dead band is lit — y 248, 249 and 250 all name a target', () => {
+    // The baseline swept this exact stack and found 248-250 lit NOTHING.
+    const targets = slots(['slot:g1:0', 'slot:g1:1', 'slot:g1:2']);
+    for (const y of [248, 249, 250]) {
+      expect(collide('field:a', targets, { x: 300, y }), `y ${y}`).toHaveLength(1);
+    }
+  });
+
+  it('the whole stack lights exactly one target per pixel', () => {
+    const targets = slots(['slot:g1:0', 'slot:g1:1', 'slot:g1:2', 'slot:g1:3']);
+    for (let y = 245; y <= 245 + 3 * 33 + 6; y += 1) {
+      expect(collide('field:a', targets, { x: 300, y }), `y ${y}`).toHaveLength(1);
+    }
+  });
+
+  it('the pointer decides even from the gutter the grips live in', () => {
+    // The grips sit 20px LEFT of the slots' own left edge, so the dragged
+    // rect never overlaps a target at all. An x-sensitive rule reads that as
+    // "nowhere"; this one reads the row the pointer is on.
+    const targets = slots(['slot:g1:0', 'slot:g1:1']);
+    expect(collide('field:a', targets, { x: -18, y: 260 })).toEqual(['slot:g1:0']);
+  });
+
+  it('a group drag never lights a field slot, and a field drag never a group gap', () => {
+    // Interleaved on purpose: at y 280 both grammars have a candidate, so the
+    // answer is about eligibility and not about which one happens to be near.
+    const mixed = [
+      ...slots(['slot:g1:0', 'slot:g1:1', 'slot:g1:2']),
+      ...slots(['groupslot:0'], 278),
+    ];
+    expect(collide('field:a', mixed, { x: 300, y: 280 })).toEqual(['slot:g1:1']);
+    expect(collide('group:g1', mixed, { x: 300, y: 280 })).toEqual(['groupslot:0']);
+    // A group carried up among the field rows has only its own gaps to land
+    // in, and above the topmost one there is nothing.
+    expect(collide('group:g1', mixed, { x: 300, y: 246 })).toEqual([]);
+  });
+
+  it('a keyboard drag reports no pointer and falls back to the dragged rect centre', () => {
+    const targets = slots(['slot:g1:0', 'slot:g1:1', 'slot:g1:2']);
+    // Grip top 260, height 24 -> centre y 272, which is slot 1's band.
+    expect(
+      collide('field:a', targets, null, { top: 260, left: 20, width: 16, height: 24 }),
+    ).toEqual(['slot:g1:1']);
+  });
+
+  it('a target with no measured rect is simply not a target', () => {
+    const targets = slots(['slot:g1:0', 'slot:g1:1']);
+    const out = canvasCollision(
+      args(
+        'field:a',
+        targets,
+        { x: 300, y: 249 },
+        { top: 0, left: 0, width: 16, height: 24 },
+        new Map(),
+      ),
+    );
+    expect(out).toEqual([]);
   });
 });
 
@@ -744,7 +847,12 @@ describe('a live canvas drag owns Escape (M46.2)', () => {
     grip.focus();
     fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
     // Vacuity guard: with no drag in flight every case below is about nothing.
-    expect(announced()).toContain('Picked up draggable item');
+    // Matched on the item rather than on the pick-up sentence, because since
+    // M46.2 Task 3 the canvas resolves a target from the pointer and the
+    // pick-up announcement is superseded by the first "moved over" in the
+    // same tick. Either sentence proves what this guard is for: a drag is
+    // live, and it is this grip's.
+    expect(announced()).toContain('field:priority');
     await new Promise((r) => setTimeout(r, 0));
     return grip;
   };
@@ -774,11 +882,18 @@ describe('a live canvas drag owns Escape (M46.2)', () => {
 
   it('hands Escape back on a drop too', async () => {
     setup();
+    // Asserted on the LAYER rather than by driving the dialog shut, because
+    // since M46.2 Task 3 a drop always lands somewhere: jsdom measures every
+    // rect at 0x0, so the resolved slot is the first droppable rather than
+    // the row's own, the drop commits a real move, and the next Escape is the
+    // discard confirm's rather than the dialog's. The claim the name makes —
+    // a released gesture stops owning the key — is this line.
+    pushLayer('panel');
     const grip = await pickUp();
+    expect(ownsEscape('panel')).toBe(false);
     // Space again is the keyboard sensor's DROP, not a cancel.
     fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
-    escape(grip);
-    expect(screen.queryByTestId('layout-editor')).toBeNull();
+    expect(ownsEscape('panel')).toBe(true);
   });
 
   it('leaves Escape alone when no drag is running', () => {
