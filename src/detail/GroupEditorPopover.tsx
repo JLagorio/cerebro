@@ -201,22 +201,38 @@ export function GroupEditorPopover({
    * the default tab instead of trusting this door. */
   const tabTargets = draft.tabs.filter(tabBearsProperties);
 
+  /** Does this section declare no tab at all? That is a HOME — the default
+   * tab — and the list marks it as one, so an untabbed section shows exactly
+   * one check (on "Untabbed") instead of two (there, and on whichever tab it
+   * resolves to). */
+  const untabbed = isGroup && group.tab === undefined;
+
   /** Does this section show on that tab? Asked of `resolveLayout` itself
-   * rather than re-derived from `group.tab`: untabbed means the default tab,
-   * and a section whose tab stopped bearing properties falls back onto the
-   * default one too. Both answers are the engine's, and a second copy here
-   * would be free to drift from the first. */
+   * rather than re-derived from `group.tab`: a section whose tab stopped
+   * bearing properties falls back onto the default one, and that fallback is
+   * the engine's — a second copy here would be free to drift from the first.
+   * Untabbed is excluded because "Untabbed" is its own entry above: the
+   * question this answers is which tab the section NAMES, not where an
+   * unnamed one lands. */
   const showsOnTab = (tabId: string) =>
     isGroup &&
+    !untabbed &&
     resolveLayout(draft.layout, overlaid, layoutTabScope(draft.tabs, tabId)).groups.some(
       (g) => g.id === container,
     );
 
-  const moveToTab = (tabId: string) => {
-    // Picking the tab it already shows on stages nothing: setGroupTab would
-    // still WRITE the id onto an untabbed group, dirtying the draft — and
-    // asking to discard — over a move that moves nothing.
-    if (!showsOnTab(tabId)) update({ layout: setGroupTab(draft.layout, container, tabId) });
+  /** Move the section to a tab, or back to untabbed with `null` (M45.6).
+   * Clearing is the ONLY way back: `addGroup` mints a section already
+   * wearing the active tab, so without this entry "untabbed" would be a
+   * shape the parser reads and no door could ever write. */
+  const moveToTab = (target: string | null) => {
+    // Picking the home it already has stages nothing. `setGroupTab` no-ops
+    // the id it already wears, but not untabbed → the default tab's id: that
+    // WRITES a key meaning what absent already meant, dirtying the draft —
+    // and asking to discard on close — over a move that moves nothing.
+    const home =
+      target === null ? untabbed : untabbed && layoutTabScope(draft.tabs, target).isDefault;
+    if (!home) update({ layout: setGroupTab(draft.layout, container, target) });
     // Either way this editor goes: it is anchored to a shell on the tab the
     // canvas stands on, and the section may have just left it.
     onClose();
@@ -524,6 +540,20 @@ export function GroupEditorPopover({
     <MenuSurface width={264} autoFocus={false}>
       <div data-testid="group-editor-tab-list" className="flex min-w-0 flex-col">
         <MenuBack title="Move to tab" onBack={() => setStep('main')} />
+        {/* FIRST, and its own entry rather than an absence: absent `tab:` is
+            a real placement — the default tab — and it is the shape every
+            pre-M45.6 vault wears. Without a door that WRITES it, the model
+            would be readable and unwritable, because the + mints a section
+            already wearing the tab it was pressed on. The label carries
+            where that lands, so the list never has to check two rows. */}
+        <MenuItem
+          icon="minus"
+          label="Untabbed (default tab)"
+          checked={untabbed}
+          testId="group-editor-untabbed"
+          onSelect={() => moveToTab(null)}
+        />
+        <MenuSeparator />
         {tabTargets.map((t) => (
           <MenuItem
             key={t.id}

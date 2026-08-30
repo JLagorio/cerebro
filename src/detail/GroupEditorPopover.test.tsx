@@ -798,8 +798,9 @@ describe('Move to tab (M45.6 Task 4)', () => {
     expect(screen.getByTestId('group-editor-tab-list').textContent).toContain(
       'Tabs that hold their own content — free text or a view — can’t hold sections.',
     );
-    // g1 is UNTABBED, which means the default tab: the check says so.
-    expect(checked('group-editor-tab-one')).toBe(true);
+    // g1 is UNTABBED — its home is the entry that says so, not the tab that
+    // entry resolves to (the sibling case holds that half).
+    expect(checked('group-editor-tab-one')).toBe(false);
     expect(checked('group-editor-tab-two')).toBe(false);
   });
 
@@ -845,6 +846,43 @@ describe('Move to tab (M45.6 Task 4)', () => {
       { id: 'g1', name: 'Planning', fields: ['priority'] },
       { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
     ]);
+  });
+
+  it('Untabbed is the marked home of a section with no tab, and re-picking it stages nothing', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    await user.click(shellOf('g1'));
+    await user.click(screen.getByTestId('group-editor-move-tab'));
+    // g1 declares no tab. ONE mark, on the entry that says so — marking the
+    // default tab as well would show two checks for one home.
+    expect(checked('group-editor-untabbed')).toBe(true);
+    expect(checked('group-editor-tab-one')).toBe(false);
+
+    await user.click(screen.getByTestId('group-editor-untabbed'));
+    const payload = await apply(patchFrontmatter);
+    // Absent means the default tab already: writing the id would dirty the
+    // draft — and ask to discard on close — over a move that moves nothing.
+    expect((payload.layout as { groups: unknown[] }).groups).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['priority'] },
+      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+    ]);
+  });
+
+  it('Untabbed CLEARS a tabbed section — the one way back to the default tab', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    await user.click(shellOf('g2'));
+    await user.click(screen.getByTestId('group-editor-move-tab'));
+    expect(checked('group-editor-untabbed')).toBe(false);
+    await user.click(screen.getByTestId('group-editor-untabbed'));
+
+    const payload = await apply(patchFrontmatter);
+    // The key DELETES — `tab:` absent, not `tab: null` or the old id. Without
+    // this entry the model could be read but never written back.
+    const groups = (payload.layout as { groups: Record<string, unknown>[] }).groups;
+    expect(groups[1]).toEqual({ id: 'g2', name: 'Details', fields: ['notes'] });
+    expect('tab' in groups[1]).toBe(false);
   });
 
   it('a tabless type offers no move — and heading and rest never do', async () => {
