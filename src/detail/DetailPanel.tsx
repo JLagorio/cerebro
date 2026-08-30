@@ -15,7 +15,7 @@ import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
-import { layoutTabScope, tabBearsProperties, typeStyle } from '@/engine/typeCatalog';
+import { typeStyle } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -235,8 +235,8 @@ export function DetailPanel() {
     // it when the body stops rendering — NoteBodyEditor unmounts then too,
     // and nothing else nulled this ref, so a later commitTitle's splice could
     // hit a detached editor. M45.6 widened that trigger from `show_body` to
-    // `showsBody`, because switching to a Sections, Properties or View tab
-    // unmounts the editor for exactly the same reason; and split it off the
+    // `showsBody`, because switching to a Sections or View tab unmounts the
+    // editor for exactly the same reason; and split it off the
     // title sync above, so a tab press no longer throws away a rename the
     // user has typed but not committed.
     //
@@ -263,37 +263,12 @@ export function DetailPanel() {
   // `!stripShows || detailsShown`, and the untouched default for
   // `detailsShown` is `!stripShows` (per path) rather than a stored false.
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  // M45.6 — which tab the layout resolves FOR. `layoutTabScope` because the
-  // engine holds no tab roster and must not learn one: this side owns the
-  // tabs, so it answers "is this the default tab" and "can that id still
-  // hold sections" once. The page and the layout editor's canvas build the
-  // scope from the same helper in the same shape — three surfaces that must
-  // never disagree about which sections a tab holds, since the canvas is a
-  // PREVIEW of the other two. No tab at all resolves tab-blind: the canvas's
-  // form verbatim, and pre-M45.6 behavior verbatim with it.
-  //
-  // The heading is read off the SCOPED resolve only because it is the same
-  // list either way: `resolveLayout` keeps `heading` and `rest` global by
-  // decision, and the strip renders on every tab (Notion's heading block
-  // sits above the tab bar; ours sits above this strip).
-  //
-  // THIRD ARM (M45.6 review): a type can declare tabs that ALL refuse the
-  // stack — every one a Sections or a View. On the record page that is
-  // survivable, because `DocSidePanel` renders the whole unscoped stack
-  // beside the canvas whatever tab is open. The peek HAS no side panel, so
-  // the same type left a record's groups and loose fields with nowhere at
-  // all to render: only the heading strip survived, because it sits outside
-  // the tab gate. A property nobody can reach is a property the vault holds
-  // and the app denies — worse than an ugly surface, and the rule it breaks
-  // is that a record's properties must be reachable from at least ONE
-  // surface. So when no tab bears properties, the peek takes the side
-  // panel's job: the stack renders UNSCOPED (no tab filter — there is no tab
-  // to filter for) under whatever the open tab shows.
-  const propertiesOrphaned = tabs.length > 0 && !tabs.some(tabBearsProperties);
-  const tabScope =
-    activeTab === null || propertiesOrphaned ? undefined : layoutTabScope(tabs, activeTab.id);
+  // M46.1 — the layout is the RECORD's, resolved once and rendered above the
+  // tab strip on every tab. The engine holds no tab roster and now needs
+  // none: nothing here narrows a resolution, so the peek, the page and the
+  // customizer's canvas cannot disagree about what a record shows.
   const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields, tabScope).heading;
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
   const stripShows =
     headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
   // Render-time derived-state reset (the React-sanctioned pattern): the lens
@@ -443,32 +418,60 @@ export function DetailPanel() {
             schema={schema}
             fields={headingFields}
             detailsShown={detailsShown}
-            // Only a tab that can FOLD the stack gets the expander: a
-            // Properties tab always shows it, and Sections/View show none at
-            // all, so a toggle there would expand nothing (DocPage's rule).
-            // A record with no tabs keeps the toggle — that is every vault
-            // written before tabs existed.
-            onToggleDetails={
-              activeTab === null || activeTab.content === 'overview'
-                ? () => setDetails({ path: entry.path, shown: !detailsShown })
-                : undefined
-            }
+            // M46.1: the expander is offered on EVERY tab, because the stack
+            // it opens stands on every tab. Gating it by tab kind would
+            // strand the record's sections behind a strip with no way to
+            // open — the same hole one layer down from the one this slice
+            // closed.
+            onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
           />
         )}
+        {/* M3: extracted to RecordProperties — shared with the split view.
+            Keyed per record (prefixed: the sibling NoteBodyEditor also keys
+            on the path) so the add-property flyout closes on switch.
+
+            M46.1 — ABOVE the tab strip, on every tab. A section belongs to
+            the record, not to a tab (Notion's order, and the user's ruling:
+            "tabs are only for related data sources. fields shwo above"), so
+            the only thing that still hides this stack is the strip's own
+            fold — and the toggle for it now renders on every tab too. */}
+        {(!stripShows || detailsShown) && (
+          <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+        )}
+        {/* The peek's own chrome (M45.6, re-placed M46.1): freshness and the
+            knowledge loop are facts about the RECORD, not about the lens you
+            have open, and a tab that hid them would make them unreachable
+            from the peek rather than merely elsewhere.
+
+            They sit with the other global blocks, ABOVE the strip: everything
+            below it is the open tab's own content and nothing else, which is
+            the whole shape this slice restores. On an untabbed record that is
+            the pre-tabs panel line for line — the knowledge loop above the
+            Description, where it has always been — and on a view tab they
+            stand above the embedded table rather than however many rows below
+            it. Fixed position either way: chrome that moves when you press a
+            tab is worse than chrome in an awkward place. The two heavy blocks
+            stay at the foot of the panel, where they have always been. */}
+        {/* M34.5.3 — a cached copy says its own freshness. Null for every
+            record without fetch bookkeeping. */}
+        <SourceFreshnessLine entry={entry} />
+        {/* M12: records lost the doc side panel when display:doc died, and
+            the knowledge loop must not die with it — the same commit state
+            and related-concepts view, collapsed until asked (M8.3's rule:
+            the assistant never speaks first). */}
+        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
         {/* M45.6 — the peek shows the record's tabs. The user found them
             missing here (2026-08-29): the strip mounted on the page and in
             the layout editor, and the peek is the surface a table row opens
             into. Same gate as the page — SAVED tabs only, because Simple
-            means no strip rather than a one-tab bar — and the same four
-            content arms below, in this column's geometry.
+            means no strip rather than a one-tab bar.
 
-            It sits UNDER the heading strip because the heading is global:
-            Notion's heading block sits above the tab bar and the layout
-            editor's canvas previews exactly this order. The page pins its
-            strip above the scroll container instead, where it is page chrome;
-            here it scrolls with the record it describes. `-mx-4` lets the
-            underline reach both edges of the panel while `gutter="sm"` keeps
-            the tabs on this column's own 16px inset. */}
+            It sits UNDER the record's own blocks (M46.1) because those are
+            global and this bar divides them from the one tab's content: the
+            page and the customizer's canvas render exactly this order. The
+            page pins nothing above its scroll container anymore either.
+            `-mx-4` lets the underline reach both edges of the panel while
+            `gutter="sm"` keeps the tabs on this column's own 16px inset. */}
         {savedTabs.length > 0 && activeTab !== null && (
           <div className="-mx-4 mb-3.5">
             <RecordTabs
@@ -487,73 +490,6 @@ export function DetailPanel() {
             />
           </div>
         )}
-        {/* M3: extracted to RecordProperties — shared with the split view.
-            Keyed per record (prefixed: the sibling NoteBodyEditor also keys
-            on the path) so the add-property flyout closes on switch.
-
-            M45.6: the first content arm. A Sections or View tab IS its own
-            content, so it carries no stack (DocPage's gate, verbatim); a
-            Properties tab is the stack alone, so it ignores the strip's fold.
-            And `tab` picks WHICH sections it holds.
-
-            NOT keyed by tab, decided when the content started differing per
-            tab (M45.6 Task 3): every piece of state this component owns is
-            about the RECORD's stack — the reveal expander, the add-property
-            flyout, a drag in flight — and none of it is read against a
-            particular tab's sections, which are derived from props on every
-            render. Keying by tab would throw away a flyout the user opened
-            and a reveal they asked for, every press, buying nothing: there is
-            no stale per-tab state to discard. Keyed by PATH still, because a
-            different record is a different stack.
-
-            `propertiesOrphaned` short-circuits BOTH halves of the gate, and
-            has to: the first because no tab of such a type would ever pass
-            it, and the second because the strip's expander is only offered
-            on an Overview tab — a folded stack behind a toggle that is not
-            rendered is the same hole one layer down. */}
-        {(propertiesOrphaned ||
-          activeTab === null ||
-          (activeTab.content !== 'sections' && activeTab.content !== 'view')) &&
-          (propertiesOrphaned ||
-            activeTab?.content === 'properties' ||
-            !stripShows ||
-            detailsShown) && (
-            <RecordProperties
-              key={`props:${entry.path}`}
-              entry={entry}
-              schema={schema}
-              tab={tabScope}
-            />
-          )}
-        {/* The peek's own chrome, on EVERY tab (M45.6): freshness and the
-            knowledge loop are facts about the RECORD, not about the lens you
-            have open, and a tab that hid them would make them unreachable
-            from the peek rather than merely elsewhere.
-
-            They sit HERE, between the stack and the tab's own content, which
-            is exactly where they sat before tabs existed — so the Overview
-            tab is the pre-M45.6 panel line for line, and nothing about an
-            untabbed record's peek moved.
-
-            PLACEMENT, decided against the review's "hoist them above the view
-            arm only" (M45.6): chrome that changes position depending on the
-            open tab is worse than chrome in an awkward place — you learn
-            where a thing lives once, or you hunt for it every time. Fixed
-            here, they answer the review's real complaint anyway: both are one
-            line (a null freshness line, a collapsed disclosure), so on a view
-            tab they stand ABOVE the embedded table rather than however many
-            rows below it. The two heavy blocks stay at the foot of the panel,
-            which is where they have always been. If an unbounded embed ever
-            does become the problem, the fix is a height on the embed, not a
-            moving knowledge block. */}
-        {/* M34.5.3 — a cached copy says its own freshness. Null for every
-            record without fetch bookkeeping. */}
-        <SourceFreshnessLine entry={entry} />
-        {/* M12: records lost the doc side panel when display:doc died, and
-            the knowledge loop must not die with it — the same commit state
-            and related-concepts view, collapsed until asked (M8.3's rule:
-            the assistant never speaks first). */}
-        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
         {/* M44.1 — the type's display config gates the body; M45.6 — so does
             the open tab (`showsBody`). DocPage's body IS the page; this is
             the peek panel's Description block. */}

@@ -136,7 +136,11 @@ describe('DocPage', () => {
       if (record === undefined) throw new Error('fixture vault has no Work item');
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
-      expect(screen.queryByTestId('page-properties')).toBeNull();
+      // The swap is the BODY's: M46.1 keeps the record's stack on every tab,
+      // behind the corpus layout's strip toggle here as it is on Overview.
+      expect(screen.queryByTestId('markdown-editor')).toBeNull();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
     it('switching between two Overview tabs keeps the live editor (M44.5)', async () => {
@@ -232,20 +236,7 @@ describe('DocPage', () => {
       expect(screen.queryByTestId('page-properties')).toBeNull();
     });
 
-    it('a properties tab always shows the stack, and no toggle renders', async () => {
-      const record = await setTypeFrontmatter(
-        'layout:\n  heading: [status]\n' +
-          'tabs:\n' +
-          '  - { id: overview, name: Overview, content: overview }\n' +
-          '  - { id: props, name: Properties, content: properties }\n',
-      );
-      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'props' }} />);
-      expect(screen.getByTestId('heading-strip')).toBeTruthy();
-      expect(screen.getByTestId('page-properties')).toBeTruthy();
-      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
-    });
-
-    it('a sections tab renders the strip only — no stack conjured for it', async () => {
+    it('the strip and its toggle stand on a sections tab as well', async () => {
       const record = await setTypeFrontmatter(
         'layout:\n  heading: [status]\n' +
           'tabs:\n' +
@@ -255,8 +246,11 @@ describe('DocPage', () => {
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
       expect(screen.getByTestId('heading-strip')).toBeTruthy();
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      // M46.1: the stack is the record's on every tab, so the fold is the
+      // strip's alone — and the toggle that opens it renders here too.
       expect(screen.queryByTestId('page-properties')).toBeNull();
-      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
     it('no layout → no strip, and the stack renders exactly as today', async () => {
@@ -300,11 +294,16 @@ describe('DocPage', () => {
   });
 
   /**
-   * M45.6 — a section belongs to a tab, so the page renders the OPEN tab's
-   * sections. The user's second defect, on the surface that answers it: a
-   * section assigned to a tab used to render on every one of them.
+   * M46.1 — a section belongs to the RECORD, not to a tab (user, 2026-08-29:
+   * "sorry tabs are only for related data sources. fields shwo above. just
+   * like notion."). The heading strip and the whole property stack stand
+   * ABOVE the tab strip on every tab; the tab below them holds only its own
+   * content — the body, its free text, or its database.
+   *
+   * This reverses M45.6, whose per-tab cases are deleted rather than
+   * weakened: they described a product that no longer exists.
    */
-  describe('sections belong to tabs (M45.6)', () => {
+  describe('properties stand above the tabs (M46.1)', () => {
     const TYPE_DOC = 'types/work-item.md';
     // The heading-strip block's idiom: strip the corpus `layout:` first, or
     // the splice mints a duplicate key and the frontmatter parse fails whole.
@@ -334,125 +333,104 @@ describe('DocPage', () => {
       return record;
     };
 
-    // Planning belongs to tab one, Links to tab two, Extra to no tab at all —
-    // the three cases one fixture has to hold. `status` heads the strip and
-    // `priority`/`window` fall to the loose remainder, both global.
+    // Three sections and a loose remainder, none of them a tab's property:
+    // every one has to stand on every tab. No `heading:` here, so the stack
+    // is not folded behind the strip's toggle — that fold is its own case
+    // below, and it is the ONE gate this slice leaves in place.
     const SECTIONS =
       'layout:\n' +
-      '  heading: [status]\n' +
       '  groups:\n' +
-      '    - { id: planning, name: Planning, fields: [assignee, due], tab: one }\n' +
-      '    - { id: links, name: Links, fields: [epic, blocked_by], tab: two }\n' +
+      '    - { id: planning, name: Planning, fields: [assignee, due] }\n' +
+      '    - { id: links, name: Links, fields: [epic, blocked_by] }\n' +
       '    - { id: extra, name: Extra, fields: [estimate] }\n';
-    // Both tabs bear properties, so the stack renders on each without the
-    // strip's toggle in the way — the tab filter is what is under test.
-    const TWO_PROPERTY_TABS =
+    // One tab of each surviving kind: the body, free text, and a database.
+    const TABS =
       'tabs:\n' +
-      '  - { id: one, name: One, content: properties }\n' +
-      '  - { id: two, name: Two, content: properties }\n';
-    const stageTabbedSections = () => stage(TWO_PROPERTY_TABS + SECTIONS);
+      '  - { id: overview, name: Overview, content: overview }\n' +
+      '  - { id: spec, name: Spec, content: sections }\n' +
+      '  - { id: items, name: Items, content: view, source: { type: Work item } }\n';
+    const stageTabs = () => stage(TABS + SECTIONS);
 
-    // Everything is asserted INSIDE the stack. The doc side panel renders a
-    // second, unscoped `DocProperties` holding every group (and a "Links" tab
-    // of its own), and it is only off screen here because `docPanelTab`
-    // happens to default to 'outline' — a default this file must not depend
-    // on to tell a scoped stack from an unscoped one.
+    // Everything is asserted INSIDE the page stack. The doc side panel
+    // renders a second `DocProperties` holding the same groups, and it is
+    // only off screen here because `docPanelTab` happens to default to
+    // 'outline' — a default this file must not depend on.
     const props = () => within(screen.getByTestId('page-properties'));
     const groupIds = () =>
       props()
         .queryAllByTestId('property-group')
         .map((g) => g.getAttribute('data-group'));
+    const above = (first: HTMLElement, second: HTMLElement) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-    it('the default tab shows its own sections and the untabbed one', async () => {
-      const record = await stageTabbedSections();
+    // The headline of the reversal: a tab that is not the body still carries
+    // the record's whole stack, and the stack stands over the strip.
+    it('a sections tab shows every section, above the tab strip', async () => {
+      const record = await stageTabs();
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(groupIds()).toEqual(['planning', 'links', 'extra']);
+      expect(props().getByText('Priority')).toBeTruthy();
+      expect(above(screen.getByTestId('page-properties'), screen.getByTestId('record-tabs'))).toBe(
+        true,
+      );
+    });
+
+    it('a view tab shows every section too — the embed is the tab, not the page', async () => {
+      const record = await stageTabs();
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'items' }} />);
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      expect(groupIds()).toEqual(['planning', 'links', 'extra']);
+      expect(above(screen.getByTestId('page-properties'), screen.getByTestId('record-tabs'))).toBe(
+        true,
+      );
+    });
+
+    it('the overview tab is the same stack, in the same place', async () => {
+      const record = await stageTabs();
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
-      expect(groupIds()).toEqual(['planning', 'extra']);
-      expect(props().queryByText('Links')).toBeNull();
-      // …and the leak in the direction the group ids cannot see: under a
-      // filter-before-resolve regression these two would look unclaimed here
-      // and render loose in the headerless rest block, section and all.
-      expect(props().queryByText('Epic')).toBeNull();
-      expect(props().queryByText('Blocked by')).toBeNull();
+      expect(groupIds()).toEqual(['planning', 'links', 'extra']);
+      expect(above(screen.getByTestId('page-properties'), screen.getByTestId('record-tabs'))).toBe(
+        true,
+      );
     });
 
-    it('a second tab shows only its own sections', async () => {
-      const record = await stageTabbedSections();
-      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
-      expect(groupIds()).toEqual(['links']);
-      expect(props().queryByText('Planning')).toBeNull();
-      expect(props().queryByText('Extra')).toBeNull();
-      // The same leak from the other side: `assignee` and `due` are claimed
-      // by the other tab's section, so they are not loose here.
-      expect(props().queryByText('Assignee')).toBeNull();
-      expect(props().queryByText('Due')).toBeNull();
-    });
-
-    // Two globals, by decision: the heading strip sits above the tab bar, and
-    // `rest` is the remainder of the ROSTER, so both stand on every tab.
-    it('the heading strip and the loose remainder stand on both tabs', async () => {
-      const record = await stageTabbedSections();
-      const { unmount } = render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
-      expect(screen.getByTestId('heading-strip')).toBeTruthy();
-      expect(props().getByText('Priority')).toBeTruthy();
+    // The other half of the correction: the tab holds only ITS content, so
+    // the body is the Overview tab's and nobody else's.
+    it('the body editor renders on the overview tab and nowhere else', async () => {
+      const record = await stageTabs();
+      const { unmount } = render(
+        <DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />,
+      );
+      expect(screen.queryByTestId('markdown-editor')).toBeNull();
       unmount();
-      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
-      expect(screen.getByTestId('heading-strip')).toBeTruthy();
-      expect(props().getByText('Priority')).toBeTruthy();
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
     });
 
-    /**
-     * The doc side panel's Info tab passes NO tab, and these two cases are
-     * why: they stand where the page renders no property stack at all, so
-     * the panel is the last surface holding the record's sections.
-     *
-     * Sections outlive the tab they were assigned to — the tab is deleted, or
-     * re-kinded to one that renders no stack — and the properties inside them
-     * are still the user's data.
-     */
-    describe('the side panel is the surface of last resort', () => {
-      const panelGroupIds = () =>
-        within(screen.getByTestId('doc-properties'))
-          .queryAllByTestId('property-group')
-          .map((g) => g.getAttribute('data-group'));
-
-      it('a type with no property-bearing tab left shows its sections in the panel', async () => {
-        // Every tab is its own content now, so DocPage skips the stack on
-        // each of them and `page-properties` exists nowhere.
-        const record = await stage(
-          'tabs:\n' +
-            '  - { id: spec, name: Spec, content: sections }\n' +
-            '  - { id: items, name: Items, content: view, source: { type: Work item } }\n' +
-            SECTIONS,
-        );
-        render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
-        expect(screen.queryByTestId('page-properties')).toBeNull();
-        fireEvent.click(screen.getByTestId('doc-panel-tab-info'));
-        expect(panelGroupIds()).toEqual(['planning', 'links', 'extra']);
-      });
-
-      // The discriminating one: this type HAS a property-bearing tab, so a
-      // scope threaded into the panel would resolve `spec` as a non-default
-      // tab and hide all three sections — every one of them, with the page
-      // showing none either. Passing no tab is what keeps them readable.
-      it('and so does a sections tab on a type that has one', async () => {
-        const record = await stage(
-          'tabs:\n' +
-            '  - { id: one, name: One, content: properties }\n' +
-            '  - { id: spec, name: Spec, content: sections }\n' +
-            SECTIONS,
-        );
-        render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
-        expect(screen.getByTestId('tab-sections')).toBeTruthy();
-        expect(screen.queryByTestId('page-properties')).toBeNull();
-        fireEvent.click(screen.getByTestId('doc-panel-tab-info'));
-        expect(panelGroupIds()).toEqual(['planning', 'links', 'extra']);
-      });
+    // The strip's expander is the one thing that still hides the stack, and
+    // it is offered on EVERY tab now: the stack it opens is the same stack on
+    // all of them, so a toggle missing here would strand the sections behind
+    // a strip that has no way to open.
+    it('the strip folds the stack behind its toggle on a view tab too', async () => {
+      const record = await stage(
+        TABS + SECTIONS.replace('layout:\n', 'layout:\n  heading: [status]\n'),
+      );
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'items' }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(groupIds()).toEqual(['planning', 'links', 'extra']);
     });
   });
 
   // M45.4 — the fourth swap arm: a record tab backed by a database view. The
-  // tab IS the content — no property stack, no body editor — and a dead
-  // pointer renders the broken card, never an empty database.
+  // tab's CONTENT is the database — no body editor — and a dead pointer
+  // renders the broken card, never an empty database. M46.1: the record's
+  // property stack stands above the strip here as on every tab, so these
+  // cases assert the embed and the body, never the stack's absence.
   describe('view tabs (M45.4)', () => {
     const TYPE_DOC = 'types/work-item.md';
     // syn-6 is the host: syn-7 and syn-10 declare `blocked_by: [[syn-6]]`,
@@ -460,9 +438,8 @@ describe('DocPage', () => {
     // drop the third.
     const HOST = 'projects/offline-sync-hardening/items/syn-6.md';
     // The heading-strip suite's tripwire, reused: these cases strip the
-    // corpus `layout:` so `stripShows` is FALSE — which makes the
-    // page-properties assertions bite: without the view-tab gate,
-    // `!stripShows` alone would render the stack on a view tab.
+    // corpus `layout:` so `stripShows` is FALSE and the stack stands
+    // unfolded — which is what makes the M46.1 assertion below bite.
     const CORPUS_LAYOUT =
       'layout:\n' +
       '  heading: [status, priority]\n' +
@@ -495,11 +472,12 @@ describe('DocPage', () => {
       // …and not the one blocked by a different record.
       expect(screen.queryByText('Recover gracefully from the first failed sync')).toBeNull();
       expect(screen.getAllByTestId('table-row')).toHaveLength(2);
-      // The tab IS the content: no stack (the layout is stripped, so
-      // `!stripShows` would render it without the view gate) and no body
-      // editor — `showsEditor` stays false, the M44.5 reset key untouched.
-      expect(screen.queryByTestId('page-properties')).toBeNull();
+      // The tab holds the database and nothing else: no body editor —
+      // `showsEditor` stays false, the M44.5 reset key untouched. The
+      // record's own stack stands above the strip (M46.1), unfolded here
+      // because the corpus layout was stripped.
       expect(screen.queryByTestId('markdown-editor')).toBeNull();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
     });
 
     it('a dead source renders the card — the sentence, never an empty database', async () => {
@@ -512,15 +490,13 @@ describe('DocPage', () => {
       expect(screen.getByTestId('view-tab-broken').textContent).toContain(
         'This tab points at a type called “Ghost” that is no longer in the vault.',
       );
-      // Broken is a sentence, not an empty view (an empty-state line would
-      // read as measured-at-zero) and not the property stack. Both spellings:
-      // the table this dead source would default to says "No records yet";
-      // "No items yet" is BoardView's.
+      // Broken is a sentence, not an empty view — an empty-state line would
+      // read as measured-at-zero. Both spellings: the table this dead source
+      // would default to says "No records yet"; "No items yet" is BoardView's.
       expect(screen.queryByTestId('view-tab-embed')).toBeNull();
       expect(screen.queryByText('No records yet')).toBeNull();
       expect(screen.queryByText('No items yet')).toBeNull();
       expect(screen.queryByTestId('table-row')).toBeNull();
-      expect(screen.queryByTestId('page-properties')).toBeNull();
     });
 
     it('a stale selection.tab still falls back to the first tab (M44.5 unchanged)', async () => {

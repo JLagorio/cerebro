@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -644,18 +644,12 @@ describe('DetailPanel', () => {
       expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
     });
 
-    it('a properties tab is the stack alone — no body', () => {
-      withTabs([{ id: 'props', name: 'Fields', content: 'properties' }, SPEC]);
-      render(<DetailPanel />);
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
-    });
-
-    it('a sections tab is its own free text — no stack, no body', () => {
+    it('a sections tab is its own free text — the stack stays, the body goes', () => {
       withTabs([SPEC, OVERVIEW]);
       render(<DetailPanel />);
       expect(screen.getByTestId('tab-sections')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      // M46.1: the stack is the RECORD's, so it stands on this tab too.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
       expect(screen.queryByTestId('detail-body-heading')).toBeNull();
     });
 
@@ -667,7 +661,7 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
       expect(screen.getByText('Wire field sync banner')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
       expect(screen.queryByTestId('detail-body-heading')).toBeNull();
     });
 
@@ -781,7 +775,7 @@ describe('DetailPanel', () => {
      * user had typed and not yet committed. Split, only the handle reacts.
      */
     it('keeps an uncommitted rename when you press another tab', () => {
-      withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'properties' }]);
+      withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'sections' }]);
       render(<DetailPanel />);
       const input = screen.getByTestId('detail-title') as HTMLInputElement;
       fireEvent.change(input, { target: { value: 'Half typed' } });
@@ -823,54 +817,6 @@ describe('DetailPanel', () => {
     });
 
     /**
-     * A record's properties must be reachable from at least ONE surface, and
-     * the peek is the only surface a peek user has (M45.6 review).
-     *
-     * A type may declare tabs that ALL refuse the stack — every one Sections
-     * or View. The record PAGE survives it: `DocSidePanel` renders the whole
-     * unscoped stack beside the canvas whatever tab is open. The peek has no
-     * side panel, so the same type left the record's groups and loose fields
-     * with nowhere at all to render — only the heading strip survived,
-     * because it sits outside the tab gate. The peek takes the side panel's
-     * job instead: no tab bears properties, so the stack renders unscoped.
-     */
-    it('shows the whole stack when NO tab of the type bears properties', () => {
-      withTabs(
-        [
-          { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
-          { id: 'notes', name: 'Notes', content: 'sections' },
-        ],
-        // A heading too, because it hides the second half of the hole: the
-        // strip's expander is offered on Overview tabs only, so a stack
-        // folded behind a toggle nothing renders is just as unreachable.
-        {
-          heading: ['status'],
-          groups: [{ id: 'g-alpha', name: 'Alpha', fields: ['priority'] }],
-        },
-      );
-      render(<DetailPanel />);
-      // The view tab's own content still renders…
-      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
-      // …and so does every property that would otherwise have vanished: the
-      // grouped one, the loose remainder, and the way to add more. Scoped to
-      // the GROUP, because the embedded table below carries a column of the
-      // same name — the peek shows `Priority` twice here, and only one of
-      // them is the record's own property.
-      const group = screen.getByTestId('property-group');
-      expect(group.getAttribute('data-group')).toBe('g-alpha');
-      expect(within(group).getByText('Priority')).toBeTruthy();
-      // The undeclared key rides the stack's remainder, outside every group.
-      expect(within(group).queryByText('Channel')).toBeNull();
-      expect(screen.getAllByText('field-ops').length).toBeGreaterThan(0);
-      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
-      // Unscoped, so pressing the other tab changes the tab's content and
-      // nothing about the stack — there is no tab to filter it for.
-      fireEvent.click(screen.getByTestId('record-tab-notes'));
-      expect(screen.getByTestId('tab-sections')).toBeTruthy();
-      expect(screen.getByTestId('property-group').getAttribute('data-group')).toBe('g-alpha');
-    });
-
-    /**
      * `RecordProperties` is keyed by PATH, never by tab — pinned here because
      * adding the tab id to that key breaks nothing else in the suite.
      *
@@ -884,7 +830,7 @@ describe('DetailPanel', () => {
       // No layout: the stack is flat, so this case turns on the keying alone
       // and not on which sections a tab holds. `due` is empty on fld-1, so
       // hide_when_empty folds it and the expander appears.
-      const entries = withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'properties' }]);
+      const entries = withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'sections' }]);
       const typeProps = entries.find((e) => e.path === 'types/work-item.md')!.properties as unknown;
       (typeProps as { fields: Record<string, unknown> }).fields.due = {
         kind: 'date',
@@ -931,62 +877,73 @@ describe('DetailPanel', () => {
     });
 
     /**
-     * M45.6 Task 3 — and the tabs HOLD things. The peek resolves its layout
-     * FOR the open tab, so a section shows on its own tab and nowhere else,
-     * while an untabbed one keeps the only home it ever had.
+     * M46.1 — the reversal: a section belongs to the RECORD, so the whole
+     * stack stands above the strip on every tab and the tab below carries
+     * only its own content. M45.6's per-tab cases are deleted, not weakened.
      */
-    describe('sections belong to tabs', () => {
-      const ONE = { id: 'one', name: 'One', content: 'overview' };
-      const TWO = { id: 'two', name: 'Two', content: 'properties' };
-      // No heading here: the strip would fold the Overview tab's stack behind
-      // its toggle, which is a different case (asserted below).
+    describe('properties stand above the tabs (M46.1)', () => {
+      const SPEC_TAB = { id: 'spec', name: 'Spec', content: 'sections' };
+      const ITEMS_TAB = {
+        id: 'items',
+        name: 'Items',
+        content: 'view',
+        source: { type: 'Work item' },
+      };
+      // No heading here: the strip would fold the stack behind its toggle,
+      // which is its own case below.
       const SECTIONED = {
         groups: [
-          { id: 'g-alpha', name: 'Alpha', fields: ['priority'], tab: 'one' },
-          { id: 'g-beta', name: 'Beta', fields: ['assignee'], tab: 'two' },
-          { id: 'g-gamma', name: 'Gamma', fields: ['due'] },
+          { id: 'g-alpha', name: 'Alpha', fields: ['priority'] },
+          { id: 'g-beta', name: 'Beta', fields: ['assignee'] },
         ],
       };
       const groupIds = () =>
         screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group'));
+      const above = (first: HTMLElement, second: HTMLElement) =>
+        Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-      it('the peek shows the open tab’s sections, and swaps them on a press', () => {
-        withTabs([ONE, TWO], SECTIONED);
+      it('a sections tab carries every section, above the strip', () => {
+        withTabs([SPEC_TAB, OVERVIEW], SECTIONED);
         render(<DetailPanel />);
-        // The default tab: its own section plus the untabbed one.
-        expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
-        fireEvent.click(screen.getByTestId('record-tab-two'));
-        expect(groupIds()).toEqual(['g-beta']);
-        expect(screen.queryByText('Alpha')).toBeNull();
-        expect(screen.queryByText('Gamma')).toBeNull();
+        expect(screen.getByTestId('tab-sections')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(
+          above(screen.getAllByTestId('property-group')[0], screen.getByTestId('record-tabs')),
+        ).toBe(true);
       });
 
-      // The leak `rest` would spring if the tab filter ran before the roster
-      // was counted: a field another tab's section claims would look
-      // unclaimed here and render loose, showing one property on two tabs.
-      it('a field another tab’s section claims never renders loose', () => {
-        withTabs([ONE, TWO], SECTIONED);
+      it('and so does a view tab — the embed is the tab, not the record', () => {
+        withTabs([ITEMS_TAB, OVERVIEW], SECTIONED);
         render(<DetailPanel />);
-        expect(screen.queryByText('Assignee')).toBeNull();
-        fireEvent.click(screen.getByTestId('record-tab-two'));
-        expect(screen.getByText('Assignee')).toBeTruthy();
-        expect(screen.queryByText('Priority')).toBeNull();
-        expect(screen.queryByText('Due')).toBeNull();
+        expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(
+          above(screen.getAllByTestId('property-group')[0], screen.getByTestId('record-tabs')),
+        ).toBe(true);
       });
 
-      // The heading is global by decision — Notion's heading block sits above
-      // the tab bar, and ours renders over the strip on every tab.
-      it('the heading strip stands on every tab', () => {
-        withTabs([{ id: 'one', name: 'One', content: 'properties' }, TWO], {
-          heading: ['status'],
-          groups: SECTIONED.groups,
-        });
+      it('a press swaps the tab’s content and leaves the stack standing', () => {
+        withTabs([OVERVIEW, SPEC_TAB], SECTIONED);
+        render(<DetailPanel />);
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+        fireEvent.click(screen.getByTestId('record-tab-spec'));
+        // The body is the Overview tab's alone; the sections are the
+        // record's, so they did not move.
+        expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+      });
+
+      // The heading strip stands on every tab, and so does the expander that
+      // opens the stack behind it — the stack it opens is the same one on
+      // every tab, so a tab without the toggle would strand it.
+      it('the strip and its expander stand on a view tab', () => {
+        withTabs([ITEMS_TAB, OVERVIEW], { heading: ['status'], groups: SECTIONED.groups });
         render(<DetailPanel />);
         expect(screen.getByTestId('heading-strip')).toBeTruthy();
-        expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
-        fireEvent.click(screen.getByTestId('record-tab-two'));
-        expect(screen.getByTestId('heading-strip')).toBeTruthy();
-        expect(groupIds()).toEqual(['g-beta']);
+        expect(groupIds()).toEqual([]);
+        fireEvent.click(screen.getByTestId('view-details-toggle'));
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
       });
     });
   });

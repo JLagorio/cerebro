@@ -19,7 +19,7 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
-import { resolveLayout, revealableFields, type LayoutTab } from '@/engine/layout';
+import { resolveLayout, revealableFields } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
@@ -98,23 +98,12 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
  * fields, manage loose frontmatter keys. Everything writes through
  * patchFrontmatter (optimistic, disk-first on rescan).
  *
- * `tab` is RecordProperties' seam (M45.6) on this stack, so the two cannot
- * disagree about which sections a tab holds. Its shipped host passes none on
- * purpose: the side panel stands BESIDE the page rather than on one of its
- * tabs, and it is where the record's SECTIONS AND REMAINDER stay reachable
- * while a `sections` or `view` tab is open — a tab that renders no stack at
- * all. The page's own strip carries the HEADING on every tab; this panel
- * does not — see `headingFolds` below for the exclusion and its cost.
+ * Like `RecordProperties`, it takes no tab (M46.1): a section belongs to the
+ * record, so this panel and the page's own stack show the same containers and
+ * cannot disagree. The page's strip carries the HEADING on every tab; this
+ * panel does not — see `headingFolds` below for the exclusion and its cost.
  */
-export function DocProperties({
-  entry,
-  schema,
-  tab,
-}: {
-  entry: Entry;
-  schema: Schema;
-  tab?: LayoutTab;
-}) {
+export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
 
@@ -137,10 +126,10 @@ export function DocProperties({
   const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
 
-  // M45.1, the record panel's math verbatim — M45.6's tab scoping included.
-  // Only the declared stack is arranged: the Type row, Convert flow, and
-  // undeclared keys render exactly as the flat panel does.
-  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared, tab);
+  // M45.1, the record panel's math verbatim. Only the declared stack is
+  // arranged: the Type row, Convert flow, and undeclared keys render exactly
+  // as the flat panel does.
+  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, folds).shown;
   // The one expander counts what THIS stack can reveal — the record panel's

@@ -4,8 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { DocProperties } from '@/detail/DocProperties';
 import { buildSchema } from '@/engine/schema';
-import { layoutTabScope } from '@/engine/typeCatalog';
-import type { Entry, TabDef } from '@/engine/types';
+import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
@@ -307,64 +306,33 @@ describe('DocProperties layout groups (M45.1)', () => {
 });
 
 /**
- * M45.6 — the same tab seam RecordProperties grew, on this stack. No shipped
- * host passes one (the doc side panel stands BESIDE the page, not on one of
- * its tabs — see the mount in `DocSidePanel`), so these cases mount the
- * component directly: the seam is real, one stack cannot disagree with the
- * other about what a tab holds, and absent stays the pre-tab stack.
+ * M46.1 — this stack takes no tab either. The side panel stands BESIDE the
+ * page and the page's own stack stands ABOVE its tab strip, so neither has a
+ * tab to resolve for: every section renders on both, and the two cannot
+ * disagree about what a record holds.
  */
-describe('DocProperties sections belong to tabs (M45.6)', () => {
+describe('DocProperties sections belong to the record (M46.1)', () => {
   afterEach(cleanup);
 
-  const TABS: TabDef[] = [
-    { id: 'one', name: 'One', icon: null, content: 'overview' },
-    { id: 'two', name: 'Two', icon: null, content: 'properties' },
-  ];
-
-  const setupTab = (activeId: string | null) => {
+  it('renders every section, with the Type row and the loose keys around them', () => {
     const entries = fixtureVault();
     const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
     (typeDoc.properties as unknown as Record<string, unknown>).layout = {
       heading: ['status'],
       groups: [
-        { id: 'g-alpha', name: 'Alpha', fields: ['priority'], tab: 'one' },
-        { id: 'g-beta', name: 'Beta', fields: ['assignee'], tab: 'two' },
+        { id: 'g-alpha', name: 'Alpha', fields: ['priority'] },
+        { id: 'g-beta', name: 'Beta', fields: ['assignee'] },
         { id: 'g-gamma', name: 'Gamma', fields: ['due'] },
       ],
     };
     useVaultStore.setState({ entries, vaultPath: '/vault' });
     const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
-    render(
-      <DocProperties
-        entry={entry}
-        schema={buildSchema(entries)}
-        tab={activeId === null ? undefined : layoutTabScope(TABS, activeId)}
-      />,
-    );
-  };
-
-  const groupIds = () =>
-    screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group'));
-  const rowNames = () =>
-    screen.getAllByTestId('property-row').map((r) => r.getAttribute('data-property'));
-
-  it('the default tab shows its own sections and the untabbed ones', () => {
-    setupTab('one');
-    expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
-    // Rest picks up nothing another tab's section claims — the Type row and
-    // the loose keys are all that follow.
-    expect(rowNames()).toEqual(['Type', 'priority', 'due', 'key', 'channel']);
-  });
-
-  it('a second tab shows only its own', () => {
-    setupTab('two');
-    expect(groupIds()).toEqual(['g-beta']);
-    expect(rowNames()).toEqual(['Type', 'assignee', 'key', 'channel']);
-  });
-
-  it('a hostless mount is the pre-tab stack verbatim', () => {
-    setupTab(null);
-    expect(groupIds()).toEqual(['g-alpha', 'g-beta', 'g-gamma']);
-    expect(rowNames()).toEqual(['Type', 'priority', 'assignee', 'due', 'key', 'channel']);
+    render(<DocProperties entry={entry} schema={buildSchema(entries)} />);
+    expect(
+      screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group')),
+    ).toEqual(['g-alpha', 'g-beta', 'g-gamma']);
+    expect(
+      screen.getAllByTestId('property-row').map((r) => r.getAttribute('data-property')),
+    ).toEqual(['Type', 'priority', 'assignee', 'due', 'key', 'channel']);
   });
 });

@@ -199,11 +199,6 @@ function OrganizePanel({
   // DocPage/DetailPanel: `stripShows` derived per render with the strip's own
   // fold predicate, stack whenever `!stripShows || detailsShown`, untouched
   // default `!stripShows`, and the lens forgets a capture it left.
-  //
-  // No tab passed, on purpose (M45.6): this aside carries no tab strip, so
-  // there is no open tab to scope to and nowhere to go for the sections a
-  // scope would hide. Untabbed resolution shows every section, which is what
-  // a capture review wants — the whole record, once.
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
   const headingFields =
     typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;

@@ -22,7 +22,7 @@ import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
-import { isRecordEntry, layoutTabScope } from '@/engine/typeCatalog';
+import { isRecordEntry } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -227,7 +227,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   useEffect(() => {
     // The keyed editor remounts per doc; wait for onReady. `showsEditor` is a
-    // dependency because a sections/properties tab unmounts the editor
+    // dependency because a sections or view tab unmounts the editor
     // entirely — holding the stale instance would keep feeding the outline
     // (and the blank-page bar) a body the canvas no longer shows.
     setEditor(null);
@@ -253,7 +253,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     return () => unsubscribe?.();
   }, [editor]);
 
-  // M45.1 — whether the Overview tab's full property stack is open under the
+  // M45.1 — whether the record's full property stack is open under the
   // heading strip. Sticky per record PATH (a new record resets it), and the
   // untouched default is derived per render below rather than stored: it must
   // track whether the strip actually SHOWS, which can change without the path
@@ -297,20 +297,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // whenever `!stripShows || detailsShown`, and the untouched default for
   // `detailsShown` is `!stripShows` (per path) rather than a stored false.
   const typeDef = record && entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  // M45.6 — which tab the layout resolves FOR, built with `layoutTabScope`
-  // exactly as the peek and the layout editor's canvas build it: the engine
-  // holds no tab roster, so this side answers "is this the default tab" and
-  // "can that id still hold sections", and one helper in one shape keeps the
-  // three from disagreeing — the canvas is a PREVIEW of this page, so a
-  // second derivation is how the preview would start lying.
-  //
-  // The heading comes off the SCOPED resolve only because it is the same
-  // list either way — `heading` and `rest` stay global by decision, and the
-  // strip renders on every tab (Notion's heading block sits above the tab
-  // bar, and so does ours).
-  const tabScope = activeTab === null ? undefined : layoutTabScope(tabs, activeTab.id);
+  // M46.1 — one resolution for the whole record, rendered above the tab strip
+  // on every tab. No tab narrows it, so this page, the peek and the
+  // customizer's canvas cannot disagree about what a record shows — and the
+  // canvas, which is a PREVIEW of this page, has nothing left to preview
+  // wrongly.
   const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields, tabScope).heading;
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
   const stripShows =
     headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
   // Render-time derived-state reset (the React-sanctioned pattern): the lens
@@ -694,22 +687,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
-          {/* M44.5 — the tab strip is a flex-none sibling ABOVE the scroll
-              container: it survives the diffOpen canvas swap and stays out of
-              the 820px content measure. M45.2 gates it on SAVED tabs: the
-              synthesized Overview renders content, never a one-tab strip. */}
-          {savedTabs.length > 0 && (
-            <RecordTabs
-              tabs={tabs}
-              activeId={activeTab?.id ?? tabs[0].id}
-              hostType={entry.type}
-              onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
-              onChange={(next) => {
-                if (entry.type !== null)
-                  void setTypeTabs({ name: entry.type, docPath: null }, next);
-              }}
-            />
-          )}
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div
               data-testid="doc-content"
@@ -732,10 +709,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       onCommit={(next) => void adoptTitle(next)}
                     />
                   )}
-                  {/* M45.1 — the key-property strip, on every tab. Only the
-                      Overview tab gets the expander: Properties always shows
-                      the stack, and Sections shows no stack at all — a toggle
-                      there would expand nothing. */}
+                  {/* M45.1 — the key-property strip, on every tab. M46.1: so
+                      is its expander, because the stack it opens is the same
+                      stack on every tab — gating the toggle by tab kind would
+                      strand the record's sections behind a strip that has no
+                      way to open. */}
                   {headingFields.length > 0 && (
                     <HeadingProperties
                       key={`strip:${entry.path}`}
@@ -743,17 +721,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       schema={schema}
                       fields={headingFields}
                       detailsShown={detailsShown}
-                      onToggleDetails={
-                        activeTab !== null && activeTab.content === 'overview'
-                          ? () => setDetails({ path: entry.path, shown: !detailsShown })
-                          : undefined
-                      }
+                      onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
                     />
                   )}
-                  {/* M44.5 — the record canvas swaps by the open tab: Overview
-                      is today's layout verbatim, Properties is the surface
-                      alone, Sections is the tab's free text. An untyped doc
-                      knows nothing of tabs and keeps its document form. */}
+                  {/* M44.5 — the record canvas swaps by the open tab: the
+                      body, the tab's free text, or its database. An untyped
+                      doc knows nothing of tabs and keeps its document form. */}
                   {record && activeTab !== null ? (
                     <>
                       {/* M38.2 — the property surface the peek shows, on the
@@ -761,35 +734,61 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           geometries, so a field added here is a field added
                           there. M45.6 widened that from the surface to the
                           whole anatomy — the peek grew this strip and these
-                          four arms too, so the geometry is the only thing
-                          that differs now; the gate below has a twin in
+                          arms too, so the geometry is the only thing that
+                          differs now; the gate below has a twin in
                           `DetailPanel`, and a change to one is a change owed
-                          to the other. M45.4: view tabs skip the stack — the
-                          embedded database IS the tab's content, and a stack
-                          above it would be the Overview leaking through.
-                          M45.6: `tab` picks WHICH sections the stack holds.
+                          to the other.
 
-                          Still keyed by PATH alone, not by tab, decided when
-                          the content started differing per tab: the state
-                          this component owns — the reveal expander, the
+                          M46.1 — the stack stands here, ABOVE the tab strip,
+                          on every tab: a section belongs to the record, and
+                          the tabs are for the body and for related data
+                          sources (the user's ruling, 2026-08-29). The strip's
+                          own fold is all that is left of the old gate.
+
+                          Keyed by PATH alone, not by tab: the state this
+                          component owns — the reveal expander, the
                           add-property flyout, a drag in flight — is about the
-                          record's stack, never about one tab's sections,
-                          which re-derive from props on every render. A
-                          tab-keyed remount would discard a flyout the user
-                          opened and a reveal they asked for on every press
-                          and discard no stale state, because there is none. */}
-                      {activeTab.content !== 'sections' &&
-                        activeTab.content !== 'view' &&
-                        (activeTab.content === 'properties' || !stripShows || detailsShown) && (
-                          <div data-testid="page-properties" className="mb-4">
-                            <RecordProperties
-                              key={`props:${entry.path}`}
-                              entry={entry}
-                              schema={schema}
-                              tab={tabScope}
-                            />
-                          </div>
-                        )}
+                          record's stack, and it is the same stack on every
+                          tab. A tab-keyed remount would discard a flyout the
+                          user opened and a reveal they asked for on every
+                          press, and discard no stale state, because there is
+                          none. */}
+                      {(!stripShows || detailsShown) && (
+                        <div data-testid="page-properties" className="mb-4">
+                          <RecordProperties
+                            key={`props:${entry.path}`}
+                            entry={entry}
+                            schema={schema}
+                          />
+                        </div>
+                      )}
+                      {/* M44.5, re-placed by M46.1 — the tab strip divides
+                          the record's own blocks from the ONE tab's content,
+                          so it lives inside the content column now rather
+                          than pinned above the scroll container. It scrolls
+                          with the record it describes (Notion's order, the
+                          peek's order, and the customizer canvas's), and it
+                          costs what that placement costs: reading an inline
+                          diff swaps it out with the rest of the canvas, so
+                          tabs are unavailable until the diff is closed.
+                          `-mx-6` lets the underline reach both edges of the
+                          820px measure while the tabs keep its inset. M45.2
+                          gates it on SAVED tabs: the synthesized Overview
+                          renders content, never a one-tab strip. */}
+                      {savedTabs.length > 0 && (
+                        <div className="-mx-6 mb-4">
+                          <RecordTabs
+                            tabs={tabs}
+                            activeId={activeTab.id}
+                            hostType={entry.type}
+                            onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+                            onChange={(next) => {
+                              if (entry.type !== null)
+                                void setTypeTabs({ name: entry.type, docPath: null }, next);
+                            }}
+                          />
+                        </div>
+                      )}
                       {activeTab.content === 'overview' && editorBlock}
                       {activeTab.content === 'sections' && (
                         <TabSections

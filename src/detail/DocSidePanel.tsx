@@ -136,13 +136,6 @@ export function DocSidePanel({
           ) : (
             <div data-testid="outline-loading" />
           ))}
-        {/* No record `tab` passed, on purpose (M45.6): this panel stands
-            BESIDE the page rather than on one of its tabs, and it is the last
-            surface holding the record's sections and remainder when the page
-            can show none — a type whose tabs are all Sections or View has no
-            property-bearing tab at all, and DocPage skips the stack on every
-            one of them. Threading a scope here would strand those properties
-            with nowhere left to read them. */}
         {tab === 'info' && <DocProperties entry={entry} schema={schema} />}
         {tab === 'links' && <LinksTab entry={entry} />}
         {tab === 'knowledge' && (
