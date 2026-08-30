@@ -144,9 +144,14 @@ layout:
   one), which is what every group written before M45.6 has, so no vault
   migrates. A `tab:` naming a tab the type no longer declares renders the
   section on the default tab, visible — the opposite of a dead FIELD
-  pointer, because the section still holds real properties.
+  pointer, because the section still holds real properties. A tab that
+  survives but stops BEARING properties (re-kinded to `sections`/`view`)
+  strands its sections the same way and falls back the same way.
 - Fields in no group and not in `heading` render in the DEFAULT group
-  (declaration order), so a hand-edited vault never loses a property.
+  (declaration order), so a hand-edited vault never loses a property. That
+  remainder has NO tab dimension (M45.6 decision): it is the leftover of the
+  ROSTER, not of a tab, so a field placed in a section on one tab is never
+  also loose on another. A section is the unit you assign to a tab.
 - A field named in `layout` that no longer exists is skipped on render and
   pruned on the next Apply (pointer hygiene, same as favorites).
 - `visibility` stays per-field in `fields:` — `layout` places, `visibility`

@@ -579,6 +579,24 @@ describe('layout config (M45.1)', () => {
     ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'], tab: 'spec' }] });
   });
 
+  it('spells absent identically at both doors — a whitespace tab never reaches the vault', () => {
+    // The serializer trims like the parser does. Guarding on `!== ''` alone
+    // would write `tab: '   '`, which parses back ABSENT: parse(serialize(x))
+    // would stop equalling x for that input.
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: [], tab: '   ' }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: [] }] });
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: [], tab: ' spec ' }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: [], tab: 'spec' }] });
+  });
+
   it('round-trips a tabbed layout', () => {
     const l = parseLayoutConfig({
       heading: ['status'],

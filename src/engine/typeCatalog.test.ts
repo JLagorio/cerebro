@@ -226,11 +226,22 @@ describe('layoutTabScope (M45.6)', () => {
     expect(layoutTabScope(tabs, 'rows').isDefault).toBe(false);
   });
 
-  it('reports liveness from the roster — the engine holds none of it', () => {
-    const scope = layoutTabScope([tab('spec', 'sections'), tab('details', 'overview')], 'details');
+  it('answers can-hold from the roster — the engine holds none of it', () => {
+    const scope = layoutTabScope([tab('spec', 'overview'), tab('details', 'overview')], 'details');
     expect(scope.id).toBe('details');
-    expect(scope.isLive('spec')).toBe(true);
-    expect(scope.isLive('deleted-tab')).toBe(false);
+    expect(scope.canHoldSections('spec')).toBe(true);
+    expect(scope.canHoldSections('deleted-tab')).toBe(false);
+  });
+
+  it('a tab that stopped BEARING properties can no longer hold sections either', () => {
+    // The two-click strand: assign a section to a `properties` tab, then
+    // re-kind that tab to `view`. It is still declared, so liveness alone
+    // would report it fine while every surface renders no property stack —
+    // the section would be invisible everywhere and unreachable in the
+    // customizer. Folding the content kind in here makes it fall back.
+    const scope = layoutTabScope([tab('rows', 'view'), tab('notes', 'sections')], 'details');
+    expect(scope.canHoldSections('rows')).toBe(false);
+    expect(scope.canHoldSections('notes')).toBe(false);
   });
 
   it('fails VISIBLE: an empty roster or an id no tab wears counts as the default', () => {

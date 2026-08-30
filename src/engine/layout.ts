@@ -11,13 +11,22 @@ import type { FieldDef, LayoutConfig, LayoutGroup } from './types';
  * `LayoutTab`) rather than rendering as nothing. */
 export interface ResolvedLayout {
   heading: FieldDef[];
-  groups: { id: string; name: string; fields: FieldDef[] }[];
+  /** `tab` rides through unresolved — a tab id is a string this module never
+   * interprets beyond `showsOn`, and carrying it is what lets a consumer
+   * rebuild a config group from a resolved one without losing the
+   * assignment (M45.6). Absent stays ABSENT, never `undefined`: the
+   * deviations-only serializer must not learn a `tab:` key from a rebuild. */
+  groups: { id: string; name: string; fields: FieldDef[]; tab?: string }[];
   /** Declared fields no container claimed, declaration order. Renders after
    * the named groups so a freshly added field lands visibly. Global by
    * decision (M45.6): rest is the remainder of the ROSTER, so a field a
    * section on another tab claims is not also loose here. */
   rest: FieldDef[];
-  /** Nothing resolved to a placement — render the pre-M45 flat stack. */
+  /** Nothing anywhere in the config resolved to a placement — render the
+   * pre-M45 flat stack. GLOBAL, never per-tab: the consumers' flat branch
+   * ignores `groups` and `rest` and stacks the WHOLE declared roster
+   * (RecordProperties/DocProperties), so a per-tab `flat` would render a
+   * field both inside its section on one tab and loose on another. */
   flat: boolean;
 }
 
@@ -30,12 +39,12 @@ export interface ResolvedLayout {
  * re-deciding "which tab is default" per call site.
  *
  * The dead-pointer FALLBACK is this module's, not the caller's. The caller
- * only reports a fact it can see (`isLive`: does the type still declare this
- * tab id?); `resolveLayout` alone decides what that fact means — a section
- * whose tab died shows on the default tab. That is why `isLive` is REQUIRED
- * rather than optional with a permissive default: an omitted predicate would
- * read as "every tab is live", and a section pointing at a deleted tab would
- * silently vanish, the one outcome the doctrine forbids.
+ * only reports a fact it can see (`canHoldSections`); `resolveLayout` alone
+ * decides what that fact means — a section whose tab can no longer hold it
+ * shows on the default tab. That is why the predicate is REQUIRED rather
+ * than optional with a permissive default: an omitted one would read as
+ * "every tab can hold sections", and a section pointing at a tab that cannot
+ * would silently vanish, the one outcome the doctrine forbids.
  */
 export interface LayoutTab {
   /** The tab being rendered. */
@@ -43,20 +52,29 @@ export interface LayoutTab {
   /** Is this the tab untabbed sections call home? Exactly one tab of a
    * roster answers true. */
   isDefault: boolean;
-  /** Does the type still declare `tabId`? Liveness only — no ordering, no
-   * content kind, nothing this module could mistake for a roster. */
-  isLive: (tabId: string) => boolean;
+  /** CAN that tab id still hold sections? Deleted is one way to fail; so is
+   * surviving as a kind that renders no property stack at all (a `sections`
+   * or `view` tab IS its content), and a section stranded on one of those is
+   * exactly as unreachable as a section on a tab that no longer exists. The
+   * caller folds both in — this module gets a decision about ONE id, never
+   * an enumerable roster: no ordering, no counting, no content kind. */
+  canHoldSections: (tabId: string) => boolean;
 }
 
 /** Does this section render on that tab? Untabbed means the default tab
- * (which is what every group did before M45.6). A section pointing at a tab
- * that no longer exists lands on the default tab too, and there ONLY — never
- * nowhere, and never on every tab at once. */
+ * (which is what every group did before M45.6). A section whose tab cannot
+ * hold it — deleted, or turned into a kind that renders no properties —
+ * lands on the default tab too, and there ONLY: never nowhere, and never on
+ * every tab at once. */
 function showsOn(group: LayoutGroup, tab: LayoutTab): boolean {
   const owner = typeof group.tab === 'string' && group.tab !== '' ? group.tab : null;
   if (owner === null) return tab.isDefault;
-  if (owner === tab.id) return true;
-  return tab.isDefault && !tab.isLive(owner);
+  // Asked BEFORE the id match, so a stranded section has exactly one home
+  // rather than two: a tab that cannot hold sections cannot hold its own
+  // either, and showing it there AND on the default tab would render the
+  // same properties twice.
+  if (!tab.canHoldSections(owner)) return tab.isDefault;
+  return owner === tab.id;
 }
 
 /** Empty groups survive — the renderer skips them, the layout editor shows
@@ -93,19 +111,23 @@ export function resolveLayout(
   // `rest` — counts placements across all tabs. Filtering first would leak a
   // field placed on another tab back into this tab's loose remainder, which
   // is the same property shown twice.
-  const resolved = layout.groups.map((g) => ({
-    id: g.id,
-    name: g.name,
-    fields: resolve(g.fields),
-  }));
+  const resolved = layout.groups.map((g) => {
+    const base = { id: g.id, name: g.name, fields: resolve(g.fields) };
+    return typeof g.tab === 'string' && g.tab !== '' ? { ...base, tab: g.tab } : base;
+  });
   const groups =
     tab === undefined ? resolved : resolved.filter((_, i) => showsOn(layout.groups[i], tab));
   const rest = fields.filter((d) => !claimed.has(d.name));
-  // Flat describes the RESOLVED shape: a layout whose every pointer is dead
-  // must keep today's flat stack (and its reorder grip), not an empty shell.
-  // With a tab, "resolved" means resolved HERE — a tab whose sections all
-  // live elsewhere shows the remainder flat, which is what that tab looked
-  // like before any section named it.
-  const flat = heading.length === 0 && groups.every((g) => g.fields.length === 0);
+  // Flat describes the RESOLVED shape of the WHOLE config, before the tab
+  // filter — a layout whose every pointer is dead must keep today's flat
+  // stack (and its reorder grip), not an empty shell. Deliberately not
+  // per-tab: the consumers' flat branch ignores `groups` and `rest` and
+  // stacks the entire declared roster, so a tab holding no section of its
+  // own would re-render a field that its section already shows on another
+  // tab — the double-render the resolve-before-filter ordering above closes.
+  // Consequence, and the right one: such a tab takes the NON-flat branch and
+  // loses the roster's reorder grip. Once anything is placed anywhere, the
+  // config owns the order, not the declaration list.
+  const flat = heading.length === 0 && resolved.every((g) => g.fields.length === 0);
   return { heading, groups, rest, flat };
 }

@@ -273,7 +273,10 @@ export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> 
   if (l.groups.length !== LAYOUT_DEFAULTS.groups.length) {
     out.groups = l.groups.map((g) => {
       const group: Record<string, unknown> = { id: g.id, name: g.name, fields: [...g.fields] };
-      if (typeof g.tab === 'string' && g.tab !== '') group.tab = g.tab;
+      // Both doors spell "absent" the same way — TRIMMED-blank, matching the
+      // parser above (and setGroupTab/addGroup). A door that wrote `tab: '  '`
+      // for what the other reads as absent would break parse(serialize(x)).
+      if (typeof g.tab === 'string' && g.tab.trim() !== '') group.tab = g.tab.trim();
       return group;
     });
   }

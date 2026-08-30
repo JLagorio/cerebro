@@ -323,8 +323,14 @@ export function tabBearsProperties(tab: TabDef): boolean {
  *
  * - **default** = the first PROPERTY-BEARING tab. Untabbed sections — every
  *   section in every vault written before M45.6 — call it home.
- * - **live** = the type still declares that tab id, so `resolveLayout` can
- *   tell a section on another tab from a section on a DELETED one.
+ * - **canHoldSections** = the type still declares that tab id AND that tab
+ *   still bears properties. Both conditions fold in here, on the roster
+ *   side, so `resolveLayout` gets one decision about one id. Deleting a tab
+ *   and re-kinding it to `sections`/`view` strand a section identically —
+ *   the surfaces render no property stack on either — so they must fall back
+ *   identically. Liveness alone would miss the re-kind, which no
+ *   group-editor refusal can cover: the content kind changes AFTER the
+ *   assignment.
  *
  * Both failure modes fail VISIBLE: a roster with no property-bearing tab
  * falls back to the first tab, and an `activeId` no tab wears (a stale
@@ -340,6 +346,6 @@ export function layoutTabScope(tabs: TabDef[], activeId: string): LayoutTab {
       fallback === undefined || !tabs.some((t) => t.id === activeId)
         ? true
         : activeId === fallback.id,
-    isLive: (tabId) => tabs.some((t) => t.id === tabId),
+    canHoldSections: (tabId) => tabs.some((t) => t.id === tabId && tabBearsProperties(t)),
   };
 }
