@@ -586,7 +586,7 @@ describe('DetailPanel', () => {
    * mounted on the record PAGE and in the layout editor only, so a type whose
    * tabs were saved showed none on the surface a table row actually opens
    * into. Same gate as the page (SAVED tabs, never the synthesized Overview),
-   * same four content arms, panel geometry — and the selection is LOCAL,
+   * the same content arms, panel geometry — and the selection is LOCAL,
    * because a peek is not a place the back button returns to.
    */
   describe('record tabs (M45.6)', () => {

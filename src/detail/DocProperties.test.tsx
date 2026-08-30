@@ -298,41 +298,30 @@ describe('DocProperties layout groups (M45.1)', () => {
     expect(within(screen.getByTestId('property-group')).getByText('Internal')).toBeTruthy();
   });
 
-  it('grouped mode renders no reorder grips', () => {
-    setupLayout({ groups: [{ id: 'g-main', name: 'Main', fields: ['priority'] }] });
-    expect(screen.getByTestId('property-group')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Reorder/ })).toBeNull();
-  });
-});
-
-/**
- * M46.1 — this stack takes no tab either. The side panel stands BESIDE the
- * page and the page's own stack stands ABOVE its tab strip, so neither has a
- * tab to resolve for: every section renders on both, and the two cannot
- * disagree about what a record holds.
- */
-describe('DocProperties sections belong to the record (M46.1)', () => {
-  afterEach(cleanup);
-
-  it('renders every section, with the Type row and the loose keys around them', () => {
-    const entries = fixtureVault();
-    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
-    (typeDoc.properties as unknown as Record<string, unknown>).layout = {
+  /**
+   * M46.1 — every section, on every surface. This stack takes no tab: the
+   * side panel stands BESIDE the page and the page's own stack stands ABOVE
+   * its tab strip, so neither has a tab to resolve for and the two cannot
+   * disagree about what a record holds.
+   */
+  it('renders every section, in layout order', () => {
+    setupLayout({
       heading: ['status'],
       groups: [
         { id: 'g-alpha', name: 'Alpha', fields: ['priority'] },
         { id: 'g-beta', name: 'Beta', fields: ['assignee'] },
         { id: 'g-gamma', name: 'Gamma', fields: ['due'] },
       ],
-    };
-    useVaultStore.setState({ entries, vaultPath: '/vault' });
-    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
-    render(<DocProperties entry={entry} schema={buildSchema(entries)} />);
+    });
     expect(
       screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group')),
     ).toEqual(['g-alpha', 'g-beta', 'g-gamma']);
-    expect(
-      screen.getAllByTestId('property-row').map((r) => r.getAttribute('data-property')),
-    ).toEqual(['Type', 'priority', 'assignee', 'due', 'key', 'channel']);
+    expect(rowNames()).toEqual(['Type', 'priority', 'assignee', 'due', 'key', 'channel']);
+  });
+
+  it('grouped mode renders no reorder grips', () => {
+    setupLayout({ groups: [{ id: 'g-main', name: 'Main', fields: ['priority'] }] });
+    expect(screen.getByTestId('property-group')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Reorder/ })).toBeNull();
   });
 });

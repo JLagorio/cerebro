@@ -426,7 +426,7 @@ describe('DocPage', () => {
     });
   });
 
-  // M45.4 — the fourth swap arm: a record tab backed by a database view. The
+  // M45.4 — the view swap arm: a record tab backed by a database view. The
   // tab's CONTENT is the database — no body editor — and a dead pointer
   // renders the broken card, never an empty database. M46.1: the record's
   // property stack stands above the strip here as on every tab, so these

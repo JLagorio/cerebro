@@ -797,7 +797,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           tabId={activeTab.id}
                         />
                       )}
-                      {/* M45.4 — the fourth arm: resolve the tab's pointer
+                      {/* M45.4 — the view arm: resolve the tab's pointer
                           (the dashboard ViewBlock path, per render like the
                           dashboard's) and render the embed, or the broken
                           card — never an empty view for a dead pointer. */}

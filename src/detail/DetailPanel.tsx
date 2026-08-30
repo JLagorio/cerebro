@@ -513,12 +513,12 @@ export function DetailPanel() {
             />
           </>
         )}
-        {/* M45.6 — the third arm: the tab's own free text, keyed by tab
+        {/* M45.6 — the free-text arm: the tab's own sections, keyed by tab
             because `_sections` is stored per tab id on the record itself. */}
         {activeTab?.content === 'sections' && (
           <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
         )}
-        {/* M45.6 — the fourth arm: the real embedded database, resolved by the
+        {/* M45.6 — the view arm: the real embedded database, resolved by the
             engine (a dead pointer renders the card, never an empty view).
             DECISION, weighed against rendering an honest "open the page" line
             instead: the embed is HONEST at this width. `ViewTabEmbed` is
