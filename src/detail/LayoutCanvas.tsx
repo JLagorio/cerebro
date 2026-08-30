@@ -764,10 +764,13 @@ function RowStack({
 }
 
 /** A whole-container drop target for the containers where an insertion line
- * would lie — heading (appends at config end) and rest (index ignored). It
- * wears the cortex ring while a drag hovers, the drag-hover grammar the
- * shells already speak. The ring arrives on `motion-move` — a ring is a thing
- * appearing, and it hands off to and from the slot bars in the same 200ms. */
+ * would lie — heading (appends at config end), rest (index ignored), and
+ * since M46.2 Task 4 a section emptied of rows, which has no box for a line to
+ * hug and no position to insert at. It wears the cortex ring while a drag
+ * hovers, the drag-hover grammar the shells already speak. The ring arrives on
+ * `motion-move` — a ring is a thing appearing, and it hands off to and from
+ * the insertion lines in the same 200ms, so travel between the canvas's two
+ * drop grammars is one movement. */
 function AreaDrop({ id, children }: { id: string; children: ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
