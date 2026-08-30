@@ -354,9 +354,11 @@ export function LayoutCanvas({
                   ruling): the strip's own rename, delete, reorder, duplicate,
                   "+ Tab" and "Change source…" all report the whole next tab
                   set, and it stages through the draft's one door — landing
-                  with everything else on Apply. The record page's strip stays
-                  the VAULT's editing surface; the two stage into different
-                  stores and never race. `hostType` is the type being edited,
+                  with everything else on Apply. The record surfaces' strips
+                  stay the VAULT's editing surface — the page's and, since
+                  92e5dc5, the peek's, both firing `setTypeTabs` — while this
+                  one is the DRAFT's; they stage into different stores and
+                  never race. `hostType` is the type being edited,
                   which is what a new view tab's related-scope toggle gates on. */}
               <RecordTabs
                 tabs={draft.tabs}
@@ -395,7 +397,7 @@ export function LayoutCanvas({
                   >
                     {activeTab.content === 'view'
                       ? viewTabPlaceholder(activeTab)
-                      : 'Free text, written on each record — shown on the record page'}
+                      : 'Free text, written on each record — shown on the record'}
                   </div>
                 </InertContent>
               )}
@@ -594,13 +596,17 @@ export function LayoutCanvas({
  * drill-in DOES subscribe to the vault for its roster, but that read is
  * RecordTabs', inside the strip, and the canvas still has none of it) — and a
  * dead list pointer has no title to offer, so the id fallback is needed
- * regardless. A sourceless tab says what the record page will show: the
- * broken card, never an empty view. */
+ * regardless. A sourceless tab says what the record's surfaces will show: the
+ * broken card, never an empty view.
+ *
+ * "on the record", not "on the record page" (M45.6): the peek renders these
+ * same four arms since 92e5dc5, so a line promising the PAGE would name one
+ * of the two places the tab appears. */
 function viewTabPlaceholder(tab: TabDef): string {
   const source = tab.source ?? null;
-  if (source === null) return 'View of a missing source — shown broken on the record page';
+  if (source === null) return 'View of a missing source — shown broken on the record';
   const name = 'type' in source ? source.type : source.list;
-  return `View of ${name} — shown on the record page`;
+  return `View of ${name} — shown on the record`;
 }
 
 /** The persistent shell's stand-in content when no row renders: which KIND

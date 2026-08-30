@@ -316,7 +316,7 @@ describe('the view-tab placeholder (M45.4)', () => {
       .find((b) => b.getAttribute('data-block') === 'tabs');
     if (tabsBlock === undefined) throw new Error('tabs shell missing');
     const placeholder = within(tabsBlock).getByTestId('layout-preview-viewtab');
-    expect(placeholder.textContent).toBe('View of Work item — shown on the record page');
+    expect(placeholder.textContent).toBe('View of Work item — shown on the record');
     // Preview, not surface: the placeholder lives inside an inert fragment.
     expect(placeholder.closest('[data-testid="layout-preview-content"]')).not.toBeNull();
   });
@@ -327,13 +327,13 @@ describe('the view-tab placeholder (M45.4)', () => {
       RECORD,
     ]);
     expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
-      'View of work — shown on the record page',
+      'View of work — shown on the record',
     );
     cleanup();
     resetLayers();
     setup([typeDoc(undefined, [{ id: 'v1', name: 'Broken', content: 'view' }]), RECORD]);
     expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
-      'View of a missing source — shown broken on the record page',
+      'View of a missing source — shown broken on the record',
     );
   });
 
@@ -351,7 +351,7 @@ describe('the view-tab placeholder (M45.4)', () => {
     // Pressing the view tab selects it — and the placeholder is ITS source.
     fireEvent.click(screen.getByTestId('record-tab-v1'));
     expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
-      'View of Work item — shown on the record page',
+      'View of Work item — shown on the record',
     );
     // And back: the placeholder belongs to the active tab, never the first.
     fireEvent.click(screen.getByTestId('record-tab-o1'));
@@ -660,7 +660,7 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     ]);
     fireEvent.click(screen.getByTestId('record-tab-s1'));
     expect(screen.getByTestId('layout-preview-sectionstab').textContent).toBe(
-      'Free text, written on each record — shown on the record page',
+      'Free text, written on each record — shown on the record',
     );
     const blocks = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
     expect(blocks).toEqual(['heading', 'tabs']);
