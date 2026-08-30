@@ -501,10 +501,20 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     setup(interleaved());
     // Standing on the first tab: its two sections, never the other tab's.
     expect(groupBlocks()).toEqual(['g1', 'g3']);
+    // Overview is the one kind that renders the body, on BOTH hosts.
+    expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
+
     fireEvent.click(screen.getByTestId('record-tab-two'));
     expect(groupBlocks()).toEqual(['g2']);
+    // A `properties` tab is the property stack ALONE — DocPage gates the
+    // editor on `content === 'overview'` and DetailPanel spells the same
+    // predicate, so a Content block here would be the Overview leaking
+    // through on the third of the three non-overview kinds.
+    expect(screen.queryByTestId('layout-preview-body')).toBeNull();
+
     fireEvent.click(screen.getByTestId('record-tab-one'));
     expect(groupBlocks()).toEqual(['g1', 'g3']);
+    expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
   });
 
   it('switching tabs puts down an editor whose shell just left the canvas', () => {

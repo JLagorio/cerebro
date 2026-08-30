@@ -516,11 +516,14 @@ export function LayoutCanvas({
               </BlockShell>
             </div>
           )}
-          {/* The body stands down on a tab that IS its own content (M45.6):
-              DocPage renders no editor under a `sections` or `view` tab, so a
-              Content block there would be the Overview leaking through — the
-              same leak the property zones above just stopped. */}
-          {draft.display.showBody && bearsProperties && (
+          {/* OVERVIEW is the one kind that renders the body, and the canvas
+              says so because both hosts do (M45.6): DocPage gates its editor
+              block on `activeTab.content === 'overview'` and DetailPanel
+              spells this predicate verbatim. Anywhere else — a `properties`
+              tab as much as a `sections` or `view` one — a Content block
+              would be the Overview leaking through, the same leak the
+              property zones above stand down to stop. */}
+          {draft.display.showBody && (activeTab === null || activeTab.content === 'overview') && (
             <BlockShell container="content" label="Content">
               {/* The body as a placeholder block: the preview stages the page's
                   SHAPE, and a real body would need a real read. */}
