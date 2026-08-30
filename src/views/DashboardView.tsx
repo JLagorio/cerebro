@@ -13,7 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
-import { useDndGesture } from '@/hooks/useDragGesture';
+import { useDndGesture, useDragGesture } from '@/hooks/useDragGesture';
 import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
 import {
@@ -569,6 +569,8 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
   const edit = useContext(EditContext);
   const ref = useRef<HTMLSpanElement>(null);
   const [active, setActive] = useState(false);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   if (edit === null) return null;
   const wA = a.w ?? 1;
   const wB = b.w ?? 1;
@@ -605,16 +607,29 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
       elB.style.flexGrow = String(w.b);
     };
     let moved = false;
+    let released = false;
     const move = (e: PointerEvent) => {
       moved = true;
       paint(at(e.clientX));
     };
-    const up = (e: PointerEvent) => {
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the pair goes back to the rendered weights and
+     * nothing is written (M46.2) — the same restore a press that never moved
+     * already did, for the same reason.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
+      if (!released) paint({ a: wA, b: wB });
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      gesture.end();
       // A press that never moved restores the rendered weights and writes
       // nothing: the px ratio rarely equals the weight ratio exactly (each
       // shell's minWidth clamps), and a click is not an edit.
@@ -640,6 +655,7 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
     // is outside the 7px strip, which is most of any real drag.
     document.body.classList.add('cb-resizing');
     setActive(true);
+    gesture.begin(teardown);
   };
 
   return (
@@ -688,6 +704,8 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
    * `null` means "nothing pending".
    */
   const pending = useRef<number | null>(null);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   if (edit === null) return null;
   const h0 = row.h ?? ROW_HEIGHT_DEFAULT;
   const clamp = (h: number) => Math.round(Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, h)));
@@ -717,21 +735,34 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
     pending.current = null;
     const at = (y: number) => clamp(h0 + (y - startY));
     let moved = false;
+    let released = false;
     const move = (e: PointerEvent) => {
       moved = true;
       el.style.height = `${at(e.clientY)}px`;
     };
-    const up = (e: PointerEvent) => {
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the row goes back to its stored height and
+     * nothing is written (M46.2) — the pointer's half of what the arrows'
+     * own Escape already does above.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
+      if (!released) el.style.height = `${h0}px`;
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      const h = at(e.clientY);
+      gesture.end();
       if (!moved) {
         el.style.height = `${h0}px`;
         return;
       }
-      const h = at(e.clientY);
       el.style.height = `${h}px`;
       if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
     };
@@ -740,6 +771,7 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
     window.addEventListener('pointercancel', up);
     document.body.classList.add('cb-resizing');
     setActive(true);
+    gesture.begin(teardown);
   };
 
   return (

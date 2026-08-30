@@ -943,6 +943,8 @@ function ColumnResizer({
 }) {
   const start = useRef({ x: 0, w: 0 });
   const [active, setActive] = useState(false);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   /**
    * The width an arrow key is building, before it is persisted (M20.5).
    *
@@ -967,17 +969,32 @@ function ColumnResizer({
     // the blur after the drag would settle the stale pending as a second
     // write on top of the drag's own.
     pending.current = null;
-    start.current = { x: clientX, w: width };
+    const from = width;
+    start.current = { x: clientX, w: from };
     setActive(true);
     const at = (x: number) => Math.max(min, Math.round(start.current.w + (x - start.current.x)));
     const move = (e: PointerEvent) => onDrag(at(e.clientX));
-    const up = (e: PointerEvent) => {
+    let released = false;
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the column is repainted at the width the grab
+     * found it and nothing is persisted (M46.2). The paint/persist split is
+     * what makes that cheap — the drag has written nothing yet.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
-      onCommit(at(e.clientX));
+      if (!released) onDrag(from);
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      const w = at(e.clientX);
+      gesture.end();
+      onCommit(w);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -985,6 +1002,7 @@ function ColumnResizer({
     // Kills text selection and keeps the col-resize cursor while the pointer
     // is outside the 9px handle, which is most of any real drag.
     document.body.classList.add('cb-resizing');
+    gesture.begin(teardown);
   };
 
   return (

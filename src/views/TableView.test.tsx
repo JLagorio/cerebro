@@ -279,6 +279,115 @@ describe('TableView column resizing (M11)', () => {
     expect(screen.queryByLabelText('Resize Status column')).toBeNull();
     expect(screen.queryByLabelText('Resize Name column')).toBeNull();
   });
+
+  /**
+   * Abandoning a pointer resize (M46.2). The KEYBOARD path has taken Escape
+   * since M20.5 (the case above); the pointer path took none, so a drag begun
+   * by accident could only be ended by dropping it and dragging it back.
+   */
+  describe('Escape while the pointer resize is live', () => {
+    beforeEach(() => resetLayers());
+    afterEach(() => {
+      resetLayers();
+      document.body.classList.remove('cb-resizing');
+    });
+
+    /** Widths are painted onto the grid element as CSS custom properties. */
+    const painted = () => screen.getByRole('grid').firstElementChild as HTMLElement;
+    const escape = () => fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    it('puts the column back, and the release persists nothing', () => {
+      const { onColumnsChange } = grid();
+      const handle = screen.getByLabelText('Resize Status column');
+      fireEvent(handle, at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('210px');
+
+      escape();
+
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('150px');
+      fireEvent(window, at('pointerup', 160));
+      // Without the cancel this release writes 210 — the measured defect.
+      expect(onColumnsChange).not.toHaveBeenCalled();
+    });
+
+    it('stops tracking the pointer, so a later move paints nothing', () => {
+      grid();
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      escape();
+      fireEvent(window, at('pointermove', 400));
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('150px');
+    });
+
+    it('leaves a later drag able to persist', () => {
+      const { onColumnsChange } = grid();
+      const handle = screen.getByLabelText('Resize Status column');
+      fireEvent(handle, at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      escape();
+      fireEvent(window, at('pointerup', 160));
+
+      // A DIFFERENT width, so the assertion can tell the two worlds apart:
+      // cancelling a drag to 210 and repeating it lands on the very width an
+      // uncancelled first drag would have produced.
+      drag(handle, 100, 130);
+      expect(onColumnsChange).toHaveBeenCalledTimes(1);
+      expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 180 });
+    });
+
+    it('keeps the keystroke away from the surface behind while a drag is live', () => {
+      grid();
+      const onWindow = vi.fn();
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      window.addEventListener('keydown', onWindow);
+      try {
+        escape();
+        expect(onWindow).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('keydown', onWindow);
+      }
+    });
+
+    it('takes Escape off the surface underneath for the length of the drag', () => {
+      grid();
+      // What DetailPanel and Dialog both register; their handlers ask the
+      // stack who owns the keystroke.
+      pushLayer('panel');
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(ownsEscape('panel')).toBe(false);
+      escape();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('leaves no resizing cursor and no listeners when the table unmounts mid-drag', () => {
+      const onColumnsChange = vi.fn();
+      const entries = fixtureVault();
+      const schema = buildSchema(entries);
+      const { unmount } = render(
+        <TableView
+          entries={entries.filter((e) => e.type === 'Work item')}
+          presentation={presentation}
+          schema={schema}
+          fields={schema.types.get('Work item')?.fields ?? []}
+          onColumnsChange={onColumnsChange}
+        />,
+      );
+      pushLayer('panel');
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(document.body.classList.contains('cb-resizing')).toBe(true);
+
+      unmount();
+      fireEvent(window, at('pointerup', 160));
+
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      expect(onColumnsChange).not.toHaveBeenCalled();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+  });
 });
 
 /**

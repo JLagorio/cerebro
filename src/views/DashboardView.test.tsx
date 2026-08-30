@@ -1393,6 +1393,186 @@ describe('DashboardView resize (M44.4)', () => {
     expect(document.body.classList.contains('cb-resizing')).toBe(false);
   });
 
+  /**
+   * Abandoning a pointer resize (M46.2). The row edge's ARROWS have taken
+   * Escape since M44.4 (the case above); neither pointer loop took any, so a
+   * drag begun by accident could only be ended by dropping it, and the release
+   * then wrote the width or height the user was backing out of.
+   */
+  describe('Escape while a pointer resize is live', () => {
+    beforeEach(() => resetLayers());
+    afterEach(() => {
+      resetLayers();
+      document.body.classList.remove('cb-resizing');
+    });
+
+    const escape = () =>
+      act(() => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+
+    const seamRow = () =>
+      rowsPresentation({
+        rows: [
+          {
+            id: 'r1',
+            widgets: [
+              { id: 'a', kind: 'number', agg: 'count', w: 1 },
+              { id: 'b', kind: 'number', agg: 'count', w: 2 },
+            ],
+          },
+        ],
+      });
+
+    /** 200 + 400px, matching the 1:2 weights. */
+    const measure = () => {
+      rect(screen.getByTestId('widget-a'), 0, 200);
+      rect(screen.getByTestId('widget-b'), 212, 400);
+    };
+    const grabSeam = (clientX: number) =>
+      act(() => {
+        screen
+          .getByTestId('dashboard-seam')
+          .dispatchEvent(new MouseEvent('pointerdown', { clientX, bubbles: true }));
+      });
+    const moveX = (clientX: number) =>
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointermove', { clientX }));
+      });
+    const upX = (clientX: number) =>
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointerup', { clientX }));
+      });
+
+    it('a seam drag goes back to the rendered weights and the release writes nothing', () => {
+      const onChange = resizeSetup(seamRow());
+      measure();
+      grabSeam(200);
+      moveX(300);
+      expect(screen.getByTestId('widget-a').style.flexGrow).toBe('1.5');
+
+      escape();
+
+      expect(screen.getByTestId('widget-a').style.flexGrow).toBe('1');
+      expect(screen.getByTestId('widget-b').style.flexGrow).toBe('2');
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      upX(300);
+      // Without the cancel this release writes [1.5, 1.5] — the defect.
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('a cancelled seam drag leaves a later one able to write', () => {
+      const onChange = resizeSetup(seamRow());
+      measure();
+      grabSeam(200);
+      moveX(300);
+      escape();
+      upX(300);
+
+      // A DIFFERENT split, so the assertion can tell the two worlds apart:
+      // cancelling a drag to 300 and repeating it lands on the very weights
+      // an uncancelled first drag would have produced.
+      measure();
+      grabSeam(200);
+      moveX(400);
+      upX(400);
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(dash(onChange).rows[0].widgets.map((w) => w.w)).toEqual([2, 1]);
+    });
+
+    it('a seam drag keeps the keystroke away from the surface behind, and hands it back', () => {
+      resizeSetup(seamRow());
+      measure();
+      const onWindow = vi.fn();
+      // What DetailPanel and Dialog both register; their handlers ask the
+      // stack who owns the keystroke.
+      pushLayer('panel');
+      grabSeam(200);
+      moveX(300);
+      expect(ownsEscape('panel')).toBe(false);
+      window.addEventListener('keydown', onWindow);
+      try {
+        escape();
+        expect(onWindow).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('keydown', onWindow);
+      }
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('a seam drag caught by an unmount strands nothing', () => {
+      const onChange = resizeSetup(seamRow());
+      measure();
+      pushLayer('panel');
+      grabSeam(200);
+      moveX(300);
+      expect(document.body.classList.contains('cb-resizing')).toBe(true);
+
+      cleanup();
+      upX(300);
+
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    const oneRowSpec = () =>
+      rowsPresentation({ rows: [{ id: 'r1', widgets: [countWidget('a')] }] });
+    const grabEdge = (clientY: number) =>
+      act(() => {
+        screen
+          .getByTestId('dashboard-row-edge')
+          .dispatchEvent(new MouseEvent('pointerdown', { clientY, bubbles: true }));
+      });
+    const moveY = (clientY: number) =>
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointermove', { clientY }));
+      });
+
+    it('a row-edge drag goes back to the stored height and the release writes nothing', () => {
+      const onChange = resizeSetup(oneRowSpec());
+      grabEdge(300);
+      moveY(500);
+      expect(screen.getByTestId('dashboard-row').style.height).toBe('500px');
+
+      escape();
+
+      expect(screen.getByTestId('dashboard-row').style.height).toBe('300px');
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointerup', { clientY: 500 }));
+      });
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('a row-edge drag takes Escape off the surface underneath, and hands it back', () => {
+      resizeSetup(oneRowSpec());
+      pushLayer('panel');
+      grabEdge(300);
+      moveY(500);
+      expect(ownsEscape('panel')).toBe(false);
+      escape();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('a row-edge drag caught by an unmount strands nothing', () => {
+      const onChange = resizeSetup(oneRowSpec());
+      pushLayer('panel');
+      grabEdge(300);
+      moveY(500);
+
+      cleanup();
+      act(() => {
+        window.dispatchEvent(new MouseEvent('pointerup', { clientY: 500 }));
+      });
+
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+  });
+
   it('seams and row edges render only in Edit mode', () => {
     const entries = editVault();
     render(
