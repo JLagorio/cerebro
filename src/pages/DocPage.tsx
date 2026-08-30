@@ -17,12 +17,12 @@ import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
-import { RecordTabs } from '@/detail/RecordTabs';
+import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
-import { isRecordEntry, typeTabs } from '@/engine/typeCatalog';
+import { isRecordEntry } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -210,14 +210,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // "the Spec tab of DOC-14" is a place the back button returns to. A stale
   // `selection.tab` — a tab deleted while history still names it — falls back
   // to the first tab rather than rendering nothing.
-  const tabs = record && entry !== null && entry.type !== null ? typeTabs(entry.type, schema) : [];
+  //
   // M45.2 (spec §3.5): Simple means NO strip — the strip mounts only on SAVED
   // tabs, while the content swap keeps consuming `typeTabs` so the synthesized
-  // Overview still drives the canvas.
-  const savedTabs =
-    record && entry !== null && entry.type !== null
-      ? (schema.types.get(entry.type)?.tabs ?? [])
-      : [];
+  // Overview still drives the canvas. M45.6 hoisted both halves to
+  // `recordTabSet` beside the strip, because the PEEK grew the same strip and
+  // two hand-rolled gates are how the two surfaces would come to disagree.
+  const { tabs, saved: savedTabs } = recordTabSet(entry, schema);
   const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
 
   // Whether the canvas is rendering the body editor at all. The reset below
@@ -748,9 +747,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       {/* M38.2 — the property surface the peek shows, on the
                           page. The SAME component: one property editor, two
                           geometries, so a field added here is a field added
-                          there. M45.4: view tabs skip it too — the embedded
-                          database IS the tab's content, and a stack above it
-                          would be the Overview leaking through. */}
+                          there. M45.6 widened that from the surface to the
+                          whole anatomy — the peek grew this strip and these
+                          four arms too, so the geometry is the only thing
+                          that differs now; the gate below has a twin in
+                          `DetailPanel`, and a change to one is a change owed
+                          to the other. M45.4: view tabs skip the stack — the
+                          embedded database IS the tab's content, and a stack
+                          above it would be the Overview leaking through. */}
                       {activeTab.content !== 'sections' &&
                         activeTab.content !== 'view' &&
                         (activeTab.content === 'properties' || !stripShows || detailsShown) && (

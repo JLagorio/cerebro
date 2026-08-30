@@ -5,9 +5,12 @@ import type { ViewTabResolution } from '@/engine/viewTab';
 import { ViewCanvas } from '@/views/ViewCanvas';
 
 /**
- * The record page's `content: 'view'` tab, rendered from Task 2's resolution
+ * A record's `content: 'view'` tab, rendered from Task 2's resolution
  * (M45.4) — a saved database view embedded where the tab's content would be,
- * or the honest card when its pointer is dead.
+ * or the honest card when its pointer is dead. Both record surfaces mount it
+ * since M45.6: the page and the peek, the second in a column that starts at
+ * 360px, which is why the embed flows with its host's scroll and claims no
+ * height of its own.
  *
  * THE SEAM, decided against the plan's "extract ViewBlock's resolvable core"
  * (amended 2026-08-28): DashboardView's ViewBlock does NOT route through this
@@ -28,9 +31,10 @@ import { ViewCanvas } from '@/views/ViewCanvas';
  */
 
 /** The one broken-pointer sentence body: icon + words, no chrome. The
- * dashboard wraps it in a WidgetShell; the record page in the quiet card
- * below. "A blank tile is indistinguishable from a block that is still
- * loading" — the sentence is the point, so it is written once. */
+ * dashboard wraps it in a WidgetShell; the record page and the record peek
+ * in the quiet card below. "A blank tile is indistinguishable from a block
+ * that is still loading" — the sentence is the point, so it is written
+ * once. */
 export function BrokenNotice({ icon, message }: { icon: string; message: string }) {
   return (
     <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">

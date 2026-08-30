@@ -6,6 +6,9 @@ import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
+import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
+import { TabSections } from '@/detail/TabSections';
+import { setTypeTabs } from '@/app/typeActions';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
@@ -13,7 +16,9 @@ import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
 import { typeStyle } from '@/engine/typeCatalog';
+import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
+import { ViewTabEmbed } from '@/views/ViewTabEmbed';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
 import { EntityDossier } from '@/knowledge/EntityDossier';
@@ -169,6 +174,8 @@ export function DetailPanel() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const entries = useVaultStore((s) => s.entries);
+  // The saved-view catalog a `content: 'view'` tab resolves against.
+  const views = useVaultStore((s) => s.views);
   const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
 
@@ -182,6 +189,12 @@ export function DetailPanel() {
   // whether the strip actually SHOWS, which can change without the path
   // changing (clearing the strip's last hide_when_empty field folds it away).
   const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
+  // M45.6 — which tab of the record is open. LOCAL, unlike the page's, which
+  // rides `{ kind: 'doc', tab }` because a page is a place the back button
+  // returns to; a peek is not one, so the tab is this component's state and
+  // the record it belongs to is stored beside it (the `details` idiom below:
+  // a one-slot cache that is reset the moment the panel points elsewhere).
+  const [tabPick, setTabPick] = useState<{ path: string; id: string } | null>(null);
 
   // M44.1: per-type presentation. Untyped records and types the schema
   // doesn't know about fall back to the pre-M44.1 defaults. Computed ahead
@@ -191,15 +204,43 @@ export function DetailPanel() {
     (entry && entry.type !== null ? schema.types.get(entry.type)?.display : undefined) ??
     DISPLAY_DEFAULTS;
 
+  // M45.6 — the peek's tabs, derived ahead of the early return for the same
+  // reason `display` is: the editor-handle effect below reacts to whether the
+  // body renders at all, and a tab that is not Overview unmounts it.
+  //
+  // `recordTabSet` is the page's own derivation (it lives beside the strip):
+  // `tabs` drives the content swap, `saved` decides whether a strip exists.
+  const { tabs, saved: savedTabs } = recordTabSet(entry ?? null, schema);
+  // Render-time derived-state reset, like `details`: the lens FORGETS the tab
+  // of a record it left, so the next record opens on its own first tab.
+  if (tabPick !== null && tabPick.path !== (entry?.path ?? null)) setTabPick(null);
+  const activeTab =
+    (tabPick !== null && tabPick.path === entry?.path
+      ? tabs.find((t) => t.id === tabPick.id)
+      : undefined) ??
+    tabs[0] ??
+    null;
+  // Whether the Description block renders: the type's own `show_body`, AND a
+  // tab that shows the record's body at all (LayoutCanvas's fallback idiom —
+  // a pick whose tab has died reads as the first tab, never as nothing).
+  const showsBody = display.showBody && (activeTab === null || activeTab.content === 'overview');
+
   useEffect(() => {
     setTitle(entry?.title ?? '');
+  }, [entry?.path, entry?.title]);
+
+  useEffect(() => {
     // The keyed NoteBodyEditor remounts on path change; drop the stale
     // handle until the new editor reports ready. M44.1 follow-up: also drop
-    // it when show_body flips off — NoteBodyEditor unmounts then too, and
-    // nothing else nulled this ref, so a later commitTitle's splice could
-    // hit a detached editor.
+    // it when the body stops rendering — NoteBodyEditor unmounts then too,
+    // and nothing else nulled this ref, so a later commitTitle's splice could
+    // hit a detached editor. M45.6 widened that trigger from `show_body` to
+    // `showsBody`, because switching to a Sections, Properties or View tab
+    // unmounts the editor for exactly the same reason; and split it off the
+    // title sync above, so a tab press no longer throws away a rename the
+    // user has typed but not committed.
     editorRef.current = null;
-  }, [entry?.path, entry?.title, display.showBody]);
+  }, [entry?.path, entry?.title, showsBody]);
 
   if (!detailPath || !entry) return null;
 
@@ -364,26 +405,66 @@ export function DetailPanel() {
             schema={schema}
             fields={headingFields}
             detailsShown={detailsShown}
-            onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
+            // Only a tab that can FOLD the stack gets the expander: a
+            // Properties tab always shows it, and Sections/View show none at
+            // all, so a toggle there would expand nothing (DocPage's rule).
+            // A record with no tabs keeps the toggle — that is every vault
+            // written before tabs existed.
+            onToggleDetails={
+              activeTab === null || activeTab.content === 'overview'
+                ? () => setDetails({ path: entry.path, shown: !detailsShown })
+                : undefined
+            }
           />
+        )}
+        {/* M45.6 — the peek shows the record's tabs. The user found them
+            missing here (2026-08-29): the strip mounted on the page and in
+            the layout editor, and the peek is the surface a table row opens
+            into. Same gate as the page — SAVED tabs only, because Simple
+            means no strip rather than a one-tab bar — and the same four
+            content arms below, in this column's geometry.
+
+            It sits UNDER the heading strip because the heading is global:
+            Notion's heading block sits above the tab bar and the layout
+            editor's canvas previews exactly this order. The page pins its
+            strip above the scroll container instead, where it is page chrome;
+            here it scrolls with the record it describes. `-mx-4` lets the
+            underline reach both edges of the panel while the tabs keep the
+            column's own 16px gutter. */}
+        {savedTabs.length > 0 && activeTab !== null && (
+          <div className="-mx-4 mb-3.5">
+            <RecordTabs
+              tabs={tabs}
+              activeId={activeTab.id}
+              gutter="panel"
+              hostType={entry.type}
+              onSelect={(id) => setTabPick({ path: entry.path, id })}
+              onChange={(next) => {
+                // The vault is the store: the peek writes the type's tabs
+                // exactly as the page does. Fire-and-forget by the store-layer
+                // invariant — `setTypeTabs` toasts and returns false.
+                if (entry.type !== null)
+                  void setTypeTabs({ name: entry.type, docPath: null }, next);
+              }}
+            />
+          </div>
         )}
         {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
-            on the path) so the add-property flyout closes on switch. */}
-        {(!stripShows || detailsShown) && (
-          <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
-        )}
-        {/* M34.5.3 — a cached copy says its own freshness. Null for every
-            record without fetch bookkeeping. */}
-        <SourceFreshnessLine entry={entry} />
-        {/* M12: records lost the doc side panel when display:doc died, and
-            the knowledge loop must not die with it — the same commit state
-            and related-concepts view, collapsed until asked (M8.3's rule:
-            the assistant never speaks first). */}
-        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        {/* M44.1 — the type's display config gates the body. DocPage's body
-            IS the page and is out of scope; this is the peek panel only. */}
-        {display.showBody && (
+            on the path) so the add-property flyout closes on switch.
+
+            M45.6: the first content arm. A Sections or View tab IS its own
+            content, so it carries no stack (DocPage's gate, verbatim); a
+            Properties tab is the stack alone, so it ignores the strip's fold. */}
+        {(activeTab === null ||
+          (activeTab.content !== 'sections' && activeTab.content !== 'view')) &&
+          (activeTab?.content === 'properties' || !stripShows || detailsShown) && (
+            <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+          )}
+        {/* M44.1 — the type's display config gates the body; M45.6 — so does
+            the open tab (`showsBody`). DocPage's body IS the page; this is
+            the peek panel's Description block. */}
+        {showsBody && (
           <>
             <div
               data-testid="detail-body-heading"
@@ -403,6 +484,47 @@ export function DetailPanel() {
             />
           </>
         )}
+        {/* M45.6 — the third arm: the tab's own free text, keyed by tab
+            because `_sections` is stored per tab id on the record itself. */}
+        {activeTab?.content === 'sections' && (
+          <TabSections key={`${entry.path}#${activeTab.id}`} entry={entry} tabId={activeTab.id} />
+        )}
+        {/* M45.6 — the fourth arm: the real embedded database, resolved by the
+            engine (a dead pointer renders the card, never an empty view).
+            DECISION, weighed against rendering an honest "open the page" line
+            instead: the embed is HONEST at this width. `ViewTabEmbed` is
+            already shipped inside dashboard widgets, which resize well below
+            this panel's 360px floor (560px by default), it flows with the
+            host's scroll rather than demanding a height, and its `embedded`
+            flag already suppresses the detail-sibling registration that would
+            otherwise make the peek renumber itself from its own rows. A
+            column is a narrow database, not a broken one — and refusing to
+            draw rows we can draw would be inventing a capability gap. What is
+            genuinely narrow is chrome, not truth: the table scrolls
+            sideways, and pressing a row moves the ONE peek to that row's
+            record, which is what pressing a record anywhere in this app
+            does. */}
+        {activeTab?.content === 'view' && (
+          <ViewTabEmbed
+            resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+            entries={entries}
+            schema={schema}
+            scope={`viewtab:${activeTab.id}`}
+          />
+        )}
+        {/* The peek's own chrome, below whatever the tab shows and on EVERY
+            tab (M45.6): freshness, the knowledge loop and the file's history
+            are facts about the RECORD, not about the lens you have open, and
+            a tab that hid them would make them unreachable from the peek
+            rather than merely elsewhere. */}
+        {/* M34.5.3 — a cached copy says its own freshness. Null for every
+            record without fetch bookkeeping. */}
+        <SourceFreshnessLine entry={entry} />
+        {/* M12: records lost the doc side panel when display:doc died, and
+            the knowledge loop must not die with it — the same commit state
+            and related-concepts view, collapsed until asked (M8.3's rule:
+            the assistant never speaks first). */}
+        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
         {/* M9.4 — every version of this note, and what each one changed.
             Renders nothing when there is no history, so a note you just
             created does not get a heading over an empty list. */}

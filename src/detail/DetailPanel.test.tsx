@@ -10,6 +10,7 @@ import { FieldEditor } from '@/detail/FieldEditor';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
@@ -507,6 +508,160 @@ describe('DetailPanel', () => {
       render(<DetailPanel />);
       expect(screen.queryByTestId('heading-strip')).toBeNull();
       expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+  });
+
+  /**
+   * M45.6 — the peek shows the record's tabs.
+   *
+   * The defect (user, 2026-08-29: "the tabs dont render in the UI"): the strip
+   * mounted on the record PAGE and in the layout editor only, so a type whose
+   * tabs were saved showed none on the surface a table row actually opens
+   * into. Same gate as the page (SAVED tabs, never the synthesized Overview),
+   * same four content arms, panel geometry — and the selection is LOCAL,
+   * because a peek is not a place the back button returns to.
+   */
+  describe('record tabs (M45.6)', () => {
+    const OVERVIEW = { id: 'overview', name: 'Overview', content: 'overview' };
+    const SPEC = { id: 'spec', name: 'Spec', content: 'sections' };
+
+    const withTabs = (tabs: Record<string, unknown>[], layout?: Record<string, unknown>) => {
+      const entries = fixtureVault();
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+      typeProps.tabs = tabs;
+      if (layout !== undefined) typeProps.layout = layout;
+      useVaultStore.setState({ entries, vaultPath: '/vault' });
+      useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
+      return entries;
+    };
+
+    it('a type with no saved tabs raises no strip, and the peek is what it was', () => {
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+      // The synthesized Overview drives the content, never a one-tab strip.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('an untyped note has no tabs at all', () => {
+      useVaultStore.setState({
+        entries: [...fixtureVault(), makeEntry({ path: 'notes/plain.md', title: 'Plain note' })],
+      });
+      useUiStore.setState({ detailPath: 'notes/plain.md' });
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+      // …and its properties still render: no tabs is not no record surface.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+
+    it('saved tabs raise the strip, under the heading strip and over the content', () => {
+      withTabs([OVERVIEW, SPEC], { heading: ['status', 'priority'] });
+      render(<DetailPanel />);
+      const strip = screen.getByTestId('record-tabs');
+      const heading = screen.getByTestId('heading-strip');
+      const body = screen.getByTestId('detail-body-heading');
+      expect(
+        heading.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(strip.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The first tab opens by default — no selection to read.
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('the overview arm is the peek as it was: properties and the body', () => {
+      withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('a properties tab is the stack alone — no body', () => {
+      withTabs([{ id: 'props', name: 'Fields', content: 'properties' }, SPEC]);
+      render(<DetailPanel />);
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('a sections tab is its own free text — no stack, no body', () => {
+      withTabs([SPEC, OVERVIEW]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('a view tab embeds its database in the peek', () => {
+      withTabs([
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+        OVERVIEW,
+      ]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      expect(screen.getByText('Wire field sync banner')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('a dead source renders the sentence, never an empty database', () => {
+      withTabs([{ id: 'ghost', name: 'Ghost', content: 'view', source: { type: 'Ghost' } }]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('view-tab-broken').textContent).toContain(
+        'This tab points at a type called “Ghost” that is no longer in the vault.',
+      );
+      expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+    });
+
+    it('pressing a tab swaps the content, and the selection is the peek’s own', () => {
+      withTabs([OVERVIEW, SPEC]);
+      const where = useNavStore.getState().selection;
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      // A peek is not a place: the tab is local state, so nothing moved the
+      // navigation selection the back button reads.
+      expect(useNavStore.getState().selection).toEqual(where);
+      fireEvent.click(screen.getByTestId('record-tab-overview'));
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('switching records reopens on the first tab', () => {
+      withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
+      expect(screen.queryByTestId('tab-sections')).toBeNull();
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    // The peek's own chrome is about the RECORD, not about a tab: it stays
+    // reachable whichever lens is open.
+    it('keeps the knowledge block on a tab that is not Overview', () => {
+      withTabs([SPEC, OVERVIEW]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('detail-knowledge')).toBeTruthy();
+    });
+
+    it('a tab edit in the peek writes the type doc', async () => {
+      const patchFrontmatter = vi.fn().mockResolvedValue(true);
+      withTabs([OVERVIEW, SPEC]);
+      useVaultStore.setState({ patchFrontmatter });
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-overview'));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+      const input = screen.getByLabelText('Tab name');
+      fireEvent.change(input, { target: { value: 'Summary' } });
+      fireEvent.blur(input);
+      await waitFor(() =>
+        expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', {
+          tabs: [
+            { id: 'overview', name: 'Summary', icon: null, content: 'overview' },
+            { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+          ],
+        }),
+      );
     });
   });
 

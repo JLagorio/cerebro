@@ -8,8 +8,9 @@ import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { useSortableList } from '@/hooks/useSortableList';
-import { listTypes, typeViews } from '@/engine/typeCatalog';
+import { isRecordEntry, listTypes, typeTabs, typeViews } from '@/engine/typeCatalog';
 import type {
+  Entry,
   ListFile,
   Schema,
   TabContent,
@@ -29,15 +30,44 @@ import { uniqueName } from '@/views/ViewTabs';
  *
  * Controlled on purpose: the strip renders `tabs` and reports intent — a
  * press through `onSelect`, every structural edit as the whole next tab set
- * through `onChange` — while the HOST decides what that intent means. Two
- * hosts since M45.5: the record page WRITES it (`setTypeTabs` patches the
- * Type doc) and owns the selection (the open tab rides `{ kind: 'doc', tab }`
- * so the back button returns to it), while the layout editor's canvas STAGES
- * it into its draft and lands the whole draft on Apply. One ambient exception
- * (M45.4): the add/change drill-in reads the vault catalog
- * (entries/views/schema) straight from the store — rosters are lookups, not
- * contract state.
+ * through `onChange` — while the HOST decides what that intent means. THREE
+ * hosts since M45.6:
+ *
+ * - the record PAGE writes it (`setTypeTabs` patches the Type doc) and owns
+ *   the selection through navigation — the open tab rides
+ *   `{ kind: 'doc', tab }`, because a page is a place the back button
+ *   returns to;
+ * - the record PEEK (`DetailPanel`) writes it the same way and holds the
+ *   selection in LOCAL state, because a peek is not such a place;
+ * - the layout editor's canvas STAGES it into its draft and lands the whole
+ *   draft on Apply.
+ *
+ * One ambient exception (M45.4): the add/change drill-in reads the vault
+ * catalog (entries/views/schema) straight from the store — rosters are
+ * lookups, not contract state.
  */
+
+/**
+ * The tabs a record surface shows, and the ones that raise a strip (M45.6).
+ *
+ * It lives beside the strip because the page and the peek must not disagree
+ * about when a strip EXISTS — the defect that made the peek show none was a
+ * missing mount, and a second hand-rolled derivation is how it would come
+ * back as a mismatch instead. `tabs` drives the content swap (`typeTabs`
+ * synthesizes Overview for a type that saved none); `saved` is what the type
+ * actually declared, and only that raises the strip — Simple means NO strip,
+ * never a one-tab bar (M45.2). A doc, a Type doc, a template, an untyped
+ * note: no tabs of any kind.
+ */
+export function recordTabSet(
+  entry: Entry | null,
+  schema: Schema,
+): { tabs: TabDef[]; saved: TabDef[] } {
+  if (entry === null || entry.type === null || !isRecordEntry(entry)) {
+    return { tabs: [], saved: [] };
+  }
+  return { tabs: typeTabs(entry.type, schema), saved: schema.types.get(entry.type)?.tabs ?? [] };
+}
 
 /** What a new tab can render — a tile catalog, `VIEW_KINDS`' little sibling.
  * Sections stays first because it is the default (a new tab is almost always
@@ -80,9 +110,21 @@ export interface RecordTabsProps {
    * is gated on: it exists iff the picked source stores a relation aimed at
    * this type. Optional so pre-M45.4 call sites compile; absent = no toggle. */
   hostType?: string | null;
+  /** Which gutter the strip sits in (M45.6). The page and the editor canvas
+   * are 24px columns; the peek's is 16px, and a strip carrying the page's
+   * gutter into the panel reads as misaligned against everything above it.
+   * The underline spans the host's full width either way. */
+  gutter?: 'page' | 'panel';
 }
 
-export function RecordTabs({ tabs, activeId, onSelect, onChange, hostType }: RecordTabsProps) {
+export function RecordTabs({
+  tabs,
+  activeId,
+  onSelect,
+  onChange,
+  hostType,
+  gutter = 'page',
+}: RecordTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -215,7 +257,11 @@ export function RecordTabs({ tabs, activeId, onSelect, onChange, hostType }: Rec
   };
 
   return (
-    <div className="flex min-w-0 flex-none items-end border-b border-n-200 px-6">
+    <div
+      className={`flex min-w-0 flex-none items-end border-b border-n-200 ${
+        gutter === 'panel' ? 'px-4' : 'px-6'
+      }`}
+    >
       {deleting !== null && (
         <Dialog
           open
