@@ -867,6 +867,28 @@ describe('Move to tab (M45.6 Task 4)', () => {
     expect(screen.queryByTestId('group-editor-move-tab')).toBeNull();
   });
 
+  it('offers no Add section where the + is hidden — a tab that holds no properties', async () => {
+    const user = userEvent.setup();
+    setup([
+      tabbedDoc([
+        { id: 'ov', name: 'Overview', icon: null, content: 'overview' },
+        { id: 'v1', name: 'Blocked', icon: null, content: 'view', source: { type: 'Work item' } },
+      ]),
+      RECORD,
+    ]);
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    // The heading shell renders on EVERY tab, so its editor is reachable from
+    // a view tab — and its footer used to stage a section onto that tab. The
+    // engine would then show the section on the OVERVIEW (a tab bearing no
+    // properties cannot hold one), while the editor unmounted: pressed here,
+    // landed there, with nothing on screen to say so.
+    await user.click(shellOf('heading'));
+    expect(screen.getByTestId('group-editor')).toBeTruthy();
+    expect(screen.queryByTestId('group-editor-add-section')).toBeNull();
+    // The canvas's + is hidden here too — two doors, one answer.
+    expect(screen.queryByRole('button', { name: 'Add section' })).toBeNull();
+  });
+
   it('the editor’s own Add section lands on the active tab, like the canvas + does', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);

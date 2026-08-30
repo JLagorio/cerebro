@@ -300,6 +300,18 @@ export function GroupEditorPopover({
   // the canvas remounts us keyed by the new container.
   const addSection = () => stageNewSection(draft, update, onOpenGroup, activeTab);
 
+  /** CAN a section be added where we are standing? The canvas hides its +
+   * on a `sections` or `view` tab; this footer has to answer the same, and
+   * for a sharper reason than symmetry — the HEADING shell renders on every
+   * tab, so this editor is reachable from a tab that holds no properties,
+   * and an Add section there would mint a group on a tab that cannot show
+   * it. The engine strands it onto the default tab (visible, by doctrine),
+   * so the press would land a "New group" on a tab the user was not looking
+   * at while this popover unmounted under them. Two doors, one answer.
+   * Simple structure has no tabs and always can. */
+  const activeBearsSections =
+    draft.tabs.length === 0 || draft.tabs.some((t) => t.id === activeTab && tabBearsProperties(t));
+
   const eyeRow = (f: FieldDef, i: number) => {
     const label = humanize(f.name);
     const hidden = (f.visibility ?? 'show') === 'hide';
@@ -433,7 +445,7 @@ export function GroupEditorPopover({
           testId="group-editor-add"
           onSelect={() => setStep('add')}
         />
-        {!isGroup && (
+        {!isGroup && activeBearsSections && (
           // Rest/heading footers only (the plan's §3.3 call): a group's own
           // editor arranges the group; sections are the page's to grow.
           <MenuItem
