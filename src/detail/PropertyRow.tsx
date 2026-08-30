@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
@@ -102,7 +102,6 @@ export function PropertyRow({
   style,
 }: PropertyRowProps) {
   const label = humanize(name);
-  const nameRef = useRef<HTMLElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Tooltip the name only when it is actually cut off. A tooltip that repeats
@@ -110,22 +109,54 @@ export function PropertyRow({
   // above it — the first live look at M16.6 showed "Priority" covering
   // "Status" for a name that fitted with room to spare.
   const [clipped, setClipped] = useState(false);
-  useLayoutEffect(() => {
-    const el = nameRef.current;
+  const watcher = useRef<ResizeObserver | null>(null);
+  /**
+   * A CALLBACK ref, not an effect over a ref object, because the node this
+   * measures is REPLACED by the very state it sets.
+   *
+   * `Tooltip` renders its child bare while disabled and inside a fragment
+   * once enabled, so React unmounts the old name element and mounts a new one
+   * the moment `clipped` turns true. An effect keyed on the label never
+   * re-runs across that swap: it kept observing the detached node, which
+   * reports `0/0`, and the next callback set `clipped` straight back to false
+   * — for good, since nothing would ever measure the live node again.
+   *
+   * Measured in the browser at M46.2 Task 8, on the two demo-vault labels the
+   * 84px name box newly clips ("Key result count", "Current value"): the
+   * tooltip was silent on both. Re-attaching per node is the whole fix.
+   */
+  const nameNode = useRef<HTMLElement | null>(null);
+  const nameRef = useCallback((el: HTMLElement | null) => {
+    // The menu anchors on whatever node is live, so it is kept here too.
+    nameNode.current = el;
+    watcher.current?.disconnect();
+    watcher.current = null;
     if (el === null) return;
     const check = () => setClipped(el.scrollWidth > el.clientWidth + 1);
     check();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(check);
     ro.observe(el);
-    return () => ro.disconnect();
-  }, [label]);
+    watcher.current = ro;
+  }, []);
+  useEffect(() => () => watcher.current?.disconnect(), []);
 
   // 14 / 400 / 20 in the panel (§A8). It was 12px, the step below our values —
   // the label is the same size as its value in Notion and reads as secondary
-  // by COLOUR, not by size. Ours still sets values at 13, so this is the one
-  // measured number that leaves our own ramp mid-inverted; Task 8 re-measures
-  // it rather than this row guessing at a value-side change.
+  // by COLOUR, not by size.
+  //
+  // Ours sets values at 13, so a 14px label is one step ABOVE the thing it
+  // names. Task 8 ruled on that in the browser rather than on the number: at
+  // 1x the panel reads correctly, because `--n-500` against `--n-800` is a far
+  // stronger cue than 1px of size and the value still leads; at 2.2x the
+  // inversion is visible but nobody reads a panel at 2.2x. It STAYS, as
+  // recorded debt — closing it properly means 14px values, which reaches every
+  // `FieldEditor` control including the grid's, and that is a type-ramp
+  // decision, not a drag-slice one.
+  //
+  // What the ruling did surface is the real cost of the 84px name box: it
+  // clips two of the demo vault's 52 panel labels where 96px clipped none —
+  // and the tooltip that covers them was broken. See `nameRef` above.
   const nameClass = 'min-w-0 flex-1 truncate text-left text-md leading-md text-n-500';
 
   return (
@@ -205,7 +236,7 @@ export function PropertyRow({
             </span>
           ) : (
             <button
-              ref={nameRef as React.RefObject<HTMLButtonElement>}
+              ref={nameRef}
               type="button"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
@@ -228,7 +259,7 @@ export function PropertyRow({
       {trailing}
       {menu !== undefined && menuOpen && (
         <Popover
-          anchorRef={nameRef}
+          anchorRef={nameNode}
           onClose={() => setMenuOpen(false)}
           role="menu"
           ariaLabel={`${label} property`}

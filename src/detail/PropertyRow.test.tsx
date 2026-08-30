@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropertyRow, PROPERTY_LABEL_W } from '@/detail/PropertyRow';
 import type { GripProps } from '@/hooks/useSortableList';
@@ -112,6 +112,67 @@ describe('PropertyRow', () => {
     } finally {
       scroll.mockRestore();
       client.mockRestore();
+    }
+  });
+
+  /**
+   * The regression the M46.2 re-measure found in the browser: the tooltip
+   * turned itself off again.
+   *
+   * `Tooltip` renders its child bare while disabled and inside a fragment once
+   * enabled, so the name element is UNMOUNTED by the state that enables it.
+   * The watcher that measured it was set up once, keyed on the label, and went
+   * on reporting the detached node — which measures 0 — so the next callback
+   * put `clipped` back to false and nothing ever measured the live node again.
+   * jsdom ships no ResizeObserver, so the failure needs one stubbed to appear
+   * at all: without this case the whole thing is invisible to the suite.
+   */
+  it('keeps measuring the name element the tooltip swap mounts', async () => {
+    const user = userEvent.setup();
+    const observed: Element[] = [];
+    let fire: () => void = () => {};
+    class StubRO {
+      constructor(private cb: () => void) {
+        fire = () => this.cb();
+      }
+      observe(el: Element) {
+        observed.push(el);
+      }
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', StubRO);
+    // A detached node measures zero, which is the whole of the bug.
+    const scroll = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (
+      this: Element,
+    ) {
+      return this.isConnected ? 400 : 0;
+    });
+    const client = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (
+      this: Element,
+    ) {
+      return this.isConnected ? 84 : 0;
+    });
+    try {
+      render(
+        <PropertyRow kind="text" name="an_extremely_long_property_name_indeed">
+          <span>value</span>
+        </PropertyRow>,
+      );
+      const name = () => within(labelCell()).getByText('An extremely long property name indeed');
+      await user.hover(name());
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeTruthy(), { timeout: 2000 });
+
+      // The watcher followed the swap: what it points at is on screen.
+      expect(observed.at(-1)?.isConnected).toBe(true);
+      // And a report from it does not undo the measurement that opened it.
+      await act(async () => fire());
+      await user.unhover(name());
+      await user.hover(name());
+      await waitFor(() => expect(screen.getByRole('tooltip')).toBeTruthy(), { timeout: 2000 });
+    } finally {
+      scroll.mockRestore();
+      client.mockRestore();
+      vi.unstubAllGlobals();
     }
   });
 
