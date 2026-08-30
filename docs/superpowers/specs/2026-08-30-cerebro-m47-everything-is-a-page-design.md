@@ -181,21 +181,60 @@ A one-shot, idempotent converter run on vault scan.
 | --- | --- |
 | `<folder>/collection.yml` | `<folder>/<folder>.md` frontmatter, merged into an existing folder note if there is one |
 | `<folder>/*.list.yml` | a `ViewDefinition` appended to the `views:` of the type named by its `source.type` |
-| a `*.list.yml` with `source.type: null` ("Everything") | **has no home database** — see risk R1 |
+| a `*.list.yml` with `source.type: null` ("Everything") | **stays a `*.list.yml`** — see D9 |
 
 The demo vault is the golden corpus, so this churns e2e assertions by design.
 Per AGENTS.md, that is a test change and is budgeted as one.
 
+### D9 — a typeless list does not convert (resolves R1) **[author]**
+
+A List over "Everything" queries across every database, so it belongs to none,
+and there is nowhere in the new model to put it. Three options were open:
+invent a home, expand the fence to carry a database-less query, or leave it
+where it is.
+
+**It stays where it is**, and the converter says so rather than dropping it.
+The evidence for taking the conservative route: **every `*.list.yml` in
+`demo-vault/` names a concrete type** — three Work item, one Objective — so
+this case has no instances in the corpus at all, and expanding the fence
+format to carry filters and a presentation would be paying a permanent cost in
+the on-disk contract for a case nothing exercises. Silently dropping the file
+would destroy configuration a user wrote.
+
+This is a carve-out from D2, and worth naming as one. D2 retires
+`*.list.yml` as *the way a view is expressed going forward*; it does not
+require deleting a reader for the handful of views that genuinely have no
+database to belong to. If cross-database views turn out to matter, the fence
+can grow a database-less form then, with instances to design against.
+
 ## 8. Slices
 
-| Slice | Content |
-| --- | --- |
-| **M47.1** | Exercise what exists: tests for `TypeDef.folder` and `TypeDef.views` end-to-end, since no Type doc in the corpus uses either. Nothing ships on an untested foundation. |
-| **M47.2** | The `database` block spec + markdown round-trip + the pointer resolver. Renders read-only first. |
-| **M47.3** | Door 1 — embed an existing database. Lift `DashboardView`'s embed into a shared component both surfaces use. |
-| **M47.4** | Door 2 — create a database inline, and schema-by-use (`+` a column writes a field). **Includes the first writer for `folder:`**, which has none today. |
-| **M47.5** | The converter, the demo-vault migration, and the e2e churn. Retires `collection.yml` and `*.list.yml`. |
-| **M47.6** | Retire the New-list dialog and the sidebar `+` → New list path; the collection page grows its own create affordance and its own prose. |
+| Slice | Content | Status |
+| --- | --- | --- |
+| **M47.1** | Exercise what exists: tests for `TypeDef.folder` and `TypeDef.views`, since no Type doc in the corpus uses either. Nothing ships on an untested foundation. | **done** `6ae280e` |
+| **M47.2** | The `database` block spec + markdown round-trip + the pointer resolver. Renders read-only first. | **done** `62a38ff` |
+| **M47.3** | Door 1 — embed an existing database. | **done** `02480c9` |
+| **M47.4** | Door 2 — create a database inline, and schema-by-use (`+` a column writes a field). **Includes the first writer for `folder:`**, which had none. | **done** `2139014` |
+| **M47.5** | The converter, the demo-vault migration, and the e2e churn. Retires `collection.yml` and `*.list.yml`. | next |
+| **M47.6** | Retire the New-list dialog and the sidebar `+` → New list path; the collection page grows its own create affordance and its own prose. | |
+
+### What the built slices changed about the plan
+
+- **M47.3 did not lift `DashboardView`'s embed**, as written. It did not need
+  to: a database's NAME is its query, so
+  `resolveSurface({ kind: 'type' })` — the same call the database's own screen
+  makes — gives the block its rows directly. The dashboard's embed exists to
+  resolve a *List file* and thread its source through, which is work a database
+  does not have. Sharing a component would have meant sharing a wrapper around
+  the part they do not have in common.
+- **Two defects turned up in M47.4 that were not about M47.** `recordsFolder`
+  double-pluralized any already-plural name (`Groceries` → `grocerieses`),
+  invisible while the folder was implicit and permanent once written into a
+  user's Type doc. And `TableView`'s empty state read "Create the first one
+  below" on every surface, including the ones that pass no `onCreate` and so
+  render no such row — the dashboard's embed has been making that false promise
+  since M44.
+- **R1 is resolved** (D9) — the evidence that settled it was in the corpus, not in the design: every `*.list.yml` in `demo-vault/` names a concrete type, so the homeless case has no instances to design against.
 
 ## 9. Non-goals
 
@@ -207,12 +246,13 @@ Per AGENTS.md, that is a test change and is budgeted as one.
 
 ## 10. Risks
 
-- **R1 — the homeless view.** A `*.list.yml` with `source.type: null` queries
-  *everything* and so belongs to no database. Two candidate resolutions: keep a
-  view-only page kind for these, or refuse to convert them and leave them for the
-  user to place. **This is unresolved and must be settled before M47.5.**
-- **R2 — `folder:` and `views:` have no production callers.** Shipping the
-  migration onto them without M47.1 would be building on unmeasured ground.
+- **R1 — the homeless view. RESOLVED by D9:** it stays a `*.list.yml`. The
+  case has no instances in `demo-vault/`, so expanding the fence to carry a
+  database-less query would be a permanent cost in the on-disk contract paid
+  for something nothing exercises.
+- **R2 — `folder:` and `views:` had no production callers. CLOSED by M47.1**,
+  which tested both and gave `TypeDef.folder` its first consumer, and by M47.4,
+  which gave `folder:` its first writer.
 - **R3 — the corpus churn is wide.** Every e2e spec touching Delivery or
   Strategy will move. Sequencing the migration last (M47.5) keeps it from
   blocking the parts that can be verified independently.
