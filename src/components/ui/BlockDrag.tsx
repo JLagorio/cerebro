@@ -166,6 +166,13 @@ function GhostClone({ source, style }: { source: HTMLElement; style: CSSProperti
   return <div data-testid="drag-ghost" ref={box} style={style} />;
 }
 
+/** The source's box, in viewport coordinates — which is what the layer is
+ * positioned in. */
+function measure(el: HTMLElement): GhostRect {
+  const r = el.getBoundingClientRect();
+  return { top: r.top, left: r.left, width: r.width, height: r.height };
+}
+
 /** The source of the drag with this id, or null — the element a surface marked
  * with `data-drag-id`. Scanned rather than selected: an id may carry a colon
  * (`field:priority`) or a quote, and jsdom has no `CSS.escape` to lean on. */
@@ -187,40 +194,57 @@ function findDragSource(id: string): HTMLElement | null {
  * frame of every drag, which on the layout canvas is the entire preview.
  */
 export function DragGhostLayer() {
-  const [ghost, setGhost] = useState<{
-    source: HTMLElement;
-    rect: GhostRect;
-    delta: GhostDelta;
-  } | null>(null);
+  /** The element being copied, held outside state: it does not change for the
+   * length of a gesture, and the move handler needs it before React has
+   * re-rendered. */
+  const source = useRef<HTMLElement | null>(null);
+  const [ghost, setGhost] = useState<{ rect: GhostRect; delta: GhostDelta } | null>(null);
   useDndMonitor({
     onDragStart: ({ active }) => {
-      const source = findDragSource(String(active.id));
-      if (source === null) {
-        // A surface that marks no sources gets no ghost, and nothing else
-        // changes. That is the whole failure mode.
-        setGhost(null);
-        return;
-      }
-      const r = source.getBoundingClientRect();
-      setGhost({
-        source,
-        rect: { top: r.top, left: r.left, width: r.width, height: r.height },
-        delta: { x: 0, y: 0 },
-      });
+      const el = findDragSource(String(active.id));
+      source.current = el;
+      // A surface that marks no sources gets no ghost, and nothing else
+      // changes. That is the whole failure mode.
+      setGhost(el === null ? null : { rect: measure(el), delta: { x: 0, y: 0 } });
     },
-    onDragMove: ({ delta }) =>
-      setGhost((g) => (g === null ? null : { ...g, delta: { x: delta.x, y: delta.y } })),
-    onDragEnd: () => setGhost(null),
+    /**
+     * Re-measured every frame, and that is what keeps the ghost under the
+     * pointer while a surface AUTO-SCROLLS (dnd-kit does that by default, and
+     * both our block surfaces scroll).
+     *
+     * dnd-kit's `delta` is `scrollAdjustedTranslate` — the pointer's travel
+     * PLUS however far the container has scrolled — because the thing it
+     * normally moves lives inside that container and has to be pushed back.
+     * Ours does not: it sits in a fixed layer that no scrolling moves. A rect
+     * measured once at pick-up plus that delta would drift away from the
+     * cursor by exactly the scrolled distance. Measured fresh, the source has
+     * itself moved by minus that distance, and the two cancel — leaving the
+     * pointer's own travel, which is what §C-II.2 says the wrapper carries.
+     */
+    onDragMove: ({ delta }) => {
+      const el = source.current;
+      if (el === null) return;
+      const rect = measure(el);
+      setGhost((g) => (g === null ? null : { rect, delta: { x: delta.x, y: delta.y } }));
+    },
+    onDragEnd: () => {
+      source.current = null;
+      setGhost(null);
+    },
     // The reference verified this for a block and a database row both: cancel
     // takes the ghost with it and the order is untouched.
-    onDragCancel: () => setGhost(null),
+    onDragCancel: () => {
+      source.current = null;
+      setGhost(null);
+    },
   });
-  if (ghost === null) return null;
+  const el = source.current;
+  if (ghost === null || el === null) return null;
   const styles = ghostLayout(ghost.rect, ghost.delta);
   return createPortal(
     <div data-testid="drag-layer" style={LAYER} inert>
       <div style={styles.wrapper}>
-        <GhostClone source={ghost.source} style={styles.clone} />
+        <GhostClone source={el} style={styles.clone} />
       </div>
     </div>,
     document.body,

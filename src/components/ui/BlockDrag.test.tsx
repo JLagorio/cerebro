@@ -10,6 +10,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import {
+  DragGhostLayer,
   ghostLayout,
   insertionLineClass,
   lineHosts,
@@ -168,7 +169,10 @@ function Harness({ target }: { target: string }) {
   );
   return (
     <DndContext sensors={sensors} collisionDetection={() => [{ id: target }]}>
-      <Grip />
+      <DragGhostLayer />
+      <div data-testid="source" data-drag-id="block:1">
+        <Grip />
+      </div>
       <Gap id="gap:a" />
       <Gap id="gap:b" />
     </DndContext>
@@ -230,6 +234,25 @@ describe('InsertionLine during a drag', () => {
     expect(lineFor('gap:b').getAttribute('data-lit')).toBe('true');
     fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
     expect(lineFor('gap:b').getAttribute('data-lit')).toBe('false');
+  });
+
+  it('re-measures the source each frame, so a scroll does not carry the ghost off', async () => {
+    // dnd-kit's `delta` is the pointer's travel PLUS however far the surface
+    // has scrolled, because the thing it normally moves lives inside that
+    // surface. Ours lives in a fixed layer that no scrolling moves, so a rect
+    // measured once at pick-up would drift by exactly the scrolled distance —
+    // and dnd-kit auto-scrolls by default, on two surfaces that both scroll.
+    // Here the source is made to report a box 40px higher, as a scrolled
+    // container would; the ghost has to follow the source, not the memory.
+    render(<Harness target="gap:b" />);
+    const source = screen.getByTestId('source');
+    const grip = await pickUp();
+    expect((screen.getByTestId('drag-ghost') as HTMLElement).style.top).toBe('0px');
+
+    source.getBoundingClientRect = () => ({ top: -40, left: 0, width: 100, height: 20 }) as DOMRect;
+    fireEvent.keyDown(grip, { key: 'ArrowDown', code: 'ArrowDown' });
+
+    expect((screen.getByTestId('drag-ghost') as HTMLElement).style.top).toBe('-40px');
   });
 });
 
