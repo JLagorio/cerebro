@@ -1526,15 +1526,25 @@ describe('tab list on a Type doc (M44.5)', () => {
     expect(parseTabList(serializeTabList(parseTabList(tabs)))).toEqual(parseTabList(tabs));
   });
 
-  it('re-kinds the retired `properties` tab to overview, keeping its id (M46.1)', () => {
+  it('re-kinds the retired `properties` tab to free text, keeping its id (M46.1)', () => {
     // A tab that IS the property stack is the shape the ruling forbids — the
-    // stack stands above the strip on every tab now. It re-kinds to the page
-    // body rather than falling to the generic unrecognised default, and it
-    // is never dropped: `_sections` keys per-record content by this id.
+    // stack stands above the strip on every tab now — so the kind has no
+    // content left and falls to the generic unrecognised default. NOT to
+    // `overview`: a type carrying both an Overview and a Properties tab
+    // would come back with two body tabs, two editors on one file. It is
+    // never dropped either way: `_sections` keys per-record content by this
+    // id.
     const parsed = parseTabList([{ id: 'props', name: 'Fields', content: 'properties' }]);
-    expect(parsed).toEqual([{ id: 'props', name: 'Fields', icon: null, content: 'overview' }]);
+    expect(parsed).toEqual([{ id: 'props', name: 'Fields', icon: null, content: 'sections' }]);
+    // The discriminating case: the Overview tab beside it stays the only body.
+    expect(
+      parseTabList([
+        { id: 'overview', name: 'Overview', content: 'overview' },
+        { id: 'props', name: 'Fields', content: 'properties' },
+      ]).map((t) => t.content),
+    ).toEqual(['overview', 'sections']);
     // And the retired word never reaches the vault again.
-    expect(serializeTabList(parsed)[0]).toMatchObject({ content: 'overview' });
+    expect(serializeTabList(parsed)[0]).toMatchObject({ content: 'sections' });
   });
 
   it('mints unique ids and drops a content kind nothing renders', () => {

@@ -172,9 +172,12 @@ layout:
 > though the key were absent and sheds it on the next Apply — the only
 > accommodation the reversal gets). The `properties` tab kind retires with
 > it: `TAB_CONTENTS` is `overview | sections | view`, and a stored
-> `content: properties` re-kinds to `overview` at the parse door rather than
-> being dropped, because a tab's id is what `_sections` keys per-record
-> content by. See `docs/superpowers/specs/2026-08-29-cerebro-m46-notion-parity-polish.md` §2.
+> `content: properties` takes the parse door's unrecognised-kind fallback to
+> `sections` — an empty free-text tab — rather than being dropped, because a
+> tab's id is what `_sections` keys per-record content by. Not `overview`:
+> a type carrying both an Overview and a Properties tab would come back with
+> two body tabs, two editors mounted against one file.
+> See `docs/superpowers/specs/2026-08-29-cerebro-m46-notion-parity-polish.md` §2.
 
 ## 5. Slices
 

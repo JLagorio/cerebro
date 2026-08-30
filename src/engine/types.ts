@@ -176,7 +176,11 @@ export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
  * `'properties'` was a fourth kind between M44.5 and M46.1 and retired with
  * the per-tab sections model: a tab that IS the stack is the shape the
  * ruling forbids, because the stack now stands above the strip on every
- * tab. `parseTabList` re-kinds a stored `properties` to `'overview'`. */
+ * tab. A stored `properties` needs no special arm at the parse door: it
+ * takes the unrecognised-kind fallback to `'sections'` and lands as an
+ * empty free-text tab, which is the safe outcome — mapping it to
+ * `'overview'` would give a type that had both an Overview and a Properties
+ * tab two body tabs. */
 export const TAB_CONTENTS = ['overview', 'sections', 'view'] as const;
 export type TabContent = (typeof TAB_CONTENTS)[number];
 
