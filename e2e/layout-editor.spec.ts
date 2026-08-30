@@ -245,11 +245,17 @@ test('layout editor: the strip renames a tab, the + mints a section, both land i
     preview.locator('[data-block="heading"]').getByTestId('layout-block-label'),
   ).toHaveCSS('opacity', '1');
 
-  // -- Defect 1a: heading first, tabs second (Notion's order) ----------
+  // -- Defect 1a: the strip is not on top ------------------------------
+  // The user's words were "tabs are on top", and the canvas order is that
+  // sentence's answer. M45.5 spelled the fix as heading-then-tabs; M46.1
+  // moved the WHOLE property stack above the strip, so the strip sits below
+  // everything the record owns and above only the tab's own content. Epic
+  // declares no `layout:`, so it has no section blocks yet — `rest` is the
+  // Properties remainder and `content` is the Overview body.
   const order = await preview
     .getByTestId('layout-block')
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-block')));
-  expect(order.slice(0, 2)).toEqual(['heading', 'tabs']);
+  expect(order).toEqual(['heading', 'rest', 'tabs', 'content']);
 
   // -- Defect 1b: the strip EDITS — rename Overview in place -----------
   const strip = preview.getByTestId('record-tabs');
@@ -309,33 +315,36 @@ test('layout editor: the strip renames a tab, the + mints a section, both land i
 });
 
 /**
- * M45.6 — the two defects the user found testing M45.5, end to end.
+ * M46.1 — the user's correction, end to end: "tabs are only for related data
+ * sources. fields shwo above. just like notion."
  *
- * Epic again, for the same reason the spec above picks it: the only corpus
- * type wearing `tabs:`, and the one with NO `layout:` — so every section this
- * journey sees is one it minted, and the "not on the other tab" claim cannot
- * be satisfied by something the corpus already had.
+ * This journey replaces M45.6's, which asserted the opposite model (a section
+ * belonged to a tab and showed only there). That product is gone, so its
+ * assertions are deleted rather than weakened — but its FIRST claim survives
+ * intact, because it was a real defect and it is still fixed: the peek carries
+ * the tab strip.
+ *
+ * Epic again, for the reason both specs above pick it: the only corpus type
+ * wearing `tabs:`, and the one with NO `layout:` — so every section this
+ * journey sees is one it minted, and its second tab is a `view`, the exact
+ * kind M45.6 said could hold no properties.
  *
  * Two claims only a real browser can make:
  *
- * 1. **"the tabs dont render in the UI"** — the strip mounted on the page and
- *    in the editor canvas, never in the PEEK, which is the surface a table row
- *    opens into. jsdom covers the mount (`DetailPanel.test.tsx`); only this
- *    proves it on the surface the user was actually looking at, with the panel
- *    scoped so a page strip can never stand in for it.
- * 2. **"thers no way to put anything in the tabs in the customizer"** — the
- *    plan's ordered journey, whole: open the customizer, mint a second
- *    property-bearing tab, STAND on it, add a section there, put a property in
- *    it, Apply — and then the record shows that section on that tab and
- *    nowhere else, on both surfaces, because the Type doc's bytes carry
- *    `tab:`. Four staged slices (`tabs`, a group, its field, its tab) through
- *    one door and one atomic write; the unit suites cover each joint alone.
+ * 1. **"the tabs dont render in the UI"** (M45.6 defect 1) — the strip mounted
+ *    in the PEEK, which is the surface a table row opens into. jsdom covers the
+ *    mount (`DetailPanel.test.tsx`); only this proves it on the surface the user
+ *    was looking at, with the panel scoped so a page strip can never stand in.
  *
- * The second tab is MINTED rather than seeded into the corpus: Epic's own
- * second tab is a `view`, which holds no sections by decision, and a corpus
- * edit is a test change that churns every other spec that reads the type.
+ * 2. **Properties stand ABOVE the tabs, on every tab.** The ordered journey,
+ *    whole: open the customizer, mint a section, put a property in it, watch it
+ *    survive a swap to the VIEW tab in the canvas, Apply — and then the record
+ *    shows that section on both tabs, on both surfaces, above the strip in real
+ *    DOM order, because the Type doc's bytes carry a group with no `tab:` at
+ *    all. Three staged slices (a group, its field, the untouched tab set)
+ *    through one door and one atomic write; the unit suites cover each joint.
  */
-test('layout editor: the peek shows the strip, and a section rides its tab to the record', async ({
+test('layout editor: the peek shows the strip, and a section stands above every tab', async ({
   page,
 }) => {
   await boot(page);
@@ -348,7 +357,7 @@ test('layout editor: the peek shows the strip, and a section rides its tab to th
   const panel = page.getByTestId('detail-panel');
   await expect(panel).toBeVisible();
 
-  // -- Defect 1: the PEEK carries the strip ----------------------------
+  // -- M45.6 defect 1, still fixed: the PEEK carries the strip ---------
   // Scoped to the panel, and the panel alone is open — no page is behind it
   // to lend a strip to a page-level locator. Both corpus tabs, so this is the
   // record's strip and not some other tablist that happens to be here.
@@ -357,12 +366,14 @@ test('layout editor: the peek shows the strip, and a section rides its tab to th
   await expect(peekStrip.getByTestId('record-tab-overview')).toHaveText('Overview');
   await expect(peekStrip.getByTestId('record-tab-work-items')).toHaveText('Work items');
 
-  // -- Precondition for the "not on Overview" claim below --------------
-  // Epic declares no `layout:`, so today every property — `owner` included —
-  // renders in the peek's one flat stack. Without this the disappearance at
-  // the end could be a row that was never there.
+  // -- Preconditions for the claims below -------------------------------
+  // Epic declares no `layout:`, so `owner` renders loose in the one flat
+  // stack and the record has no section at all. Without both, the group that
+  // appears at the end could be one the corpus already had, and the owner row
+  // moving into it could be a row that was never outside it.
   const ownerRow = panel.locator('[data-testid="property-row"][data-property="owner"]');
   await expect(ownerRow).toHaveCount(1);
+  await expect(panel.getByTestId('property-group')).toHaveCount(0);
 
   // -- ⋯ → Customize layout raises the fullscreen editor ---------------
   await panel.getByRole('button', { name: 'Record actions' }).click();
@@ -371,26 +382,14 @@ test('layout editor: the peek shows the strip, and a section rides its tab to th
   await expect(editor).toBeVisible();
   const preview = page.getByTestId('layout-preview');
   // The peek stays mounted BEHIND the fullscreen dialog, so every strip
-  // locator from here on is scoped: the canvas's strip stages the draft, the
+  // locator from here on is scoped: the canvas's strip drives the draft, the
   // panel's writes the vault, and an unscoped `record-tabs` matches both.
   const canvasStrip = preview.getByTestId('record-tabs');
   await expect(canvasStrip).toBeVisible();
 
-  // -- Mint a second PROPERTY-bearing tab in the draft ------------------
-  await canvasStrip.getByTestId('new-record-tab').click();
-  const tabForm = canvasStrip.getByTestId('new-record-tab-form');
-  await expect(tabForm).toBeVisible();
-  await tabForm.getByRole('textbox', { name: 'Tab name' }).fill('Delivery');
-  await tabForm.getByTestId('new-tab-kind-properties').click();
-  await tabForm.getByTestId('create-record-tab').click();
-  const canvasDelivery = canvasStrip.getByTestId('record-tab-delivery');
-  await expect(canvasDelivery).toBeVisible();
-
-  // -- Stand ON it: the canvas swaps to the tab you pressed -------------
-  await canvasDelivery.click();
-  await expect(canvasDelivery).toHaveAttribute('aria-selected', 'true');
-
-  // -- Add a section HERE, and put a property in it ---------------------
+  // -- Mint a section and put `owner` in it -----------------------------
+  // No tab is chosen anywhere in this sequence, because there is nothing left
+  // to choose: the + adds to the RECORD.
   await preview.getByTestId('layout-add-section').click();
   const groupEditor = page.getByTestId('group-editor');
   await expect(groupEditor).toBeVisible();
@@ -404,58 +403,93 @@ test('layout editor: the peek shows the strip, and a section rides its tab to th
   const ownershipBlock = preview.getByTestId('layout-block-label').filter({ hasText: 'Ownership' });
   await expect(ownershipBlock).toBeVisible();
 
-  // -- …and the canvas says it belongs to THAT tab ----------------------
-  // The press lands through the open editor's dismiss, the mechanics the two
-  // specs above ride. Overview is the default tab, so an untabbed section
-  // would still be standing here — its absence is the tab assignment.
-  await canvasStrip.getByTestId('record-tab-overview').click();
-  await expect(ownershipBlock).toHaveCount(0);
+  // -- The canvas puts it above the strip -------------------------------
+  // The minted section takes its place in the record's own stack — heading,
+  // sections, the Properties remainder — and only THEN the Tabs block, whose
+  // tail is the active tab's content. `content` is the Overview body block.
+  const blocks = () =>
+    preview
+      .getByTestId('layout-block')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-block')));
+  expect(await blocks()).toEqual(['heading', 'group-1', 'rest', 'tabs', 'content']);
+
+  // -- …and a VIEW tab does not take it away ----------------------------
+  // The exact case M45.6 forbade: a `view` tab was its own content and stood
+  // the whole property stack down. The press lands through the open editor's
+  // dismiss, the mechanics the two specs above ride. Only the TAIL changes —
+  // the body block gives way to the view tab's placeholder — while every
+  // property block above the strip stays exactly where it was.
+  await canvasStrip.getByTestId('record-tab-work-items').click();
+  await expect(canvasStrip.getByTestId('record-tab-work-items')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(preview.getByTestId('layout-preview-viewtab')).toBeVisible();
+  await expect(preview.getByTestId('layout-preview-body')).toHaveCount(0);
+  expect(await blocks()).toEqual(['heading', 'group-1', 'rest', 'tabs']);
+  await expect(ownershipBlock).toBeVisible();
 
   // -- Nothing has been written yet -------------------------------------
   const before = await readMockFile(page, 'types/epic.md');
   expect(before).not.toContain('Ownership');
-  expect(before).not.toContain('Delivery');
 
-  // -- Apply lands the tab, the section and its field in one write ------
+  // -- Apply lands the section and its field in one write ---------------
   await page.getByTestId('layout-apply').click();
   await expect(editor).toHaveCount(0);
 
-  // -- The peek: Overview has neither the section nor its property ------
-  // The row is not loose here either — `rest` counts placements across every
-  // tab, so a field a section on another tab claims is not also in the
-  // remainder. That is the whole point of the resolve-then-filter order.
+  // -- The peek: the section and its property, on Overview --------------
   const ownership = panel.locator('[data-testid="property-group"][data-group="group-1"]');
-  await expect(ownership).toHaveCount(0);
-  await expect(ownerRow).toHaveCount(0);
-
-  // -- …and the Delivery tab has both -----------------------------------
-  await peekStrip.getByTestId('record-tab-delivery').click();
   await expect(ownership).toBeVisible();
   await expect(ownership).toContainText('Ownership');
+  // Still exactly one owner row, and it is inside the section now: `rest` is
+  // the remainder, so a field a section claims is not also loose below it.
+  await expect(ownership.locator('[data-property="owner"]')).toHaveCount(1);
+  await expect(ownerRow).toHaveCount(1);
+
+  // -- …and on the view tab too, which is the whole ruling --------------
+  // Under M45.6 this tab replaced the stack; under M46.1 it hangs below it.
+  await peekStrip.getByTestId('record-tab-work-items').click();
+  await expect(panel.getByTestId('view-tab-embed')).toBeVisible();
+  await expect(ownership).toBeVisible();
   await expect(ownerRow).toHaveCount(1);
 
   // -- The page agrees, because it reads the same bytes ------------------
-  // Opening in full page closes the peek, so `page-properties` is now the one
-  // stack on screen and the strip is unambiguous.
+  // Opening in full page closes the peek and lands on the default tab, so
+  // `page-properties` is the one stack on screen and the strip is unambiguous.
   await panel.getByRole('button', { name: 'Open in full page' }).click();
   const pageProps = page.getByTestId('page-properties');
   await expect(pageProps).toBeVisible();
   const pageOwnership = pageProps.locator('[data-testid="property-group"][data-group="group-1"]');
-  await expect(pageOwnership).toHaveCount(0);
-  await page.getByTestId('record-tab-delivery').click();
+  await expect(pageOwnership).toBeVisible();
+  // ABOVE the strip in real document order — the sentence the user wrote. A
+  // testid sequence would only say which one Playwright found first; this asks
+  // the DOM which one comes first.
+  expect(
+    await page.evaluate(() => {
+      const props = document.querySelector('[data-testid="page-properties"]');
+      const tabs = document.querySelector('[data-testid="record-tabs"]');
+      if (props === null || tabs === null) return null;
+      return Boolean(props.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+  ).toBe(true);
+  await page.getByTestId('record-tab-work-items').click();
+  await expect(page.getByTestId('view-tab-embed')).toBeVisible();
   await expect(pageOwnership).toBeVisible();
   await expect(
     pageProps.locator('[data-testid="property-row"][data-property="owner"]'),
   ).toHaveCount(1);
 
-  // -- …because the Type doc's bytes carry the tab AND the assignment ---
+  // -- …because the Type doc's bytes carry a section with NO tab --------
   const typeDoc = await readMockFile(page, 'types/epic.md');
-  expect(typeDoc).toContain('id: delivery');
-  expect(typeDoc).toContain('content: properties');
   // Scoped to the layout block first (the capture guard the specs above use):
-  // an unscoped `tab: delivery` could be satisfied by the tab list itself.
+  // an unscoped `name:` could be satisfied by the tab list itself.
   const layoutBlock = typeDoc.match(/\nlayout:\n((?: {2,}.*\n)*)/)?.[1] ?? '';
   expect(layoutBlock).toContain('name: Ownership');
   expect(layoutBlock).toContain('- owner');
-  expect(layoutBlock).toContain('tab: delivery');
+  // The key M45.6 wrote here is not written by anything anymore.
+  expect(layoutBlock).not.toContain('tab:');
+  // The corpus tab set rode through untouched — the customizer edited the
+  // record's layout, not its tabs.
+  expect(typeDoc).toContain('id: overview');
+  expect(typeDoc).toContain('id: work-items');
 });

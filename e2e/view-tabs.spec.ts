@@ -56,8 +56,11 @@ test('view tab: scoped to the host record, and honest when the source dies', asy
   await expect(embed.getByTestId('table-row')).toHaveCount(4);
   // …and not the offline-conflict item, whose `epic` points elsewhere.
   await expect(embed.getByText('Detect write conflicts on job close')).toHaveCount(0);
-  // The tab IS the content: no property stack above the embed (M45.4).
-  await expect(page.getByTestId('page-properties')).toHaveCount(0);
+  // M45.4 read the tab as its own whole surface and asserted NO property
+  // stack here. M46.1 reversed that on the user's correction — "tabs are only
+  // for related data sources. fields shwo above" — so the record's stack
+  // stands above this embed, exactly as it does on Overview.
+  await expect(page.getByTestId('page-properties')).toBeVisible();
 
   // -- Kill the source: the Work item database leaves the vault --------
   // The type doc and all 45 records; anchored to the frontmatter line so a
@@ -68,22 +71,24 @@ test('view tab: scoped to the host record, and honest when the source dies', asy
       if (path === 'types/work-item.md' || /^type: Work item$/m.test(text)) fs.delete(path);
     }
   });
-  // The mock has no watcher; a store write — a status change on the epic's
-  // own Overview stack — triggers the rescan that notices the deletion.
-  // The value CHIP is named by the value it shows (the row's other buttons
-  // are the reorder grip and the property menu).
-  await page.getByTestId('record-tab-overview').click();
+  // The mock has no watcher; a store write triggers the rescan that notices
+  // the deletion. The write happens WITHOUT leaving this tab, because since
+  // M46.1 the stack the status row lives in stands above the embed — the
+  // record keeps its properties on every tab. The value CHIP is named by the
+  // value it shows (the row's other buttons are the reorder grip and the
+  // property menu).
   await page
     .locator('[data-testid="property-row"][data-property="status"]')
     .getByRole('button', { name: 'Committed' })
     .click();
   await page.getByRole('listbox').getByRole('option', { name: 'Building' }).click();
+  // The popover outlives its own selection; Escape dismisses it so nothing
+  // floats over the card asserted below.
+  await page.keyboard.press('Escape');
 
   // -- The tab says what died — a sentence, never an empty database ----
-  // The press lands THROUGH the still-open popover's dismiss (the
-  // layout-editor spec's mechanics: outside pointerdown closes the layer,
-  // the click still reaches the tab).
-  await page.getByTestId('record-tab-work-items').click();
+  // No tab press to get here: the rescan re-resolves the pointer under the
+  // open tab, so the card replaces the embed in place.
   await expect(page.getByTestId('view-tab-broken')).toContainText(
     'This tab points at a type called “Work item” that is no longer in the vault.',
   );
