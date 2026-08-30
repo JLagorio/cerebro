@@ -103,6 +103,11 @@ describe('HeadingProperties (M45.1)', () => {
     // — so it is the strip's own version of one-region-lights, not a guess at
     // a number nobody read.
     expect(value.className).toContain('hover:bg-n-50');
+    // And it is DECLARED. The re-measure (M46.2 Task 8) read this control's
+    // transition as `all` — the initial value, i.e. none — while the panel's
+    // label cell already had the 20ms guard. A wash that exists has to be
+    // timed, or it strobes as the pointer crosses the strip.
+    expect(value.className).toContain('motion-hover');
   });
 
   it('renders nothing when the resolved heading is empty — no empty container', () => {

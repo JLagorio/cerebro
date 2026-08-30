@@ -116,14 +116,20 @@ const BLANK_FILL = 'min-h-[22px] flex-1 self-stretch';
  *   was read on that surface either way — so the wash STAYS here, where the
  *   value is the only thing in the column you can click. That keeps the
  *   strip's own version of the one-lit-region rule without inventing a
- *   measurement.
+ *   measurement. Its wash carries the 20ms hover token, which the re-measure
+ *   found it was missing while the panel's label cell had it (M46.2 Task 8):
+ *   an undeclared wash strobes under a pointer crossing the strip, and the
+ *   guard is the same one for the same reason wherever a wash exists. `cell`
+ *   is left alone on purpose — the grid's hover is its own story and was
+ *   never on the measured checklist.
  */
 export type FieldChrome = 'cell' | 'panel' | 'strip';
 
 const CHROME: Record<FieldChrome, string> = {
   cell: 'rounded-md px-2 py-[3px] hover:bg-n-50',
   panel: 'min-h-[34px] cursor-pointer overflow-hidden rounded-xs p-1.5',
-  strip: 'min-h-[30px] cursor-pointer overflow-hidden rounded-xs px-1.5 py-1 hover:bg-n-50',
+  strip:
+    'min-h-[30px] cursor-pointer overflow-hidden rounded-xs px-1.5 py-1 motion-hover hover:bg-n-50',
 };
 
 export interface FieldEditorProps {
