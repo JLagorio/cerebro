@@ -15,7 +15,7 @@ import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
-import { layoutTabScope, typeStyle } from '@/engine/typeCatalog';
+import { layoutTabScope, tabBearsProperties, typeStyle } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -276,7 +276,22 @@ export function DetailPanel() {
   // list either way: `resolveLayout` keeps `heading` and `rest` global by
   // decision, and the strip renders on every tab (Notion's heading block
   // sits above the tab bar; ours sits above this strip).
-  const tabScope = activeTab === null ? undefined : layoutTabScope(tabs, activeTab.id);
+  //
+  // THIRD ARM (M45.6 review): a type can declare tabs that ALL refuse the
+  // stack — every one a Sections or a View. On the record page that is
+  // survivable, because `DocSidePanel` renders the whole unscoped stack
+  // beside the canvas whatever tab is open. The peek HAS no side panel, so
+  // the same type left a record's groups and loose fields with nowhere at
+  // all to render: only the heading strip survived, because it sits outside
+  // the tab gate. A property nobody can reach is a property the vault holds
+  // and the app denies — worse than an ugly surface, and the rule it breaks
+  // is that a record's properties must be reachable from at least ONE
+  // surface. So when no tab bears properties, the peek takes the side
+  // panel's job: the stack renders UNSCOPED (no tab filter — there is no tab
+  // to filter for) under whatever the open tab shows.
+  const propertiesOrphaned = tabs.length > 0 && !tabs.some(tabBearsProperties);
+  const tabScope =
+    activeTab === null || propertiesOrphaned ? undefined : layoutTabScope(tabs, activeTab.id);
   const headingFields =
     typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields, tabScope).heading;
   const stripShows =
@@ -489,10 +504,20 @@ export function DetailPanel() {
             render. Keying by tab would throw away a flyout the user opened
             and a reveal they asked for, every press, buying nothing: there is
             no stale per-tab state to discard. Keyed by PATH still, because a
-            different record is a different stack. */}
-        {(activeTab === null ||
+            different record is a different stack.
+
+            `propertiesOrphaned` short-circuits BOTH halves of the gate, and
+            has to: the first because no tab of such a type would ever pass
+            it, and the second because the strip's expander is only offered
+            on an Overview tab — a folded stack behind a toggle that is not
+            rendered is the same hole one layer down. */}
+        {(propertiesOrphaned ||
+          activeTab === null ||
           (activeTab.content !== 'sections' && activeTab.content !== 'view')) &&
-          (activeTab?.content === 'properties' || !stripShows || detailsShown) && (
+          (propertiesOrphaned ||
+            activeTab?.content === 'properties' ||
+            !stripShows ||
+            detailsShown) && (
             <RecordProperties
               key={`props:${entry.path}`}
               entry={entry}

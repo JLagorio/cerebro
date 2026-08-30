@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -820,6 +820,86 @@ describe('DetailPanel', () => {
       expect(
         above(screen.getByTestId('detail-knowledge'), screen.getByTestId('view-tab-embed')),
       ).toBe(true);
+    });
+
+    /**
+     * A record's properties must be reachable from at least ONE surface, and
+     * the peek is the only surface a peek user has (M45.6 review).
+     *
+     * A type may declare tabs that ALL refuse the stack — every one Sections
+     * or View. The record PAGE survives it: `DocSidePanel` renders the whole
+     * unscoped stack beside the canvas whatever tab is open. The peek has no
+     * side panel, so the same type left the record's groups and loose fields
+     * with nowhere at all to render — only the heading strip survived,
+     * because it sits outside the tab gate. The peek takes the side panel's
+     * job instead: no tab bears properties, so the stack renders unscoped.
+     */
+    it('shows the whole stack when NO tab of the type bears properties', () => {
+      withTabs(
+        [
+          { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+          { id: 'notes', name: 'Notes', content: 'sections' },
+        ],
+        // A heading too, because it hides the second half of the hole: the
+        // strip's expander is offered on Overview tabs only, so a stack
+        // folded behind a toggle nothing renders is just as unreachable.
+        {
+          heading: ['status'],
+          groups: [{ id: 'g-alpha', name: 'Alpha', fields: ['priority'] }],
+        },
+      );
+      render(<DetailPanel />);
+      // The view tab's own content still renders…
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      // …and so does every property that would otherwise have vanished: the
+      // grouped one, the loose remainder, and the way to add more. Scoped to
+      // the GROUP, because the embedded table below carries a column of the
+      // same name — the peek shows `Priority` twice here, and only one of
+      // them is the record's own property.
+      const group = screen.getByTestId('property-group');
+      expect(group.getAttribute('data-group')).toBe('g-alpha');
+      expect(within(group).getByText('Priority')).toBeTruthy();
+      // The undeclared key rides the stack's remainder, outside every group.
+      expect(within(group).queryByText('Channel')).toBeNull();
+      expect(screen.getAllByText('field-ops').length).toBeGreaterThan(0);
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // Unscoped, so pressing the other tab changes the tab's content and
+      // nothing about the stack — there is no tab to filter it for.
+      fireEvent.click(screen.getByTestId('record-tab-notes'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.getByTestId('property-group').getAttribute('data-group')).toBe('g-alpha');
+    });
+
+    /**
+     * `RecordProperties` is keyed by PATH, never by tab — pinned here because
+     * adding the tab id to that key breaks nothing else in the suite.
+     *
+     * The state the stack owns is about the RECORD (a reveal the user asked
+     * for, an open add-property flyout), never about a tab: the fields it
+     * shows are derived from props on every render. Keying by tab would
+     * discard that state on every press and buy nothing back, so a press
+     * must leave it standing.
+     */
+    it('keeps a reveal the user asked for across a tab press', () => {
+      // No layout: the stack is flat, so this case turns on the keying alone
+      // and not on which sections a tab holds. `due` is empty on fld-1, so
+      // hide_when_empty folds it and the expander appears.
+      const entries = withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'properties' }]);
+      const typeProps = entries.find((e) => e.path === 'types/work-item.md')!.properties as unknown;
+      (typeProps as { fields: Record<string, unknown> }).fields.due = {
+        kind: 'date',
+        visibility: 'hide_when_empty',
+      };
+      useVaultStore.setState({ entries: [...entries] });
+      render(<DetailPanel />);
+      const toggle = () => screen.getByTestId('hidden-properties-toggle');
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      fireEvent.click(toggle());
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      // A different tab, the same stack: the reveal is still open.
+      fireEvent.click(screen.getByTestId('record-tab-props'));
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
     });
 
     // The peek's own chrome is about the RECORD, not about a tab: it stays
