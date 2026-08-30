@@ -1,31 +1,21 @@
-import React, { useId, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { useEscapeLayer } from '@/components/ui/Popover';
-
-/**
- * Puts the open listbox on the layer stack (M16.34).
- *
- * The Escape branch in `onKeyDown` below is a React BUBBLE handler, and its
- * comment promised that "an open dropdown must swallow Escape before global
- * listeners". That was true when the global listeners bubbled too. M16.1
- * moved them to `window` in the CAPTURE phase, which runs before any React
- * handler — so the promise quietly inverted, and a Dropdown open inside a
- * Popover let Escape close the POPOVER out from under it. The listbox
- * appeared to close as well, but only because its parent had unmounted.
- *
- * A child component, so the layer exists exactly as long as the listbox does:
- * a hook in the parent would hold one open for a closed menu.
- */
-function DropdownEscapeLayer({ onClose }: { onClose: () => void }) {
-  useEscapeLayer(onClose);
-  return null;
-}
+import { Popover } from '@/components/ui/Popover';
 
 /**
  * DS dropdown (M2 Task 2): a custom listbox-button replacing native selects
  * in toolbars — native popups can't carry DS styling, icons, or check marks.
- * Anchored like FieldPopover; render context needs no `relative` wrapper
- * (the component brings its own).
+ *
+ * The menu is a `Popover` (M46.3). It used to be an `absolute` panel inside
+ * the trigger's own `relative` wrapper, which is precisely the pre-M16.1
+ * mistake `Popover`'s header describes: a panel rendered in place is CLIPPED
+ * by any scrolling ancestor, and one near the bottom of the window opens off
+ * the screen instead of flipping up. Both were live — MEASURED in the New
+ * list dialog, whose body is `overflow: auto`: the "First view" menu lost
+ * everything below Calendar to the dialog's edge, and the source-type menu
+ * lost everything below Type. Adopting the primitive also retires this
+ * file's own escape layer and its `fixed inset-0` backdrop, which `Popover`
+ * brings with it.
  */
 export interface DropdownOption {
   value: string;
@@ -57,6 +47,12 @@ export function Dropdown({
 }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
+  // The trigger's width at the moment it opened. `min-w-full` used to say
+  // this, and stopped meaning anything once the panel left the subtree: the
+  // menu is at least as wide as the button and grows for a long option,
+  // which is why this is a minimum and not `matchAnchorWidth`.
+  const [minWidth, setMinWidth] = useState<number>();
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
   const listId = useId();
   const selectedIndex = Math.max(
     0,
@@ -66,6 +62,7 @@ export function Dropdown({
 
   const openMenu = () => {
     setActive(selectedIndex);
+    setMinWidth(anchorRef.current?.getBoundingClientRect().width);
     setOpen(true);
   };
   const pick = (v: string) => {
@@ -82,8 +79,8 @@ export function Dropdown({
       return;
     }
     if (e.key === 'Escape') {
-      // Belt only. `DropdownEscapeLayer` handles this from the layer stack
-      // before the key ever reaches React, and is what makes the dropdown win
+      // Belt only. The `Popover` owns Escape from the layer stack before the
+      // key ever reaches React, and is what makes an open dropdown win
       // against an enclosing popover; this branch survives for the case where
       // the event is dispatched at the element rather than at the window.
       e.stopPropagation();
@@ -110,8 +107,7 @@ export function Dropdown({
   };
 
   return (
-    <span className="relative inline-flex" style={{ width }} onKeyDown={onKeyDown}>
-      {open && <DropdownEscapeLayer onClose={() => setOpen(false)} />}
+    <span ref={anchorRef} className="relative inline-flex" style={{ width }} onKeyDown={onKeyDown}>
       <button
         type="button"
         aria-label={label}
@@ -121,61 +117,49 @@ export function Dropdown({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         style={{ height: size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h)' }}
-        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-sm text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
+        className="motion-hover inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-sm text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
       >
         {selected?.icon && <Icon name={selected.icon} size={13} color="var(--n-500)" />}
         <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? ''}</span>
         <Icon name="chevron-down" size={14} color="var(--n-500)" />
       </button>
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close menu"
-            tabIndex={-1}
-            onClick={() => setOpen(false)}
-            // A full-screen backdrop swallows wheel events — the app "stops
-            // scrolling" while any menu is open. Scrolling dismisses instead.
-            onWheel={() => setOpen(false)}
-            className="fixed inset-0 z-40 cursor-default bg-transparent"
-          />
-          <div
-            id={listId}
-            role="listbox"
-            aria-label={label}
-            // The arrow-key highlight was paint only (M16.35): it shaded a row
-            // and told assistive tech nothing, because DOM focus never leaves
-            // the trigger button. `aria-activedescendant` is what names the
-            // shaded row for a screen reader — without it the listbox reads as
-            // if nothing in it were current, and Enter appeared to pick at
-            // random. The ids come from the same `useId` that names the list.
-            aria-activedescendant={
-              options[active] === undefined ? undefined : `${listId}-${options[active].value}`
-            }
-            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
-          >
-            <div className="max-h-[264px] overflow-y-auto">
-              {options.map((o, i) => (
-                <button
-                  key={o.value}
-                  id={`${listId}-${o.value}`}
-                  type="button"
-                  role="option"
-                  aria-selected={o.value === value}
-                  onMouseEnter={() => setActive(i)}
-                  onClick={() => pick(o.value)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 ${
-                    i === active ? 'bg-n-50' : ''
-                  }`}
-                >
-                  {o.icon && <Icon name={o.icon} size={13} color="var(--n-500)" />}
-                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                  {o.value === value && <Icon name="check" size={14} color="var(--cortex-600)" />}
-                </button>
-              ))}
-            </div>
+        <Popover
+          anchorRef={anchorRef}
+          onClose={() => setOpen(false)}
+          role="listbox"
+          ariaLabel={label}
+          id={listId}
+          // DOM focus never leaves the trigger button, so the shaded row is
+          // paint only until something names it (M16.35). Without this the
+          // listbox reads as if nothing in it were current, and Enter
+          // appeared to pick at random.
+          activeDescendant={
+            options[active] === undefined ? undefined : `${listId}-${options[active].value}`
+          }
+          className="whitespace-nowrap rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
+        >
+          <div className="max-h-[264px] overflow-y-auto" style={{ minWidth }}>
+            {options.map((o, i) => (
+              <button
+                key={o.value}
+                id={`${listId}-${o.value}`}
+                type="button"
+                role="option"
+                aria-selected={o.value === value}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(o.value)}
+                className={`motion-hover flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 ${
+                  i === active ? 'bg-n-50' : ''
+                }`}
+              >
+                {o.icon && <Icon name={o.icon} size={13} color="var(--n-500)" />}
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {o.value === value && <Icon name="check" size={14} color="var(--cortex-600)" />}
+              </button>
+            ))}
           </div>
-        </>
+        </Popover>
       )}
     </span>
   );
