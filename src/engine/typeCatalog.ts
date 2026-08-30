@@ -11,7 +11,6 @@
 
 import { isTemplate } from '@/lib/templates';
 import { DEFAULT_TIME_FORMAT } from './dates';
-import type { LayoutTab } from './layout';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -305,54 +304,13 @@ export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
  * surface hand-rolls the "does a strip exist" gate a second time. The layout
  * editor's canvas is the strip's third host but not this function's reader:
  * it renders a staged draft, not a saved type's tabs.
+ *
+ * A tab's roster has NO bearing on where properties render (M46.1): the
+ * property stack stands above the strip, on every tab, so no module here
+ * answers "which tab holds this section".
  */
 export function typeTabs(typeName: string, schema: Schema): TabDef[] {
   const saved = schema.types.get(typeName)?.tabs ?? [];
   if (saved.length > 0) return saved;
   return [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
-}
-
-/**
- * Does this tab render the property stack at all (M45.6)? `sections` and
- * `view` tabs ARE their content — free text, an embedded database — and the
- * record surfaces already skip the stack on both, so a section assigned to
- * one would be invisible. The layout editor's "Move to tab…" offers exactly
- * the tabs this answers true for.
- */
-export function tabBearsProperties(tab: TabDef): boolean {
-  return tab.content === 'overview' || tab.content === 'properties';
-}
-
-/**
- * The `LayoutTab` seam `resolveLayout` takes (M45.6) — built HERE because
- * this module owns the tab roster and `layout.ts` deliberately does not.
- * Two facts, one place:
- *
- * - **default** = the first PROPERTY-BEARING tab. Untabbed sections — every
- *   section in every vault written before M45.6 — call it home.
- * - **canHoldSections** = the type still declares that tab id AND that tab
- *   still bears properties. Both conditions fold in here, on the roster
- *   side, so `resolveLayout` gets one decision about one id. Deleting a tab
- *   and re-kinding it to `sections`/`view` strand a section identically —
- *   the surfaces render no property stack on either — so they must fall back
- *   identically. Liveness alone would miss the re-kind, which no
- *   group-editor refusal can cover: the content kind changes AFTER the
- *   assignment.
- *
- * Both failure modes fail VISIBLE: a roster with no property-bearing tab
- * falls back to the first tab, and an `activeId` no tab wears (a stale
- * selection the caller did not resolve) counts as the default. Untabbed
- * sections always have exactly one home, because a section with none is a
- * section the user cannot recover.
- */
-export function layoutTabScope(tabs: TabDef[], activeId: string): LayoutTab {
-  const fallback = tabs.find(tabBearsProperties) ?? tabs[0];
-  return {
-    id: activeId,
-    isDefault:
-      fallback === undefined || !tabs.some((t) => t.id === activeId)
-        ? true
-        : activeId === fallback.id,
-    canHoldSections: (tabId) => tabs.some((t) => t.id === tabId && tabBearsProperties(t)),
-  };
 }

@@ -4,16 +4,14 @@ import { makeEntry } from './testHelpers';
 import {
   isLockedField,
   isSystemType,
-  layoutTabScope,
   listTypes,
   serializeFields,
   systemTypeSpec,
-  tabBearsProperties,
   typePresentation,
   typeStyle,
   typeTabs,
 } from './typeCatalog';
-import type { Entry, FieldDef, TabDef } from './types';
+import type { Entry, FieldDef } from './types';
 
 const typeDoc = (title: string, patch: Parameters<typeof makeEntry>[0] = {}): Entry =>
   makeEntry({
@@ -198,63 +196,5 @@ describe('typeTabs (M44.5)', () => {
       }),
     ];
     expect(typeTabs('Work item', buildSchema(entries)).map((t) => t.id)).toEqual(['spec']);
-  });
-});
-
-describe('layoutTabScope (M45.6)', () => {
-  const tab = (id: string, content: TabDef['content']): TabDef => ({
-    id,
-    name: id,
-    icon: null,
-    content,
-  });
-
-  it('makes the first PROPERTY-BEARING tab the default, not the first tab', () => {
-    // A sections or view tab renders its own content instead of the property
-    // stack, so an untabbed section homed there would be invisible.
-    const tabs = [tab('spec', 'sections'), tab('details', 'properties'), tab('more', 'overview')];
-    expect(layoutTabScope(tabs, 'details').isDefault).toBe(true);
-    expect(layoutTabScope(tabs, 'spec').isDefault).toBe(false);
-    expect(layoutTabScope(tabs, 'more').isDefault).toBe(false);
-  });
-
-  it('falls back to the first tab when no tab bears properties', () => {
-    // Nothing renders a property stack there anyway — but isDefault stays
-    // total, so an untabbed section always has exactly one home.
-    const tabs = [tab('spec', 'sections'), tab('rows', 'view')];
-    expect(layoutTabScope(tabs, 'spec').isDefault).toBe(true);
-    expect(layoutTabScope(tabs, 'rows').isDefault).toBe(false);
-  });
-
-  it('answers can-hold from the roster — the engine holds none of it', () => {
-    const scope = layoutTabScope([tab('spec', 'overview'), tab('details', 'overview')], 'details');
-    expect(scope.id).toBe('details');
-    expect(scope.canHoldSections('spec')).toBe(true);
-    expect(scope.canHoldSections('deleted-tab')).toBe(false);
-  });
-
-  it('a tab that stopped BEARING properties can no longer hold sections either', () => {
-    // The two-click strand: assign a section to a `properties` tab, then
-    // re-kind that tab to `view`. It is still declared, so liveness alone
-    // would report it fine while every surface renders no property stack —
-    // the section would be invisible everywhere and unreachable in the
-    // customizer. Folding the content kind in here makes it fall back.
-    const scope = layoutTabScope([tab('rows', 'view'), tab('notes', 'sections')], 'details');
-    expect(scope.canHoldSections('rows')).toBe(false);
-    expect(scope.canHoldSections('notes')).toBe(false);
-  });
-
-  it('fails VISIBLE: an empty roster or an id no tab wears counts as the default', () => {
-    // The only safe failure. If the caller hands us a tab we cannot place,
-    // untabbed sections must still land somewhere, or they are unrecoverable.
-    expect(layoutTabScope([], 'overview').isDefault).toBe(true);
-    expect(layoutTabScope([tab('spec', 'overview')], 'stale').isDefault).toBe(true);
-  });
-
-  it('names the property-bearing tabs, the set a section may be moved onto', () => {
-    expect(tabBearsProperties(tab('a', 'overview'))).toBe(true);
-    expect(tabBearsProperties(tab('b', 'properties'))).toBe(true);
-    expect(tabBearsProperties(tab('c', 'sections'))).toBe(false);
-    expect(tabBearsProperties(tab('d', 'view'))).toBe(false);
   });
 });

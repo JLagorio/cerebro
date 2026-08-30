@@ -7,16 +7,12 @@ import type { LayoutConfig } from './types';
  * other group keeps its identity), and every no-op returns the SAME
  * reference, so a caller can `!==`-gate a draft commit.
  *
- * The editors are roster-blind — a field name is just a string, and since
- * M45.6 so is a TAB id (`setGroupTab` writes any string; which tabs exist is
- * the caller's knowledge, never this module's). `rest` is DERIVED — the
- * names no container claims (layout.ts computes it against the live roster)
- * — so moving a name to `rest` means deleting it from every container, and a
- * name nobody placed is already there. Dead pointers are not this module's
- * concern: a dead FIELD pointer renders as nothing and prunes on the
- * editor's Apply (spec §4), the same contract favorites keep, while a dead
- * TAB pointer falls back onto the default tab, visible (layout.ts's
- * `LayoutTab`).
+ * The editors are roster-blind — a field name is just a string. `rest` is
+ * DERIVED — the names no container claims (layout.ts computes it against the
+ * live roster) — so moving a name to `rest` means deleting it from every
+ * container, and a name nobody placed is already there. Dead pointers are
+ * not this module's concern: a dead FIELD pointer renders as nothing and
+ * prunes on the editor's Apply (spec §4), the same contract favorites keep.
  */
 
 /** Where a field can be addressed: the heading strip, the derived rest
@@ -104,56 +100,20 @@ export function moveField(
 
 /** Appends an empty group named "New group" under a freshly minted id and
  * reports that id, so the caller can open its editor on the new section.
- * `taken` must carry ALL draft group ids (mintGroupId's contract).
- *
- * `tab` (M45.6) mints the section ALREADY belonging to a tab — the + button
- * adds to the tab you are looking at, not to the default one. Omitted, null
- * or blank mints it untabbed, the key absent, exactly as before the key
- * existed. */
+ * `taken` must carry ALL draft group ids (mintGroupId's contract). A section
+ * has no home to choose (M46.1): it renders above the tab strip, on every
+ * tab, so there is nothing for the caller to say about where it lands. */
 export function addGroup(
   layout: LayoutConfig,
   taken: string[],
-  tab?: string | null,
 ): { layout: LayoutConfig; id: string } {
   const id = mintGroupId(taken);
-  const owner = typeof tab === 'string' && tab.trim() !== '' ? tab.trim() : null;
-  const group = { id, name: 'New group', fields: [] };
   return {
     layout: {
       heading: layout.heading,
-      groups: [...layout.groups, owner === null ? group : { ...group, tab: owner }],
+      groups: [...layout.groups, { id, name: 'New group', fields: [] }],
     },
     id,
-  };
-}
-
-/**
- * Moves a section to a tab, or back to untabbed with `null` (M45.6). The
- * editors stay tab-roster-blind the way they are roster-blind about field
- * names: a tab id is just a string here, and a section pointing at a tab
- * that later dies falls back visibly on render (layout.ts's `LayoutTab`),
- * so nothing needs validating at this door.
- *
- * A blank string means the same as `null` — the parse door spells absent
- * that way too. Setting the tab a group already wears, clearing an already
- * untabbed one, and an unknown id are all no-ops.
- */
-export function setGroupTab(layout: LayoutConfig, id: string, tab: string | null): LayoutConfig {
-  const idx = layout.groups.findIndex((g) => g.id === id);
-  if (idx === -1) return layout;
-  const next = typeof tab === 'string' && tab.trim() !== '' ? tab.trim() : null;
-  const current = layout.groups[idx].tab ?? null;
-  if (next === current) return layout;
-  return {
-    heading: layout.heading,
-    groups: layout.groups.map((g, i) => {
-      if (i !== idx) return g;
-      // Rebuilt key by key rather than spread-with-undefined: clearing must
-      // REMOVE `tab`, or the deviations-only serializer would carry a
-      // `tab: undefined` into the vault bytes.
-      const bare = { id: g.id, name: g.name, fields: g.fields };
-      return next === null ? bare : { ...bare, tab: next };
-    }),
   };
 }
 

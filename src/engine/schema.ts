@@ -238,24 +238,19 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
     return true;
   });
 
+  // A group carries id, name and fields and nothing else. M45.6's `tab:` key
+  // is not read (M46.1 — a section belongs to the record, not to a tab), and
+  // an unknown key is simply not carried: a vault written by a local M45.6
+  // build parses as though the key were never there and sheds it on the next
+  // Apply, which is the only accommodation that reversal gets.
   const groups = items.map((g, i) => {
     const id = owns[i] ? declaredIds[i] : mintGroupId(i, taken);
     taken.add(id);
-    const base = {
+    return {
       id,
       name: typeof g.name === 'string' && g.name.trim() !== '' ? g.name.trim() : `Group ${i + 1}`,
       fields: claimFieldNames(g.fields, claimed),
     };
-    // M45.6 — `tab:` is tolerant BY VALUE like every other key here: a
-    // number, a bool, an array, a blank string all degrade to ABSENT, which
-    // means the default tab, which is what the group did before the key
-    // existed. The key is OMITTED rather than set to undefined so the
-    // deviations-only serializer round-trips it out of the vault bytes.
-    // Liveness is NOT checked here: the parser has no tab roster, and a
-    // section pointing at a deleted tab must survive to fall back visibly
-    // on render (resolveLayout owns that), not be erased at the door.
-    const tab = typeof g.tab === 'string' && g.tab.trim() !== '' ? g.tab.trim() : null;
-    return tab === null ? base : { ...base, tab };
   });
 
   return { heading, groups };
@@ -263,22 +258,13 @@ export function parseLayoutConfig(raw: unknown): LayoutConfig {
 
 /** LayoutConfig → the `layout:` frontmatter value. Deviations only: the
  * defaults = null (patchFrontmatter deletes the key), an empty heading is
- * omitted, groups always serialize whole — an empty group is a real drop
- * target the editor keeps — and `tab:` is written only when the section
- * names one (M45.6), so an untabbed group's bytes are exactly what they were
- * before the key existed. */
+ * omitted, and groups always serialize whole — an empty group is a real drop
+ * target the editor keeps. */
 export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> | null {
   const out: Record<string, unknown> = {};
   if (l.heading.length !== LAYOUT_DEFAULTS.heading.length) out.heading = [...l.heading];
   if (l.groups.length !== LAYOUT_DEFAULTS.groups.length) {
-    out.groups = l.groups.map((g) => {
-      const group: Record<string, unknown> = { id: g.id, name: g.name, fields: [...g.fields] };
-      // Both doors spell "absent" the same way — TRIMMED-blank, matching the
-      // parser above (and setGroupTab/addGroup). A door that wrote `tab: '  '`
-      // for what the other reads as absent would break parse(serialize(x)).
-      if (typeof g.tab === 'string' && g.tab.trim() !== '') group.tab = g.tab.trim();
-      return group;
-    });
+    out.groups = l.groups.map((g) => ({ id: g.id, name: g.name, fields: [...g.fields] }));
   }
   return Object.keys(out).length === 0 ? null : out;
 }

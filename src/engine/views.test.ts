@@ -1522,9 +1522,19 @@ describe('tab list on a Type doc (M44.5)', () => {
     const tabs = [
       { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
       { id: 'spec', name: 'Spec', icon: 'file-text', content: 'sections' },
-      { id: 'props', name: 'Fields', icon: null, content: 'properties' },
     ];
     expect(parseTabList(serializeTabList(parseTabList(tabs)))).toEqual(parseTabList(tabs));
+  });
+
+  it('re-kinds the retired `properties` tab to overview, keeping its id (M46.1)', () => {
+    // A tab that IS the property stack is the shape the ruling forbids — the
+    // stack stands above the strip on every tab now. It re-kinds to the page
+    // body rather than falling to the generic unrecognised default, and it
+    // is never dropped: `_sections` keys per-record content by this id.
+    const parsed = parseTabList([{ id: 'props', name: 'Fields', content: 'properties' }]);
+    expect(parsed).toEqual([{ id: 'props', name: 'Fields', icon: null, content: 'overview' }]);
+    // And the retired word never reaches the vault again.
+    expect(serializeTabList(parsed)[0]).toMatchObject({ content: 'overview' });
   });
 
   it('mints unique ids and drops a content kind nothing renders', () => {

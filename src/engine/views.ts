@@ -980,6 +980,14 @@ function mintTabId(i: number, taken: Set<string>): string {
  * (first occurrence wins a duplicate, same as before); pass two hands each
  * entry its reservation or, lacking one, the first `tab-N` nothing already
  * answers to.
+ *
+ * The retired `properties` kind (M44.5–M46.1) is the one kind re-mapped by
+ * NAME rather than falling to the generic unrecognised default: it is not
+ * garbage, it is a real tab a local M45.6 build wrote, and what it meant —
+ * show the property stack — every tab now does anyway. It becomes an
+ * `overview` (the page body) so the tab keeps a body to render, and it is
+ * never DROPPED, because its id is what `_sections` keys per-record content
+ * by.
  */
 export function parseTabList(raw: unknown): TabDef[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
@@ -998,9 +1006,11 @@ export function parseTabList(raw: unknown): TabDef[] {
     const id = owns[i] ? declaredIds[i] : mintTabId(i, taken);
     taken.add(id);
     const content: TabDef['content'] =
-      typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
-        ? (obj.content as TabDef['content'])
-        : 'sections';
+      obj.content === 'properties'
+        ? 'overview'
+        : typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
+          ? (obj.content as TabDef['content'])
+          : 'sections';
     const tab: TabDef = {
       id,
       name:

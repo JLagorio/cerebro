@@ -544,60 +544,11 @@ describe('layout config (M45.1)', () => {
     expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
   });
 
-  it('reads a group tab tolerantly — a non-string or a blank is ABSENT, not a tab', () => {
-    // Absent is the default tab (M45.6), which is what every group had before
-    // the key existed — so garbage degrading to absent degrades to today.
-    const l = parseLayoutConfig({
-      groups: [
-        { id: 'a', name: 'A', fields: [], tab: '  spec  ' },
-        { id: 'b', name: 'B', fields: [], tab: 7 },
-        { id: 'c', name: 'C', fields: [], tab: true },
-        { id: 'd', name: 'D', fields: [], tab: '   ' },
-        { id: 'e', name: 'E', fields: [], tab: ['spec'] },
-        { id: 'f', name: 'F', fields: [], tab: null },
-      ],
-    });
-    expect(l.groups[0].tab).toBe('spec');
-    for (const g of l.groups.slice(1)) expect(g.tab).toBeUndefined();
-    // Not merely undefined-valued: the key must be gone, or the deviations-only
-    // serializer would round-trip `tab: undefined` into the vault bytes.
-    expect(Object.keys(l.groups[1])).toEqual(['id', 'name', 'fields']);
-  });
-
-  it('serializes tab only when set — an untabbed group is byte-identical to pre-M45.6', () => {
-    expect(
-      serializeLayoutConfig({
-        heading: [],
-        groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
-      }),
-    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }] });
-    expect(
-      serializeLayoutConfig({
-        heading: [],
-        groups: [{ id: 'group-1', name: 'Main', fields: ['due'], tab: 'spec' }],
-      }),
-    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'], tab: 'spec' }] });
-  });
-
-  it('spells absent identically at both doors — a whitespace tab never reaches the vault', () => {
-    // The serializer trims like the parser does. Guarding on `!== ''` alone
-    // would write `tab: '   '`, which parses back ABSENT: parse(serialize(x))
-    // would stop equalling x for that input.
-    expect(
-      serializeLayoutConfig({
-        heading: [],
-        groups: [{ id: 'group-1', name: 'Main', fields: [], tab: '   ' }],
-      }),
-    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: [] }] });
-    expect(
-      serializeLayoutConfig({
-        heading: [],
-        groups: [{ id: 'group-1', name: 'Main', fields: [], tab: ' spec ' }],
-      }),
-    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: [], tab: 'spec' }] });
-  });
-
-  it('round-trips a tabbed layout', () => {
+  it('ignores a group `tab:` key and never writes one back (M46.1)', () => {
+    // The only accommodation the reversal gets: a `layout:` written by a
+    // local M45.6 build parses as though the key were never there — no
+    // throw, no migration, no compatibility branch — and sheds it on the
+    // next Apply. No user of a shipped build can have one.
     const l = parseLayoutConfig({
       heading: ['status'],
       groups: [
@@ -605,7 +556,20 @@ describe('layout config (M45.1)', () => {
         { id: 'g2', name: 'Loose', fields: ['team'] },
       ],
     });
-    expect(l.groups.map((g) => g.tab)).toEqual(['spec', undefined]);
+    expect(l.groups.map((g) => Object.keys(g))).toEqual([
+      ['id', 'name', 'fields'],
+      ['id', 'name', 'fields'],
+    ]);
+    expect(l.groups.map((g) => g.id)).toEqual(['g1', 'g2']);
+    // The key does not survive a round-trip: what the vault gets back is a
+    // pre-M45.6 group, byte for byte.
+    expect(serializeLayoutConfig(l)).toStrictEqual({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Main', fields: ['due'] },
+        { id: 'g2', name: 'Loose', fields: ['team'] },
+      ],
+    });
     expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
   });
 

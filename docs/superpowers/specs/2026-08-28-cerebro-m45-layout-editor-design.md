@@ -159,6 +159,23 @@ layout:
 - Structure (Simple/Tabbed) is NOT stored — it is derived from `tabs:`
   (empty/absent = Simple). One source of truth.
 
+> **Amendment, M46.1 (2026-08-29) — `tab:` on a group is REVERSED.** The
+> product owner ruled after live-testing M45.6: *"sorry tabs are only for
+> related data sources. fields shwo above. just like notion."* Confirmed
+> against the live Notion app — the property strip renders above the tab
+> strip and shows on every tab. The three bullets above that describe `tab:`,
+> its default, its dead-pointer fallback and the remainder's "no tab
+> dimension" rationale stand as the record of a superseded ruling; the
+> shipped model is that a layout has NO tab dimension at all. `LayoutGroup`
+> carries `id`, `name` and `fields`; the `tab: spec` in the YAML example
+> above is not written or read any more (a vault carrying one parses as
+> though the key were absent and sheds it on the next Apply — the only
+> accommodation the reversal gets). The `properties` tab kind retires with
+> it: `TAB_CONTENTS` is `overview | sections | view`, and a stored
+> `content: properties` re-kinds to `overview` at the parse door rather than
+> being dropped, because a tab's id is what `_sections` keys per-record
+> content by. See `docs/superpowers/specs/2026-08-29-cerebro-m46-notion-parity-polish.md` §2.
+
 ## 5. Slices
 
 - **M45.1 — engine + door**: `LayoutConfig` parse/serialize (+ tests over
