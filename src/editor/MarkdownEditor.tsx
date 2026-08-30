@@ -439,6 +439,19 @@ export function MarkdownEditor({
       icon: <Icon name="waypoints" size={14} />,
       onItemClick: () => insertBlockAtCursor({ type: 'mermaid', props: { code: '' } }),
     },
+    {
+      // M47.3, Door 1 of the spec's two: show a database that already exists.
+      // Inserted UNSET and asks in place, the way Notion does — a modal that
+      // demanded the answer before the block existed would be the New-list
+      // dialog again, which is the ceremony this milestone is deleting.
+      title: 'Database',
+      subtext: 'Show a database — tasks, reading list, anything',
+      group: 'Advanced blocks',
+      aliases: ['database', 'table', 'list', 'records', 'view', 'embed'],
+      icon: <Icon name="table-2" size={14} />,
+      onItemClick: () =>
+        insertBlockAtCursor({ type: 'database', props: { database: '', view: '' } }),
+    },
   ];
 
   // --- Templates in the slash menu (M2.x feedback) ------------------------

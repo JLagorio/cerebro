@@ -320,6 +320,11 @@ export const DatabaseBlock = createReactBlockSpec(
       <ConnectedDatabaseBlock
         database={String(props.block.props.database ?? '')}
         view={String(props.block.props.view ?? '')}
+        // The block rewrites its own pointer. Passed rather than assumed so
+        // the view keeps a real read-only mood: rendered outside an editor
+        // there is no document to write back to, and a picker that silently
+        // did nothing would be worse than no picker.
+        onChange={(next) => props.editor.updateBlock(props.block, { props: next } as never)}
       />
     ),
     /**
