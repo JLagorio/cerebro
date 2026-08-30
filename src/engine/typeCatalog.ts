@@ -295,9 +295,16 @@ export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
 }
 
 /**
- * The record page's tabs for a type (M44.5) — same contract as `typeViews`:
- * a type that saved none gets the Overview default, and nothing is written
- * to its Type doc until the user makes the tabs their own.
+ * A record's tabs for a type (M44.5) — same contract as `typeViews`: a type
+ * that saved none gets the Overview default, and nothing is written to its
+ * Type doc until the user makes the tabs their own.
+ *
+ * The record PAGE was the only reader when this landed; since M45.6 the PEEK
+ * shows the same tabs, and both reach them through `recordTabSet`
+ * (src/detail/RecordTabs.tsx) rather than calling here directly — so neither
+ * surface hand-rolls the "does a strip exist" gate a second time. The layout
+ * editor's canvas is the strip's third host but not this function's reader:
+ * it renders a staged draft, not a saved type's tabs.
  */
 export function typeTabs(typeName: string, schema: Schema): TabDef[] {
   const saved = schema.types.get(typeName)?.tabs ?? [];

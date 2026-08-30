@@ -24,7 +24,7 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { uniqueName } from '@/views/ViewTabs';
 
 /**
- * The record page's tab strip (M44.5) — a focused subset of `ViewTabs`
+ * A record's tab strip (M44.5) — a focused subset of `ViewTabs`
  * (`src/views/ViewTabs.tsx`): same tablist semantics, same popover mechanics,
  * fewer features (no layout picker, no icon picker, no settings aside).
  *
@@ -199,7 +199,7 @@ export function RecordTabs({
     if (next.length === 0) return; // the menu never offers this, but belt and braces
     if (tab.id === activeId) {
       // The open tab is dying — hand the selection to a neighbour BEFORE the
-      // set shrinks, so the page never renders a tab that no longer exists.
+      // set shrinks, so the surface never renders a tab that no longer exists.
       const index = tabs.findIndex((t) => t.id === tab.id);
       const survivor = tabs[index - 1] ?? tabs[index + 1];
       onSelect(survivor.id);
@@ -244,7 +244,7 @@ export function RecordTabs({
       { icon: 'copy', label: 'Duplicate', onSelect: () => duplicate(tab, index) },
     ];
     // The last tab is the only way to look at the record; removing it would
-    // leave the page with no surface at all.
+    // leave the surface with nothing to show at all.
     if (tabs.length > 1) {
       items.push({
         icon: 'trash-2',
@@ -652,8 +652,8 @@ function rewireTab(tab: TabDef, value: ViewSourceValue): TabDef {
 /**
  * Create a tab: name it and pick what it renders, in one step — the
  * `NewViewForm` shape. Sections is the default because a NEW tab is almost
- * always a place to write; Overview and Properties re-arrange what the page
- * already shows; View (M45.4) opens the drill-in below the tiles.
+ * always a place to write; Overview and Properties re-arrange what the
+ * surface already shows; View (M45.4) opens the drill-in below the tiles.
  */
 function NewTabForm({
   takenNames,

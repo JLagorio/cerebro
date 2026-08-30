@@ -123,6 +123,21 @@ describe('RecordTabs (M44.5)', () => {
     expect(new Set(next.map((t) => t.id)).size).toBe(3);
     expect(next[1].content).toBe('overview');
   });
+
+  // M45.6 — the strip's horizontal inset is the HOST's measurement, not its
+  // own: the page and the editor canvas are 24px columns, the peek is a 16px
+  // one, and a strip that carried the page's gutter into the panel would sit
+  // misaligned under everything above it. Default = the page, so the two
+  // older hosts pass nothing.
+  it('sits in the host’s gutter: the page by default, narrower on request', () => {
+    setup();
+    expect(screen.getByTestId('record-tabs').parentElement?.className).toContain('px-6');
+    cleanup();
+    setup({ gutter: 'panel' });
+    const strip = screen.getByTestId('record-tabs').parentElement;
+    expect(strip?.className).toContain('px-4');
+    expect(strip?.className).not.toContain('px-6');
+  });
 });
 
 describe('RecordTabs keyboard contract (M44.5)', () => {

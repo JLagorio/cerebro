@@ -792,9 +792,10 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
 
 /** A block that cannot draw says what is missing and where it pointed — a
  * blank tile is indistinguishable from a block that is still loading. The
- * sentence body is `BrokenNotice`, shared with the record page's view-tab
- * card (M45.4) — a second copy of it is the review-blocking defect the plan
- * names; this shell only adds the widget chrome around it. */
+ * sentence body is `BrokenNotice`, shared with the view-tab card both record
+ * surfaces render (M45.4; the peek joined the page in M45.6) — a second copy
+ * of it is the review-blocking defect the plan names; this shell only adds
+ * the widget chrome around it. */
 function BrokenBlock({
   widget,
   title,

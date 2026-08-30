@@ -1,5 +1,6 @@
 /**
- * Resolution for a record page's `content: 'view'` tab (M45.4).
+ * Resolution for a record's `content: 'view'` tab (M45.4) — read by every
+ * surface that renders one: the page, and the peek since M45.6.
  *
  * A view tab carries a POINTER — `source: { type } | { list, collection? }`,
  * an optional saved-view id, an optional `scope: 'related'` — and this module

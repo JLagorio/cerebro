@@ -232,8 +232,9 @@ export interface TypeDef {
    * type's properties. Always resolved: absent frontmatter yields the
    * defaults (the flat stack), so no consumer null-checks. */
   layout: LayoutConfig;
-  /** `tabs:` on the Type doc (M44.5) — the record page's tab set. [] means
-   * none saved yet; `typeTabs` synthesizes the Overview default. */
+  /** `tabs:` on the Type doc (M44.5) — the tab set every surface that shows
+   * a record of this type renders (the page and the peek since M45.6). []
+   * means none saved yet; `typeTabs` synthesizes the Overview default. */
   tabs: TabDef[];
 }
 
