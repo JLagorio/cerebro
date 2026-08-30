@@ -87,11 +87,22 @@ export default defineConfig({
       // 3071/4000), so a 0.01 gap is real headroom there; branches moved its
       // denominator again (19999 → 20001) at an unchanged 84.66, and keeps
       // the wider margin for it.
+      // M46.2 measured 82.63 statements / 84.87 branches / 77.26 functions /
+      // 82.63 lines. The drag rebuild added four tested primitives that did
+      // not exist (`useDragGesture`, `sortableGeometry`, `dropPartition`,
+      // `BlockDrag`) plus `Grip`, `ResizeHandle` and the motion tokens, and a
+      // slice that adds that much tested code and leaves the floor where it
+      // was is licensing the NEXT one to add none. Same two-run protocol:
+      // statements, lines and functions reported the same numerator and
+      // denominator both times (54608/66086, 3126/4046), so the small gap
+      // there is real headroom; branches moved both (17153/20209 →
+      // 17159/20213, 84.87 → 84.89) and keeps the wider margin, because a
+      // ratchet that trips on its own measurement noise is a broken gate.
       thresholds: {
-        lines: 82.3,
-        statements: 82.3,
-        functions: 76.7,
-        branches: 84.6,
+        lines: 82.6,
+        statements: 82.6,
+        functions: 77.2,
+        branches: 84.8,
       },
     },
   },
