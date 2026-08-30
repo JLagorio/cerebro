@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { normalizeFieldName, RESERVED, type TypeLayoutDraft } from '@/app/typeActions';
 import { Dialog } from '@/components/ui/Dialog';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -278,7 +279,7 @@ export function GroupEditorPopover({
             affordance is absent because the capability is. (A filtered list
             is the other case — see `canReorder`.) */}
         {canReorder ? (
-          <span
+          <Grip
             {...grip}
             onKeyDown={(e) => {
               grip.onKeyDown(e);
@@ -297,16 +298,16 @@ export function GroupEditorPopover({
             data-testid="group-editor-grip"
             // Opacity, not `hidden`: a hidden grip leaves the tab order, and
             // arrow-key reordering is the primitive's whole point.
-            className="flex h-4 w-3 flex-none cursor-grab touch-none items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+            className="opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100"
+          />
         ) : (
           // The cell is the layout; the grip is only its occupant
           // (OptionListEditor's rule). Held empty where no grip renders, so a
-          // row does not jump 18px left the moment the search box filters —
-          // and so rest's rows line up with every other container's.
-          <span className="h-4 w-3 flex-none" />
+          // row does not jump the moment the search box filters — and so
+          // rest's rows line up with every other container's. Its size is the
+          // `row` grip's 18 x 24 slot (M46.2 Task 6), which is what makes the
+          // two cases the same width.
+          <span className="h-6 w-[18px] flex-none" />
         )}
         <Icon name={kindMeta(f.kind).icon} size={13} color="var(--n-400)" />
         <span className="min-w-0 flex-1 truncate text-sm text-n-800">{label}</span>

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { gripClass } from '@/components/ui/Grip';
 import type { ViewDefinition } from '@/engine/types';
 import { ViewTabs } from '@/views/ViewTabs';
 
@@ -162,6 +163,18 @@ describe('reordering tabs (M16.26)', () => {
     const props = setup({ onReorder: vi.fn() });
     fireEvent.keyDown(grip('All work'), { key: 'ArrowLeft' });
     expect(props.onReorder).not.toHaveBeenCalled();
+  });
+
+  it('takes the row grip TRANSPOSED, inside the tab padding it lives in (M46.2 Task 6)', () => {
+    setup({ onReorder: vi.fn() });
+    const el = grip('All work');
+    // Same glyph, same ink, same cursor, same reveal as a list row's grip —
+    // the one thing it gives up is the 18px slot, because the tab's leading
+    // padding is 10px and a wider handle would shove every tab sideways the
+    // moment the pointer arrived (§B1's one prohibition).
+    expect(el.className).toContain(gripClass('tab'));
+    expect(el.className).toContain('cursor-grab');
+    expect(el.className).not.toContain('w-[18px]');
   });
 
   it('no grip at all on a surface that cannot persist the order', () => {

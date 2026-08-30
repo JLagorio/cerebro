@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { canvasCollision, handleLayoutDragEnd } from '@/detail/LayoutCanvas';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
+import { gripClass } from '@/components/ui/Grip';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -330,6 +331,24 @@ describe('the drag layer on the canvas (M45.3 Task 6)', () => {
       // drag control there would render but never fire (Task 6's whole
       // reason for the fragment boundary).
       expect(el.closest('[data-testid="layout-preview-content"]')).toBeNull();
+    }
+  });
+
+  it('both canvas handles are the BLOCK grip, out in the gutter (M46.2 Task 6)', () => {
+    setup();
+    // Kind decides the primitive: a canvas row and a canvas group both MOVE A
+    // BLOCK among blocks, so both take the larger gutter handle — 18 x 24, a
+    // 20px mark in the dimmer ink, its own 4px radius and wash (§B7) — where a
+    // property row, which reorders within a list, takes the row grip.
+    for (const el of [
+      ...screen.getAllByTestId('layout-grip'),
+      ...screen.getAllByTestId('layout-group-grip'),
+    ]) {
+      expect(el.className).toContain(gripClass('block'));
+      expect(el.className).not.toContain(gripClass('row'));
+      // In the gutter, not in the row: `-left-6` is the canvas's own `p-6`,
+      // so the handle never hangs outside the scroller at a narrow width.
+      expect(el.className).toContain('-left-6');
     }
   });
 

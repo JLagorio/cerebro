@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -330,16 +331,16 @@ export function RecordTabs({
               >
                 {/* The grip sits in the tab's own left padding, which is dead
                     space — an appended handle would shove every tab sideways
-                    the moment the pointer arrived. */}
+                    the moment the pointer arrived. `tab` is the row grip
+                    transposed for that 10px slot (M46.2 Task 6). */}
                 <Tooltip label="Drag to reorder">
-                  <span
+                  <Grip
+                    kind="tab"
                     {...sortable.gripProps(tab.id, index)}
                     // Opacity, not `hidden`: a hidden grip is out of the tab
                     // order, and Left/Right reordering needs it reachable.
-                    className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    <Icon name="grip-vertical" size={11} />
-                  </span>
+                    className="absolute inset-y-1 left-0 z-10 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  />
                 </Tooltip>
                 <button
                   type="button"

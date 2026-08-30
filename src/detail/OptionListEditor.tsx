@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -106,12 +107,7 @@ function OptionRow({
     <div style={style} className="group flex flex-col rounded-md px-1 py-1 hover:bg-n-25">
       <div className="flex items-center gap-2">
         {grip !== undefined && (
-          <span
-            {...grip}
-            className="flex flex-none cursor-grab items-center justify-center rounded-xs text-n-300 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+          <Grip {...grip} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
         )}
         <button
           type="button"

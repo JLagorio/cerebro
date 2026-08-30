@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -24,8 +25,15 @@ import type { FieldKind } from '@/engine/types';
  * spending the name's width on one.
  */
 
-/** Label column, in px. Icon (13) + gap (6) + the 96px names always had. */
-export const PROPERTY_LABEL_W = 116;
+/**
+ * Label column, in px. Icon slot (18) + gap (6) + the 96px names always had.
+ *
+ * It was 116 while the icon slot was 13 (M16.6). The slot is the drag grip's,
+ * and the grip is 18 x 24 on every surface now (M46.2 Task 6), so the column
+ * follows it — landing on the 120px the reference measured (§A2) without the
+ * name losing a pixel.
+ */
+export const PROPERTY_LABEL_W = 120;
 
 export interface PropertyRowProps {
   /**
@@ -58,8 +66,9 @@ export interface PropertyRowProps {
   menu?: (args: { close: () => void }) => React.ReactNode;
   /**
    * Turns the kind icon into a drag grip on hover (M16.8). Spread from
-   * `useSortableList().gripProps`. The two share one 13px cell, so a row
-   * neither grows nor shifts when the pointer crosses it.
+   * `useSortableList().gripProps`. The two share one 18 x 24 cell — the
+   * `row` grip's slot — so a row neither grows nor shifts when the pointer
+   * crosses it.
    */
   grip?: GripProps;
   /** Says what dragging this actually changes. */
@@ -136,36 +145,36 @@ export function PropertyRow({
         ].join(' ')}
         style={{ width: PROPERTY_LABEL_W }}
       >
-        {/* Icon and grip occupy the same 13px cell — Notion swaps them in
-            place, and a grip that appended itself would shove every name a
-            glyph to the right the moment the pointer arrived.
+        {/* Icon and grip occupy the same 18 x 24 cell (§A10, §B1) — Notion
+            swaps them in place, and a grip that appended itself would shove
+            every name a glyph to the right the moment the pointer arrived.
+            The cell is the grip's slot, so its size is the primitive's: the
+            13px cell this used to be made a 169px² target where Notion's is
+            432px² (M46.2 Task 6).
 
             Both halves carry `motion-move`, which turns the swap from a hard
             cut into the cross-fade the reference measured (§B1). Notion times
             this one at 0.15s and its gutter cluster at 0.2s; we spend the
             movement token for both rather than mint a third number for a
-            difference nobody can see. The grip's OWN hover wash is left
-            undeclared: it arrives with the grip, so there is no pointer travel
-            for a 20ms guard to smooth, and one element cannot carry two
-            timings in one utility. */}
-        <span className="relative flex h-[13px] w-[13px] flex-none items-center justify-center">
+            difference nobody can see. The grip has no wash of its own at all
+            now (§B4): the label cell's is the row's one highlight, and a grip
+            that painted its own put a second, smaller one inside it. */}
+        <span className="relative flex h-6 w-[18px] flex-none items-center justify-center">
           <Icon
             name={icon ?? kindMeta(kind).icon}
-            size={13}
+            size={16}
             color="var(--n-400)"
             className={grip === undefined ? undefined : 'motion-move group-hover:opacity-0'}
           />
           {grip !== undefined && (
             <Tooltip label={gripHint ?? ''}>
-              <span
+              <Grip
                 {...grip}
                 // Opacity, not `hidden`: a hidden grip is out of the tab
                 // order, and arrow-key reordering is the whole point of the
                 // primitive underneath this.
-                className="motion-move absolute inset-0 flex cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <Icon name="grip-vertical" size={13} />
-              </span>
+                className="absolute inset-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+              />
             </Tooltip>
           )}
         </span>

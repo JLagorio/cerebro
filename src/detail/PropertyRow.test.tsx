@@ -5,6 +5,7 @@ import { PropertyRow, PROPERTY_LABEL_W } from '@/detail/PropertyRow';
 import type { GripProps } from '@/hooks/useSortableList';
 import { kindMeta } from '@/engine/properties';
 import { FIELD_KINDS } from '@/engine/types';
+import { gripClass } from '@/components/ui/Grip';
 import { resolveIcon } from '@/components/ui/Icon';
 
 afterEach(cleanup);
@@ -190,6 +191,26 @@ describe('PropertyRow', () => {
     );
     expect(row().className).toContain('motion-hover');
     expect(row().className).not.toContain('motion-move');
+  });
+
+  it('wears the shared ROW grip, in the type icon slot it shares (M46.2 Task 6)', () => {
+    render(
+      <PropertyRow kind="text" name="a" grip={stubGrip}>
+        <span>v</span>
+      </PropertyRow>,
+    );
+    const handle = screen.getByLabelText('Drag a');
+    // Not "contains a grip-shaped class string": the row spends the primitive,
+    // so a change to the primitive reaches here and a local copy cannot drift.
+    expect(handle.className).toContain(gripClass('row'));
+    // The slot is the grip's, and the icon lives in it too — the swap is in
+    // place (§B1), so the row's width cannot change on hover.
+    const slot = handle.parentElement as HTMLElement;
+    expect(slot.className).toContain('h-6');
+    expect(slot.className).toContain('w-[18px]');
+    expect(slot.querySelector('svg')).toBeTruthy();
+    // §B4: no second, smaller highlight inside the row's own.
+    expect(handle.className).not.toContain('hover:bg-');
   });
 
   it('cross-fades the icon and the grip rather than cutting between them', () => {

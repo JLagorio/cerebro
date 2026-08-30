@@ -11,6 +11,7 @@ import {
 import type { CollisionDetection, DragEndEvent } from '@dnd-kit/core';
 import type { TypeLayoutDraft } from '@/app/typeActions';
 import { DragGhostLayer, InsertionLine, lineHosts } from '@/components/ui/BlockDrag';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
@@ -785,14 +786,18 @@ function AreaDrop({ id, children }: { id: string; children: ReactNode }) {
   );
 }
 
-/** One draggable field row: a gutter grip (the draggable NODE, kept small so
- * it stays out of the row's own geometry while the row itself is inert;
- * DashboardView's grip pattern) beside the row's inert preview. The grip stops
- * click propagation so a press that never became a drag does not double as the
- * shell's click-to-edit.
+/** One draggable field row: a gutter grip (the draggable NODE, out in the
+ * gutter so it stays out of the row's own geometry while the row itself is
+ * inert) beside the row's inert preview. The grip stops click propagation so a
+ * press that never became a drag does not double as the shell's
+ * click-to-edit.
  *
- * The grip's REVEAL is `motion-move`, the same 200ms fade the reference
- * measured on Notion's gutter cluster (§B7).
+ * It is the shared `block` grip (M46.2 Task 6) — 18 x 24, a 20px mark in the
+ * dimmer ink, its own 4px radius and wash — and its REVEAL is `motion-move`,
+ * the same 200ms fade the reference measured on Notion's gutter cluster
+ * (§B7). The offset is 24px rather than the measured 28.5: the canvas's own
+ * gutter is `p-6`, and a handle hung further out than that would clip against
+ * the scroller at narrow widths.
  *
  * The row does NOT dim while it is dragged (M46.2 Task 4). Ours faded the
  * source to 0.6 and put nothing under the cursor at all; Notion leaves the
@@ -816,17 +821,16 @@ function FieldRow({
     <div className="group/row relative" data-drag-id={`field:${name}`}>
       {lines !== undefined && <InsertionLine gap={lines.above} side="top" />}
       {lines?.below !== undefined && <InsertionLine gap={lines.below} side="bottom" />}
-      <span
+      <Grip
+        kind="block"
         ref={setNodeRef}
         data-testid="layout-grip"
         {...attributes}
         {...listeners}
         aria-label={`Drag ${humanize(name)}`}
         onClick={(e) => e.stopPropagation()}
-        className="motion-move absolute -left-5 top-0.5 z-10 flex h-6 w-4 cursor-grab touch-none items-center justify-center rounded text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100"
-      >
-        <Icon name="grip-vertical" size={12} />
-      </span>
+        className="absolute -left-6 top-0.5 z-10 opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100"
+      />
       <InertContent>{children}</InertContent>
     </div>
   );
@@ -927,17 +931,16 @@ function BlockShell({
         {label}
       </span>
       {dragId !== undefined && (
-        <span
+        <Grip
+          kind="block"
           ref={setNodeRef}
           data-testid="layout-group-grip"
           {...attributes}
           {...listeners}
           aria-label={`Drag ${label}`}
           onClick={(e) => e.stopPropagation()}
-          className="absolute -left-5 top-1 z-10 flex h-6 w-4 cursor-grab touch-none items-center justify-center rounded text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/block:opacity-100"
-        >
-          <Icon name="grip-vertical" size={12} />
-        </span>
+          className="absolute -left-6 top-1 z-10 opacity-0 focus-visible:opacity-100 group-hover/block:opacity-100"
+        />
       )}
       {children}
     </div>

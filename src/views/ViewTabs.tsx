@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
@@ -242,18 +243,23 @@ export function ViewTabs({
                   space — an appended handle would shove every tab sideways
                   the moment the pointer arrived, and one overlaying the icon
                   would have to be aligned by hand against a button whose
-                  vertical padding is asymmetric. */}
+                  vertical padding is asymmetric.
+
+                  That padding is 10px, which is why this takes the `tab`
+                  kind rather than the 18 x 24 row slot (M46.2 Task 6): the
+                  row grip transposed for a horizontal list, keeping its
+                  glyph, ink, cursor and reveal, giving up only the width the
+                  surface has no room for. */}
                 {onReorder !== undefined && (
                   <Tooltip label="Drag to reorder">
-                    <span
+                    <Grip
+                      kind="tab"
                       {...sortable.gripProps(view.id, index)}
                       // Opacity, not `hidden`: a hidden grip is out of the tab
                       // order, and Left/Right reordering is the point of the
                       // primitive underneath it.
-                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <Icon name="grip-vertical" size={11} />
-                    </span>
+                      className="absolute inset-y-1 left-0 z-10 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    />
                   </Tooltip>
                 )}
                 <button

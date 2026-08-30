@@ -12,6 +12,7 @@ import type { CollisionDetection } from '@dnd-kit/core';
 import { DragGhostLayer, InsertionLine, lineHosts } from '@/components/ui/BlockDrag';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
@@ -600,16 +601,14 @@ function WidgetShell({
       {lines?.below !== undefined && <InsertionLine gap={lines.below} side="end" />}
       <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
         {edit !== null && (
-          <span
+          <Grip
+            kind="block"
             ref={setNodeRef}
             data-testid="widget-grip"
             {...attributes}
             {...listeners}
             aria-label={`Drag ${title}`}
-            className="flex h-6 w-4 flex-none cursor-grab touch-none items-center justify-center rounded text-n-400 hover:bg-n-100 hover:text-n-700"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+          />
         )}
         {edit !== null && edit.renamingId === widget.id ? (
           <RenameWidget

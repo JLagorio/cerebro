@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -795,14 +796,14 @@ function PropertiesPage({
       style={index !== undefined ? sortable.rowStyle(index) : undefined}
     >
       {on && !searching && index !== undefined ? (
-        <span
+        <Grip
           {...sortable.gripProps(f.name, index)}
-          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
-        >
-          <Icon name="grip-vertical" size={12} />
-        </span>
+          className="focus-visible:text-cortex-600 focus-visible:outline-none"
+        />
       ) : (
-        <span className="h-5 w-4 flex-none" />
+        // The cell is the layout; the grip is only its occupant, so the empty
+        // case holds the same 18 x 24 slot (M46.2 Task 6).
+        <span className="h-6 w-[18px] flex-none" />
       )}
       <Icon name={kindMeta(f.kind).icon} size={12} color="var(--n-400)" />
       {canEdit ? (
@@ -1679,12 +1680,7 @@ function SortPage({
             style={sortable.rowStyle(i)}
           >
             <Tooltip label="Drag to reorder — the first key breaks ties first">
-              <span
-                {...sortable.gripProps(s.field, i)}
-                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-xs text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
-              >
-                <Icon name="grip-vertical" size={13} />
-              </span>
+              <Grip {...sortable.gripProps(s.field, i)} className="focus-visible:text-n-600" />
             </Tooltip>
             <Select
               size="sm"
