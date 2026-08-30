@@ -507,6 +507,21 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     expect(groupBlocks()).toEqual(['g1', 'g3']);
   });
 
+  it('switching tabs puts down an editor whose shell just left the canvas', () => {
+    setup(interleaved());
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('layout-block')
+        .find((b) => b.getAttribute('data-block') === 'g1') as HTMLElement,
+      { key: 'Enter' },
+    );
+    expect(screen.getByTestId('group-editor')).toBeTruthy();
+    // g1 belongs to the tab we are leaving, so its shell — the popover's one
+    // anchor — unmounts with the switch.
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    expect(screen.queryByTestId('group-editor')).toBeNull();
+  });
+
   it('the group slots speak CONFIG indexes, so a filtered drag reorders the right section', () => {
     setup(interleaved());
     // Preview index 1 is CONFIG index 2 — a render-indexed slot would say

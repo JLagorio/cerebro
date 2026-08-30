@@ -206,14 +206,6 @@ export function LayoutCanvas({
     }),
     [editing],
   );
-  // A container the draft no longer holds (Delete section) has nothing to
-  // edit — heading and rest are structural and always valid.
-  const editingValid =
-    editing !== null &&
-    (editing === 'heading' ||
-      editing === 'rest' ||
-      draft.layout.groups.some((g) => g.id === editing));
-
   // BoardView's exact sensors: distance-4 keeps a grip press from eating
   // ordinary clicks; Space picks up and drops, arrows move, Escape cancels.
   const sensors = useSensors(
@@ -243,6 +235,16 @@ export function LayoutCanvas({
     draftRoster(typeDef.fields, draft.added),
     activeTab === null ? undefined : layoutTabScope(draft.tabs, activeTab.id),
   );
+  // A container whose SHELL is not on screen has nothing for the editor to
+  // anchor to. Delete section is one way to lose it; since M45.6 so is
+  // standing on another tab, or on one that bears no properties at all (the
+  // group stack and rest stand down together there). The heading is the one
+  // container that renders on every tab, so it is always valid.
+  const editingValid =
+    editing !== null &&
+    (editing === 'heading' ||
+      (bearsProperties &&
+        (editing === 'rest' || previewLayout.groups.some((g) => g.id === editing))));
   // The canvas folds what the page folds (M45.3): the panels' predicate with
   // the DRAFT overlaid — staged visibility on each def, staged showEmpty into
   // `foldsWhenUnset`. Folded rows render NOTHING (the page's collapsed

@@ -68,10 +68,15 @@ export function GroupEditorPopover({
   const isGroup = group !== undefined;
   const title = isGroup ? group.name : container === 'heading' ? 'Heading' : 'Properties';
 
-  // The DRAFT roster with the DRAFT's visibility overlaid — the same lens the
-  // canvas renders through, minus its fold: the editor never folds a row. The
+  // The DRAFT roster with the DRAFT's visibility overlaid — the canvas's own
+  // lens minus its fold, because the editor never folds a row. The
   // un-overlaid roster survives for the staging guard, which needs to know
   // what the DOC says apart from what the draft stages over it.
+  //
+  // TAB-BLIND on purpose, where the canvas resolves for its active tab
+  // (M45.6): this resolve answers "which fields does THIS container hold",
+  // and a container holds the same fields whichever tab it shows on. Only
+  // `showsOnTab` below asks the other question, and it passes a scope.
   const roster = draftRoster(typeDef.fields, draft.added);
   const overlaid = overlayVisibility(roster, draft.visibility);
   const resolved = resolveLayout(draft.layout, overlaid);
