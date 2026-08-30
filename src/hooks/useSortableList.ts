@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { popLayer, pushLayer } from '@/components/ui/layers';
+import React, { useCallback, useRef, useState } from 'react';
+import { useDragGesture } from '@/hooks/useDragGesture';
 
 /**
  * One reorderable list, operable by pointer AND keyboard (M16.2).
@@ -23,10 +23,11 @@ import { popLayer, pushLayer } from '@/components/ui/layers';
  * indicator, the midpoint slot maths, commit-on-release — is the shape the
  * view settings list already proved, generalised.
  *
- * The one thing it does share with the rest of the app is the LAYER STACK
+ * The one thing it does share with the rest of the app is `useDragGesture`
  * (M46.2), and only to say that a drag in flight owns Escape. That is not a
- * drag context: the stack knows nothing about gestures beyond who a keystroke
- * belongs to, so a list inside a `DndContext` still sees neither.
+ * drag context either: the layer stack it pushes onto knows nothing about
+ * gestures beyond who a keystroke belongs to, so a list inside a `DndContext`
+ * still sees neither.
  */
 
 export interface SortableList {
@@ -85,26 +86,11 @@ export function useSortableList({
   latest.current = { ids, onReorder };
 
   /**
-   * The teardown for whatever gesture is in flight — its window listeners and
-   * its Escape layer — held outside React state because a gesture outlives the
-   * render that began it.
-   *
-   * It is what makes a SECOND press safe (the first gesture's listeners are
-   * closures the second one's `removeEventListener` could never match, so
-   * without this both would fire on the same release and the drop would commit
-   * twice) and what makes an unmount mid-drag safe: a leaked gesture layer sits
-   * on top of the stack forever and every later Escape in the app finds it
-   * there instead of the surface it was aimed at.
+   * The drag's claim on Escape, its supersede-the-last-press rule, and the
+   * teardown an unmount runs — all three the shared hook's (M46.2 Task 1b,
+   * which found five more loops needing exactly this and lifted it out).
    */
-  const endGesture = useRef<(() => void) | null>(null);
-  const layerId = useId();
-  useEffect(
-    () => () => {
-      endGesture.current?.();
-      endGesture.current = null;
-    },
-    [],
-  );
+  const gesture = useDragGesture();
 
   const startDrag = useCallback(
     (id: string) => (e: React.PointerEvent) => {
@@ -114,9 +100,6 @@ export function useSortableList({
       // this same guard, has no test.
       if (disabled || (e.button ?? 0) !== 0) return;
       e.preventDefault();
-      // A press while something is already in flight replaces it rather than
-      // stacking on it. Two live gestures over one list would each commit.
-      endGesture.current?.();
       const rows = Array.from(containerRef.current?.children ?? []) as HTMLElement[];
       // Measured once, at grab time. Re-measuring per move would read the
       // positions the drop indicator itself has already shifted.
@@ -132,18 +115,15 @@ export function useSortableList({
         setDragging(id);
         setDropSlot(slotAt(ev));
       };
-      const end = () => {
+      const teardown = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
-        window.removeEventListener('keydown', onEscape, true);
-        popLayer(layerId);
-        endGesture.current = null;
         setDragging(null);
         setDropSlot(null);
       };
       const up = (ev: PointerEvent) => {
-        end();
+        gesture.end();
         const slot = slotAt(ev);
         const from = latest.current.ids.indexOf(id);
         if (from === -1) return;
@@ -152,44 +132,24 @@ export function useSortableList({
         const to = slot > from ? slot - 1 : slot;
         if (to !== from) latest.current.onReorder(id, to);
       };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
       /**
        * Escape abandons the gesture (M46.2). Measured before this existed: the
        * key did not cancel, the gesture kept tracking, and the RELEASE THEN
        * COMMITTED the move — the opposite of what the user asked for, and the
        * app has no undo.
        *
-       * Cancelling is exactly `end()` without the commit. Nothing has moved on
-       * screen yet at this point — this list commits on release only, and the
-       * drop indicator is the whole of the drag's visible state — so stripping
-       * that state IS the restore. A reflow that moves rows during the drag
-       * would put its own undo here, beside the listener teardown.
-       *
-       * Capture on `window`, the node the pointer listeners already use and the
-       * first one every keystroke reaches, so nothing nested sees the key at
-       * all. `stopImmediate`, not `stopPropagation`: the surfaces this list
-       * sits inside listen on `window` themselves (`DetailPanel`) and the
-       * latter governs only travel BETWEEN nodes, never siblings on one.
+       * Cancelling is exactly the teardown without the commit. Nothing has
+       * moved on screen at this point — this list commits on release only, and
+       * the drop indicator is the whole of the drag's visible state — so
+       * stripping that state IS the restore. A reflow that moves rows during
+       * the drag would put its own undo in `teardown`, beside the listeners.
        */
-      const onEscape = (ev: KeyboardEvent) => {
-        if (ev.key !== 'Escape') return;
-        ev.preventDefault();
-        ev.stopImmediatePropagation();
-        end();
-      };
-      endGesture.current = end;
-      // Ordering between `window` listeners is only whoever registered first,
-      // which is the opposite of what precedence needs — so the gesture says on
-      // the layer stack that Escape is its own for as long as it lasts, and the
-      // record panel, the dialog and the popover all defer through the
-      // `ownsEscape` they already ask. `'gesture'` and not `'surface'`: nothing
-      // opened, and a focus trap must not think it has been superseded.
-      pushLayer(layerId, { kind: 'gesture' });
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-      window.addEventListener('pointercancel', up);
-      window.addEventListener('keydown', onEscape, true);
+      gesture.begin(teardown);
     },
-    [axis, disabled, layerId],
+    [axis, disabled, gesture],
   );
 
   const onKeyDown = useCallback(
