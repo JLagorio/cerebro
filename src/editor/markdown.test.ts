@@ -129,6 +129,55 @@ describe('markdown round trip', () => {
   });
 });
 
+/**
+ * The database fence (M47.2).
+ *
+ * A page holds a POINTER to a database, never the database — so what has to
+ * be right is that the pointer survives a trip to disk and back unchanged,
+ * through the real editor rather than through the promote/demote helpers in
+ * isolation. A block whose fence is not a usable pointer must come back as
+ * the ordinary code block it was, because that is the only behaviour that
+ * cannot destroy what somebody typed.
+ */
+describe('the cerebro-database fence', () => {
+  const fence = (body: string) => `\`\`\`cerebro-database\n${body}\n\`\`\`\n`;
+
+  it('promotes a fence naming a database into a database block', async () => {
+    const blocks = await markdownToBlocks(editor, fence('database: Reading list\nview: shelf'));
+    expect(blocks.map((b) => b.type)).toEqual(['database']);
+    expect(blocks[0].props).toMatchObject({ database: 'Reading list', view: 'shelf' });
+  });
+
+  it('carries an unnamed view as the empty string, not as a missing prop', async () => {
+    const blocks = await markdownToBlocks(editor, fence('database: Reading list'));
+    expect(blocks[0].props).toMatchObject({ database: 'Reading list', view: '' });
+  });
+
+  it('round-trips back to the same fence', async () => {
+    for (const body of ['database: Reading list\nview: shelf', 'database: Reading list']) {
+      expect(await roundTrip(fence(body))).toBe(fence(body));
+    }
+  });
+
+  /**
+   * The failure that would be silent and unrecoverable: a half-typed fence
+   * becoming a database block means the user's text is replaced by a message
+   * about their text, and saving then writes the replacement to disk. It stays
+   * a code block, holding exactly what they wrote.
+   */
+  it('leaves a fence that names no database as an ordinary code block', async () => {
+    for (const body of ['', 'view: shelf', 'database:', 'not yaml: [', '- a list']) {
+      const blocks = await markdownToBlocks(editor, fence(body));
+      expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    }
+  });
+
+  it('does not claim a fence in another language', async () => {
+    const blocks = await markdownToBlocks(editor, '```yaml\ndatabase: Reading list\n```\n');
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+  });
+});
+
 describe('normalizeParsedBlocks', () => {
   it('halves doubled break runs in text nodes, including nested content', () => {
     const blocks = [

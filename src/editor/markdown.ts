@@ -1,4 +1,5 @@
 import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
+import { DATABASE_FENCE, parseDatabaseRef, serializeDatabaseRef } from '@/engine/databaseBlock';
 import { DATE_TOKEN_SOURCE, dateValueToChipProps, parseDateToken } from '@/engine/dates';
 
 /** Schema-agnostic editor view: custom inline specs (chips) change the
@@ -159,9 +160,10 @@ export function unescapeChipMarkdown(markdown: string): string {
     .join('\n');
 }
 
-// --- Callout / mermaid round-trip (M2.x custom blocks) ---------------------
-// On disk a callout is an Obsidian-style `> [!info] …` quote and a diagram is
-// a ```mermaid fence. promoteRichBlocks upgrades those plain forms into the
+// --- Callout / mermaid / database round-trip (M2.x, M47.2) -----------------
+// On disk a callout is an Obsidian-style `> [!info] …` quote, a diagram is a
+// ```mermaid fence, and an embedded database is a ```cerebro-database fence
+// holding a pointer. promoteRichBlocks upgrades those plain forms into the
 // custom blocks after parse; demoteRichBlocks reverses it before
 // serialization, on a deep copy so the live editor state is never mutated.
 
@@ -182,6 +184,21 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
     const b = block as PartialBlock & { content?: unknown; children?: PartialBlock[] };
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === 'mermaid') {
       return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
+    }
+    if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === DATABASE_FENCE) {
+      // A fence that names no database stays the code block it already is —
+      // `parseDatabaseRef` returns null rather than an empty pointer, so a
+      // half-typed fence keeps showing what the user typed instead of being
+      // replaced by a database block complaining about it.
+      const ref = parseDatabaseRef(blockText(b.content));
+      if (ref !== null) {
+        // `view: ''` is the prop-schema spelling of "named none" — BlockNote
+        // prop defaults are primitives, so null does not survive the trip.
+        return {
+          type: 'database',
+          props: { database: ref.database, view: ref.view ?? '' },
+        } as unknown as T;
+      }
     }
     if (b.type === 'quote' && Array.isArray(b.content)) {
       const first = b.content[0] as { type?: string; text?: string } | undefined;
@@ -218,6 +235,15 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
         type: 'codeBlock',
         props: { language: 'mermaid' },
         content: [{ type: 'text', text: code, styles: {} }],
+      } as unknown as T;
+    }
+    if (b.type === 'database') {
+      const database = typeof b.props?.database === 'string' ? b.props.database : '';
+      const view = typeof b.props?.view === 'string' && b.props.view !== '' ? b.props.view : null;
+      return {
+        type: 'codeBlock',
+        props: { language: DATABASE_FENCE },
+        content: [{ type: 'text', text: serializeDatabaseRef({ database, view }), styles: {} }],
       } as unknown as T;
     }
     if (b.type === 'callout') {

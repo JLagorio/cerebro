@@ -33,20 +33,22 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { AiBlock, CalloutBlock, MermaidBlock } from './blocks';
+import { AiBlock, CalloutBlock, DatabaseBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
 
 // Default schema with the fully-featured code block (shiki highlighting,
 // full language list) swapped in, plus the Cerebro custom blocks (callout,
-// mermaid) and inline chips: wikilinks, assignees, and dates (M2.x).
+// mermaid, database) and inline chips: wikilinks, assignees, and dates
+// (M2.x, M47.2).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
     ai: AiBlock(),
     callout: CalloutBlock(),
+    database: DatabaseBlock(),
     mermaid: MermaidBlock(),
   },
   inlineContentSpecs: {

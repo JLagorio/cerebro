@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
+import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
+import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
 
 /**
  * Custom blocks (M2.x docs polish). Both stay plain markdown on disk:
  *
- *   callout  Obsidian-style `> [!info] …` blockquote
- *   mermaid  ```mermaid fenced code block
+ *   callout   Obsidian-style `> [!info] …` blockquote
+ *   mermaid   ```mermaid fenced code block
+ *   database  ```cerebro-database fence holding a POINTER (M47.2)
  *
  * markdown.ts promotes the plain forms into these blocks after parse and
  * demotes them back before serialization, so files never stop being
@@ -292,5 +295,51 @@ export const AiBlock = createReactBlockSpec(
         contentRef={props.contentRef}
       />
     ),
+  },
+);
+
+/**
+ * An embedded database (M47.2).
+ *
+ * `content: 'none'` — the block draws a database, it does not hold text. What
+ * it holds is a pointer: the name of a database and which of its views to
+ * show. The rows are files and stay files (spec D7), so nothing here is a
+ * second copy of the vault that could disagree with the vault.
+ */
+export const DatabaseBlock = createReactBlockSpec(
+  {
+    type: 'database',
+    // '' rather than null on both: BlockNote prop defaults are primitives, so
+    // an empty view id is how "this block named no view" survives the round
+    // trip. markdown.ts converts at the boundary.
+    propSchema: { database: { default: '' }, view: { default: '' } },
+    content: 'none',
+  },
+  {
+    render: (props) => (
+      <ConnectedDatabaseBlock
+        database={String(props.block.props.database ?? '')}
+        view={String(props.block.props.view ?? '')}
+      />
+    ),
+    /**
+     * What leaves the app when a selection crosses this block. Without it
+     * BlockNote falls back to the block's RENDERED text, so copying a page
+     * would put "Reading list · Shelf" on the clipboard and the pointer
+     * nowhere in it — the same defect `MermaidBlock` documents above. The
+     * fence is what markdown.ts already demotes this block to for the disk.
+     */
+    toExternalHTML: (props) => {
+      const view = String(props.block.props.view ?? '');
+      const body = serializeDatabaseRef({
+        database: String(props.block.props.database ?? ''),
+        view: view === '' ? null : view,
+      });
+      return (
+        <pre>
+          <code>{`\`\`\`${DATABASE_FENCE}\n${body}\n\`\`\``}</code>
+        </pre>
+      );
+    },
   },
 );
