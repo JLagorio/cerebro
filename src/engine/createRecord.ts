@@ -63,20 +63,21 @@ export function createTarget(
     if (value !== undefined && value !== null) frontmatter[groupBy] = value;
   }
 
+  // `folder:` on the Type doc pins where its records land (M12.2), and it is
+  // read STRAIGHT OFF THE SCHEMA (M47.1). This used to re-find the Type doc in
+  // `entries` and re-normalise the key itself, so the same `folder:` had two
+  // readers with two copies of the trim-and-strip rule — and `TypeDef.folder`,
+  // which `buildSchema` has always parsed, had no consumer at all. Safe
+  // because every call site passes a schema built from the `entries` it also
+  // passes (`useSchema` caches on that identity), so the two could never have
+  // disagreed. M47 makes this key load-bearing, which is the wrong time to
+  // keep a twin of it.
   const folder =
     project !== null
       ? `${project.path.replace(/\/project\.md$/, '')}/items`
-      : (declaredFolder(typeName, entries) ?? recordsFolder(typeName));
+      : (schema.types.get(typeName)?.folder ?? recordsFolder(typeName));
 
   return { folder, frontmatter };
-}
-
-/** `folder:` on the Type doc pins where its records land (M12.2). */
-function declaredFolder(typeName: string, entries: Entry[]): string | null {
-  const doc = entries.find((e) => e.type === 'Type' && e.title === typeName);
-  const folder = doc?.properties.folder;
-  if (typeof folder !== 'string' || folder.trim() === '') return null;
-  return folder.trim().replace(/^\/+|\/+$/g, '');
 }
 
 /**

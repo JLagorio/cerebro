@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { childLink, childTypeOf, createTarget, recordsFolder } from '@/engine/createRecord';
 import { buildSchema } from '@/engine/schema';
+import type { Entry } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
 
 const project = makeEntry({
@@ -191,5 +192,62 @@ describe('childTypeOf', () => {
     expect(
       childTypeOf({ direction: 'forward', field: 'mystery' }, 'Key result', schema),
     ).toBeNull();
+  });
+});
+
+/**
+ * `folder:` on a Type doc (M47.1).
+ *
+ * M12.2 built this and nothing has ever exercised it: no Type doc in
+ * `demo-vault/` declares a `folder:`, and no test declared one either. M47
+ * makes it load-bearing — it is where a database's new rows land — so it gets
+ * measured before anything is built on top of it.
+ */
+describe('createTarget honours a declared home folder', () => {
+  const typeDoc = (properties: Record<string, unknown>, path = 'types/reading.md') =>
+    makeEntry({ path, title: 'Reading', type: 'Type', properties: properties as never });
+
+  /** Schema built from the same entries, exactly as every call site does. */
+  const homeOf = (entries: Entry[], inProject: Entry | null = null) =>
+    createTarget('Reading', { project: inProject, entries, schema: buildSchema(entries) }).folder;
+
+  it('places new records in the folder the Type doc declares', () => {
+    expect(homeOf([typeDoc({ folder: 'reading' })])).toBe('reading');
+  });
+
+  /**
+   * The database page may BE the folder note of its own folder
+   * (`reading/reading.md`) — decision D8 of the M47 spec. It holds because a
+   * Type doc is found by TITLE: `buildSchema` scans every entry and never
+   * looks at the path. Pinned so D8 is a measured fact, not a hoped-for one.
+   */
+  it('finds the Type doc by title, wherever the file sits', () => {
+    expect(homeOf([typeDoc({ folder: 'reading' }, 'reading/reading.md')])).toBe('reading');
+  });
+
+  it('strips wrapping slashes, so `/reading/` is not a sibling of the vault', () => {
+    expect(homeOf([typeDoc({ folder: '/reading/' })])).toBe('reading');
+  });
+
+  /**
+   * Vault-tolerant, like every other read of a hand-edited file. The blank
+   * case matters more than it looks: `''` is a legal folder path meaning the
+   * VAULT ROOT, so a `folder:` that fell through as-written would spray new
+   * records across the top level of someone's vault.
+   */
+  it('falls back to the records convention when `folder:` says nothing usable', () => {
+    for (const folder of ['', '   ', 42, null, ['reading'], { path: 'reading' }]) {
+      expect(homeOf([typeDoc({ folder })])).toBe('records/readings');
+    }
+  });
+
+  /**
+   * Containment is a property of the CONTEXT, not of the type (M12.2), and
+   * that rule outranks `folder:` — a record created inside a project lands in
+   * the project. Worth pinning because it is the one case where a database's
+   * declared home does NOT win, and M47's create affordances have to know it.
+   */
+  it('yields to a project context, which still wins over the declared folder', () => {
+    expect(homeOf([project, typeDoc({ folder: 'reading' })], project)).toBe('projects/atlas/items');
   });
 });

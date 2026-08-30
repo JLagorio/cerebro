@@ -10,8 +10,9 @@ import {
   typePresentation,
   typeStyle,
   typeTabs,
+  typeViews,
 } from './typeCatalog';
-import type { Entry, FieldDef } from './types';
+import type { Entry, FieldDef, Presentation } from './types';
 
 const typeDoc = (title: string, patch: Parameters<typeof makeEntry>[0] = {}): Entry =>
   makeEntry({
@@ -196,5 +197,70 @@ describe('typeTabs (M44.5)', () => {
       }),
     ];
     expect(typeTabs('Work item', buildSchema(entries)).map((t) => t.id)).toEqual(['spec']);
+  });
+});
+
+/**
+ * `views:` on a Type doc (M47.1).
+ *
+ * M12.3 built this and, like `folder:`, nothing has exercised it: no Type doc
+ * in `demo-vault/` saves a view, and the only test that ever put `views:` on
+ * one asserts a REFUSAL (`viewTab.test.ts` — a dashboard saved on a type is
+ * not a legal record tab). So the guard was measured and the feature was not.
+ * M47 turns a type's saved views into the views of a database, which makes
+ * this the load-bearing path.
+ */
+describe('typeViews (M47.1)', () => {
+  const savedView = (id: string, type: Presentation['type'] = 'table') => ({
+    id,
+    name: id,
+    presentation: { type },
+  });
+
+  it('synthesizes one table when a type saved none — nothing written until owned', () => {
+    const views = typeViews('Work item', buildSchema([typeDoc('Work item')]));
+    expect(views).toHaveLength(1);
+    expect(views[0]?.id).toBe('all');
+    expect(views[0]?.presentation.type).toBe('table');
+  });
+
+  it('returns the saved views, in order, when a type declares them', () => {
+    const entries = [
+      typeDoc('Work item', {
+        properties: { views: [savedView('board', 'board'), savedView('cal', 'calendar')] },
+      }),
+    ];
+    const views = typeViews('Work item', buildSchema(entries));
+    expect(views.map((v) => v.id)).toEqual(['board', 'cal']);
+    expect(views.map((v) => v.presentation.type)).toEqual(['board', 'calendar']);
+  });
+
+  /**
+   * Decision D8 of the M47 spec, from the other side: a database page that is
+   * its own folder note contributes its views exactly like one in `types/`.
+   * `buildSchema` scans every entry and never consults the path — pinned here
+   * so the spec's claim has a test behind it and not just a reading of the code.
+   */
+  it('reads views off a Type doc that is a folder note, not a types/ file', () => {
+    const entries = [
+      typeDoc('Reading', {
+        path: 'reading/reading.md',
+        properties: { views: [savedView('shelf')] },
+      }),
+    ];
+    expect(typeViews('Reading', buildSchema(entries)).map((v) => v.id)).toEqual(['shelf']);
+  });
+
+  /**
+   * Vault-tolerant: `views: []` is not "this type has no views", it is a
+   * hand-edited file saying nothing. Falling through to the synthesized table
+   * is what keeps an empty list from rendering a type screen with no view at
+   * all — the "unavailable is never empty" rule, applied to a container.
+   */
+  it('falls back to the default table when `views:` is empty or malformed', () => {
+    for (const views of [[], null, 'table', 42, { id: 'x' }]) {
+      const entries = [typeDoc('Work item', { properties: { views } as Entry['properties'] })];
+      expect(typeViews('Work item', buildSchema(entries)).map((v) => v.id)).toEqual(['all']);
+    }
   });
 });

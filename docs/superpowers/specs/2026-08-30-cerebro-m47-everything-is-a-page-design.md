@@ -64,6 +64,29 @@ lane A and opens two doors onto lane B.
 The capability shipped without a caller. The migration in §7 is their first real
 use, which means both need test coverage they do not currently have.
 
+### What M47.1 found when it went looking (2026-08-30)
+
+Three things the reading above did not show, each turned up by writing the tests
+rather than by reading the code:
+
+- **`TypeDef.folder` had no consumer at all.** `buildSchema` parsed it and
+  stored it, and nothing ever read it. The only live reader of `folder:` was a
+  private `declaredFolder` in `createRecord.ts` that re-found the Type doc in
+  `entries` and re-implemented the trim-and-strip rule — a twin of a key M47 is
+  about to make load-bearing. M47.1 collapsed them onto the schema field.
+- **Nothing writes `folder:`.** It is a `RESERVED` key in `typeActions.ts`, so
+  it is protected from becoming a user field, but no action sets it: it is
+  hand-edit-only today. **M47.4 must add the writer** — creating a database
+  inline is exactly the act of giving it a home.
+- **`views:` does have a writer** (`setTypeViews`, driven from the type screen's
+  tab row), so only its read path was unmeasured. The one test that had ever put
+  `views:` on a Type doc asserts a *refusal* — the guard was measured and the
+  feature was not.
+
+The first of those changes D8's status: "a database page may be a folder note"
+now rests on a test that fails when the title-lookup breaks, not on a reading of
+`buildSchema`.
+
 ## 3. The model
 
 Four sentences.
@@ -170,7 +193,7 @@ Per AGENTS.md, that is a test change and is budgeted as one.
 | **M47.1** | Exercise what exists: tests for `TypeDef.folder` and `TypeDef.views` end-to-end, since no Type doc in the corpus uses either. Nothing ships on an untested foundation. |
 | **M47.2** | The `database` block spec + markdown round-trip + the pointer resolver. Renders read-only first. |
 | **M47.3** | Door 1 — embed an existing database. Lift `DashboardView`'s embed into a shared component both surfaces use. |
-| **M47.4** | Door 2 — create a database inline, and schema-by-use (`+` a column writes a field). |
+| **M47.4** | Door 2 — create a database inline, and schema-by-use (`+` a column writes a field). **Includes the first writer for `folder:`**, which has none today. |
 | **M47.5** | The converter, the demo-vault migration, and the e2e churn. Retires `collection.yml` and `*.list.yml`. |
 | **M47.6** | Retire the New-list dialog and the sidebar `+` → New list path; the collection page grows its own create affordance and its own prose. |
 
