@@ -119,6 +119,21 @@ interface DragState {
   pos: number;
   metrics: ListMetrics;
   box: { width: number; height: number };
+  /**
+   * Whether the freeze frame has been PAINTED, and so whether the siblings may
+   * animate yet.
+   *
+   * The freeze takes every row out of flow and places it at its slot in one
+   * commit. A row's computed transform before that commit is `none`, so a
+   * `transition: transform` declared in the same commit interpolates from the
+   * identity — every row slides in from the container's origin over 200ms the
+   * instant a drag begins. Measured in the re-measurement pass (M46.2 Task 8)
+   * on a three-row list: the third row rendered 56px above its slot on the
+   * first frame and crawled back over eight, and the artifact grows with the
+   * list. So the freeze frame declares no transition at all, and the movement
+   * token arrives on the frame after the one that painted it.
+   */
+  primed: boolean;
 }
 
 const px = (value: string): number => {
@@ -224,6 +239,9 @@ export function useSortableList({
       let slot = from;
       let pos = startPos;
       let started = false;
+      /** See `DragState.primed`. False until the freeze frame has painted. */
+      let primed = false;
+      let priming: number | null = null;
 
       const track = (ev: PointerEvent) => {
         const along = axis === 'y' ? ev.clientY : ev.clientX;
@@ -237,17 +255,32 @@ export function useSortableList({
         if (!started) {
           started = true;
           document.body.classList.add(LIST_DRAGGING_CLASS);
+          // Two frames, not one: a callback registered here runs BEFORE the
+          // paint of the frame React commits the freeze in, so priming from it
+          // would land the transition in that same paint and animate the very
+          // thing it exists to stop. The second frame is the first one that
+          // can see the rows already at their slots.
+          priming = requestAnimationFrame(() => {
+            priming = requestAnimationFrame(() => {
+              priming = null;
+              primed = true;
+              setDrag((cur) => (cur === null || cur.primed ? cur : { ...cur, primed: true }));
+            });
+          });
         }
         setDrag((cur) =>
-          cur !== null && cur.pos === pos && cur.slot === slot
+          cur !== null && cur.pos === pos && cur.slot === slot && cur.primed === primed
             ? cur
-            : { id, from, slot, pos, metrics, box },
+            : { id, from, slot, pos, metrics, box, primed },
         );
       };
       const teardown = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', up);
+        // A drag shorter than two frames would otherwise prime the NEXT one.
+        if (priming !== null) cancelAnimationFrame(priming);
+        priming = null;
         document.body.classList.remove(LIST_DRAGGING_CLASS);
         setDrag(null);
       };
@@ -370,7 +403,9 @@ export function useSortableList({
         // movement token (M46.2 Task 3) rather than as a literal, so this and
         // every other sliding thing stay one number — and so a reader who has
         // asked for reduced motion gets the reflow without the slide.
-        transition: held ? 'none' : 'transform var(--motion-move)',
+        //
+        // Nobody transitions on the freeze frame: see `DragState.primed`.
+        transition: held || !drag.primed ? 'none' : 'transform var(--motion-move)',
         // Lifted by this ALONE: no shadow, no scale, no dimming. What tells you
         // which row you are holding is that it is the one moving.
         zIndex: held ? 1 : undefined,

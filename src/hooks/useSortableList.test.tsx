@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { LIST_DRAGGING_CLASS, useSortableList } from '@/hooks/useSortableList';
@@ -353,12 +353,34 @@ describe('useSortableList C-I lifecycle (guard)', () => {
     expect(row('c').style.boxShadow).toBe('');
   });
 
-  it('slides the neighbour out of the way on the movement token', () => {
+  it('declares no transition on the freeze frame', async () => {
+    // The freeze places every row at the slot it already occupies. Declaring
+    // the movement token in that same commit makes each one interpolate from
+    // the identity transform instead — measured in the browser (M46.2 Task 8)
+    // as a 56px collapse-and-expand at the start of every drag, growing with
+    // the list. So the first frame says `none` and the token arrives after it.
     render(<List />);
     stubRows();
 
     press('a', 10);
     moveTo(25);
+
+    expect(row('b').style.transition).toBe('none');
+    expect(row('c').style.transition).toBe('none');
+    // And the freeze still puts them where they belong, so the frame that
+    // paints is indistinguishable from the list at rest.
+    expect(row('b').style.transform).toBe('translate(0px, 0px)');
+  });
+
+  it('slides the neighbour out of the way on the movement token', async () => {
+    render(<List />);
+    stubRows();
+
+    press('a', 10);
+    moveTo(25);
+    // Two frames after the freeze — the point at which the rows have painted
+    // at their slots and a transition can only describe what happens NEXT.
+    await waitFor(() => expect(row('b').style.transition).not.toBe('none'));
 
     // b takes slot 0 — the gap that opens IS the drop indicator.
     expect(row('b').style.transform).toBe('translate(0px, 0px)');
@@ -369,6 +391,8 @@ describe('useSortableList C-I lifecycle (guard)', () => {
     expect(row('b').style.transition).toBe('transform var(--motion-move)');
     // c has not been passed, so it stays in its own slot.
     expect(row('c').style.transform).toBe('translate(0px, 40px)');
+    // The held row never transitions, primed or not — it is under the cursor.
+    expect(row('a').style.transition).toBe('none');
   });
 
   it('clamps the held row to the list, however far the pointer goes', () => {
