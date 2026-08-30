@@ -236,10 +236,20 @@ export function LayoutCanvas({
     activeTab === null ? undefined : layoutTabScope(draft.tabs, activeTab.id),
   );
   // A container whose SHELL is not on screen has nothing for the editor to
-  // anchor to. Delete section is one way to lose it; since M45.6 so is
-  // standing on another tab, or on one that bears no properties at all (the
-  // group stack and rest stand down together there). The heading is the one
-  // container that renders on every tab, so it is always valid.
+  // anchor to, and `Popover.measure` bails on a null anchor — an unpositioned
+  // floating editor over a canvas with no shell under it. Delete section is
+  // one way to lose the shell; since M45.6 so is standing on another tab. The
+  // heading is the one container that renders on every tab, so it is always
+  // valid.
+  //
+  // The shell can leave with no press to hang a `setEditing(null)` on: a tab
+  // REORDER changes which tab is default, and an untabbed section moves with
+  // it while the selection stands still (the case the suite drives). The
+  // `bearsProperties` arm is the defensive half — today's strip offers no way
+  // to change a tab's content KIND, so it guards a state only a future
+  // affordance (or a vault edit under an open dialog) can reach. Kept because
+  // rest's shell stands down with the group stack, and the alternative to a
+  // cheap predicate is an anchorless popover.
   const editingValid =
     editing !== null &&
     (editing === 'heading' ||

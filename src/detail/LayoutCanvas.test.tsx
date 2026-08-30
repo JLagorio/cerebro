@@ -532,6 +532,47 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     expect(screen.queryByTestId('group-editor')).toBeNull();
   });
 
+  it('an editor whose section moved off the tab under it goes too — no anchorless popover', () => {
+    // The shell can leave WITHOUT a tab switch, and then nothing calls
+    // `setEditing(null)`: reordering the tabs changes which one is DEFAULT,
+    // and an UNTABBED section calls the default tab home. Standing still
+    // while the ground moves is the case `editingValid` has to catch on its
+    // own — a popover whose anchor is gone cannot be positioned at all.
+    setup([
+      makeEntry({
+        path: DOC,
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: { status: 'text', notes: 'text' },
+          layout: { heading: [], groups: [{ id: 'g1', name: 'Planning', fields: ['status'] }] },
+          tabs: TABBED,
+        } as unknown as ReturnType<typeof makeEntry>['properties'],
+      }),
+      FILLED,
+    ]);
+    fireEvent.keyDown(
+      screen
+        .getAllByTestId('layout-block')
+        .find((b) => b.getAttribute('data-block') === 'g1') as HTMLElement,
+      { key: 'Enter' },
+    );
+    expect(screen.getByTestId('group-editor')).toBeTruthy();
+
+    // Move the tab we are STANDING on to second place: the selection does not
+    // change (the strip reports no press), but the first property-bearing tab
+    // — the one untabbed sections live on — is now the other one.
+    fireEvent.contextMenu(screen.getByTestId('record-tab-one'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
+    expect(
+      screen
+        .getAllByTestId('layout-block')
+        .map((b) => b.getAttribute('data-block'))
+        .filter((b) => b !== null && b.startsWith('g')),
+    ).toEqual([]);
+    expect(screen.queryByTestId('group-editor')).toBeNull();
+  });
+
   it('the group slots speak CONFIG indexes, so a filtered drag reorders the right section', () => {
     setup(interleaved());
     // Preview index 1 is CONFIG index 2 — a render-indexed slot would say
