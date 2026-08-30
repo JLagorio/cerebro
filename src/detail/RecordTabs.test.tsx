@@ -78,11 +78,11 @@ describe('RecordTabs (M44.5)', () => {
     // stack stands above the strip on every tab, so a tab that IS the stack
     // is exactly the shape the correction forbids.
     expect(screen.queryByRole('button', { name: 'Properties' })).toBeNull();
-    expect(
-      ['Sections', 'Overview', 'View'].every(
-        (kind) => screen.getByRole('button', { name: kind }) !== null,
-      ),
-    ).toBe(true);
+    // The other three survive — `getByRole` throws if one goes missing, so
+    // this is the vacuity guard on the absence above.
+    for (const kind of ['Sections', 'Overview', 'View']) {
+      screen.getByRole('button', { name: kind });
+    }
   });
 
   it('the last tab cannot be deleted', () => {

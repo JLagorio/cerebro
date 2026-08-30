@@ -216,13 +216,18 @@ export function LayoutCanvas({
   // tab, because the property stack lives ABOVE the strip — so the resolve is
   // tab-blind and there is nothing left to scope it by.
   const previewLayout = resolveLayout(draft.layout, draftRoster(typeDef.fields, draft.added));
-  // A container the draft no longer holds (Delete section) has nothing to
-  // edit — heading and rest are structural and always valid.
+  // A container with no SHELL on screen has nothing for `Popover.measure` to
+  // anchor to, so the question is asked of what the canvas RENDERS — the
+  // resolved groups, not the config's. The two agree while `resolveLayout`
+  // maps one block per config slot, which is exactly the coincidence the
+  // group-index comment below refuses to lean on. Delete section is the
+  // ordinary way to lose the shell; heading and rest are structural and
+  // always stand.
   const editingValid =
     editing !== null &&
     (editing === 'heading' ||
       editing === 'rest' ||
-      draft.layout.groups.some((g) => g.id === editing));
+      previewLayout.groups.some((g) => g.id === editing));
   // The canvas folds what the page folds (M45.3): the panels' predicate with
   // the DRAFT overlaid — staged visibility on each def, staged showEmpty into
   // `foldsWhenUnset`. Folded rows render NOTHING (the page's collapsed
@@ -270,7 +275,7 @@ export function LayoutCanvas({
           inward — see InertContent for the boundary's rationale. */}
       <div data-testid="layout-preview" className="min-w-0 flex-1 overflow-auto p-6">
         {/* gap-3 spaces the OUTER column's bordered shells (M45.5) — heading,
-            tabs, the group stack, content — so borders never fuse and the
+            the group stack, tabs, content — so borders never fuse and the
             overhanging -top-2 label chips keep headroom; INSIDE the group
             stack the block-size DropSlots do that same job. */}
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
@@ -554,9 +559,10 @@ export function LayoutCanvas({
  * regardless. A sourceless tab says what the record's surfaces will show: the
  * broken card, never an empty view.
  *
- * "on the record", not "on the record page" (M45.6): the peek renders these
- * same four arms since 92e5dc5, so a line promising the PAGE would name one
- * of the two places the tab appears. */
+ * "on the record", not "on the record page" (M45.6): the peek renders the
+ * same arms — a typed source, a list source, and a missing one — since
+ * 92e5dc5, so a line promising the PAGE would name one of the two places the
+ * tab appears. */
 function viewTabPlaceholder(tab: TabDef): string {
   const source = tab.source ?? null;
   if (source === null) return 'View of a missing source — shown broken on the record';

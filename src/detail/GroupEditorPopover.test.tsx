@@ -750,3 +750,179 @@ describe('panel rows reorder within their container (M45.5 Task 4)', () => {
     expect(editor().queryAllByTestId('group-editor-grip')).toHaveLength(0);
   });
 });
+
+// M46.1 — the second Add-section door. The canvas `+` and this footer entry
+// share ONE `stageNewSection`, and that sharing is the whole point: M45.6 gave
+// them a tab argument and a gate apiece, and the reversal took both away. The
+// canvas door kept its cases; this one lost all of its when "Move to tab…"
+// went, so the gate could come back — or the doors could part — in silence.
+describe('the group editor’s Add section, on a tabbed type (M46.1)', () => {
+  const TABS = [
+    { id: 'ov', name: 'Overview', icon: null, content: 'overview' },
+    { id: 'v1', name: 'Blocked', icon: null, content: 'view', source: { type: 'Work item' } },
+  ];
+
+  function tabbedDoc() {
+    return makeEntry({
+      path: DOC,
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: 'text', priority: 'text', notes: 'text' },
+        display: { show_file: true },
+        layout: {
+          heading: ['status'],
+          groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
+        },
+        tabs: TABS,
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+  }
+
+  const stagedGroups = (patch: Record<string, unknown>) =>
+    (patch.layout as { groups: Record<string, unknown>[] }).groups;
+
+  it('is offered from the heading while standing on a VIEW tab, and stages a real section', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    // The heading shell renders on every tab, so this editor is reachable
+    // from a view tab. Under M45.6 the footer entry stood DOWN here, because
+    // the section would have landed on a tab that could not show it. A
+    // section belongs to the record now, so the door is open — and if a gate
+    // is ever re-added, this line is where it fails.
+    await user.click(shellOf('heading'));
+    expect(editor().getByTestId('group-editor-add-section')).toBeTruthy();
+    await user.click(editor().getByTestId('group-editor-add-section'));
+
+    // Staged and VISIBLE from the very tab it was pressed on — the stack
+    // stands above the strip, so there is nowhere for it to hide.
+    expect(shellOf('group-1').textContent).toContain('New group');
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    expect(stagedGroups(patch)).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['priority'] },
+      { id: 'group-1', name: 'New group', fields: [] },
+    ]);
+    // `toEqual` fails on a surplus key, but absent and undefined read alike
+    // through it — so the no-tab claim is made in its own words too.
+    for (const g of stagedGroups(patch)) expect('tab' in g).toBe(false);
+  });
+
+  it('stages byte-identically to the canvas +, from the same tab — two doors, one function', async () => {
+    const user = userEvent.setup();
+    // Door one: the canvas's circular +.
+    const first = setup([tabbedDoc(), RECORD]);
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    await user.click(screen.getByTestId('layout-add-section'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const viaCanvas = stagedGroups(await apply(first.patchFrontmatter));
+
+    cleanup();
+    resetLayers();
+    useUiStore.setState({ layoutEditor: null });
+
+    // Door two: the group editor's footer entry, same tab, same fixture.
+    const second = setup([tabbedDoc(), RECORD]);
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    await user.click(shellOf('heading'));
+    await user.click(editor().getByTestId('group-editor-add-section'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    const viaFooter = stagedGroups(await apply(second.patchFrontmatter));
+
+    // The drift guard: give either door back an argument the other does not
+    // pass — a tab, a different minted id, a different name — and these part.
+    expect(viaFooter).toEqual(viaCanvas);
+  });
+
+  it('offers a group placement, never a tab — "Move to tab…" is gone', async () => {
+    const user = userEvent.setup();
+    setup([tabbedDoc(), RECORD]);
+    await user.click(shellOf('g1'));
+    // A section has no tab to be moved between, so the drill-in, its
+    // "Untabbed (default tab)" entry, and the whole `tab` step retire. The
+    // group footer still governs the section's existence.
+    expect(editor().queryByTestId('group-editor-move-tab')).toBeNull();
+    expect(editor().queryByTestId('group-editor-untabbed')).toBeNull();
+    expect(editor().queryByTestId('group-editor-tab-list')).toBeNull();
+    expect(editor().queryByText('Move to tab…')).toBeNull();
+    expect(editor().getByTestId('group-editor-delete-section')).toBeTruthy();
+  });
+});
+
+// The staging guards `stageNew` mirrors from applyTypeLayout, and the shape a
+// relation stages. Each refuses (or stages) BEFORE the write, inline where the
+// typo is — the store-layer toast contract is for vault writes, and nothing
+// here writes.
+describe('what Create new refuses, and what a relation stages', () => {
+  const openCreate = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(shellOf('g1'));
+    await user.click(editor().getByTestId('group-editor-add'));
+    await user.click(screen.getByTestId('group-editor-create-new'));
+  };
+
+  it('a name that NORMALIZES to nothing refuses inline — the panel cannot see it', async () => {
+    const user = userEvent.setup();
+    setup();
+    await openCreate(user);
+    // Underscores are not whitespace, so the panel's own blank check passes
+    // them through; `normalizeFieldName` strips leading underscores and is
+    // left with nothing. Same class of gap as the double-space duplicate:
+    // the guard exists because the panel's compare cannot reach it.
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), '___');
+    await user.click(screen.getByTestId('property-kind-text'));
+    expect(screen.getByRole('alert').textContent).toContain('needs a name');
+    expect(useUiStore.getState().toasts).toEqual([]);
+    // Nothing staged: the container's rows are what they were.
+    // The refusal keeps the user ON the create step, so the assertion reads
+    // the CANVAS, which is mounted throughout: g1 still holds its one row.
+    expect(within(shellOf('g1')).getAllByTestId('property-row')).toHaveLength(1);
+  });
+
+  it('a two-way relation refuses outright — Apply cannot write the other type', async () => {
+    const user = userEvent.setup();
+    setup();
+    await openCreate(user);
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Blocked by');
+    await user.click(screen.getByTestId('property-kind-relation'));
+    await user.click(screen.getByTestId('relation-target-Work item'));
+    await user.click(screen.getByRole('switch', { name: 'Add related property' }));
+    await user.type(screen.getByRole('textbox', { name: 'Related property name' }), 'Blocks');
+    await user.click(screen.getByTestId('add-relation'));
+    // The reciprocal declares a field on the TARGET type — a second doc the
+    // one-write atomic Apply can never carry. Half-staging it would be worse
+    // than refusing, so the refusal names the two ways out.
+    expect(screen.getByRole('alert').textContent).toContain('writes the other type');
+    expect(useUiStore.getState().toasts).toEqual([]);
+    // The refusal keeps the user ON the create step, so the assertion reads
+    // the CANVAS, which is mounted throughout: g1 still holds its one row.
+    expect(within(shellOf('g1')).getAllByTestId('property-row')).toHaveLength(1);
+  });
+
+  it('a one-way relation stages its target and limit into the addition', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await openCreate(user);
+    await user.type(screen.getByRole('textbox', { name: 'Property name' }), 'Blocked by');
+    await user.click(screen.getByTestId('property-kind-relation'));
+    await user.click(screen.getByTestId('relation-target-Work item'));
+    await user.click(screen.getByRole('switch', { name: 'Limit to 1 record' }));
+    await user.click(screen.getByTestId('add-relation'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const patch = await apply(patchFrontmatter);
+    // The FieldDef members typeActions spreads under {name, kind}: `limit`
+    // rides only because the switch was thrown, and the placement is the
+    // container the editor was opened on.
+    expect((patch.fields as Record<string, unknown>).blocked_by).toEqual({
+      kind: 'relation',
+      target: 'Work item',
+      limit: 1,
+    });
+    expect((patch.layout as { groups: { fields: string[] }[] }).groups[0].fields).toEqual([
+      'priority',
+      'blocked_by',
+    ]);
+  });
+});
