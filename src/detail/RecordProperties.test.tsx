@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RecordProperties } from './RecordProperties';
 import { buildSchema } from '@/engine/schema';
+import { layoutTabScope } from '@/engine/typeCatalog';
+import type { TabDef } from '@/engine/types';
 import { fixtureVault } from '@/test/factories';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -185,5 +187,132 @@ describe('RecordProperties layout groups (M45.1)', () => {
     fireEvent.click(screen.getByTestId('hidden-properties-toggle'));
     expect(ids()).toEqual(['g-folded', 'g-live']);
     expect(screen.getByText('Folded')).toBeTruthy();
+  });
+});
+
+/**
+ * M45.6 — a section belongs to a tab, so the stack shows the OPEN tab's
+ * sections. The user's second defect (2026-08-29: "thers no way to put
+ * anything in the tabs"): `tab` was a dimension the config had and the
+ * surfaces ignored, so a section assigned to a tab rendered on all of them.
+ *
+ * The seam is one optional prop carrying `layoutTabScope`'s answer — absent
+ * is the pre-M45.6 stack VERBATIM, which is what a host with no tabs at all
+ * (InboxPage) mounts.
+ */
+describe('RecordProperties sections belong to tabs (M45.6)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+  });
+  afterEach(cleanup);
+
+  const TABS: TabDef[] = [
+    { id: 'one', name: 'One', icon: null, content: 'overview' },
+    { id: 'two', name: 'Two', icon: null, content: 'properties' },
+  ];
+
+  // Alpha lives on tab one, Beta on tab two, Gamma nowhere — the three cases
+  // one fixture has to hold to prove a section shows on exactly one tab.
+  const LAYOUT = {
+    heading: ['status'],
+    groups: [
+      { id: 'g-alpha', name: 'Alpha', fields: ['priority'], tab: 'one' },
+      { id: 'g-beta', name: 'Beta', fields: ['assignee'], tab: 'two' },
+      { id: 'g-gamma', name: 'Gamma', fields: ['due'] },
+    ],
+  };
+
+  const setupTab = (activeId: string | null, layout: Record<string, unknown> = LAYOUT) => {
+    const entries = fixtureVault();
+    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+    (typeDoc.properties as unknown as Record<string, unknown>).layout = layout;
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    render(
+      <RecordProperties
+        entry={entry}
+        schema={buildSchema(entries)}
+        tab={activeId === null ? undefined : layoutTabScope(TABS, activeId)}
+      />,
+    );
+  };
+
+  const groupIds = () =>
+    screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group'));
+  const rowNames = () =>
+    screen.getAllByTestId('property-row').map((r) => r.getAttribute('data-property'));
+
+  it('the default tab shows its own sections and the untabbed ones', () => {
+    setupTab('one');
+    expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
+    expect(screen.queryByText('Beta')).toBeNull();
+    expect(screen.queryByText('Assignee')).toBeNull();
+  });
+
+  it('a second tab shows only its own — the untabbed section stays home', () => {
+    setupTab('two');
+    expect(groupIds()).toEqual(['g-beta']);
+    expect(screen.queryByText('Alpha')).toBeNull();
+    expect(screen.queryByText('Gamma')).toBeNull();
+  });
+
+  // The leak: `rest` is the remainder of the ROSTER, counted across every
+  // tab. Resolving the tab's groups first would make a field placed on the
+  // other tab look unclaimed here and render it loose — the same property on
+  // two tabs, one of them without its section.
+  it('rest never picks up a field another tab’s section claims', () => {
+    setupTab('two');
+    // assignee (this tab's section) and the undeclared key only: priority and
+    // due are claimed elsewhere, not loose here.
+    expect(rowNames()).toEqual(['assignee', 'channel']);
+  });
+
+  it('and the same on the default tab', () => {
+    setupTab('one');
+    expect(rowNames()).toEqual(['priority', 'due', 'channel']);
+  });
+
+  // Every vault written before M45.6, and every host that has no tabs to
+  // pass: one stack, every section.
+  it('a hostless mount is the pre-tab stack verbatim', () => {
+    setupTab(null);
+    expect(groupIds()).toEqual(['g-alpha', 'g-beta', 'g-gamma']);
+    expect(rowNames()).toEqual(['priority', 'assignee', 'due', 'channel']);
+  });
+
+  // A section whose tab died — deleted, or re-kinded to one that renders no
+  // stack — falls back onto the default tab VISIBLE. The engine owns that
+  // rule; this pins that the surface does not undo it.
+  it('a section on a tab that no longer exists comes home to the default', () => {
+    setupTab('one', {
+      groups: [{ id: 'g-ghost', name: 'Ghost', fields: ['priority'], tab: 'gone' }],
+    });
+    expect(groupIds()).toEqual(['g-ghost']);
+  });
+
+  // The expander promises rows. A folded field inside another tab's section
+  // is not hidden HERE — it is elsewhere — and counting it would promise a
+  // row this stack cannot produce.
+  it('the hidden count is what this tab can actually reveal', () => {
+    const entries = fixtureVault();
+    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+    const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+    const fields = typeProps.fields as Record<string, unknown>;
+    fields.internal = { kind: 'text', visibility: 'hide' };
+    fields.archived = { kind: 'checkbox', visibility: 'hide' };
+    typeProps.layout = {
+      groups: [
+        { id: 'g-alpha', name: 'Alpha', fields: ['priority', 'internal'], tab: 'one' },
+        { id: 'g-beta', name: 'Beta', fields: ['assignee', 'archived'], tab: 'two' },
+      ],
+    };
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    render(
+      <RecordProperties entry={entry} schema={buildSchema(entries)} tab={layoutTabScope(TABS, 'one')} />,
+    );
+    const toggle = screen.getByTestId('hidden-properties-toggle');
+    expect(toggle.textContent).toContain('1 hidden property');
+    fireEvent.click(toggle);
+    expect(within(screen.getByTestId('property-group')).getByText('Internal')).toBeTruthy();
+    expect(screen.queryByText('Archived')).toBeNull();
   });
 });

@@ -14,7 +14,7 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
-import { resolveLayout } from '@/engine/layout';
+import { resolveLayout, type LayoutTab } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
 import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
@@ -44,8 +44,23 @@ function undeclaredKind(entry: Entry, name: string): FieldKind {
  * frontmatter read-only, plus the add-property flyout. Extracted from
  * DetailPanel (M3) so the overlay panel and the split view's right-hand pane
  * share one code path.
+ *
+ * `tab` is which tab the host has open (M45.6), as `layoutTabScope` answers
+ * it — sections belong to tabs now, and this stack shows the open one's.
+ * ABSENT is the pre-M45.6 stack verbatim: every section, on one surface.
+ * That is not a legacy path but the honest answer for a host with no tabs to
+ * report — InboxPage's peek-in-a-list, and the doc side panel, which stands
+ * BESIDE the page rather than on one of its tabs.
  */
-export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
+export function RecordProperties({
+  entry,
+  schema,
+  tab,
+}: {
+  entry: Entry;
+  schema: Schema;
+  tab?: LayoutTab;
+}) {
   const [addingProp, setAddingProp] = useState(false);
   const addRef = useRef<HTMLButtonElement | null>(null);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
@@ -64,19 +79,30 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   // also makes the reorder mapping below the identity case.
   const [revealed, setRevealed] = useState(false);
   const folds = foldsWhenUnset(entry, schema, showEmpty);
-  const { shown, hidden } = splitByVisibility(allDeclared, folds);
+  const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
 
-  // M45.1: `layout:` arranges the stack into named groups. Resolution
-  // partitions `allDeclared` exactly (heading ∪ groups ∪ rest, claim-once by
-  // parse), so the split above IS the pooled hidden count: the one expander
-  // below spans every container — the heading strip's folds included —
-  // without a second bookkeeping pass.
-  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
+  // M45.1: `layout:` arranges the stack into named groups. M45.6: and `tab`
+  // narrows those groups to the tab the host has open — `rest` and the
+  // heading stay global by decision, so a field a section on another tab
+  // claims is not loose here either.
+  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared, tab);
   // Per container, the SAME fold the flat stack makes; revealing opens each
   // container's folds in place.
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, folds).shown;
+  // The pooled hidden count is what THIS stack can reveal, container by
+  // container. It used to be the whole roster's, which was the same number
+  // while every section rendered on every surface; once `tab` scopes the
+  // groups it is not — a folded field inside another tab's section is not
+  // hidden here, it is elsewhere, and counting it would promise a row the
+  // expander cannot produce. Absent `tab`, heading ∪ groups ∪ rest partitions
+  // the roster exactly (claim-once at parse) and the flat case's `rest` IS
+  // the roster, so this is the old global count verbatim.
+  const hidden = splitByVisibility(
+    [...layout.heading, ...layout.groups.flatMap((g) => g.fields), ...layout.rest],
+    folds,
+  ).hidden;
   // Heading fields the strip folded. The strip cannot reveal them, so on
   // reveal they surface at the TOP of the stack — the heading is the topmost
   // container — headerless. The strip's SHOWN fields stay out of the stack.

@@ -19,7 +19,7 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
-import { resolveLayout } from '@/engine/layout';
+import { resolveLayout, type LayoutTab } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
@@ -97,8 +97,22 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
  * M2.x: embedded in the tabbed panel): assign a type, edit its declared
  * fields, manage loose frontmatter keys. Everything writes through
  * patchFrontmatter (optimistic, disk-first on rescan).
+ *
+ * `tab` is RecordProperties' seam (M45.6) on this stack, so the two cannot
+ * disagree about which sections a tab holds. Its shipped host passes none on
+ * purpose: the side panel stands BESIDE the page rather than on one of its
+ * tabs, and it is where every property stays reachable while a `sections` or
+ * `view` tab is open — a tab that renders no stack at all.
  */
-export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
+export function DocProperties({
+  entry,
+  schema,
+  tab,
+}: {
+  entry: Entry;
+  schema: Schema;
+  tab?: LayoutTab;
+}) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
 
@@ -118,17 +132,24 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   // M16.10, the same split the record panel makes.
   const [revealed, setRevealed] = useState(false);
   const folds = foldsWhenUnset(entry, schema, showEmpty);
-  const { shown, hidden } = splitByVisibility(allDeclared, folds);
+  const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
 
-  // M45.1, the record panel's math verbatim: resolution partitions
-  // `allDeclared` exactly, so the split above IS the pooled hidden count and
-  // the one expander spans every container, the heading strip's folds
-  // included. Only the declared stack is arranged — the Type row, Convert
-  // flow, and undeclared keys render exactly as the flat panel does.
-  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
+  // M45.1, the record panel's math verbatim — M45.6's tab scoping included.
+  // Only the declared stack is arranged: the Type row, Convert flow, and
+  // undeclared keys render exactly as the flat panel does.
+  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared, tab);
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, folds).shown;
+  // The one expander counts what THIS stack can reveal, container by
+  // container — the record panel's rule and its reason: with `tab` scoping
+  // the groups, the roster's total would count folds that live on another
+  // tab and promise rows nothing here can produce. Absent `tab` the
+  // containers partition the roster exactly, so the number is unchanged.
+  const hidden = splitByVisibility(
+    [...layout.heading, ...layout.groups.flatMap((g) => g.fields), ...layout.rest],
+    folds,
+  ).hidden;
   // The strip cannot reveal its own folds; revealed, they surface headerless
   // at the top of the stack. Its SHOWN fields stay out of the stack — an
   // exclusion that is only sound because the host page (DocPage) co-mounts
