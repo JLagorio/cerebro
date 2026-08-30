@@ -110,11 +110,15 @@ export interface RecordTabsProps {
    * is gated on: it exists iff the picked source stores a relation aimed at
    * this type. Optional so pre-M45.4 call sites compile; absent = no toggle. */
   hostType?: string | null;
-  /** Which gutter the strip sits in (M45.6). The page and the editor canvas
-   * are 24px columns; the peek's is 16px, and a strip carrying the page's
-   * gutter into the panel reads as misaligned against everything above it.
-   * The underline spans the host's full width either way. */
-  gutter?: 'page' | 'panel';
+  /** How wide a gutter the strip sits in (M45.6): `md` is the 24px column the
+   * record page and the editor canvas both use, `sm` the 16px one the peek
+   * has — a strip carrying the page's gutter into the panel reads as
+   * misaligned against everything above it. The underline spans the host's
+   * full width either way.
+   *
+   * Named for the MEASUREMENT, not the host: a fourth surface should pick the
+   * gutter it has, not add itself to a union of surface names. */
+  gutter?: 'sm' | 'md';
 }
 
 export function RecordTabs({
@@ -123,7 +127,7 @@ export function RecordTabs({
   onSelect,
   onChange,
   hostType,
-  gutter = 'page',
+  gutter = 'md',
 }: RecordTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -259,7 +263,7 @@ export function RecordTabs({
   return (
     <div
       className={`flex min-w-0 flex-none items-end border-b border-n-200 ${
-        gutter === 'panel' ? 'px-4' : 'px-6'
+        gutter === 'sm' ? 'px-4' : 'px-6'
       }`}
     >
       {deleting !== null && (

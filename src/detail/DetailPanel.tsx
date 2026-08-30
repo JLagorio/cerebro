@@ -239,8 +239,17 @@ export function DetailPanel() {
     // unmounts the editor for exactly the same reason; and split it off the
     // title sync above, so a tab press no longer throws away a rename the
     // user has typed but not committed.
+    //
+    // The dependencies are exactly the two things that unmount the editor.
+    // `entry.title` was a third until the M45.6 review, and it belonged to
+    // neither: a rename does not move the path (the file is rewritten in
+    // place), so the editor stayed mounted while this effect nulled the
+    // handle to it — and nothing hands it back, because `onReady` fires on
+    // mount. The next rename found null, skipped `spliceTitleIntoBlocks`,
+    // and M1.x returned: the editor's next debounced save writing the old H1
+    // over the newly renamed file.
     editorRef.current = null;
-  }, [entry?.path, entry?.title, showsBody]);
+  }, [entry?.path, showsBody]);
 
   if (!detailPath || !entry) return null;
 
@@ -443,14 +452,14 @@ export function DetailPanel() {
             editor's canvas previews exactly this order. The page pins its
             strip above the scroll container instead, where it is page chrome;
             here it scrolls with the record it describes. `-mx-4` lets the
-            underline reach both edges of the panel while the tabs keep the
-            column's own 16px gutter. */}
+            underline reach both edges of the panel while `gutter="sm"` keeps
+            the tabs on this column's own 16px inset. */}
         {savedTabs.length > 0 && activeTab !== null && (
           <div className="-mx-4 mb-3.5">
             <RecordTabs
               tabs={tabs}
               activeId={activeTab.id}
-              gutter="panel"
+              gutter="sm"
               hostType={entry.type}
               onSelect={(id) => setTabPick({ path: entry.path, id })}
               onChange={(next) => {
@@ -491,6 +500,35 @@ export function DetailPanel() {
               tab={tabScope}
             />
           )}
+        {/* The peek's own chrome, on EVERY tab (M45.6): freshness and the
+            knowledge loop are facts about the RECORD, not about the lens you
+            have open, and a tab that hid them would make them unreachable
+            from the peek rather than merely elsewhere.
+
+            They sit HERE, between the stack and the tab's own content, which
+            is exactly where they sat before tabs existed — so the Overview
+            tab is the pre-M45.6 panel line for line, and nothing about an
+            untabbed record's peek moved.
+
+            PLACEMENT, decided against the review's "hoist them above the view
+            arm only" (M45.6): chrome that changes position depending on the
+            open tab is worse than chrome in an awkward place — you learn
+            where a thing lives once, or you hunt for it every time. Fixed
+            here, they answer the review's real complaint anyway: both are one
+            line (a null freshness line, a collapsed disclosure), so on a view
+            tab they stand ABOVE the embedded table rather than however many
+            rows below it. The two heavy blocks stay at the foot of the panel,
+            which is where they have always been. If an unbounded embed ever
+            does become the problem, the fix is a height on the embed, not a
+            moving knowledge block. */}
+        {/* M34.5.3 — a cached copy says its own freshness. Null for every
+            record without fetch bookkeeping. */}
+        <SourceFreshnessLine entry={entry} />
+        {/* M12: records lost the doc side panel when display:doc died, and
+            the knowledge loop must not die with it — the same commit state
+            and related-concepts view, collapsed until asked (M8.3's rule:
+            the assistant never speaks first). */}
+        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
         {/* M44.1 — the type's display config gates the body; M45.6 — so does
             the open tab (`showsBody`). DocPage's body IS the page; this is
             the peek panel's Description block. */}
@@ -542,19 +580,8 @@ export function DetailPanel() {
             scope={`viewtab:${activeTab.id}`}
           />
         )}
-        {/* The peek's own chrome, below whatever the tab shows and on EVERY
-            tab (M45.6): freshness, the knowledge loop and the file's history
-            are facts about the RECORD, not about the lens you have open, and
-            a tab that hid them would make them unreachable from the peek
-            rather than merely elsewhere. */}
-        {/* M34.5.3 — a cached copy says its own freshness. Null for every
-            record without fetch bookkeeping. */}
-        <SourceFreshnessLine entry={entry} />
-        {/* M12: records lost the doc side panel when display:doc died, and
-            the knowledge loop must not die with it — the same commit state
-            and related-concepts view, collapsed until asked (M8.3's rule:
-            the assistant never speaks first). */}
-        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
+        {/* The foot of the panel, under whatever the tab showed: the two
+            blocks that can run long, in the place they have always held. */}
         {/* M9.4 — every version of this note, and what each one changed.
             Renders nothing when there is no history, so a note you just
             created does not get a heading over an empty list. */}

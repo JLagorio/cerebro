@@ -125,15 +125,15 @@ describe('RecordTabs (M44.5)', () => {
   });
 
   // M45.6 — the strip's horizontal inset is the HOST's measurement, not its
-  // own: the page and the editor canvas are 24px columns, the peek is a 16px
-  // one, and a strip that carried the page's gutter into the panel would sit
-  // misaligned under everything above it. Default = the page, so the two
-  // older hosts pass nothing.
-  it('sits in the host’s gutter: the page by default, narrower on request', () => {
+  // own: the record page and the editor canvas are 24px columns (`md`, the
+  // default, so neither passes anything), the peek is a 16px one (`sm`). A
+  // strip that carried the wider gutter into the panel would sit misaligned
+  // under everything above it.
+  it('sits in the gutter its host has, 24px unless asked for 16', () => {
     setup();
     expect(screen.getByTestId('record-tabs').parentElement?.className).toContain('px-6');
     cleanup();
-    setup({ gutter: 'panel' });
+    setup({ gutter: 'sm' });
     const strip = screen.getByTestId('record-tabs').parentElement;
     expect(strip?.className).toContain('px-4');
     expect(strip?.className).not.toContain('px-6');

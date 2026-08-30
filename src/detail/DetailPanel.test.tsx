@@ -25,6 +25,13 @@ vi.mock('@/lib/ipc', () => ({
   updateFrontmatter: vi.fn().mockResolvedValue(undefined),
   createNote: vi.fn(),
   listViews: vi.fn().mockResolvedValue([]),
+  // Missing until M45.6, and its absence was invisible: `rescan` calls it
+  // through `loadCollections`, so every rescan in this file threw on
+  // `undefined is not a function`, was swallowed by the store-layer catch,
+  // and left `entries` untouched. Nothing failed — a rename simply never
+  // reached the store, which is exactly what a case about post-rename state
+  // needs to be able to see.
+  listCollections: vi.fn().mockResolvedValue([]),
   saveView: vi.fn(),
   startWatcher: vi.fn().mockResolvedValue(undefined),
   listFolders: vi.fn().mockResolvedValue([]),
@@ -77,6 +84,9 @@ function SurfaceOpenedOverThePanel() {
     </span>
   );
 }
+
+/** The record the panel opens on in every case below. */
+const FLD_1 = 'projects/onboarding/items/fld-1.md';
 
 describe('DetailPanel', () => {
   beforeEach(() => {
@@ -376,6 +386,64 @@ describe('DetailPanel', () => {
     );
   });
 
+  /**
+   * The SECOND rename must splice too (M45.6 review).
+   *
+   * `entry.title` sat in the editor-handle effect's dependency list, and a
+   * rename changes exactly that and nothing else the panel keys on — the
+   * path does not move (the case above states it: the file is rewritten in
+   * place). So the effect fired, nulled `editorRef.current`, and the
+   * NoteBodyEditor it was pointing at stayed mounted the whole time: nothing
+   * ever handed the handle back. The next rename found null, skipped the
+   * splice, and M1.x came back — the editor's next debounced save writing
+   * the previous H1 over the newly renamed file.
+   *
+   * The fixture has to be able to SEE that: `scanVault` replays whatever
+   * `setNoteTitle` was last given, so the rescan really does change
+   * `entry.title` the way the app does. With a fixture that returns the
+   * original titles forever, the effect never re-fires and this passes
+   * whether or not the bug is present.
+   */
+  it('splices the second rename too — the handle survives the first', async () => {
+    let renamed: string | null = null;
+    vi.mocked(ipc.setNoteTitle).mockImplementation(async (_vault, _path, title) => {
+      renamed = title;
+    });
+    vi.mocked(ipc.scanVault).mockImplementation(async () =>
+      fixtureVault().map((e) =>
+        e.path === 'projects/onboarding/items/fld-1.md' && renamed !== null
+          ? { ...e, title: renamed }
+          : e,
+      ),
+    );
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
+    render(<DetailPanel />);
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
+    const input = screen.getByLabelText('Title') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'Renamed once' } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed once'),
+    );
+    // The precondition, asserted rather than assumed: the rescan really did
+    // change `entry.title`, which is the ONLY input the buggy dependency list
+    // reacted to. Without this the case passes vacuously — a fixture whose
+    // rescan replays the original titles never re-fires the effect, so it
+    // cannot tell a fixed panel from a broken one.
+    await waitFor(() =>
+      expect(useVaultStore.getState().entries.find((e) => e.path === FLD_1)?.title).toBe(
+        'Renamed once',
+      ),
+    );
+
+    fireEvent.change(input, { target: { value: 'Renamed twice' } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed twice'),
+    );
+  });
+
   // M14.2: which knowledge surface answers is capability-gated — a record the
   // base holds concepts ABOUT gets its dossier (projects became ordinary
   // records in the M12.5 aftermath, so the dossier rides the panel now); any
@@ -612,6 +680,39 @@ describe('DetailPanel', () => {
       expect(screen.queryByTestId('view-tab-embed')).toBeNull();
     });
 
+    /**
+     * The load-bearing half of the decision to embed a real database in a
+     * 360px column: the embed does NOT renumber the peek.
+     *
+     * `detailSiblings` is "the records the canvas behind you is showing", and
+     * it drives the header's `3 of 45` and its next/prev arrows. A view tab
+     * mounts a whole second canvas INSIDE the panel; if that canvas registered
+     * its own rows, stepping "next" from a record would walk the rows of a
+     * table embedded in that record's own peek. `ViewCanvas` takes an
+     * `embedded` early return before the registration effect, so it neither
+     * writes the list nor clears it — asserted here, because the comment in
+     * `DetailPanel` argues from it and a silent change upstream would make
+     * that argument false without failing anything.
+     */
+    it('an embedded view leaves the peek’s own record list alone', async () => {
+      // Deliberately NOT the rows the embed shows: seeded with the two Work
+      // items, an embed that DID register its rows would write back the same
+      // array and this case would pass on a coincidence.
+      const siblings = ['docs/one.md', 'docs/two.md', 'docs/three.md'];
+      withTabs([
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+        OVERVIEW,
+      ]);
+      useUiStore.setState({ detailSiblings: siblings });
+      render(<DetailPanel />);
+      // The embed really did render — otherwise this passes for the boring
+      // reason that no second canvas ever mounted.
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      expect(screen.getByText('Wire field sync banner')).toBeTruthy();
+      // Effects have run by now; the list is neither replaced nor emptied.
+      await waitFor(() => expect(useUiStore.getState().detailSiblings).toEqual(siblings));
+    });
+
     it('pressing a tab swaps the content, and the selection is the peek’s own', () => {
       withTabs([OVERVIEW, SPEC]);
       const where = useNavStore.getState().selection;
@@ -634,6 +735,91 @@ describe('DetailPanel', () => {
       act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
       expect(screen.queryByTestId('tab-sections')).toBeNull();
       expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    /**
+     * A tab the type no longer has is a dead pointer, and a dead pointer
+     * falls back — it never renders nothing.
+     *
+     * The peek holds its tab in local state, so the store can drop the open
+     * tab underneath it: another window, the layout editor's Apply, or a hand
+     * edit of the Type doc. The panel then holds an id nothing answers to,
+     * and the fallback is the first tab (`tabs[0]`), the same idiom the
+     * layout canvas uses. Without it the arms all miss and the peek renders a
+     * title over a blank column.
+     */
+    it('a tab deleted under the peek falls back to the first, not to nothing', () => {
+      const entries = withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+
+      // The type loses the open tab while the peek is standing on it.
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      (typeDoc.properties as unknown as Record<string, unknown>).tabs = [OVERVIEW];
+      act(() => useVaultStore.setState({ entries: [...entries] }));
+
+      expect(screen.queryByTestId('tab-sections')).toBeNull();
+      // Overview's content, not an empty panel: the body and the stack.
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // And the strip says so. This is the assertion that discriminates: a
+      // panel that let `activeTab` go null would render no strip at all (the
+      // mount is gated on it) while still showing a body, so the two
+      // assertions above would pass on a peek that had lost its tabs.
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    /**
+     * A tab press must not discard a rename in progress (M45.6 review).
+     *
+     * The panel's title input is state, seeded from `entry.title` by an
+     * effect. That effect used to share a dependency list with the one that
+     * drops the editor handle — and pressing a tab changes `showsBody`, which
+     * the handle effect has to watch. Merged, the two would re-seed the input
+     * from disk truth on every tab press, silently throwing away whatever the
+     * user had typed and not yet committed. Split, only the handle reacts.
+     */
+    it('keeps an uncommitted rename when you press another tab', () => {
+      withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'properties' }]);
+      render(<DetailPanel />);
+      const input = screen.getByTestId('detail-title') as HTMLInputElement;
+      fireEvent.change(input, { target: { value: 'Half typed' } });
+      fireEvent.click(screen.getByTestId('record-tab-props'));
+      // The tab really did change (the body is gone), and the draft survived.
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect((screen.getByTestId('detail-title') as HTMLInputElement).value).toBe('Half typed');
+    });
+
+    /**
+     * The peek's chrome holds ONE position, whichever tab is open.
+     *
+     * Two things are pinned here, and they are the same fact. The Overview
+     * tab is the pre-M45.6 panel line for line — the knowledge loop sits
+     * above the Description, where it sat before tabs existed, so growing
+     * tabs moved nothing for the vaults that have none. And on a view tab
+     * the same block sits above the embedded table rather than however many
+     * rows below it, which is what the alternative — hoisting the chrome on
+     * view tabs only — was trying to buy, at the price of chrome that moves
+     * when you press a tab.
+     */
+    it('puts the knowledge block in one place: above the tab’s content, always', () => {
+      withTabs([
+        OVERVIEW,
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+      ]);
+      render(<DetailPanel />);
+      const above = (first: HTMLElement, second: HTMLElement) =>
+        Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+      // Overview: exactly where it was before tabs.
+      expect(
+        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('detail-body-heading')),
+      ).toBe(true);
+      // View: above the table, not buried under its rows.
+      fireEvent.click(screen.getByTestId('record-tab-items'));
+      expect(
+        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('view-tab-embed')),
+      ).toBe(true);
     });
 
     // The peek's own chrome is about the RECORD, not about a tab: it stays
