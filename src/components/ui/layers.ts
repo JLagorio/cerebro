@@ -105,10 +105,12 @@ export function isTopLayer(id: string): boolean {
  * everything, tooltips and gestures included, since a visible tooltip is the
  * thing an Escape is aimed at and a drag in flight is what it means to abandon.
  *
- * Asked instead of relying on listener order: every Escape handler in the app
- * sits on `window` in the capture phase, so which one runs first is only
- * whichever surface mounted first — the exact opposite of what precedence
- * needs.
+ * Asked instead of relying on listener order, which cannot answer it. The
+ * app's Escape handlers sit on three different nodes and phases — `Popover`,
+ * `FieldPopover` and a live drag gesture on `window` capture, `DetailPanel` on
+ * `window` bubble, `Dialog` and dnd-kit's own drag cancel on `document`
+ * bubble — so which runs first is settled by node, then phase, then whichever
+ * mounted first, and none of those tracks the surface a keystroke is aimed at.
  */
 export function ownsEscape(id: string): boolean {
   return stack.at(-1)?.id === id;
