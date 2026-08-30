@@ -78,11 +78,20 @@ export default defineConfig({
       // functions reported the same denominator on two consecutive runs while
       // the branch total moved (19864 → 19861, 84.56 → 84.55), and a ratchet
       // that trips on its own measurement noise is a broken gate, not a floor.
+      // M45.6 measured 82.31 statements / 84.66 branches / 76.77 functions /
+      // 82.31 lines on two consecutive runs — the tab seam, the peek's strip
+      // and the customizer's tab-scoped canvas all arrived with their suites.
+      // The margins are thinner than M45.5's because the noise is now
+      // measured rather than guessed at: statements, lines and functions
+      // reported the SAME numerator and denominator both times (53987/65587,
+      // 3071/4000), so a 0.01 gap is real headroom there; branches moved its
+      // denominator again (19999 → 20001) at an unchanged 84.66, and keeps
+      // the wider margin for it.
       thresholds: {
-        lines: 82.2,
-        statements: 82.2,
-        functions: 76.6,
-        branches: 84.4,
+        lines: 82.3,
+        statements: 82.3,
+        functions: 76.7,
+        branches: 84.6,
       },
     },
   },
