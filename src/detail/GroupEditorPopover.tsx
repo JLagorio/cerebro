@@ -268,11 +268,8 @@ export function GroupEditorPopover({
         key={f.name}
         data-testid="group-editor-row"
         data-property={f.name}
-        style={sortable.dropIndicator(i)}
-        className={[
-          'group/row flex items-center gap-1.5 rounded-sm px-1 py-[2px] hover:bg-n-25',
-          sortable.dragging === f.name ? 'opacity-40' : '',
-        ].join(' ')}
+        style={sortable.rowStyle(i)}
+        className="group/row flex items-center gap-1.5 rounded-sm px-1 py-[2px] hover:bg-n-25"
       >
         {/* No grip where a reorder would be a promise the model cannot keep
             (M45.5 Task 4). `rest` is DERIVED: its order is the roster's
@@ -373,6 +370,7 @@ export function GroupEditorPopover({
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
           data-testid="group-editor-rows"
           className="flex flex-col"
+          style={sortable.containerStyle}
         >
           {shown.map((f, i) => eyeRow(f, i))}
         </div>

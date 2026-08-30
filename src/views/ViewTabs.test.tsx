@@ -176,8 +176,9 @@ describe('reordering tabs (M16.26)', () => {
    */
   it('the add-view button is not one of the reorderable slots', () => {
     setup({ onReorder: vi.fn() });
-    const strip = screen.getByTestId('view-tabs');
-    const measured = [...(strip.querySelector('[style*="contents"]')?.children ?? [])];
+    // The measured set is its own box now. It was `display: contents` until
+    // M46.2, which a drag cannot freeze — it has no box to freeze.
+    const measured = [...screen.getByTestId('view-tab-slots').children];
     expect(measured).toHaveLength(2);
     expect(screen.getByTestId('new-view')).toBeTruthy();
   });

@@ -293,12 +293,17 @@ export function RecordTabs({
         // moves every other tab under the cursor as the window narrows.
         className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {/* `display: contents` so the tabs stay direct flex children of the
-            strip while the sortable measures ONLY them — the "+ Tab" button
-            below must not count as a drop slot. */}
+        {/* The tabs get their own box, so the sortable measures ONLY them —
+            the "+ Tab" button below must not count as a drop slot. It used to
+            be `display: contents`, which has no box at all: a drag freezes
+            this element to its measured size and positions the tabs against
+            it, and neither is possible without one (M46.2). `flex-none` keeps
+            the group at its natural width so it overflows into the strip's
+            scroller exactly as the loose tabs did. */}
         <div
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-          style={{ display: 'contents' }}
+          className="flex flex-none items-end gap-0.5"
+          style={sortable.containerStyle}
         >
           {tabs.map((tab, index) => {
             const active = tab.id === activeId;
@@ -320,11 +325,8 @@ export function RecordTabs({
             return (
               <div
                 key={tab.id}
-                className={[
-                  'group relative flex-none',
-                  sortable.dragging === tab.id ? 'opacity-40' : '',
-                ].join(' ')}
-                style={sortable.dropIndicator(index)}
+                className="group relative flex-none"
+                style={sortable.rowStyle(index)}
               >
                 {/* The grip sits in the tab's own left padding, which is dead
                     space — an appended handle would shove every tab sideways

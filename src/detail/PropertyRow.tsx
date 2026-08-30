@@ -64,10 +64,15 @@ export interface PropertyRowProps {
   grip?: GripProps;
   /** Says what dragging this actually changes. */
   gripHint?: string;
-  /** The insertion line, from `useSortableList().dropIndicator(index)`. */
+  /**
+   * The row's slot while a drag is live, from `useSortableList().rowStyle`.
+   * Nothing while one is not.
+   *
+   * It used to be an insertion line and a dim. Notion's list reorder has
+   * neither: the rows themselves move, and the gap that opens is the whole of
+   * the indicator (M46.2, reference §C-I).
+   */
   style?: React.CSSProperties;
-  /** Dimmed while it is the row being dragged. */
-  dragging?: boolean;
 }
 
 export function PropertyRow({
@@ -81,7 +86,6 @@ export function PropertyRow({
   grip,
   gripHint,
   style,
-  dragging = false,
 }: PropertyRowProps) {
   const label = humanize(name);
   const nameRef = useRef<HTMLElement | null>(null);
@@ -119,7 +123,6 @@ export function PropertyRow({
         'group -mx-1 flex min-w-0 gap-1.5 rounded-sm px-1',
         'hover:bg-n-25',
         align === 'center' ? 'items-center' : 'items-start',
-        dragging ? 'opacity-40' : '',
       ].join(' ')}
     >
       <span

@@ -22,14 +22,12 @@ function StatusRow({
   onChange,
   onRemove,
   grip,
-  dragging = false,
   style,
 }: {
   status: StatusDef;
   onChange: (next: StatusDef) => void;
   onRemove: () => void;
   grip?: GripProps;
-  dragging?: boolean;
   style?: React.CSSProperties;
 }) {
   const [editing, setEditing] = useState(false);
@@ -49,10 +47,7 @@ function StatusRow({
 
   const dot = status.color === null ? 'var(--n-300)' : resolveOptionColor(status.color).solid;
   return (
-    <div
-      style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
-    >
+    <div style={style} className="group flex flex-col rounded-md px-1 py-1 hover:bg-n-25">
       <div className="flex items-center gap-2">
         {grip !== undefined && (
           <span
@@ -204,14 +199,17 @@ function StatusGroup({
         <span className="flex-1" />
         <IconButton icon="plus" label={`Add status to ${label}`} size="sm" onClick={onStartAdd} />
       </div>
-      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>} className="flex flex-col">
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col"
+        style={sortable.containerStyle}
+      >
         {rows.map((s, i) => (
           <StatusRow
             key={s.id}
             status={s}
             grip={sortable.gripProps(s.id, i)}
-            dragging={sortable.dragging === s.id}
-            style={sortable.dropIndicator(i)}
+            style={sortable.rowStyle(i)}
             onChange={(next) => onChangeRow(s, next)}
             onRemove={() => onRemoveRow(s)}
           />

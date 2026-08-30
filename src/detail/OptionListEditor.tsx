@@ -73,14 +73,12 @@ function OptionRow({
   onChange,
   onRemove,
   grip,
-  dragging = false,
   style,
 }: {
   option: FieldOption;
   onChange: (next: FieldOption) => void;
   onRemove: () => void;
   grip?: GripProps;
-  dragging?: boolean;
   style?: React.CSSProperties;
 }) {
   const [editing, setEditing] = useState(false);
@@ -100,10 +98,7 @@ function OptionRow({
   };
 
   return (
-    <div
-      style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
-    >
+    <div style={style} className="group flex flex-col rounded-md px-1 py-1 hover:bg-n-25">
       <div className="flex items-center gap-2">
         {grip !== undefined && (
           <span
@@ -228,14 +223,14 @@ export function OptionListEditor({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-0.5"
+        style={sortable.containerStyle}
       >
         {options.map((o, i) => (
           <OptionRow
             key={o.id}
             option={o}
             grip={sortable.gripProps(o.id, i)}
-            dragging={sortable.dragging === o.id}
-            style={sortable.dropIndicator(i)}
+            style={sortable.rowStyle(i)}
             onChange={(next) => onChange(options.map((x, xi) => (xi === i ? next : x)))}
             onRemove={() => onChange(options.filter((_, xi) => xi !== i))}
           />

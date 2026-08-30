@@ -286,6 +286,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           <div
             ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
             className="flex flex-col gap-[7px]"
+            style={sortable.containerStyle}
           >
             {declared.map((f, index) => (
               <PropertyRow
@@ -295,8 +296,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                 align={f.kind === 'checkbox' ? 'center' : 'start'}
                 grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
                 gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
-                dragging={sortable.dragging === f.name}
-                style={sortable.dropIndicator(index)}
+                style={sortable.rowStyle(index)}
                 menu={
                   entry.type === null
                     ? undefined

@@ -67,11 +67,22 @@ const editor = () => within(screen.getByTestId('group-editor'));
 /** jsdom has no layout, so give the popover's rows heights for
  * useSortableList to measure midpoints against (its own test's recipe). */
 const fakeRects = () => {
-  const rows = [...screen.getByTestId('group-editor-rows').children] as HTMLElement[];
+  const list = screen.getByTestId('group-editor-rows');
+  const rows = [...list.children] as HTMLElement[];
+  list.getBoundingClientRect = () =>
+    ({ top: 0, height: rows.length * 20, left: 0, width: 200 }) as DOMRect;
   rows.forEach((r, i) => {
     r.getBoundingClientRect = () => ({ top: i * 20, height: 20, left: 0, width: 200 }) as DOMRect;
   });
 };
+
+/** A press with coordinates: `fireEvent.pointerDown` cannot carry any, and the
+ * drag is measured from where the cursor grabbed. */
+const press = (grip: HTMLElement, at: number) =>
+  fireEvent(
+    grip,
+    new MouseEvent('pointerdown', { button: 0, clientY: at, bubbles: true, cancelable: true }),
+  );
 
 const apply = async (patchFrontmatter: ReturnType<typeof vi.fn>) => {
   fireEvent.click(screen.getByTestId('layout-apply'));
@@ -665,11 +676,14 @@ describe('panel rows reorder within their container (M45.5 Task 4)', () => {
     fakeRects();
     // useSortableList's jsdom recipe: its listeners are native window
     // handlers and jsdom implements no PointerEvent, so a MouseEvent carries
-    // the coordinates the handler actually reads.
-    fireEvent.pointerDown(gripFor('Priority'), { button: 0 });
+    // the coordinates the handler actually reads — the PRESS included, since
+    // the drag tracks the cursor from where it grabbed (M46.2).
+    press(gripFor('Priority'), 10);
     act(() => {
-      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 45 }));
-      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 45 }));
+      // Grabbed mid-row and carried 15px down: the row now spans 15–35 and its
+      // midpoint, 25, is past the next row's leading edge at 20.
+      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 25 }));
+      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 25 }));
     });
     expect(groupOrder('g1')).toEqual(['notes', 'priority']);
   });
@@ -685,10 +699,11 @@ describe('panel rows reorder within their container (M45.5 Task 4)', () => {
     ]);
     await user.click(shellOf('g1'));
     fakeRects();
-    fireEvent.pointerDown(gripFor('Priority'), { button: 0 });
+    press(gripFor('Priority'), 10);
     act(() => {
-      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 5 }));
-      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 5 }));
+      // The same grab, carried 2px: the midpoint never reaches the neighbour.
+      window.dispatchEvent(new MouseEvent('pointermove', { clientY: 12 }));
+      window.dispatchEvent(new MouseEvent('pointerup', { clientY: 12 }));
     });
     expect(groupOrder('g1')).toEqual(['priority', 'notes']);
     fireEvent.keyDown(document, { key: 'Escape' });

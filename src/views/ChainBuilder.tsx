@@ -145,15 +145,13 @@ export function ChainBuilder({
             <div
               ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
               className="flex flex-col gap-1.5"
+              style={sortable.containerStyle}
             >
               {rows.map((row, i) => (
                 <div
                   key={`${i}:${row.value}`}
-                  className={[
-                    'group flex items-center gap-1.5',
-                    sortable.dragging === row.value ? 'opacity-40' : '',
-                  ].join(' ')}
-                  style={sortable.dropIndicator(i)}
+                  className="group flex items-center gap-1.5"
+                  style={sortable.rowStyle(i)}
                 >
                   {/* The grip shares the By/then cell rather than appending
                         itself, so the arrival of a pointer does not shove

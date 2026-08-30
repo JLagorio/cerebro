@@ -789,11 +789,10 @@ function PropertiesPage({
   const row = (f: ColumnDef, on: boolean, index?: number) => (
     <div
       key={f.name}
-      className={[
-        'group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50',
-        sortable.dragging === f.name ? 'opacity-60' : '',
-      ].join(' ')}
-      style={index !== undefined ? sortable.dropIndicator(index) : undefined}
+      className="group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50"
+      // Only the shown rows are in the sortable's container; the hidden ones
+      // below it are the same component with no index and no slot.
+      style={index !== undefined ? sortable.rowStyle(index) : undefined}
     >
       {on && !searching && index !== undefined ? (
         <span
@@ -860,6 +859,7 @@ function PropertiesPage({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-0.5"
+        style={sortable.containerStyle}
       >
         {visible.map((f, i) => (matches(f) ? row(f, true, i) : null))}
       </div>
@@ -1670,15 +1670,13 @@ function SortPage({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-1.5"
+        style={sortable.containerStyle}
       >
         {sort.map((s, i) => (
           <div
             key={`${i}:${s.field}`}
-            className={[
-              'group flex items-center gap-1.5',
-              sortable.dragging === s.field ? 'opacity-40' : '',
-            ].join(' ')}
-            style={sortable.dropIndicator(i)}
+            className="group flex items-center gap-1.5"
+            style={sortable.rowStyle(i)}
           >
             <Tooltip label="Drag to reorder — the first key breaks ties first">
               <span

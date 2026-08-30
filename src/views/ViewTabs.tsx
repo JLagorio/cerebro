@@ -202,13 +202,19 @@ export function ViewTabs({
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
         className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {/* `display: contents` so the tabs stay direct flex children of the
-            strip while the sortable measures ONLY them. Its slot maths reads
-            `container.children`, and the "+ View" button below would otherwise
-            count as a drop slot you could never mean. */}
+        {/* The tabs get their own box, so the sortable measures ONLY them: its
+            slot maths reads `container.children`, and the "+ View" button
+            below would otherwise count as a drop slot you could never mean.
+            It used to be `display: contents`, which has no box at all — a drag
+            freezes this element to its measured size and positions the tabs
+            against it, and neither is possible without one (M46.2).
+            `flex-none` keeps the group at its natural width so it overflows
+            into the strip's scroller exactly as the loose tabs did. */}
         <div
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-          style={{ display: 'contents' }}
+          data-testid="view-tab-slots"
+          className="flex flex-none items-end gap-0.5"
+          style={sortable.containerStyle}
         >
           {views.map((view, index) => {
             const active = view.id === activeId;
@@ -229,11 +235,8 @@ export function ViewTabs({
             return (
               <div
                 key={view.id}
-                className={[
-                  'group relative flex-none',
-                  sortable.dragging === view.id ? 'opacity-40' : '',
-                ].join(' ')}
-                style={sortable.dropIndicator(index)}
+                className="group relative flex-none"
+                style={sortable.rowStyle(index)}
               >
                 {/* The grip sits in the tab's own left padding, which is dead
                   space — an appended handle would shove every tab sideways
