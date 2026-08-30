@@ -68,7 +68,7 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
     return (
       <PropertyRow kind={kind} name={name} trailing={remove}>
         <Tooltip label="A list or map — edit it in the file, or declare it on a type">
-          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
             {Array.isArray(value) ? value.map(String).join(', ') : JSON.stringify(value)}
           </span>
         </Tooltip>
@@ -239,19 +239,19 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             )
       }
     >
-      <FieldEditor entry={entry} def={f} schema={schema} />
+      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
     </PropertyRow>
   );
   const restRows = containerRows(layout.rest);
 
   return (
     <div data-testid="doc-properties" aria-label="Document properties" className="pt-1">
-      <div className="flex flex-col gap-[7px]">
+      <div className="flex flex-col gap-1">
         {/* Not a property — a doc's type is the one thing on this list that
             is not in `fields:` — so it takes an explicit icon rather than a
             kind glyph that would claim otherwise. */}
         <PropertyRow kind="text" icon="shapes" name="Type" align="center">
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-n-700">
+          <span className="inline-flex min-w-0 items-center gap-1.5 p-1.5 text-sm text-n-700">
             <Icon
               name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
               size={13}
@@ -276,7 +276,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             onClick={() => setConverting(true)}
             // Indented to the value column: it acts on the Type row above it,
             // and hanging it under the label read as a third, unrelated row.
-            style={{ marginLeft: PROPERTY_LABEL_W + 6 }}
+            style={{ marginLeft: PROPERTY_LABEL_W + 4 }}
             className="self-start whitespace-nowrap rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
           >
             Convert to record…
@@ -285,7 +285,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         {layout.flat ? (
           <div
             ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-            className="flex flex-col gap-[7px]"
+            className="flex flex-col gap-1"
             style={sortable.containerStyle}
           >
             {declared.map((f, index) => (
@@ -311,14 +311,14 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                       )
                 }
               >
-                <FieldEditor entry={entry} def={f} schema={schema} />
+                <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
               </PropertyRow>
             ))}
           </div>
         ) : (
           <>
             {revealed && headingFolds.length > 0 && (
-              <div className="flex flex-col gap-[7px]">{headingFolds.map(groupedRow)}</div>
+              <div className="flex flex-col gap-1">{headingFolds.map(groupedRow)}</div>
             )}
             {layout.groups.map((g) => {
               const rows = containerRows(g.fields);
@@ -329,7 +329,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                   key={g.id}
                   data-testid="property-group"
                   data-group={g.id}
-                  className="flex flex-col gap-[7px]"
+                  className="flex flex-col gap-1"
                 >
                   <GroupLabel name={g.name} />
                   {rows.map(groupedRow)}
@@ -338,7 +338,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             })}
             {/* Rest LAST and headerless: a freshly added field lands visibly. */}
             {restRows.length > 0 && (
-              <div className="flex flex-col gap-[7px]">{restRows.map(groupedRow)}</div>
+              <div className="flex flex-col gap-1">{restRows.map(groupedRow)}</div>
             )}
           </>
         )}
@@ -361,7 +361,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         ))}
         {undeclaredRelations.map((name) => (
           <PropertyRow key={name} kind="relation" name={name}>
-            <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+            <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
               {entry.relationships[name].join(', ')}
             </span>
           </PropertyRow>

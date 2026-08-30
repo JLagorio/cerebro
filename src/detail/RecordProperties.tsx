@@ -145,20 +145,20 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             )
       }
     >
-      <FieldEditor entry={entry} def={f} schema={schema} />
+      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
     </PropertyRow>
   );
   const restRows = containerRows(layout.rest);
 
   return (
-    <div className="mb-4 flex flex-col gap-[7px]">
+    <div className="mb-4 flex flex-col gap-1">
       {layout.flat ? (
         /* Declared fields get their own container: the sortable measures its
            children as the rows, and undeclared keys are not part of the type's
            order — they are not in `fields:` at all. */
         <div
           ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-          className="flex flex-col gap-[7px]"
+          className="flex flex-col gap-1"
           style={sortable.containerStyle}
         >
           {declared.map((f, index) => (
@@ -184,14 +184,14 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
                     )
               }
             >
-              <FieldEditor entry={entry} def={f} schema={schema} />
+              <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
             </PropertyRow>
           ))}
         </div>
       ) : (
         <>
           {revealed && headingFolds.length > 0 && (
-            <div className="flex flex-col gap-[7px]">{headingFolds.map(groupedRow)}</div>
+            <div className="flex flex-col gap-1">{headingFolds.map(groupedRow)}</div>
           )}
           {layout.groups.map((g) => {
             const rows = containerRows(g.fields);
@@ -203,7 +203,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
                 key={g.id}
                 data-testid="property-group"
                 data-group={g.id}
-                className="flex flex-col gap-[7px]"
+                className="flex flex-col gap-1"
               >
                 <GroupLabel name={g.name} />
                 {rows.map(groupedRow)}
@@ -213,7 +213,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           {/* Rest LAST and headerless: a freshly added field lands visibly at
               the bottom of the arranged stack. */}
           {restRows.length > 0 && (
-            <div className="flex flex-col gap-[7px]">{restRows.map(groupedRow)}</div>
+            <div className="flex flex-col gap-1">{restRows.map(groupedRow)}</div>
           )}
         </>
       )}
@@ -254,7 +254,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             </span>
           }
         >
-          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
             {undeclaredDisplay(entry, name)}
           </span>
         </PropertyRow>

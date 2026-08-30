@@ -97,6 +97,35 @@ export type FieldPlaceholder = 'ghost' | 'blank';
  */
 const BLANK_FILL = 'min-h-[22px] flex-1 self-stretch';
 
+/**
+ * Which surface's value CELL this control is (M46.2 Task 7, reference §A.1
+ * and §A.2). The measurements are of one box under three shapes, so they are
+ * declared in one table rather than repeated across the control branches
+ * below.
+ *
+ * - `cell` — a table or list cell. Untouched by the row work: the grid has its
+ *   own chrome and its own hover story (`styles/table-chrome.css`).
+ * - `panel` — a vertical property row's value. `padding: 6px`, radius **4px**,
+ *   `min-height: 34px`, `overflow: hidden`, `cursor: pointer`, and **no hover
+ *   background at all**. The radius being SMALLER than the label cell's 6px is
+ *   the measured hierarchy, and ours had it exactly inverted (8 against 6).
+ *   The missing wash is the point of §A6: only the label lights, or the row
+ *   reads as two buttons instead of as one label with a value.
+ * - `strip` — the heading strip's value: `4px 6px`, radius 4px, `min-height:
+ *   30px`. Notion's strip value cell was measured for geometry only — no hover
+ *   was read on that surface either way — so the wash STAYS here, where the
+ *   value is the only thing in the column you can click. That keeps the
+ *   strip's own version of the one-lit-region rule without inventing a
+ *   measurement.
+ */
+export type FieldChrome = 'cell' | 'panel' | 'strip';
+
+const CHROME: Record<FieldChrome, string> = {
+  cell: 'rounded-md px-2 py-[3px] hover:bg-n-50',
+  panel: 'min-h-[34px] cursor-pointer overflow-hidden rounded-xs p-1.5',
+  strip: 'min-h-[30px] cursor-pointer overflow-hidden rounded-xs px-1.5 py-1 hover:bg-n-50',
+};
+
 export interface FieldEditorProps {
   entry: Entry;
   def: FieldDef;
@@ -110,6 +139,9 @@ export interface FieldEditorProps {
    * "Empty" so every existing consumer is unchanged; the table opts into
    * `blank`. See FieldPlaceholder. */
   placeholder?: FieldPlaceholder;
+  /** M46.2: which surface's value cell this is. Defaults to the grid's, so a
+   * consumer that has not been fitted keeps exactly the box it had. */
+  chrome?: FieldChrome;
 }
 
 export function FieldEditor({
@@ -119,6 +151,7 @@ export function FieldEditor({
   compact = false,
   chips = 'plain',
   placeholder = 'ghost',
+  chrome = 'cell',
 }: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
@@ -255,7 +288,7 @@ export function FieldEditor({
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
         >
           {chips.length === 0 ? (
             blank ? null : (
@@ -397,7 +430,7 @@ export function FieldEditor({
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
         >
           {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => (
@@ -486,7 +519,7 @@ export function FieldEditor({
           aria-label={`Edit ${humanize(def.name)}`}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
         >
           {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => {
@@ -564,7 +597,7 @@ export function FieldEditor({
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
           // clipped through the row below it (M11 item 3).
-          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-sm text-n-800 hover:bg-n-50`}
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap ${CHROME[chrome]} text-sm text-n-800`}
         >
           {!blank && <Icon name="calendar" size={12} color="var(--n-500)" />}
           {empty && !blank && <span className="text-n-400">Empty</span>}
@@ -797,7 +830,7 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} ${CHROME[chrome]} text-left text-sm text-n-800`}
     >
       {resolved.display === '' ? (
         blank ? null : (

@@ -20,10 +20,11 @@
  * The baseline measured exactly that:
  * `docs/superpowers/specs/2026-08-29-cerebro-drag-baseline.md` §D7/D9 swept
  * the canvas at 1px and found y 225-247 -> slot 0, **248-250 -> nothing**,
- * 251-279 -> slot 1 — a 3px void, twice in one 90px sweep, from a 33px pitch
- * against a 6px slot and a 24px grip. Widening the slot by 3px would have
- * closed that ONE arithmetic and reopened the moment any of the three numbers
- * moved.
+ * 251-279 -> slot 1 — a 3px void, twice in one 90px sweep, from the 33px pitch
+ * of the day against a 6px slot and a 24px grip. Widening the slot by 3px
+ * would have closed that ONE arithmetic and reopened the moment any of the
+ * three numbers moved — and one of them has: Task 7 took the row pitch to 38.
+ * The rule below is why that cost nothing.
  *
  * ## The rule instead
  *

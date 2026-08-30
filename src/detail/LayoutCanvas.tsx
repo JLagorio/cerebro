@@ -171,10 +171,12 @@ export function canDropOn(activeId: string, targetId: string): boolean {
  * The canvas's drop targeting (M46.2 Task 3).
  *
  * dnd-kit's default is `rectIntersection`: a droppable wins by OVERLAPPING
- * the dragged element's rect. Our targets are 6px and 12px slots at a 33px
- * pitch, dragged by a 24px grip, so consecutive slots' live bands missed each
- * other by 3px and the indicator blinked out twice in a 90px sweep — measured
- * in `docs/superpowers/specs/2026-08-29-cerebro-drag-baseline.md` §D7/D9.
+ * the dragged element's rect. Our targets are 6px and 12px slots between rows
+ * — at a 33px pitch when this was measured, 38px since Task 7 fitted the row
+ * anatomy — dragged by a 24px grip, so consecutive slots' live bands missed
+ * each other by 3px and the indicator blinked out twice in a 90px sweep —
+ * measured in `docs/superpowers/specs/2026-08-29-cerebro-drag-baseline.md`
+ * §D7/D9.
  *
  * So targeting is no longer about touching a rect. The eligible targets
  * PARTITION the column and the pointer is always in exactly one region of it
@@ -320,7 +322,7 @@ export function LayoutCanvas({
     stripCells(previewEntry, schema, headingFields, draft.display.showEmpty).length > 0;
   const previewRow = (f: FieldDef) => (
     <PropertyRow kind={f.kind} name={f.name} align={f.kind === 'checkbox' ? 'center' : 'start'}>
-      <FieldEditor entry={previewEntry} def={f} schema={schema} />
+      <FieldEditor entry={previewEntry} def={f} schema={schema} chrome="panel" />
     </PropertyRow>
   );
 
@@ -523,7 +525,7 @@ export function LayoutCanvas({
                   it cannot deliver; the whole area is the honest target. */}
               <AreaDrop id="slot:rest:0">
                 {restRows.length > 0 ? (
-                  <div className="flex flex-col gap-[7px]">
+                  <div className="flex flex-col gap-1">
                     {restRows.map((f) => (
                       <FieldRow key={f.name} name={f.name}>
                         {previewRow(f)}

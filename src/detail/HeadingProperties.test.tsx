@@ -63,6 +63,48 @@ describe('HeadingProperties (M45.1)', () => {
     expect(screen.getByText('Priority')).toBeTruthy();
   });
 
+  it('sets the strip label smaller AND heavier than a panel row label (§A8)', () => {
+    // The portable half of the measurement: 13/500/18 here against 14/400/20
+    // in the panel, because this label is a COLUMN HEADER rather than a row
+    // label. Ours made them identical — 12/400/20 on both — which was the
+    // real defect; the sizes themselves come from our own ramp.
+    setup({ heading: ['status'] });
+    const label = screen.getByText('Status');
+    expect(label.className).toContain('text-sm');
+    expect(label.className).toContain('font-medium');
+    expect(label.className).toContain('leading-[18px]');
+    expect(label.className).toContain('truncate');
+  });
+
+  it('gaps the strip icon at 2px and keeps the panel row slot (§A10)', () => {
+    setup({ heading: ['status'] });
+    const cell = screen.getByTestId('heading-strip').querySelector('[data-field]')!;
+    const labelRow = cell.firstElementChild as HTMLElement;
+    // 2px here, 6px in the panel — measured, and the one number of the row
+    // anatomy that is deliberately different between the two surfaces.
+    expect(labelRow.className).toContain('gap-0.5');
+    expect(labelRow.className).not.toContain('gap-1.5');
+    // The 18 x 24 slot is shared with the panel, so a strip cell and a row
+    // start their text at the same offset even though the glyph is smaller.
+    const slot = labelRow.firstElementChild as HTMLElement;
+    expect(slot.className).toContain('h-6');
+    expect(slot.className).toContain('w-[18px]');
+    expect(slot.querySelector('svg')?.getAttribute('width')).toBe('14');
+  });
+
+  it('gives the strip value the measured 30px box (§A.2)', () => {
+    setup({ heading: ['status'] });
+    const value = screen.getByTestId('heading-strip').querySelector('[data-cell-primary]')!;
+    expect(value.className).toContain('min-h-[30px]');
+    expect(value.className).toContain('rounded-xs');
+    expect(value.className).not.toContain('rounded-md');
+    // The strip's value keeps its wash: no hover was measured on this surface
+    // either way, and the value is the only thing in the column you can click
+    // — so it is the strip's own version of one-region-lights, not a guess at
+    // a number nobody read.
+    expect(value.className).toContain('hover:bg-n-50');
+  });
+
   it('renders nothing when the resolved heading is empty — no empty container', () => {
     // The root of the render, not the testid: an unmarked empty div would
     // still slip past a queryByTestId null.

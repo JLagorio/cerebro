@@ -257,3 +257,72 @@ describe('the stack is the record’s, not a tab’s (M46.1)', () => {
     expect(within(beta).getByText('Archived')).toBeTruthy();
   });
 });
+
+/**
+ * The measured property-row anatomy (M46.2 Task 7), read at the surface that
+ * assembles it. Numbers are quoted from
+ * `docs/superpowers/specs/2026-08-29-notion-drag-and-row-reference.md` §A.1;
+ * what travels is the GEOMETRY and the relationship between the two cells —
+ * the colours are ours, because Notion's are translucencies over its own
+ * background and ours are steps in a designed neutral ramp.
+ */
+describe('the measured row anatomy (M46.2 Task 7)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+  });
+  afterEach(cleanup);
+
+  const mount = () => {
+    const entries = fixtureVault();
+    const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
+    render(<RecordProperties entry={entry} schema={buildSchema(entries)} />);
+  };
+
+  it('spaces rows by 4px, so a 34px row lands on the measured 38px pitch (§A1)', () => {
+    mount();
+    const row = screen.getAllByTestId('property-row')[0];
+    const container = row.parentElement!;
+    // The 4 is the container's GAP and never the row's padding: the reference
+    // is explicit that the gap must not be part of the hover target, and the
+    // hover target is the row's label cell.
+    expect(container.className).toContain('gap-1');
+    expect(container.className).not.toContain('gap-[7px]');
+    expect(row.className).toContain('min-h-[34px]');
+  });
+
+  it('gives the value cell the measured box and NO hover wash (§A5, §A6)', () => {
+    mount();
+    const cells = [...document.querySelectorAll('[data-cell-primary]')];
+    expect(cells.length).toBeGreaterThan(0);
+    for (const c of cells) {
+      expect(c.className).toContain('p-1.5'); // 6px
+      expect(c.className).toContain('min-h-[34px]');
+      expect(c.className).toContain('overflow-hidden');
+      expect(c.className).toContain('cursor-pointer');
+      // 4px — SMALLER than the label cell's 6px. Ours was 8px against 6, the
+      // exact inverse of the measured hierarchy.
+      expect(c.className).toContain('rounded-xs');
+      expect(c.className).not.toContain('rounded-md');
+      // Only the label lights.
+      expect(c.className).not.toContain('hover:bg-');
+    }
+  });
+
+  it('draws an unset value as the literal word Empty, in an identical box (§A7)', () => {
+    mount();
+    // Never a zero, never a dash, never a collapsed row: an empty property is
+    // still a row you can click, and it is the same size as a full one.
+    const empty = screen.getAllByText('Empty')[0].closest('[data-cell-primary]');
+    expect(empty).not.toBeNull();
+    const filled = [...document.querySelectorAll('[data-cell-primary]')].find(
+      (c) => c !== empty && c.textContent !== '' && !c.textContent!.includes('Empty'),
+    );
+    expect(filled).toBeTruthy();
+    // Not whole-string equality — kinds differ in whether their chips wrap.
+    // What must not differ is the BOX: padding, radius, floor height.
+    for (const token of ['p-1.5', 'rounded-xs', 'min-h-[34px]', 'overflow-hidden']) {
+      expect(empty!.className).toContain(token);
+      expect(filled!.className).toContain(token);
+    }
+  });
+});

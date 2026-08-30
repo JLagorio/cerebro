@@ -20,18 +20,23 @@ import type { FieldKind } from '@/engine/types';
  * already draw from — every surface in the app said what kind a property was
  * except the one where you edit it.
  *
- * The gutter grew from 96px to 116px, which is the icon plus its gap: the NAME
- * has the same room it always had, and the row gained a glyph rather than
- * spending the name's width on one.
+ * The gutter grew from 96px to the icon plus its gap: the row gained a glyph
+ * rather than spending the name's width on one.
+ *
+ * M46.2 Task 7 fits the whole row to the measured anatomy (reference §A.1):
+ * 34px of content with the 4px that completes the 38px pitch living in the
+ * container's gap, a 120px label column, and ONE lit region — the label cell.
+ * The name's own box narrows to 84px in the bargain, because the cell's 6px
+ * of padding is inside the measured 120; the clipped-name tooltip that has
+ * been here since M16.6 is what keeps that readable.
  */
 
 /**
- * Label column, in px. Icon slot (18) + gap (6) + the 96px names always had.
+ * Label column, in px — the measured 120 (§A2), `flex-shrink: 0`.
  *
- * It was 116 while the icon slot was 13 (M16.6). The slot is the drag grip's,
- * and the grip is 18 x 24 on every surface now (M46.2 Task 6), so the column
- * follows it — landing on the 120px the reference measured (§A2) without the
- * name losing a pixel.
+ * It was 116 while the icon slot was 13 (M16.6) and the cell had no padding.
+ * Notion spends the same 120 as 6 + 18 + 6 + 84 + 6: the cell's padding is
+ * INSIDE the column, so the name box is 84px rather than the 96 it had.
  */
 export const PROPERTY_LABEL_W = 120;
 
@@ -116,32 +121,45 @@ export function PropertyRow({
     return () => ro.disconnect();
   }, [label]);
 
-  const nameClass = [
-    'min-w-0 flex-1 truncate rounded-sm text-left text-xs text-n-500',
-    align === 'center' ? '' : 'pt-[3px]',
-  ].join(' ');
+  // 14 / 400 / 20 in the panel (§A8). It was 12px, the step below our values —
+  // the label is the same size as its value in Notion and reads as secondary
+  // by COLOUR, not by size. Ours still sets values at 13, so this is the one
+  // measured number that leaves our own ramp mid-inverted; Task 8 re-measures
+  // it rather than this row guessing at a value-side change.
+  const nameClass = 'min-w-0 flex-1 truncate text-left text-md leading-md text-n-500';
 
   return (
     <div
       data-testid="property-row"
       data-property={name}
       style={style}
-      // -mx-1/px-1: the hover background has to reach past the text on both
-      // sides or it reads as a highlight on the label rather than on the row.
+      // -mx-1.5 answers the label cell's own `px-1.5`: the cell is what paints
+      // now, and its 6px of padding would otherwise push every glyph and name
+      // 6px right of the panel's content edge.
       className={[
-        'group -mx-1 flex min-w-0 gap-1.5 rounded-sm px-1',
-        // 20ms, declared (M46.2): a property list is read by running the
-        // pointer down it, and an undeclared wash strobes on the way past.
-        // Colour only — the row's `style` carries the drag's own transform
-        // transition and an inline rule beats this one while that is live.
-        'motion-hover hover:bg-n-25',
+        'group -mx-1.5 flex min-w-0',
+        // 34px of content; the 4px that makes the 38px pitch is the
+        // CONTAINER's gap, so it stays outside every hover target (§A1).
+        'min-h-[34px]',
         align === 'center' ? 'items-center' : 'items-start',
       ].join(' ')}
     >
       <span
+        // The label CELL, and the row's one hover region (§A3, §A4, §A6). The
+        // row itself no longer washes and neither does the value: three lit
+        // regions at once was the baseline's worst single anatomy delta, and
+        // a row that lights label AND value reads as two buttons rather than
+        // as one label with a value.
+        //
+        // 20ms, declared (M46.2 Task 3): a property list is read by running
+        // the pointer down it, and an undeclared wash strobes on the way past.
         className={[
-          'flex min-w-0 flex-none items-center gap-1.5',
-          align === 'center' ? '' : 'pt-[3px]',
+          'flex min-h-[34px] min-w-0 flex-none items-center gap-1.5 rounded-sm px-1.5',
+          'select-none text-n-500 motion-hover hover:bg-n-50',
+          // A label with no menu behind it opens nothing, so it does not
+          // claim a pointer. Notion has no such row; every one of its labels
+          // is a menu trigger.
+          menu === undefined ? '' : 'cursor-pointer',
         ].join(' ')}
         style={{ width: PROPERTY_LABEL_W }}
       >
@@ -193,14 +211,20 @@ export function PropertyRow({
               aria-expanded={menuOpen}
               aria-label={`${label} property menu`}
               onClick={() => setMenuOpen((v) => !v)}
-              className={`${nameClass} border-0 bg-transparent p-0 hover:bg-n-100 hover:text-n-700`}
+              // No wash of its own: the cell it sits in is what lights (§A4),
+              // and a button that painted too would be a second highlight
+              // inside the first.
+              className={`${nameClass} cursor-pointer border-0 bg-transparent p-0`}
             >
               {label}
             </button>
           )}
         </Tooltip>
       </span>
-      <div className="min-w-0 flex-1">{children}</div>
+      {/* The label -> value gap is a 4px MARGIN on the value column, not a
+          column gap (§A2) — the gap belongs to the value, so the label cell's
+          wash runs the full 120px and stops exactly at the column's edge. */}
+      <div className="ml-1 min-w-0 flex-1">{children}</div>
       {trailing}
       {menu !== undefined && menuOpen && (
         <Popover

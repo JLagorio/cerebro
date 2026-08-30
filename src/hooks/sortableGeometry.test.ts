@@ -80,7 +80,7 @@ describe('measureRows', () => {
   });
 
   it('keeps a row that bleeds outside the container on the cross axis', () => {
-    // PropertyRow wears `-mx-1`, so its box starts 4px left of the column.
+    // PropertyRow wears `-mx-1.5`, so its box starts 6px left of the column.
     // Zeroing that would shove every row right the moment a drag froze it.
     const m = measureRows([rect(0, -4, 108, 20), rect(20, -4, 108, 20)], { top: 0, left: 0 }, 'y');
 

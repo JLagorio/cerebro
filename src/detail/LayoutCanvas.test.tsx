@@ -138,7 +138,10 @@ describe('handleLayoutDragEnd (M45.3 Task 6)', () => {
  * cases hold is the wiring, and the id grammar the wiring filters by.
  */
 describe('canvasCollision (M46.2 Task 3)', () => {
-  /** The real stack: 6px slots at the measured 33px pitch. */
+  /** The stack the void was MEASURED in: 6px slots at the 33px row pitch of
+   * the baseline. Task 7 has since taken the row pitch to 38, and this fixture
+   * deliberately keeps 33 — it is the geometry the regression lives in, and
+   * the partition rule is pitch-independent by construction. */
   const slots = (ids: string[], start = 245) =>
     ids.map((id, i) => ({
       id,

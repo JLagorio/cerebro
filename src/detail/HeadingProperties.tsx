@@ -60,15 +60,30 @@ export function HeadingProperties({
   if (shown.length === 0) return null;
 
   const expanded = detailsShown === true;
+  // gap-x-2 is 8px, the measured strip gap (§A.2). It reads as the 20px it
+  // always did, because each cell now carries its own 6px of padding.
   return (
-    <div data-testid="heading-strip" className="mb-3 flex flex-wrap items-start gap-x-5 gap-y-2">
+    <div data-testid="heading-strip" className="mb-3 flex flex-wrap items-start gap-x-2 gap-y-2">
       {shown.map((f) => (
-        <div key={f.name} data-field={f.name} className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex items-center gap-1.5">
-            <Icon name={kindMeta(f.kind).icon} size={13} color="var(--n-400)" />
-            <span className="truncate text-xs text-n-500">{humanize(f.name)}</span>
+        <div key={f.name} data-field={f.name} className="flex min-w-0 flex-col">
+          {/* The same label cell as the panel's, folded 90° — and the one
+              place the two are deliberately DIFFERENT: 13/500/18 here against
+              14/400/20 there (§A8). Smaller and heavier, because this label is
+              a column header rather than a row label. Ours had them identical,
+              which was the real defect; the sizes come from our own ramp.
+
+              The icon→text gap is 2px here and 6px in the panel (§A10), and
+              the glyph is 14px rather than 16 — the slot stays 18 x 24 so a
+              strip cell and a panel row start their text at the same offset. */}
+          <span className="flex h-6 items-center gap-0.5 rounded-sm px-1.5">
+            <span className="flex h-6 w-[18px] flex-none items-center justify-center">
+              <Icon name={kindMeta(f.kind).icon} size={14} color="var(--n-400)" />
+            </span>
+            <span className="truncate text-sm font-medium leading-[18px] text-n-500">
+              {humanize(f.name)}
+            </span>
           </span>
-          <FieldEditor entry={entry} def={f} schema={schema} compact />
+          <FieldEditor entry={entry} def={f} schema={schema} compact chrome="strip" />
         </div>
       ))}
       {onToggleDetails !== undefined && (
