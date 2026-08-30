@@ -75,7 +75,6 @@ export function recordTabSet(
  * second step instead of finishing the form (M45.4). */
 const TAB_KINDS: { value: TabContent; label: string; icon: string }[] = [
   { value: 'sections', label: 'Sections', icon: 'text' },
-  { value: 'properties', label: 'Properties', icon: 'list' },
   { value: 'overview', label: 'Overview', icon: 'layout-grid' },
   { value: 'view', label: 'View', icon: 'table' },
 ];

@@ -123,31 +123,24 @@ describe('seedDraft', () => {
     });
   });
 
-  it('carries each section’s tab through the rebuild, and leaves the key ABSENT when untabbed', () => {
-    // The rebuild is what Apply serializes, so a tab the seed drops is a tab
-    // the vault LOSES on an Apply that changed nothing else (M45.6 Task 4).
+  it('rebuilds a section as {id, name, fields} and nothing else (M46.1)', () => {
+    // A section belongs to the record, so the rebuild — which is what Apply
+    // serializes — carries no placement key. ABSENT, not `undefined`:
+    // `toEqual` cannot tell those apart, and the deviations-only serializer
+    // must never learn a key from a rebuild.
     const draft = seedDraft(
       def({
         layout: {
           heading: [],
-          groups: [
-            { id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' },
-            { id: 'g2', name: 'Loose', fields: ['status'] },
-          ],
+          groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
         },
         tabs: [
           { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
-          { id: 'plan', name: 'Plan', icon: null, content: 'properties' },
+          { id: 'plan', name: 'Plan', icon: null, content: 'sections' },
         ],
       }),
     );
-    expect(draft.layout.groups).toEqual([
-      { id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' },
-      { id: 'g2', name: 'Loose', fields: ['status'] },
-    ]);
-    // ABSENT, not `undefined`: `toEqual` cannot tell those apart, and the
-    // deviations-only serializer must never learn a `tab:` key from a rebuild.
-    expect('tab' in draft.layout.groups[1]).toBe(false);
+    expect(Object.keys(draft.layout.groups[0])).toEqual(['id', 'name', 'fields']);
   });
 });
 
@@ -368,7 +361,7 @@ describe('LayoutEditorDialog', () => {
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, FIXTURE_PATCH);
   });
 
-  it('an Apply that changed nothing keeps the vault’s tab assignments (M45.6)', async () => {
+  it('an Apply sheds a `tab:` key an M45.6 build left in the vault (M46.1)', async () => {
     const user = userEvent.setup();
     const tabbedDoc = makeEntry({
       path: DOC,
@@ -383,18 +376,19 @@ describe('LayoutEditorDialog', () => {
         },
         tabs: [
           { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
-          { id: 'plan', name: 'Plan', icon: null, content: 'properties' },
+          { id: 'plan', name: 'Plan', icon: null, content: 'sections' },
         ],
       } as unknown as ReturnType<typeof makeEntry>['properties'],
     });
     const { patchFrontmatter } = setup({ entries: [tabbedDoc] });
     await user.click(screen.getByTestId('layout-apply'));
     await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
-    // Open, Apply, changed nothing — the bytes must come back unchanged. A
-    // seed that rebuilds groups as {id,name,fields} silently ERASES `tab:`.
+    // Parse tolerance is the ONLY accommodation the reversal gets: the key is
+    // not read, and the next Apply writes the layout without it. Only a local
+    // M45.6 build could have written one — no shipped build ever did.
     expect((patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout).toEqual({
       heading: ['status'],
-      groups: [{ id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' }],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['priority'] }],
     });
   });
 
@@ -458,7 +452,7 @@ describe('the Page settings rail (M45.2 Task 3)', () => {
   const OVERVIEW_TAB = { id: 'overview', name: 'Overview', icon: null, content: 'overview' };
   const SAVED_TABS = [
     { id: 'plan', name: 'Plan', icon: null, content: 'sections' },
-    { id: 'props', name: 'Props', icon: null, content: 'properties' },
+    { id: 'props', name: 'Props', icon: null, content: 'overview' },
   ];
 
   it('shows Structure tiles and Options switches seeded from the type', () => {
@@ -940,8 +934,9 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     const user = userEvent.setup();
     shellSetup();
     await user.click(screen.getByTestId('layout-structure-tabbed'));
-    // Notion's canvas order (M45.5): heading first, THEN the tab strip.
-    expect(blockIds()).toEqual(['heading', 'tabs', 'g1', 'rest', 'content']);
+    // Notion's page order (M46.1): the property stack first, THEN the tab
+    // strip, then the tab's own content.
+    expect(blockIds()).toEqual(['heading', 'g1', 'rest', 'tabs', 'content']);
     for (const shell of screen.getAllByTestId('layout-block')) {
       const container = shell.getAttribute('data-block');
       // At least one inert fragment inside each shell, editor or chrome —
@@ -976,7 +971,7 @@ describe('block shells around inert content (M45.3 Task 4)', () => {
     const user = userEvent.setup();
     shellSetup();
     await user.click(screen.getByTestId('layout-structure-tabbed'));
-    expect(blockIds()).toEqual(['heading', 'tabs', 'g1', 'rest', 'content']);
+    expect(blockIds()).toEqual(['heading', 'g1', 'rest', 'tabs', 'content']);
     const tabsShell = screen
       .getAllByTestId('layout-block')
       .find((b) => b.getAttribute('data-block') === 'tabs');

@@ -9,11 +9,10 @@ import { Popover } from '@/components/ui/Popover';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { draftRoster, overlayVisibility, stageNewSection } from '@/detail/LayoutCanvas';
 import { VISIBILITIES } from '@/detail/PropertyMenu';
-import { moveField, removeGroup, renameGroup, setGroupTab } from '@/engine/layoutEdit';
+import { moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
 import { resolveLayout } from '@/engine/layout';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
-import { layoutTabScope, tabBearsProperties } from '@/engine/typeCatalog';
 import type { FieldDef, FieldKind, TypeDef } from '@/engine/types';
 import { useSortableList } from '@/hooks/useSortableList';
 
@@ -34,7 +33,6 @@ export function GroupEditorPopover({
   container,
   typeDef,
   draft,
-  activeTab,
   update,
   anchorRef,
   onClose,
@@ -44,10 +42,6 @@ export function GroupEditorPopover({
   container: string;
   typeDef: TypeDef;
   draft: TypeLayoutDraft;
-  /** The tab the canvas is standing on (M45.6), or null for simple
-   * structure. The footer's "Add section" stages onto it, so the two doors
-   * onto one editor cannot mean different things. */
-  activeTab: string | null;
   /** The draft's one door (LayoutEditorDialog's `update`). */
   update: (patch: Partial<TypeLayoutDraft>) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
@@ -58,7 +52,7 @@ export function GroupEditorPopover({
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [step, setStep] = useState<'main' | 'add' | 'create' | 'tab'>('main');
+  const [step, setStep] = useState<'main' | 'add' | 'create'>('main');
   /** The staging guard's inline refusal — a form refuses in place, never by
    * toast (the store-layer toast contract is for vault writes; nothing here
    * writes). */
@@ -72,11 +66,6 @@ export function GroupEditorPopover({
   // lens minus its fold, because the editor never folds a row. The
   // un-overlaid roster survives for the staging guard, which needs to know
   // what the DOC says apart from what the draft stages over it.
-  //
-  // TAB-BLIND on purpose, where the canvas resolves for its active tab
-  // (M45.6): this resolve answers "which fields does THIS container hold",
-  // and a container holds the same fields whichever tab it shows on. Only
-  // `showsOnTab` below asks the other question, and it passes a scope.
   const roster = draftRoster(typeDef.fields, draft.added);
   const overlaid = overlayVisibility(roster, draft.visibility);
   const resolved = resolveLayout(draft.layout, overlaid);
@@ -192,52 +181,6 @@ export function GroupEditorPopover({
     onClose();
   };
 
-  /** The tabs a section can be moved ONTO (M45.6). `sections` and `view` tabs
-   * ARE their content and render no property stack — a section moved onto one
-   * would be invisible — so they are not offered, and the drill-in says so
-   * rather than leaving the absence to be inferred. The refusal is not a
-   * guarantee, and cannot be: a tab's content kind changes AFTER the
-   * assignment, which is why the engine falls a stranded section back onto
-   * the default tab instead of trusting this door. */
-  const tabTargets = draft.tabs.filter(tabBearsProperties);
-
-  /** Does this section declare no tab at all? That is a HOME — the default
-   * tab — and the list marks it as one, so an untabbed section shows exactly
-   * one check (on "Untabbed") instead of two (there, and on whichever tab it
-   * resolves to). */
-  const untabbed = isGroup && group.tab === undefined;
-
-  /** Does this section show on that tab? Asked of `resolveLayout` itself
-   * rather than re-derived from `group.tab`: a section whose tab stopped
-   * bearing properties falls back onto the default one, and that fallback is
-   * the engine's — a second copy here would be free to drift from the first.
-   * Untabbed is excluded because "Untabbed" is its own entry above: the
-   * question this answers is which tab the section NAMES, not where an
-   * unnamed one lands. */
-  const showsOnTab = (tabId: string) =>
-    isGroup &&
-    !untabbed &&
-    resolveLayout(draft.layout, overlaid, layoutTabScope(draft.tabs, tabId)).groups.some(
-      (g) => g.id === container,
-    );
-
-  /** Move the section to a tab, or back to untabbed with `null` (M45.6).
-   * Clearing is the ONLY way back: `addGroup` mints a section already
-   * wearing the active tab, so without this entry "untabbed" would be a
-   * shape the parser reads and no door could ever write. */
-  const moveToTab = (target: string | null) => {
-    // Picking the home it already has stages nothing. `setGroupTab` no-ops
-    // the id it already wears, but not untabbed → the default tab's id: that
-    // WRITES a key meaning what absent already meant, dirtying the draft —
-    // and asking to discard on close — over a move that moves nothing.
-    const home =
-      target === null ? untabbed : untabbed && layoutTabScope(draft.tabs, target).isDefault;
-    if (!home) update({ layout: setGroupTab(draft.layout, container, target) });
-    // Either way this editor goes: it is anchored to a shell on the tab the
-    // canvas stands on, and the section may have just left it.
-    onClose();
-  };
-
   // Where a landed field goes: after the container's last CONFIG slot. Rest
   // ignores the index (it orders by roster declaration).
   const appendIndex = isGroup ? group.fields.length : draft.layout.heading.length;
@@ -314,19 +257,7 @@ export function GroupEditorPopover({
   // The staging lives with the canvas's + button (M45.5 Task 3): two doors,
   // one editor. `onOpenGroup` is the hand-off addGroup reports its id for —
   // the canvas remounts us keyed by the new container.
-  const addSection = () => stageNewSection(draft, update, onOpenGroup, activeTab);
-
-  /** CAN a section be added where we are standing? The canvas hides its +
-   * on a `sections` or `view` tab; this footer has to answer the same, and
-   * for a sharper reason than symmetry — the HEADING shell renders on every
-   * tab, so this editor is reachable from a tab that holds no properties,
-   * and an Add section there would mint a group on a tab that cannot show
-   * it. The engine strands it onto the default tab (visible, by doctrine),
-   * so the press would land a "New group" on a tab the user was not looking
-   * at while this popover unmounted under them. Two doors, one answer.
-   * Simple structure has no tabs and always can. */
-  const activeBearsSections =
-    draft.tabs.length === 0 || draft.tabs.some((t) => t.id === activeTab && tabBearsProperties(t));
+  const addSection = () => stageNewSection(draft, update, onOpenGroup);
 
   const eyeRow = (f: FieldDef, i: number) => {
     const label = humanize(f.name);
@@ -461,27 +392,16 @@ export function GroupEditorPopover({
           testId="group-editor-add"
           onSelect={() => setStep('add')}
         />
-        {!isGroup && activeBearsSections && (
+        {!isGroup && (
           // Rest/heading footers only (the plan's §3.3 call): a group's own
-          // editor arranges the group; sections are the page's to grow.
+          // editor arranges the group; sections are the page's to grow. No
+          // tab gate (M46.1): a section belongs to the record, so wherever
+          // this editor is reachable from, the section it stages is visible.
           <MenuItem
             icon="square-plus"
             label="Add section"
             testId="group-editor-add-section"
             onSelect={addSection}
-          />
-        )}
-        {isGroup && draft.tabs.length > 0 && (
-          // Groups only, and only when there are tabs to move BETWEEN: the
-          // heading is global by decision (it renders above the strip) and
-          // rest is the roster's derived remainder — neither is a section, so
-          // neither belongs to a tab.
-          <MenuItem
-            icon="panel-top"
-            label="Move to tab…"
-            submenu
-            testId="group-editor-move-tab"
-            onSelect={() => setStep('tab')}
           />
         )}
         {isGroup && (
@@ -536,45 +456,6 @@ export function GroupEditorPopover({
     </MenuSurface>
   );
 
-  const tabStep = (
-    <MenuSurface width={264} autoFocus={false}>
-      <div data-testid="group-editor-tab-list" className="flex min-w-0 flex-col">
-        <MenuBack title="Move to tab" onBack={() => setStep('main')} />
-        {/* FIRST, and its own entry rather than an absence: absent `tab:` is
-            a real placement — the default tab — and it is the shape every
-            pre-M45.6 vault wears. Without a door that WRITES it, the model
-            would be readable and unwritable, because the + mints a section
-            already wearing the tab it was pressed on. The label carries
-            where that lands, so the list never has to check two rows. */}
-        <MenuItem
-          icon="minus"
-          label="Untabbed (default tab)"
-          checked={untabbed}
-          testId="group-editor-untabbed"
-          onSelect={() => moveToTab(null)}
-        />
-        <MenuSeparator />
-        {tabTargets.map((t) => (
-          <MenuItem
-            key={t.id}
-            icon={t.icon ?? 'panel-top'}
-            label={t.name}
-            checked={showsOnTab(t.id)}
-            testId={`group-editor-tab-${t.id}`}
-            onSelect={() => moveToTab(t.id)}
-          />
-        ))}
-        {tabTargets.length < draft.tabs.length && (
-          // The reason, in place. A tab missing from a list of tabs is an
-          // absence the user has to explain to themselves otherwise.
-          <div className="px-2 py-1.5 text-xs text-n-400">
-            Tabs that hold their own content — free text or a view — can’t hold sections.
-          </div>
-        )}
-      </div>
-    </MenuSurface>
-  );
-
   const createStep = (
     // The panel's INLINE variant on purpose (the view-settings precedent): a
     // page inside a popover that already exists — an anchored second surface
@@ -616,13 +497,7 @@ export function GroupEditorPopover({
       {/* autoFocus off on every surface (PropertyMenu's drill-in idiom): the
           Popover's trap already hands focus to the first control once placed,
           and a drill-in must not steal focus mid-flow. */}
-      {step === 'main'
-        ? mainStep
-        : step === 'add'
-          ? addStep
-          : step === 'tab'
-            ? tabStep
-            : createStep}
+      {step === 'main' ? mainStep : step === 'add' ? addStep : createStep}
       {menuFor !== null && menuDef !== null && (
         <Popover
           anchorRef={menuAnchorRef}

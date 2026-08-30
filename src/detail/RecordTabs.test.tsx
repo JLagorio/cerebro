@@ -64,11 +64,25 @@ describe('RecordTabs (M44.5)', () => {
   it('the add popover suggests a free name and takes a picked content kind', () => {
     const props = setup({ tabs: [TABS[0], { ...TABS[1], name: 'Tab' }] });
     fireEvent.click(screen.getByTestId('new-record-tab'));
-    fireEvent.click(screen.getByRole('button', { name: 'Properties' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
     fireEvent.click(screen.getByTestId('create-record-tab'));
     const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
     // "Tab" is taken by a sibling, so the suggestion moves along.
-    expect(next[2]).toMatchObject({ name: 'Tab 2', content: 'properties' });
+    expect(next[2]).toMatchObject({ name: 'Tab 2', content: 'overview' });
+  });
+
+  it('offers no Properties kind — a property section is never a tab (M46.1)', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    // "sorry tabs are only for related data sources. fields shwo above." The
+    // stack stands above the strip on every tab, so a tab that IS the stack
+    // is exactly the shape the correction forbids.
+    expect(screen.queryByRole('button', { name: 'Properties' })).toBeNull();
+    expect(
+      ['Sections', 'Overview', 'View'].every(
+        (kind) => screen.getByRole('button', { name: kind }) !== null,
+      ),
+    ).toBe(true);
   });
 
   it('the last tab cannot be deleted', () => {

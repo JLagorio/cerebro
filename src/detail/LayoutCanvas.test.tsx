@@ -374,10 +374,12 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
     useUiStore.setState({ layoutEditor: null });
   });
 
-  it('the heading renders FIRST; the tab strip second', () => {
+  it('the heading renders FIRST, and the tab strip after the property stack (M46.1)', () => {
     setup([typeDoc(undefined, [{ id: 's1', name: 'Notes', content: 'sections' }]), RECORD]);
     const ids = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
-    expect(ids.slice(0, 2)).toEqual(['heading', 'tabs']);
+    // Notion's page order, which M46.1 restored: the whole property stack
+    // stands above the strip, so the strip is LAST, not second.
+    expect(ids).toEqual(['heading', 'g1', 'rest', 'tabs']);
   });
 
   it('every block wears a persistent border and an always-visible label chip', () => {
@@ -428,10 +430,12 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
   });
 });
 
-// M45.6 Task 4 — the canvas stands ON a tab: the group blocks are the ACTIVE
-// tab's, the + stages onto it, and a tab that holds no properties shows its
-// OWN content instead of the Overview's zones (the M45.5 recorded gap).
-describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
+// M46.1 — the reversal of M45.6, after live testing: "sorry tabs are only for
+// related data sources. fields shwo above. just like notion." A section
+// belongs to the RECORD. The whole property stack — heading, sections, page
+// properties — stands ABOVE the strip and renders on every tab; the tab holds
+// the page body or a data source, and that is all that swaps.
+describe('properties stand above the tabs, on every tab (M46.1)', () => {
   beforeEach(() => {
     resetLayers();
   });
@@ -440,20 +444,18 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     useUiStore.setState({ layoutEditor: null });
   });
 
-  // Two property-bearing tabs, and a config whose groups INTERLEAVE them —
-  // g2 sits between g1 and g3 while belonging to the other tab, so the
-  // preview index and the config index diverge. That divergence is the whole
-  // hazard: it is what makes a position-mapped `cfg` address the wrong group.
+  // One tab of each surviving kind, so the claim is made against all three.
   const TABBED = [
     { id: 'one', name: 'One', content: 'overview' },
-    { id: 'two', name: 'Two', content: 'properties' },
+    { id: 's1', name: 'Notes', content: 'sections' },
+    { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
   ];
-  const INTERLEAVED = {
+  const THREE = {
     heading: [],
     groups: [
-      { id: 'g1', name: 'Planning', fields: ['status'], tab: 'one' },
-      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
-      { id: 'g3', name: 'Later', fields: ['owner', 'due'], tab: 'one' },
+      { id: 'g1', name: 'Planning', fields: ['status'] },
+      { id: 'g2', name: 'Details', fields: ['notes'] },
+      { id: 'g3', name: 'Later', fields: ['owner', 'due'] },
     ],
   };
   const FILLED = makeEntry({
@@ -469,21 +471,21 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     },
   });
 
-  function interleaved() {
+  function tabbed(fields: unknown = undefined, layout: unknown = THREE) {
     return [
       makeEntry({
         path: DOC,
         title: 'Work item',
         type: 'Type',
         properties: {
-          fields: {
+          fields: fields ?? {
             status: 'text',
             priority: 'text',
             notes: 'text',
             owner: 'text',
             due: 'text',
           },
-          layout: INTERLEAVED,
+          layout,
           tabs: TABBED,
         } as unknown as ReturnType<typeof makeEntry>['properties'],
       }),
@@ -491,190 +493,121 @@ describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
     ];
   }
 
-  const groupBlocks = () =>
-    screen
+  const blockIds = () =>
+    screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+  const groupBlocks = () => blockIds().filter((b) => b !== null && b.startsWith('g'));
+  const blockOf = (container: string) => {
+    const shell = screen
       .getAllByTestId('layout-block')
-      .map((b) => b.getAttribute('data-block'))
-      .filter((b) => b !== null && b.startsWith('g'));
+      .find((b) => b.getAttribute('data-block') === container);
+    if (shell === undefined) throw new Error(`${container} shell missing`);
+    return shell;
+  };
 
-  it('shows the ACTIVE tab’s sections, and switching tabs swaps them', () => {
-    setup(interleaved());
-    // Standing on the first tab: its two sections, never the other tab's.
-    expect(groupBlocks()).toEqual(['g1', 'g3']);
+  it('every section stands on EVERY tab — switching swaps only the tab’s own content', () => {
+    setup(tabbed());
+    expect(groupBlocks()).toEqual(['g1', 'g2', 'g3']);
     // Overview is the one kind that renders the body, on BOTH hosts.
     expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId('record-tab-two'));
-    expect(groupBlocks()).toEqual(['g2']);
-    // A `properties` tab is the property stack ALONE — DocPage gates the
-    // editor on `content === 'overview'` and DetailPanel spells the same
-    // predicate, so a Content block here would be the Overview leaking
-    // through on the third of the three non-overview kinds.
-    expect(screen.queryByTestId('layout-preview-body')).toBeNull();
+    fireEvent.click(screen.getByTestId('record-tab-s1'));
+    expect(groupBlocks()).toEqual(['g1', 'g2', 'g3']);
 
-    fireEvent.click(screen.getByTestId('record-tab-one'));
-    expect(groupBlocks()).toEqual(['g1', 'g3']);
-    expect(screen.getByTestId('layout-preview-body')).toBeTruthy();
-  });
-
-  it('switching tabs puts down an editor whose shell just left the canvas', () => {
-    setup(interleaved());
-    fireEvent.keyDown(
-      screen
-        .getAllByTestId('layout-block')
-        .find((b) => b.getAttribute('data-block') === 'g1') as HTMLElement,
-      { key: 'Enter' },
-    );
-    expect(screen.getByTestId('group-editor')).toBeTruthy();
-    // g1 belongs to the tab we are leaving, so its shell — the popover's one
-    // anchor — unmounts with the switch.
-    fireEvent.click(screen.getByTestId('record-tab-two'));
-    expect(screen.queryByTestId('group-editor')).toBeNull();
-  });
-
-  it('an editor whose section moved off the tab under it goes too — no anchorless popover', () => {
-    // The shell can leave WITHOUT a tab switch, and then nothing calls
-    // `setEditing(null)`: reordering the tabs changes which one is DEFAULT,
-    // and an UNTABBED section calls the default tab home. Standing still
-    // while the ground moves is the case `editingValid` has to catch on its
-    // own — a popover whose anchor is gone cannot be positioned at all.
-    setup([
-      makeEntry({
-        path: DOC,
-        title: 'Work item',
-        type: 'Type',
-        properties: {
-          fields: { status: 'text', notes: 'text' },
-          layout: { heading: [], groups: [{ id: 'g1', name: 'Planning', fields: ['status'] }] },
-          tabs: TABBED,
-        } as unknown as ReturnType<typeof makeEntry>['properties'],
-      }),
-      FILLED,
-    ]);
-    fireEvent.keyDown(
-      screen
-        .getAllByTestId('layout-block')
-        .find((b) => b.getAttribute('data-block') === 'g1') as HTMLElement,
-      { key: 'Enter' },
-    );
-    expect(screen.getByTestId('group-editor')).toBeTruthy();
-
-    // Move the tab we are STANDING on to second place: the selection does not
-    // change (the strip reports no press), but the first property-bearing tab
-    // — the one untabbed sections live on — is now the other one.
-    fireEvent.contextMenu(screen.getByTestId('record-tab-one'));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
-    expect(
-      screen
-        .getAllByTestId('layout-block')
-        .map((b) => b.getAttribute('data-block'))
-        .filter((b) => b !== null && b.startsWith('g')),
-    ).toEqual([]);
-    expect(screen.queryByTestId('group-editor')).toBeNull();
-  });
-
-  it('the group slots speak CONFIG indexes, so a filtered drag reorders the right section', () => {
-    setup(interleaved());
-    // Preview index 1 is CONFIG index 2 — a render-indexed slot would say
-    // `groupslot:1` here and moveGroup would land g3 where g2 sits.
-    expect(bySlot('groupslot:0')).toBeTruthy();
-    expect(bySlot('groupslot:2')).toBeTruthy();
-    expect(bySlot('groupslot:3')).toBeTruthy();
-    expect(bySlot('groupslot:1')).toBeNull();
-
-    // End to end over the SAME config the canvas rendered from, through the
-    // id the canvas actually PRINTED — read back off the DOM rather than
-    // retyped here, so a slot that starts lying fails this case instead of
-    // agreeing with a duplicate literal. Dragging the second visible section
-    // into the gap before the first must put it there GLOBALLY, without
-    // disturbing the tab it does not belong to.
-    const firstGap = bySlot('groupslot:0')?.getAttribute('data-slot');
-    if (firstGap === undefined || firstGap === null) throw new Error('leading block slot missing');
-    const commit = vi.fn();
-    handleLayoutDragEnd(drag('group:g3', firstGap), {
-      layout: INTERLEAVED as LayoutConfig,
-      commit,
-    });
-    expect((commit.mock.calls[0][0] as LayoutConfig).groups.map((g) => g.id)).toEqual([
-      'g3',
-      'g1',
-      'g2',
-    ]);
-  });
-
-  it('a field slot addresses its OWN group’s config, not the group at its render index', () => {
-    setup(interleaved());
-    // g3 declares two fields, so its row slots are 0 and 1 and its config-end
-    // slot is 2. Read off the group at PREVIEW index 1 — g2, one field — the
-    // rows would claim `slot:g3:-1` (indexOf on the wrong list) and the end
-    // slot would stop at 1.
-    expect(bySlot('slot:g3:0')).toBeTruthy();
-    expect(bySlot('slot:g3:1')).toBeTruthy();
-    expect(bySlot('slot:g3:2')).toBeTruthy();
-    expect(bySlot('slot:g3:-1')).toBeNull();
-  });
-
-  it('the + stages the new section ON the active tab, and Apply carries the tab', async () => {
-    const user = userEvent.setup();
-    const { patchFrontmatter } = setup(interleaved());
-    fireEvent.click(screen.getByTestId('record-tab-two'));
-    await user.click(screen.getByRole('button', { name: 'Add section' }));
-    // The fresh section stands on the tab that raised it — not on the default.
-    expect(groupBlocks()).toEqual(['g2', 'group-1']);
-    fireEvent.keyDown(document, { key: 'Escape' });
-
-    fireEvent.click(screen.getByTestId('layout-apply'));
-    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
-    expect(
-      ((patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout as LayoutConfig)
-        .groups,
-    ).toEqual([
-      { id: 'g1', name: 'Planning', fields: ['status'], tab: 'one' },
-      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
-      { id: 'g3', name: 'Later', fields: ['owner', 'due'], tab: 'one' },
-      { id: 'group-1', name: 'New group', fields: [], tab: 'two' },
-    ]);
-  });
-
-  it('a view tab shows its own content and NO property zones (the M45.5 gap, closed)', () => {
-    setup([
-      typeDoc(undefined, [
-        { id: 'o1', name: 'Overview', content: 'overview' },
-        { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
-      ]),
-      RECORD,
-    ]);
-    expect(groupBlocks()).toEqual(['g1']);
     fireEvent.click(screen.getByTestId('record-tab-v1'));
-    // The tab's own content stands …
-    expect(screen.getByTestId('layout-preview-viewtab')).toBeTruthy();
-    // … and the Overview's zones do not stack underneath it.
-    const blocks = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
-    expect(blocks).toEqual(['heading', 'tabs']);
-    expect(screen.queryByRole('button', { name: 'Add section' })).toBeNull();
+    expect(groupBlocks()).toEqual(['g1', 'g2', 'g3']);
+  });
+
+  it('the property stack renders ABOVE the tab strip, structurally', () => {
+    setup(tabbed());
+    const strip = blockOf('tabs');
+    // Document position, not testid order: the claim is about where the
+    // browser paints these, and a list of ids would still pass if the strip
+    // were nested inside the stack it is supposed to stand under.
+    for (const container of ['heading', 'g1', 'g2', 'g3', 'rest']) {
+      const block = blockOf(container);
+      expect(block.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(strip.contains(block)).toBe(false);
+    }
+  });
+
+  it('a view tab keeps the stack, shows its placeholder, and drops the body', () => {
+    setup(tabbed());
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    expect(screen.getByTestId('layout-preview-viewtab').textContent).toBe(
+      'View of Work item — shown on the record',
+    );
+    // The stack is untouched, the + still adds to it, and the body — the
+    // Overview's own content — is the one thing that stood down.
+    expect(blockIds()).toEqual(['heading', 'g1', 'g2', 'g3', 'rest', 'tabs']);
+    expect(screen.getByRole('button', { name: 'Add section' })).toBeTruthy();
     expect(screen.queryByTestId('layout-preview-body')).toBeNull();
   });
 
-  it('a sections tab shows the free-text stand-in instead of the zones', () => {
-    setup([
-      typeDoc(undefined, [
-        { id: 'o1', name: 'Overview', content: 'overview' },
-        { id: 's1', name: 'Notes', content: 'sections' },
-      ]),
-      RECORD,
-    ]);
+  it('a sections tab keeps the stack and shows the free-text stand-in', () => {
+    setup(tabbed());
     fireEvent.click(screen.getByTestId('record-tab-s1'));
     expect(screen.getByTestId('layout-preview-sectionstab').textContent).toBe(
       'Free text, written on each record — shown on the record',
     );
-    const blocks = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
-    expect(blocks).toEqual(['heading', 'tabs']);
+    expect(blockIds()).toEqual(['heading', 'g1', 'g2', 'g3', 'rest', 'tabs']);
+    expect(screen.queryByTestId('layout-preview-body')).toBeNull();
     // Preview, not surface — the stand-in lives inside an inert fragment.
     expect(
       screen
         .getByTestId('layout-preview-sectionstab')
         .closest('[data-testid="layout-preview-content"]'),
     ).not.toBeNull();
+  });
+
+  it('the + adds to the record, not to a tab — and Apply carries no tab: key', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup(tabbed());
+    // Pressed while standing on a view tab: the section it stages is a
+    // property section, so it lands in the stack that view tab also shows.
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    await user.click(screen.getByRole('button', { name: 'Add section' }));
+    expect(groupBlocks()).toEqual(['g1', 'g2', 'g3', 'group-1']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    fireEvent.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    const groups = (
+      (patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout as LayoutConfig
+    ).groups;
+    // `toEqual` fails on a surplus key, so this is the no-`tab:` assertion —
+    // said again by hand below, because absent and undefined read alike.
+    expect(groups).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['status'] },
+      { id: 'g2', name: 'Details', fields: ['notes'] },
+      { id: 'g3', name: 'Later', fields: ['owner', 'due'] },
+      { id: 'group-1', name: 'New group', fields: [] },
+    ]);
+    for (const g of groups) expect('tab' in g).toBe(false);
+  });
+
+  it('a folded row still occupies its CONFIG slot — the field ids say so', () => {
+    // The one index divergence the canvas still has to convert: `rows` is
+    // FOLDED and the config is not, so the second visible row is the third
+    // config slot. Reading the slot off the render index would name `1`.
+    setup(
+      tabbed(
+        {
+          status: 'text',
+          notes: { kind: 'text', visibility: 'hide' },
+          owner: 'text',
+          due: 'text',
+        },
+        {
+          heading: [],
+          groups: [{ id: 'g1', name: 'Planning', fields: ['status', 'notes', 'owner'] }],
+        },
+      ),
+    );
+    expect(bySlot('slot:g1:0')).toBeTruthy();
+    expect(bySlot('slot:g1:2')).toBeTruthy();
+    expect(bySlot('slot:g1:3')).toBeTruthy();
+    // The hidden field's own slot never renders — its row is folded away.
+    expect(bySlot('slot:g1:1')).toBeNull();
   });
 });
 
