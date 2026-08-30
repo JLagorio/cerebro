@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
@@ -296,6 +296,91 @@ describe('DocPage', () => {
       expect(screen.queryByTestId('heading-strip')).toBeNull();
       expect(screen.queryByTestId('view-details-toggle')).toBeNull();
       expect(screen.getByTestId('page-properties')).toBeTruthy();
+    });
+  });
+
+  /**
+   * M45.6 — a section belongs to a tab, so the page renders the OPEN tab's
+   * sections. The user's second defect, on the surface that answers it: a
+   * section assigned to a tab used to render on every one of them.
+   */
+  describe('sections belong to tabs (M45.6)', () => {
+    const TYPE_DOC = 'types/work-item.md';
+    // The heading-strip block's idiom: strip the corpus `layout:` first, or
+    // the splice mints a duplicate key and the frontmatter parse fails
+    // whole. Both tabs bear properties, so the stack renders on each without
+    // the strip's toggle in the way — the tab filter is what is under test.
+    const CORPUS_LAYOUT =
+      'layout:\n' +
+      '  heading: [status, priority]\n' +
+      '  groups:\n' +
+      '    - { id: planning, name: Planning, fields: [assignee, due, estimate] }\n';
+    const stageTabbedSections = async () => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      if (!typeDoc.includes(CORPUS_LAYOUT)) {
+        throw new Error('work-item.md corpus layout drifted — update CORPUS_LAYOUT here');
+      }
+      fs().set(
+        TYPE_DOC,
+        typeDoc
+          .replace(CORPUS_LAYOUT, '')
+          .replace(
+            '\n---\n',
+            '\ntabs:\n' +
+              '  - { id: one, name: One, content: properties }\n' +
+              '  - { id: two, name: Two, content: properties }\n' +
+              'layout:\n' +
+              '  heading: [status]\n' +
+              '  groups:\n' +
+              '    - { id: planning, name: Planning, fields: [assignee, due], tab: one }\n' +
+              '    - { id: links, name: Links, fields: [epic, blocked_by], tab: two }\n' +
+              '    - { id: extra, name: Extra, fields: [estimate] }\n' +
+              '---\n',
+          ),
+      );
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      return record;
+    };
+
+    const groupIds = () =>
+      within(screen.getByTestId('page-properties'))
+        .queryAllByTestId('property-group')
+        .map((g) => g.getAttribute('data-group'));
+
+    it('the default tab shows its own sections and the untabbed one', async () => {
+      const record = await stageTabbedSections();
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(groupIds()).toEqual(['planning', 'extra']);
+      // Scoped: the doc side panel wears a "Links" tab of its own.
+      expect(within(screen.getByTestId('page-properties')).queryByText('Links')).toBeNull();
+    });
+
+    it('a second tab shows only its own sections', async () => {
+      const record = await stageTabbedSections();
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
+      expect(groupIds()).toEqual(['links']);
+      expect(screen.queryByText('Planning')).toBeNull();
+      expect(screen.queryByText('Extra')).toBeNull();
+      // The leak `rest` would spring if the tab filter ran before the roster
+      // was counted: `assignee` is claimed by the other tab's section, so it
+      // is not loose here — one property, one tab.
+      expect(screen.queryByText('Assignee')).toBeNull();
+    });
+
+    // Two globals, by decision: the heading strip sits above the tab bar, and
+    // `rest` is the remainder of the ROSTER, so both stand on every tab.
+    it('the heading strip and the loose remainder stand on both tabs', async () => {
+      const record = await stageTabbedSections();
+      const { unmount } = render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.getByText('Priority')).toBeTruthy();
+      unmount();
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
+      expect(screen.getByTestId('heading-strip')).toBeTruthy();
+      expect(screen.getByText('Priority')).toBeTruthy();
     });
   });
 

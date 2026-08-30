@@ -22,7 +22,7 @@ import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
-import { isRecordEntry } from '@/engine/typeCatalog';
+import { isRecordEntry, layoutTabScope } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -297,8 +297,20 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // whenever `!stripShows || detailsShown`, and the untouched default for
   // `detailsShown` is `!stripShows` (per path) rather than a stored false.
   const typeDef = record && entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  // M45.6 — which tab the layout resolves FOR, built with `layoutTabScope`
+  // exactly as the peek and the layout editor's canvas build it: the engine
+  // holds no tab roster, so this side answers "is this the default tab" and
+  // "can that id still hold sections", and one helper in one shape keeps the
+  // three from disagreeing — the canvas is a PREVIEW of this page, so a
+  // second derivation is how the preview would start lying.
+  //
+  // The heading comes off the SCOPED resolve only because it is the same
+  // list either way — `heading` and `rest` stay global by decision, and the
+  // strip renders on every tab (Notion's heading block sits above the tab
+  // bar, and so does ours).
+  const tabScope = activeTab === null ? undefined : layoutTabScope(tabs, activeTab.id);
   const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields, tabScope).heading;
   const stripShows =
     headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
   // Render-time derived-state reset (the React-sanctioned pattern): the lens
@@ -754,7 +766,18 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           `DetailPanel`, and a change to one is a change owed
                           to the other. M45.4: view tabs skip the stack — the
                           embedded database IS the tab's content, and a stack
-                          above it would be the Overview leaking through. */}
+                          above it would be the Overview leaking through.
+                          M45.6: `tab` picks WHICH sections the stack holds.
+
+                          Still keyed by PATH alone, not by tab, decided when
+                          the content started differing per tab: the state
+                          this component owns — the reveal expander, the
+                          add-property flyout, a drag in flight — is about the
+                          record's stack, never about one tab's sections,
+                          which re-derive from props on every render. A
+                          tab-keyed remount would discard a flyout the user
+                          opened and a reveal they asked for on every press
+                          and discard no stale state, because there is none. */}
                       {activeTab.content !== 'sections' &&
                         activeTab.content !== 'view' &&
                         (activeTab.content === 'properties' || !stripShows || detailsShown) && (
@@ -763,6 +786,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                               key={`props:${entry.path}`}
                               entry={entry}
                               schema={schema}
+                              tab={tabScope}
                             />
                           </div>
                         )}

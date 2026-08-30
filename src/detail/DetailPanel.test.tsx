@@ -663,6 +663,66 @@ describe('DetailPanel', () => {
         }),
       );
     });
+
+    /**
+     * M45.6 Task 3 — and the tabs HOLD things. The peek resolves its layout
+     * FOR the open tab, so a section shows on its own tab and nowhere else,
+     * while an untabbed one keeps the only home it ever had.
+     */
+    describe('sections belong to tabs', () => {
+      const ONE = { id: 'one', name: 'One', content: 'overview' };
+      const TWO = { id: 'two', name: 'Two', content: 'properties' };
+      // No heading here: the strip would fold the Overview tab's stack behind
+      // its toggle, which is a different case (asserted below).
+      const SECTIONED = {
+        groups: [
+          { id: 'g-alpha', name: 'Alpha', fields: ['priority'], tab: 'one' },
+          { id: 'g-beta', name: 'Beta', fields: ['assignee'], tab: 'two' },
+          { id: 'g-gamma', name: 'Gamma', fields: ['due'] },
+        ],
+      };
+      const groupIds = () =>
+        screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group'));
+
+      it('the peek shows the open tab’s sections, and swaps them on a press', () => {
+        withTabs([ONE, TWO], SECTIONED);
+        render(<DetailPanel />);
+        // The default tab: its own section plus the untabbed one.
+        expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
+        fireEvent.click(screen.getByTestId('record-tab-two'));
+        expect(groupIds()).toEqual(['g-beta']);
+        expect(screen.queryByText('Alpha')).toBeNull();
+        expect(screen.queryByText('Gamma')).toBeNull();
+      });
+
+      // The leak `rest` would spring if the tab filter ran before the roster
+      // was counted: a field another tab's section claims would look
+      // unclaimed here and render loose, showing one property on two tabs.
+      it('a field another tab’s section claims never renders loose', () => {
+        withTabs([ONE, TWO], SECTIONED);
+        render(<DetailPanel />);
+        expect(screen.queryByText('Assignee')).toBeNull();
+        fireEvent.click(screen.getByTestId('record-tab-two'));
+        expect(screen.getByText('Assignee')).toBeTruthy();
+        expect(screen.queryByText('Priority')).toBeNull();
+        expect(screen.queryByText('Due')).toBeNull();
+      });
+
+      // The heading is global by decision — Notion's heading block sits above
+      // the tab bar, and ours renders over the strip on every tab.
+      it('the heading strip stands on every tab', () => {
+        withTabs([{ id: 'one', name: 'One', content: 'properties' }, TWO], {
+          heading: ['status'],
+          groups: SECTIONED.groups,
+        });
+        render(<DetailPanel />);
+        expect(screen.getByTestId('heading-strip')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-alpha', 'g-gamma']);
+        fireEvent.click(screen.getByTestId('record-tab-two'));
+        expect(screen.getByTestId('heading-strip')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-beta']);
+      });
+    });
   });
 
   describe('display config (M44.1)', () => {

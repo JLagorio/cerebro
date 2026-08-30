@@ -307,7 +307,11 @@ describe('RecordProperties sections belong to tabs (M45.6)', () => {
     };
     const entry = entries.find((e) => e.path.endsWith('fld-1.md'))!;
     render(
-      <RecordProperties entry={entry} schema={buildSchema(entries)} tab={layoutTabScope(TABS, 'one')} />,
+      <RecordProperties
+        entry={entry}
+        schema={buildSchema(entries)}
+        tab={layoutTabScope(TABS, 'one')}
+      />,
     );
     const toggle = screen.getByTestId('hidden-properties-toggle');
     expect(toggle.textContent).toContain('1 hidden property');

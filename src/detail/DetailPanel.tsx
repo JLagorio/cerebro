@@ -15,7 +15,7 @@ import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { sourceFreshness } from '@/engine/ingest';
 import { resolveLayout } from '@/engine/layout';
-import { typeStyle } from '@/engine/typeCatalog';
+import { layoutTabScope, typeStyle } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
@@ -254,8 +254,22 @@ export function DetailPanel() {
   // `!stripShows || detailsShown`, and the untouched default for
   // `detailsShown` is `!stripShows` (per path) rather than a stored false.
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  // M45.6 — which tab the layout resolves FOR. `layoutTabScope` because the
+  // engine holds no tab roster and must not learn one: this side owns the
+  // tabs, so it answers "is this the default tab" and "can that id still
+  // hold sections" once. The page and the layout editor's canvas build the
+  // scope from the same helper in the same shape — three surfaces that must
+  // never disagree about which sections a tab holds, since the canvas is a
+  // PREVIEW of the other two. No tab at all resolves tab-blind: the canvas's
+  // form verbatim, and pre-M45.6 behavior verbatim with it.
+  //
+  // The heading is read off the SCOPED resolve only because it is the same
+  // list either way: `resolveLayout` keeps `heading` and `rest` global by
+  // decision, and the strip renders on every tab (Notion's heading block
+  // sits above the tab bar; ours sits above this strip).
+  const tabScope = activeTab === null ? undefined : layoutTabScope(tabs, activeTab.id);
   const headingFields =
-    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields, tabScope).heading;
   const stripShows =
     headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
   // Render-time derived-state reset (the React-sanctioned pattern): the lens
@@ -455,11 +469,27 @@ export function DetailPanel() {
 
             M45.6: the first content arm. A Sections or View tab IS its own
             content, so it carries no stack (DocPage's gate, verbatim); a
-            Properties tab is the stack alone, so it ignores the strip's fold. */}
+            Properties tab is the stack alone, so it ignores the strip's fold.
+            And `tab` picks WHICH sections it holds.
+
+            NOT keyed by tab, decided when the content started differing per
+            tab (M45.6 Task 3): every piece of state this component owns is
+            about the RECORD's stack — the reveal expander, the add-property
+            flyout, a drag in flight — and none of it is read against a
+            particular tab's sections, which are derived from props on every
+            render. Keying by tab would throw away a flyout the user opened
+            and a reveal they asked for, every press, buying nothing: there is
+            no stale per-tab state to discard. Keyed by PATH still, because a
+            different record is a different stack. */}
         {(activeTab === null ||
           (activeTab.content !== 'sections' && activeTab.content !== 'view')) &&
           (activeTab?.content === 'properties' || !stripShows || detailsShown) && (
-            <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+            <RecordProperties
+              key={`props:${entry.path}`}
+              entry={entry}
+              schema={schema}
+              tab={tabScope}
+            />
           )}
         {/* M44.1 — the type's display config gates the body; M45.6 — so does
             the open tab (`showsBody`). DocPage's body IS the page; this is
