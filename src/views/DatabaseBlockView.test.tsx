@@ -1,12 +1,41 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import { DatabaseBlockView } from './DatabaseBlockView';
 
 afterEach(cleanup);
+
+/**
+ * Door 2 writes through `createDatabase`, which reaches the vault store
+ * directly. Standing in for the disk here rather than mocking the action
+ * keeps what the block asks for — a Type doc with a `folder:` — inside what
+ * these tests can see.
+ */
+let created: Record<string, unknown>[];
+let toasts: string[];
+beforeEach(() => {
+  created = [];
+  toasts = [];
+  useVaultStore.setState({
+    vaultPath: '/demo-vault',
+    entries,
+    status: 'ready',
+    createItem: vi.fn(async (args: Record<string, unknown>) => {
+      created.push(args);
+      return 'types/new.md';
+    }),
+  });
+  useUiStore.setState({
+    toast: (message: string) => {
+      toasts.push(message);
+    },
+  });
+});
 
 const typeDoc = (title: string, properties: Record<string, unknown> = {}): Entry =>
   makeEntry({
@@ -208,5 +237,123 @@ describe('DatabaseBlockView pickers', () => {
     fireEvent.click(screen.getByTestId('database-block-view-pick'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Shelf' }));
     expect(onChange).toHaveBeenCalledWith({ database: 'Reading list', view: 'shelf' });
+  });
+
+  /**
+   * Door 2 (M47.4). This is the complaint the milestone exists for: "to track
+   * tasks I have to back out of this > go to databases > create a new type >
+   * come back here and select said type." The door sits ABOVE the roster
+   * because a database you are about to invent is the case the old flow could
+   * not serve at all, and it must not be buried under the ones you have.
+   */
+  it('offers making a new database above the ones that exist', () => {
+    editable('');
+    fireEvent.click(screen.getByTestId('database-block-pick'));
+    const items = screen.getAllByRole('menuitem').map((i) => i.textContent ?? '');
+    expect(items[0]).toContain('New database');
+  });
+
+  it('asks for the name in place, without a dialog', () => {
+    editable('');
+    fireEvent.click(screen.getByTestId('database-block-pick'));
+    fireEvent.click(screen.getByTestId('database-block-new'));
+    expect(screen.getByLabelText('New database name')).toBeTruthy();
+    expect(document.querySelector('.cb-dlg')).toBeNull();
+  });
+
+  it('creates the database and points the block at it, in one gesture', async () => {
+    const onChange = editable('');
+    fireEvent.click(screen.getByTestId('database-block-pick'));
+    fireEvent.click(screen.getByTestId('database-block-new'));
+    fireEvent.change(screen.getByLabelText('New database name'), {
+      target: { value: 'Groceries' },
+    });
+    fireEvent.submit(screen.getByLabelText('New database name').closest('form')!);
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect((created[0].frontmatter as Record<string, unknown>).folder).toBe('records/groceries');
+    expect(onChange).toHaveBeenCalledWith({ database: 'Groceries', view: '' });
+  });
+
+  /**
+   * `createDatabase` toasts its own refusals and answers null, so a duplicate
+   * name must leave the block pointing at nothing and the menu open with what
+   * the user typed still in the box to fix — not silently point at the
+   * database that was already there.
+   */
+  it('leaves the block unset when the name is already taken', async () => {
+    const onChange = editable('');
+    fireEvent.click(screen.getByTestId('database-block-pick'));
+    fireEvent.click(screen.getByTestId('database-block-new'));
+    fireEvent.change(screen.getByLabelText('New database name'), {
+      target: { value: 'Reading list' },
+    });
+    fireEvent.submit(screen.getByLabelText('New database name').closest('form')!);
+    await waitFor(() => expect(toasts.join(' ')).toContain('already exists'));
+    expect(created).toHaveLength(0);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('New database name')).toBeTruthy();
+  });
+});
+
+/**
+ * Schema by use (M47.4).
+ *
+ * The table's "+" has declared real properties on a type since M12 — it was
+ * simply never reachable from a page. What turns it on is `onColumnsChange`,
+ * and what that means is that adding a column is HOW a schema comes to exist,
+ * rather than a prerequisite to satisfy on another surface first.
+ */
+describe('DatabaseBlockView column editing', () => {
+  it('offers no add-column button on a block with nowhere to write back', () => {
+    show('Reading list', 'shelf');
+    expect(screen.queryByTestId('add-column')).toBeNull();
+  });
+
+  it('offers it on an editable block', () => {
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view="shelf"
+        schema={schema}
+        entries={entries}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('add-column')).toBeTruthy();
+  });
+});
+
+/**
+ * The empty state has to be true (M47.4).
+ *
+ * Found live, not in jsdom: a brand-new database rendered "No records yet /
+ * Create the first one below." with nothing below it, because `buildRows`
+ * emits the add row only when `onCreate` was passed and the block passed
+ * none. The sentence pointed at a control that did not exist — the same
+ * defect M20.5 fixed for a control that merely sat in the wrong place. The
+ * dashboard's embed has the same shape and was making the same false promise.
+ */
+describe('DatabaseBlockView empty state', () => {
+  const empty = buildSchema([typeDoc('Wishlist')]);
+
+  it('does not promise a create row it cannot render', () => {
+    render(<DatabaseBlockView database="Wishlist" view="" schema={empty} entries={[]} />);
+    const block = screen.getByTestId('database-block');
+    expect(block.textContent).toContain('No records yet');
+    expect(block.textContent).not.toContain('below');
+  });
+
+  it('promises one when it can', () => {
+    render(
+      <DatabaseBlockView
+        database="Wishlist"
+        view=""
+        schema={empty}
+        entries={[]}
+        onChange={vi.fn()}
+        onCreate={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.getByTestId('database-block').textContent).toContain('Create the first one');
   });
 });

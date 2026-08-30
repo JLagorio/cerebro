@@ -10,6 +10,7 @@
  *   - duplicate names are checked case-insensitively.
  */
 
+import { recordsFolder } from '@/engine/createRecord';
 import { kindMeta } from '@/engine/properties';
 import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
@@ -830,4 +831,71 @@ export async function moveFieldOnType(
 
   if (!(await patchFrontmatter(doc.path, { fields: next }))) return false;
   return true;
+}
+
+/**
+ * The status vocabulary a database is born with (M47.4).
+ *
+ * Three states, not the Work item's six: a brand-new database should be
+ * immediately usable and immediately editable, and six rows of someone else's
+ * process is more to delete than to keep. The ids and colours are the vault's
+ * own — the same `todo` / `progress` / `done` spelling and the same swatches
+ * `types/work-item.md` uses — so a database created here and one written by
+ * hand agree, rather than growing a second vocabulary for one idea.
+ */
+const STARTER_STATUSES = [
+  { id: 'todo', group: 'active', color: '#7E8699' },
+  { id: 'progress', group: 'active', color: '#DE8F0A' },
+  { id: 'done', group: 'done', color: '#1F9D61' },
+];
+
+/**
+ * Create a database from wherever you are (M47.4) — Door 2 of the M47 spec.
+ *
+ * The first writer of `folder:`. It has been RESERVED since M12.2 and parsed
+ * into `TypeDef.folder` ever since, but no action has ever set it: it was
+ * hand-edit-only, which is exactly why "where do my new records go" had no
+ * answer you could give from inside the app. A database created here declares
+ * its own home, so `createTarget` puts its rows there and logging a thing
+ * stops being a question about folders.
+ *
+ * Returns the name on success and null on failure — a human-UI action, so it
+ * toasts rather than throwing (the store-layer error invariant). It
+ * deliberately does NOT navigate: the whole point of Door 2 is that you never
+ * leave the page you are writing.
+ */
+export async function createDatabase(rawName: string): Promise<string | null> {
+  const name = rawName.trim();
+  const toast = useUiStore.getState().toast;
+  if (name === '') return null;
+
+  const { entries, createItem } = useVaultStore.getState();
+  if (findTypeDoc(entries, name) !== null) {
+    toast(`A database named "${name}" already exists`);
+    return null;
+  }
+
+  try {
+    await createItem({
+      folder: 'types',
+      slug: slugify(name) || 'database',
+      frontmatter: {
+        type: 'Type',
+        icon: 'table-2',
+        // `records/<plural>` is what `recordsFolder` would have picked anyway
+        // (M3.3's convention). Writing it DOWN rather than leaving it implied
+        // is the difference between a home you can see in the file and one
+        // only the code knows — and it is the line a user edits when they want
+        // their reading list to live in `reading/` instead.
+        folder: recordsFolder(name),
+        statuses: STARTER_STATUSES,
+        fields: { status: { kind: 'status' } },
+      },
+      body: `# ${name}\n`,
+    });
+  } catch {
+    toast(`Couldn't create the database "${name}"`);
+    return null;
+  }
+  return name;
 }

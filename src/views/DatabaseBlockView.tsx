@@ -1,13 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
+import { Input } from '@/components/ui/Input';
+import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { createDatabase, setTypeViews } from '@/app/typeActions';
 import { columnUniverse } from '@/engine/columns';
 import { resolveDatabaseRef } from '@/engine/databaseBlock';
 import { resolveSurface } from '@/engine/surface';
 import { listTypes, typeStyle, typeViews } from '@/engine/typeCatalog';
-import type { Entry, Schema, ViewDefinition } from '@/engine/types';
+import type { ColumnSpec, Entry, Schema, ViewDefinition } from '@/engine/types';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { useQuickAdd } from './QuickAdd';
 import { ViewCanvas } from './ViewCanvas';
 
 /** What a block writes back when its pointer changes. */
@@ -29,6 +32,12 @@ export function ConnectedDatabaseBlock({
   onChange,
 }: DatabasePointer & { onChange?: (next: DatabasePointer) => void }) {
   const entries = useVaultStore((s) => s.entries);
+  // The same creator the database's own screen uses, so a record made here
+  // lands in the database's declared `folder:` and inherits the band it was
+  // created in. Logging a thing from the page you are writing is the point of
+  // the milestone; without this the table's empty state promised a create row
+  // that was never rendered.
+  const quickAdd = useQuickAdd(database, null);
   return (
     <DatabaseBlockView
       database={database}
@@ -36,6 +45,7 @@ export function ConnectedDatabaseBlock({
       schema={useSchema()}
       entries={entries}
       onChange={onChange}
+      onCreate={database === '' ? undefined : quickAdd}
     />
   );
 }
@@ -58,6 +68,7 @@ export function DatabaseBlockView({
   schema,
   entries,
   onChange,
+  onCreate,
 }: {
   database: string;
   /** '' is the prop-schema spelling of "named no view" — see markdown.ts. */
@@ -71,6 +82,12 @@ export function DatabaseBlockView({
    * silently does nothing would be worse than offering none.
    */
   onChange?: (next: DatabasePointer) => void;
+  /**
+   * Creates a record of this database. Absent means the table shows no create
+   * row AND does not claim one — `TableView`'s empty state reads "below" only
+   * when there is a below.
+   */
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
   const resolved = useMemo(
     () =>
@@ -142,6 +159,23 @@ export function DatabaseBlockView({
 
   const style = typeStyle(resolved.database, schema);
 
+  /**
+   * Persist a column change onto the database's own saved views.
+   *
+   * The whole list is written each time, which is `setTypeViews`' contract.
+   * When the database has saved none, `typeViews` handed us a SYNTHESIZED
+   * table and this is what makes it real — the same "nothing is written to
+   * its Type doc until the user makes a view their own" rule the type screen
+   * follows, reached from a page instead.
+   */
+  const saveColumns = async (columns: ColumnSpec[]) => {
+    if (shown === null) return;
+    const views = typeViews(resolved.database, schema).map((v) =>
+      v.id === shown.id ? { ...v, presentation: { ...v.presentation, columns } } : v,
+    );
+    await setTypeViews({ name: resolved.database, docPath: null }, views);
+  };
+
   return (
     <Shell tone="ok" testid="database-block">
       <span className="flex min-w-0 items-center gap-1.5">
@@ -184,6 +218,22 @@ export function DatabaseBlockView({
             // in the page you are writing.
             createType={resolved.database}
             filtered={shown?.filters != null}
+            onCreate={onCreate}
+            // Schema by use (M47.4). The table's "+" already declares a real
+            // property on the database — `AddColumnButton` has called
+            // `addFieldToType` since M12 — it was simply never reachable from
+            // a page. Passing this is what turns it on, and it is what makes
+            // "add a column" the way a schema comes to exist rather than a
+            // prerequisite to satisfy on another surface first.
+            //
+            // The write lands on the DATABASE's view, not on this block: the
+            // pointer names a view, and the user's model is that a database
+            // is shown in many places rather than copied into them. A column
+            // added here is therefore a column everywhere that view appears,
+            // which is the same thing that happens on its own screen.
+            onColumnsChange={
+              onChange === undefined ? undefined : (columns) => void saveColumns(columns)
+            }
           />
         </div>
       )}
@@ -215,8 +265,28 @@ function DatabasePicker({
   onPick: (database: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState('');
   const anchorRef = useRef<HTMLButtonElement>(null);
   const databases = useMemo(() => listTypes(entries, schema), [entries, schema]);
+
+  const close = () => {
+    setOpen(false);
+    setCreating(false);
+    setDraft('');
+  };
+
+  /**
+   * Door 2. `createDatabase` toasts its own failures and answers null, so a
+   * name that is taken or a write that fails leaves the menu exactly as it
+   * was — with what the user typed still in the box to fix.
+   */
+  const submitNew = async () => {
+    const created = await createDatabase(draft);
+    if (created === null) return;
+    close();
+    onPick(created);
+  };
 
   return (
     <span className="relative inline-flex">
@@ -224,20 +294,46 @@ function DatabasePicker({
         ref={anchorRef}
         type="button"
         data-testid="database-block-pick"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? close() : setOpen(true))}
         className="motion-hover inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-n-300 bg-n-0 px-2 py-1 text-sm text-n-700 hover:bg-n-50"
       >
         <Icon name="table-2" size={14} color="var(--n-500)" />
         {label}
       </button>
       {open && (
-        <Popover
-          anchorRef={anchorRef}
-          onClose={() => setOpen(false)}
-          role="menu"
-          ariaLabel="Databases"
-        >
-          <MenuSurface width={240}>
+        <Popover anchorRef={anchorRef} onClose={close} role="menu" ariaLabel="Databases">
+          <MenuSurface width={260} autoFocus={!creating}>
+            {/* Door 2 first, above the roster (spec §6). A database you are
+                about to invent is the case the old flow could not serve at
+                all — it sent you to another surface and back — so it is not
+                buried under thirteen rows of databases you already have. */}
+            {creating ? (
+              <form
+                className="flex flex-col gap-1.5 p-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void submitNew();
+                }}
+              >
+                <Input
+                  autoFocus
+                  ariaLabel="New database name"
+                  placeholder="Reading list, Groceries…"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  width="100%"
+                />
+                <span className="px-1 text-2xs text-n-500">Enter to create · Esc to go back</span>
+              </form>
+            ) : (
+              <MenuItem
+                label="New database"
+                icon="plus"
+                testId="database-block-new"
+                onSelect={() => setCreating(true)}
+              />
+            )}
+            <MenuSeparator />
             <MenuLabel>Databases</MenuLabel>
             {databases.map((d) => (
               <MenuItem
@@ -248,7 +344,7 @@ function DatabasePicker({
                 // vault has grown two similarly named databases.
                 hint={String(d.count)}
                 onSelect={() => {
-                  setOpen(false);
+                  close();
                   onPick(d.name);
                 }}
               />

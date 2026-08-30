@@ -139,6 +139,27 @@ describe('recordsFolder', () => {
     expect(recordsFolder('Story')).toBe('records/stories');
     expect(recordsFolder('Process')).toBe('records/processes');
   });
+
+  /**
+   * Found by M47.4, which made this visible. People name databases in the
+   * PLURAL — Tasks, Notes, Groceries — and the sibilant rule read every one
+   * of them as wanting `es`. It did not matter while `recordsFolder` was an
+   * implicit fallback nobody could see; `createDatabase` writes the folder
+   * into the user's own Type doc, where `folder: records/grocerieses` is a
+   * misspelling they have to look at and fix.
+   */
+  it('leaves an already-plural name alone', () => {
+    expect(recordsFolder('Groceries')).toBe('records/groceries');
+    expect(recordsFolder('Tasks')).toBe('records/tasks');
+    expect(recordsFolder('Notes')).toBe('records/notes');
+  });
+
+  // `ss` is not a plural ending, so the sibilant rule still owns it.
+  it('still pluralizes a name that merely ends in a sibilant', () => {
+    expect(recordsFolder('Process')).toBe('records/processes');
+    expect(recordsFolder('Class')).toBe('records/classes');
+    expect(recordsFolder('Box')).toBe('records/boxes');
+  });
 });
 
 describe('childLink', () => {

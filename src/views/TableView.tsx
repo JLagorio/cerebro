@@ -2979,7 +2979,16 @@ export function TableView({
                 description={
                   filtered === true
                     ? 'Adjust the filters in view settings to widen the query.'
-                    : 'Create the first one below.'
+                    : // "below" is only true when there IS an add row, and
+                      // `buildRows` emits one exactly when `onCreate` was
+                      // passed (M47.4). A surface that cannot create — the
+                      // dashboard's embed has never passed one — was pointing
+                      // at a control that does not exist on it, which is the
+                      // same defect M20.5 fixed for the case where the control
+                      // was merely in the wrong place.
+                      onCreate !== undefined
+                      ? 'Create the first one below.'
+                      : 'Nothing here yet.'
                 }
               />
             </div>

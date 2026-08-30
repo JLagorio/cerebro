@@ -5,6 +5,7 @@ import {
   addPropertyToEntry,
   applyTypeLayout,
   changeFieldKind,
+  createDatabase,
   findTypeDoc,
   normalizeFieldName,
   removeFieldFromType,
@@ -15,6 +16,7 @@ import {
   setTypeViews,
   type TypeLayoutDraft,
 } from '@/app/typeActions';
+import { recordsFolder } from '@/engine/createRecord';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -662,5 +664,88 @@ describe('changeFieldKind keeps the wiring the new kind understands', () => {
     expect(await specAfter({ kind: 'relation', target: 'Person', limit: 1 }, 'text')).toEqual({
       kind: 'text',
     });
+  });
+});
+
+/**
+ * Door 2 of the M47 spec (M47.4): create a database without leaving the page.
+ *
+ * The first writer of `folder:` in the app's history. The key has been
+ * RESERVED since M12.2 and parsed into `TypeDef.folder` ever since, but no
+ * action ever set it — it was hand-edit-only, which is why "where do my new
+ * records go" had no answer you could give from inside the app.
+ */
+describe('createDatabase (M47.4)', () => {
+  it('writes a Type doc that declares its own home folder', async () => {
+    expect(await createDatabase('Reading list')).toBe('Reading list');
+    expect(created).toHaveLength(1);
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(created[0].folder).toBe('types');
+    expect(created[0].slug).toBe('reading-list');
+    expect(fm.type).toBe('Type');
+    expect(fm.folder).toBe('records/reading-lists');
+  });
+
+  /**
+   * `records/<plural>` is exactly what `createTarget` would have fallen back
+   * to anyway. Writing it DOWN is the point: a home you can see in the file is
+   * one a user can edit to `reading/`, and a home only the code knows is one
+   * they cannot.
+   */
+  it('declares the same folder the convention would have chosen implicitly', async () => {
+    await createDatabase('Recipe box');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(fm.folder).toBe(recordsFolder('Recipe box'));
+  });
+
+  it('is born usable: a status field and a vocabulary for it', async () => {
+    await createDatabase('Habit');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(fm.fields).toEqual({ status: { kind: 'status' } });
+    expect((fm.statuses as { id: string }[]).map((s) => s.id)).toEqual([
+      'todo',
+      'progress',
+      'done',
+    ]);
+  });
+
+  /**
+   * The ids and groups are the vault's OWN, taken from `types/work-item.md`,
+   * so a database created here and one written by hand agree instead of
+   * growing two vocabularies for one idea.
+   */
+  it('borrows the vault status groups rather than inventing new ones', async () => {
+    await createDatabase('Habit');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    for (const s of fm.statuses as { id: string; group: string }[]) {
+      expect(['active', 'done', 'closed']).toContain(s.group);
+    }
+  });
+
+  it('refuses a name already taken, toasting rather than throwing', async () => {
+    expect(await createDatabase('Recipe')).toBeNull();
+    expect(created).toHaveLength(0);
+    expect(toasts.join(' ')).toContain('already exists');
+  });
+
+  it('refuses a blank name silently — nothing was asked for', async () => {
+    expect(await createDatabase('   ')).toBeNull();
+    expect(created).toHaveLength(0);
+    expect(toasts).toEqual([]);
+  });
+
+  /**
+   * A human-UI action, so a failed write toasts and answers null rather than
+   * throwing (the store-layer error invariant). The caller keeps the name the
+   * user typed on screen to fix.
+   */
+  it('answers null and toasts when the write fails', async () => {
+    useVaultStore.setState({
+      createItem: vi.fn(async () => {
+        throw new Error('disk full');
+      }),
+    });
+    expect(await createDatabase('Reading list')).toBeNull();
+    expect(toasts.join(' ')).toContain("Couldn't create");
   });
 });

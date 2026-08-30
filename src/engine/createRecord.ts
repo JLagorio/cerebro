@@ -95,6 +95,15 @@ export function recordsFolder(typeName: string): string {
 
 function pluralize(slug: string): string {
   if (slug === '') return 'records';
+  // A name that is ALREADY plural is left alone (M47.4). People name
+  // databases in the plural — Tasks, Notes, Books, Groceries — and the
+  // sibilant rule below read every one of them as needing `es`, so they
+  // became `taskses` and `grocerieses`. That was invisible while
+  // `recordsFolder` was only an implicit fallback; `createDatabase` writes
+  // the folder DOWN, which would have put the misspelling in the user's own
+  // file. `ss` is exempt because it is not a plural ending: Process still
+  // pluralizes to processes.
+  if (/[^s]s$/.test(slug)) return slug;
   if (/(s|x|z|ch|sh)$/.test(slug)) return `${slug}es`;
   if (/[^aeiou]y$/.test(slug)) return `${slug.slice(0, -1)}ies`;
   return `${slug}s`;
