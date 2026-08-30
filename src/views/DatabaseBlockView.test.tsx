@@ -357,3 +357,49 @@ describe('DatabaseBlockView empty state', () => {
     expect(screen.getByTestId('database-block').textContent).toContain('Create the first one');
   });
 });
+
+/**
+ * Inline and full page are one database seen two ways (M47.5).
+ *
+ * The block shows a single view among your prose; its own screen carries the
+ * whole tab strip. The `↗` is the trip between them, spelled the way every
+ * sidebar section already spells "open the surface this summarises".
+ */
+describe('DatabaseBlockView open full page', () => {
+  it('opens the database at the view the block is showing', () => {
+    const onOpenFullPage = vi.fn();
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view="stack"
+        schema={schema}
+        entries={entries}
+        onOpenFullPage={onOpenFullPage}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('database-block-open'));
+    // The VIEW travels with it: arriving on the full page showing something
+    // else than the block you clicked would read as a different database.
+    expect(onOpenFullPage).toHaveBeenCalledWith('Reading list', 'stack');
+  });
+
+  it('passes the fallback view when the block named none', () => {
+    const onOpenFullPage = vi.fn();
+    render(
+      <DatabaseBlockView
+        database="Reading list"
+        view=""
+        schema={schema}
+        entries={entries}
+        onOpenFullPage={onOpenFullPage}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('database-block-open'));
+    expect(onOpenFullPage).toHaveBeenCalledWith('Reading list', 'shelf');
+  });
+
+  it('offers nothing to open when no host can navigate', () => {
+    show('Reading list', 'shelf');
+    expect(screen.queryByTestId('database-block-open')).toBeNull();
+  });
+});

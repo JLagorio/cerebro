@@ -11,6 +11,7 @@
 
 import { isTemplate } from '@/lib/templates';
 import { DEFAULT_TIME_FORMAT } from './dates';
+import { COLLECTION_TYPE } from './collections';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -102,6 +103,12 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
   // the Type doc is harmless, and demanding the user delete a file to fix
   // their sidebar would be the app blaming them for its own migration.
   for (const name of names) if (isLibraryType(name)) names.delete(name);
+
+  // A Collection is a container, not a database (M47.5). It carries a `type:`
+  // because that is how a page says what it is, but listing it here would put
+  // "Collection · 2" in the Databases section beside Risk and Work item and
+  // invite you to open a table of your own folders.
+  names.delete(COLLECTION_TYPE);
 
   // Templates carry a `type:` so pages created from them inherit it — they
   // are scaffolding, never records, and must not inflate counts (M3.1: the

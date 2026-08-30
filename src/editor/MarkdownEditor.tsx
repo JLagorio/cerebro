@@ -445,9 +445,9 @@ export function MarkdownEditor({
       // demanded the answer before the block existed would be the New-list
       // dialog again, which is the ceremony this milestone is deleting.
       title: 'Database',
-      subtext: 'Show a database — tasks, reading list, anything',
+      subtext: 'Show a database here — open it full page from the block',
       group: 'Advanced blocks',
-      aliases: ['database', 'table', 'list', 'records', 'view', 'embed'],
+      aliases: ['database', 'table', 'list', 'records', 'view', 'embed', 'inline'],
       icon: <Icon name="table-2" size={14} />,
       onItemClick: () =>
         insertBlockAtCursor({ type: 'database', props: { database: '', view: '' } }),

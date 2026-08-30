@@ -44,6 +44,31 @@ fields:
     kind: rollup
     relation: key_results
     calculate: count
+views:
+  - id: okr-tree
+    name: OKR tree
+    icon: null
+    filters: null
+    presentation:
+      type: table
+      group:
+        - field: objective
+          descend:
+            direction: reverse
+            type: Key result
+            field: objective
+        - field: deliverables
+          descend:
+            direction: forward
+            field: deliverables
+      sort:
+        - field: title
+          dir: asc
+      columns:
+        - field: status
+        - field: owner
+        - field: progress
+        - field: key_result_count
 ---
 
 # Objective

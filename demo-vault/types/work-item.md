@@ -36,6 +36,74 @@ layout:
   heading: [status, priority]
   groups:
     - { id: planning, name: Planning, fields: [assignee, due, estimate] }
+views:
+  - id: at-risk-work
+    name: At risk
+    icon: null
+    filters:
+      all:
+        - field: priority
+          op: any_of
+          value:
+            - urgent
+            - high
+        - any:
+            - field: status
+              op: equals
+              value: progress
+            - field: status
+              op: equals
+              value: review
+    presentation:
+      type: table
+      group:
+        - field: status
+        - field: assignee
+      sort:
+        - field: due
+          dir: asc
+        - field: priority
+          dir: asc
+      columns:
+        - field: status
+        - field: priority
+        - field: assignee
+        - field: due
+          width: 120
+        - field: estimate
+  - id: this-month
+    name: This month
+    icon: null
+    filters: null
+    presentation:
+      type: calendar
+      group: []
+      sort:
+        - field: due
+          dir: asc
+      columns:
+        - field: status
+        - field: assignee
+      dateField: window
+  - id: delivery-schedule
+    name: Delivery schedule
+    icon: null
+    filters: null
+    presentation:
+      type: gantt
+      group:
+        - field: status
+      sort:
+        - field: due
+          dir: asc
+      columns:
+        - field: status
+        - field: assignee
+        - field: due
+        - field: estimate
+      dateField: window
+      zoom: month
+      dependencyField: blocked_by
 ---
 
 # Work item

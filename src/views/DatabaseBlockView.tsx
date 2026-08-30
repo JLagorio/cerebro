@@ -9,6 +9,7 @@ import { resolveDatabaseRef } from '@/engine/databaseBlock';
 import { resolveSurface } from '@/engine/surface';
 import { listTypes, typeStyle, typeViews } from '@/engine/typeCatalog';
 import type { ColumnSpec, Entry, Schema, ViewDefinition } from '@/engine/types';
+import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { useQuickAdd } from './QuickAdd';
 import { ViewCanvas } from './ViewCanvas';
@@ -38,6 +39,7 @@ export function ConnectedDatabaseBlock({
   // the milestone; without this the table's empty state promised a create row
   // that was never rendered.
   const quickAdd = useQuickAdd(database, null);
+  const navigate = useNavStore((s) => s.navigate);
   return (
     <DatabaseBlockView
       database={database}
@@ -46,6 +48,7 @@ export function ConnectedDatabaseBlock({
       entries={entries}
       onChange={onChange}
       onCreate={database === '' ? undefined : quickAdd}
+      onOpenFullPage={(name, id) => navigate({ kind: 'type', name, view: id })}
     />
   );
 }
@@ -69,6 +72,7 @@ export function DatabaseBlockView({
   entries,
   onChange,
   onCreate,
+  onOpenFullPage,
 }: {
   database: string;
   /** '' is the prop-schema spelling of "named no view" — see markdown.ts. */
@@ -88,6 +92,17 @@ export function DatabaseBlockView({
    * when there is a below.
    */
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  /**
+   * Opens the database's own full-page screen — the tabbed surface carrying
+   * every one of its views (M47.5).
+   *
+   * Inline and full page are the same database seen two ways, which is what
+   * Notion offers and what this block was missing: embedded here, it shows one
+   * view in the middle of your prose; opened, it is a page of its own with the
+   * whole tab strip. The `↗` spelling is the app's own — it is what every
+   * sidebar section already uses to mean "open the surface this summarises".
+   */
+  onOpenFullPage?: (database: string, view: string) => void;
 }) {
   const resolved = useMemo(
     () =>
@@ -193,6 +208,18 @@ export function DatabaseBlockView({
             views={typeViews(resolved.database, schema)}
             onPick={(id) => onChange({ database: resolved.database, view: id })}
           />
+        )}
+        {onOpenFullPage !== undefined && (
+          <button
+            type="button"
+            data-testid="database-block-open"
+            aria-label={`Open ${resolved.database} as a full page`}
+            title="Open as a full page"
+            onClick={() => onOpenFullPage(resolved.database, shown?.id ?? '')}
+            className="motion-hover ml-auto flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-700"
+          >
+            <Icon name="arrow-up-right" size={14} />
+          </button>
         )}
       </span>
       {/* The database is here and the named view is not. Showing the fallback

@@ -445,16 +445,32 @@ describe('DocPage', () => {
       '  heading: [status, priority]\n' +
       '  groups:\n' +
       '    - { id: planning, name: Planning, fields: [assignee, due, estimate] }\n';
+    /**
+     * A tab naming no `view` takes the database's FIRST saved view, filters
+     * and all — the same fallback `resolveDatabaseRef` uses, so a tab and a
+     * `/database` block agree about what "show me Work item" means. M47.5 gave
+     * the corpus Work item three saved views, the first of which filters to
+     * urgent-and-moving, and these cases are about RELATED SCOPING rather than
+     * about filters. Stripping them keeps each test measuring one thing.
+     */
+    const CORPUS_VIEWS_START = '\nviews:\n';
     const setTabs = async (tabsYaml: string) => {
       const typeDoc = fs().get(TYPE_DOC);
       if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
       if (!typeDoc.includes(CORPUS_LAYOUT)) {
         throw new Error('work-item.md corpus layout drifted — update CORPUS_LAYOUT here');
       }
-      fs().set(
-        TYPE_DOC,
-        typeDoc.replace(CORPUS_LAYOUT, '').replace('\n---\n', `\n${tabsYaml}---\n`),
-      );
+      if (!typeDoc.includes(CORPUS_VIEWS_START)) {
+        throw new Error('work-item.md corpus views drifted — update CORPUS_VIEWS_START here');
+      }
+      const [frontmatter, ...rest] = typeDoc.split('\n---\n');
+      // `+ 1` keeps the newline that ENDS the previous key — `CORPUS_LAYOUT`
+      // includes its own trailing newline, and cutting it away made that
+      // replace silently no-op and the layout survive.
+      const stripped = frontmatter
+        .slice(0, frontmatter.indexOf(CORPUS_VIEWS_START) + 1)
+        .replace(CORPUS_LAYOUT, '');
+      fs().set(TYPE_DOC, [stripped + tabsYaml.replace(/\n$/, ''), ...rest].join('\n---\n'));
       await useVaultStore.getState().rescan();
     };
     const VIEW_TABS =
