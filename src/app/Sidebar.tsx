@@ -13,7 +13,8 @@ import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { CreateMenu } from '@/app/CreateMenu';
-import { deleteCollection, deleteList } from '@/app/listActions';
+import { createPageIn, deleteCollection, deleteList } from '@/app/listActions';
+import { createDatabase } from '@/app/typeActions';
 import { SectionHeader } from '@/app/SectionHeader';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass } from '@/app/sidebarChrome';
@@ -163,6 +164,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
   const [adopting, setAdopting] = useState(false);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
   );
@@ -312,6 +314,38 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     }
     return [];
   };
+
+  /**
+   * What a container's `+` offers (M47.5).
+   *
+   * Three doors, and the order is the fix: a PAGE first. The only door this
+   * had before was "New list", which is why the empty collection page could
+   * do nothing but tell you to go and use the sidebar — and why there was no
+   * way to put a doc in a collection at all, in a container documented as
+   * holding "Lists, Folders, and Docs".
+   */
+  const addMenuItems = (folder: string): ContextMenuItem[] => [
+    {
+      icon: 'file-plus',
+      label: 'New page',
+      onSelect: () =>
+        void (async () => {
+          // createPageIn toasts its own failure and answers null.
+          const path = await createPageIn(folder);
+          if (path !== null) openPath(path);
+        })(),
+    },
+    {
+      icon: 'table-2',
+      label: 'New database',
+      onSelect: () =>
+        void (async () => {
+          const name = await createDatabase('Untitled database');
+          if (name !== null) navigate({ kind: 'type', name });
+        })(),
+    },
+    { icon: 'list', label: 'New list', onSelect: () => onNewView(folder) },
+  ];
 
   const typeMenuItems = (listing: TypeListing): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -560,7 +594,11 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               onNavigate={navigate}
               onOpenDoc={openPath}
               menuFor={nodeMenuItems}
-              onAdd={(node) => onNewView(node.id)}
+              // A container holds Lists, Folders and DOCS — and its `+` used
+              // to offer exactly one of the three, straight into the New list
+              // dialog. That single door is what made the collection page's
+              // empty state say "add a list from the sidebar's +" (M47.5).
+              onAdd={(node, at) => setAddMenu({ ...at, folder: node.id })}
             />
           </>
         )}
@@ -834,6 +872,14 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           y={typeMenu.y}
           items={typeMenuItems(typeMenu.listing)}
           onClose={() => setTypeMenu(null)}
+        />
+      )}
+      {addMenu !== null && (
+        <ContextMenu
+          x={addMenu.x}
+          y={addMenu.y}
+          items={addMenuItems(addMenu.folder)}
+          onClose={() => setAddMenu(null)}
         />
       )}
       {collectionDialog !== null && (

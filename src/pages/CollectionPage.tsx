@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CollectionDialog } from '@/app/CollectionDialog';
-import { deleteCollection, updateCollection } from '@/app/listActions';
+import { createPageIn, deleteCollection, updateCollection } from '@/app/listActions';
+import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -212,10 +213,27 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           </div>
         )}
         {empty ? (
+          /* The sentence this milestone started from was here: "Add a list
+             from the sidebar's + to start" — a page telling you to go and use
+             a different surface, because it had no create affordance of its
+             own and only one kind of thing you could make (M47.5). */
           <EmptyState
             icon="folder-open"
             title="Nothing in here yet"
-            description="A collection holds lists, folders, and docs. Add a list from the sidebar’s + to start."
+            description="A collection holds pages, databases, folders and lists."
+            action={
+              <Button
+                variant="primary"
+                onClick={() =>
+                  void (async () => {
+                    const path = await createPageIn(selection.folder);
+                    if (path !== null) openPath(path);
+                  })()
+                }
+              >
+                New page
+              </Button>
+            }
           />
         ) : (
           <div className="flex flex-col gap-7">

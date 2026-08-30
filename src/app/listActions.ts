@@ -25,6 +25,7 @@ import type {
   ViewDefinition,
 } from '@/engine/types';
 import { deleteNote, saveCollection, saveList, saveView } from '@/lib/ipc';
+import { slugify } from '@/lib/slug';
 import { slugifyListId } from '@/views/ViewToolbar';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -259,4 +260,32 @@ export async function deleteCollection(collection: CollectionFile): Promise<bool
   }
   await refresh();
   return true;
+}
+
+/**
+ * A new page inside a container (M47.5).
+ *
+ * The gap this milestone opened with: a Collection's `+` offered exactly one
+ * thing, "New list", and its empty state told you to go and use it. There was
+ * no way to put a DOC in a collection at all — a container documented as
+ * holding "Lists, Folders, and Docs" could only be given one of the three.
+ *
+ * Untitled and opened immediately rather than behind a name dialog. A page you
+ * are already typing into is the shortest path to having written something,
+ * and the H1 IS the name — asking for one up front is the ceremony this
+ * milestone exists to remove.
+ */
+export async function createPageIn(folder: string, title = 'Untitled'): Promise<string | null> {
+  const { entries, createItem } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const taken = new Set(entries.filter((e) => e.folder === folder).map((e) => e.filename));
+  const base = slugify(title) || 'page';
+  let slug = base;
+  for (let n = 2; taken.has(`${slug}.md`); n += 1) slug = `${base}-${n}`;
+  try {
+    return await createItem({ folder, slug, frontmatter: {}, body: `# ${title}\n` });
+  } catch {
+    toast("Couldn't create the page");
+    return null;
+  }
 }

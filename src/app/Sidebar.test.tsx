@@ -419,6 +419,12 @@ describe('Sidebar', () => {
     });
     render(<Sidebar onNewView={onNewView} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));
+    // M47.5: the `+` opens a MENU now. It used to go straight to the New list
+    // dialog, which is why a collection could hold nothing but lists and its
+    // empty page could only tell you to come back here. A page comes first.
+    const items = screen.getAllByRole('menuitem').map((i) => i.textContent);
+    expect(items).toEqual(['New page', 'New database', 'New list']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New list' }));
     expect(onNewView).toHaveBeenCalledWith('product');
   });
 
