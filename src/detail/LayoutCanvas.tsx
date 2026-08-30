@@ -21,6 +21,7 @@ import { resolveLayout } from '@/engine/layout';
 import { addGroup, moveField, moveGroup } from '@/engine/layoutEdit';
 import { foldsWhenUnset, splitByVisibility } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
+import { layoutTabScope, tabBearsProperties } from '@/engine/typeCatalog';
 import type { Entry, FieldDef, LayoutConfig, Schema, TabDef, TypeDef } from '@/engine/types';
 
 /**
@@ -85,10 +86,17 @@ export function stageNewSection(
   draft: TypeLayoutDraft,
   update: (patch: Partial<TypeLayoutDraft>) => void,
   openEditor: (id: string) => void,
+  /** The tab the new section belongs to (M45.6) — the canvas's ACTIVE tab, so
+   * the + adds to the tab you are looking at. Null (simple structure, or a
+   * caller with no tab in hand) mints it untabbed, which means the default
+   * tab. Both doors pass it, or "Add section" would mean two different things
+   * depending on which one you walked through. */
+  tab?: string | null,
 ): void {
   const minted = addGroup(
     draft.layout,
     draft.layout.groups.map((g) => g.id),
+    tab,
   );
   update({ layout: minted.layout });
   openEditor(minted.id);
@@ -215,7 +223,26 @@ export function LayoutCanvas({
     }),
   );
 
-  const previewLayout = resolveLayout(draft.layout, draftRoster(typeDef.fields, draft.added));
+  // Simple structure (`tabs: []`) has no tab to stand on, and no strip.
+  const activeTab =
+    draft.tabs.length === 0
+      ? null
+      : (draft.tabs.find((t) => t.id === selectedTab) ?? draft.tabs[0]);
+  // Does the active tab render a property stack at all? A `sections` or
+  // `view` tab IS its content, and the record surfaces show no groups on
+  // either — so neither does the canvas (M45.6 Task 4, closing the M45.5 gap
+  // where the Overview's zones stacked under such a tab's placeholder).
+  const bearsProperties = activeTab === null || tabBearsProperties(activeTab);
+
+  // The preview is the ACTIVE TAB'S (M45.6): the group blocks shown are the
+  // ones that tab holds. `layoutTabScope` is the one place "which tab is
+  // default" is decided, and no tab at all resolves tab-blind — pre-M45.6
+  // behavior verbatim, every group on the one canvas.
+  const previewLayout = resolveLayout(
+    draft.layout,
+    draftRoster(typeDef.fields, draft.added),
+    activeTab === null ? undefined : layoutTabScope(draft.tabs, activeTab.id),
+  );
   // The canvas folds what the page folds (M45.3): the panels' predicate with
   // the DRAFT overlaid — staged visibility on each def, staged showEmpty into
   // `foldsWhenUnset`. Folded rows render NOTHING (the page's collapsed
@@ -238,12 +265,6 @@ export function LayoutCanvas({
       <FieldEditor entry={previewEntry} def={f} schema={schema} />
     </PropertyRow>
   );
-
-  // Simple structure (`tabs: []`) has no tab to stand on, and no strip.
-  const activeTab =
-    draft.tabs.length === 0
-      ? null
-      : (draft.tabs.find((t) => t.id === selectedTab) ?? draft.tabs[0]);
 
   const openEditor = (container: string) => () => setEditing(container);
   const registerShell = (container: string) => (el: HTMLDivElement | null) => {
@@ -328,78 +349,114 @@ export function LayoutCanvas({
               <RecordTabs
                 tabs={draft.tabs}
                 activeId={activeTab.id}
-                onSelect={setSelectedTab}
+                onSelect={(id) => {
+                  // The open group editor is anchored to a shell this switch
+                  // may unmount (M45.6): the canvas now shows ONE tab's
+                  // sections, so an editor left open on another tab's group
+                  // would hang off a node that is gone. Put it down with the
+                  // tab it belonged to.
+                  setEditing(null);
+                  setSelectedTab(id);
+                }}
                 onChange={(next) => update({ tabs: next })}
                 hostType={typeDef.name}
               />
-              {/* M45.4 — the canvas does not live-embed a view tab (plan
-                  Decision: weight without fidelity), so the ACTIVE view tab
-                  gets a quiet placeholder instead. It follows the SELECTION
-                  since the strip went live; the placeholder is preview, so it
-                  keeps its inert fragment while the strip above does not. */}
-              {activeTab.content === 'view' && (
+              {/* The tab's OWN content, for the two kinds that ARE their
+                  content (M45.6 Task 4). M45.4's ruling holds for the view
+                  arm — the canvas does not live-embed a view tab (weight
+                  without fidelity), so it names the source instead — and the
+                  `sections` arm is the same bargain: free text is written per
+                  RECORD, and the canvas edits a TYPE. Both follow the
+                  SELECTION since the strip went live, and both are preview,
+                  so they keep their inert fragment while the strip above does
+                  not. The property zones below stand down for these two — see
+                  `bearsProperties`. */}
+              {!bearsProperties && (
                 <InertContent>
                   <div
-                    data-testid="layout-preview-viewtab"
+                    data-testid={
+                      activeTab.content === 'view'
+                        ? 'layout-preview-viewtab'
+                        : 'layout-preview-sectionstab'
+                    }
                     className="px-1 pb-1.5 pt-2 text-xs text-n-400"
                   >
-                    {viewTabPlaceholder(activeTab)}
+                    {activeTab.content === 'view'
+                      ? viewTabPlaceholder(activeTab)
+                      : 'Free text, written on each record — shown on the record page'}
                   </div>
                 </InertContent>
               )}
             </BlockShell>
           )}
-          <div className="flex flex-col">
-            {previewLayout.groups.map((g, i) => {
-              // resolveLayout maps config groups 1:1 in order, so the CONFIG
-              // group — whose indexes the slot ids must speak, because a
-              // folded row still occupies its config slot — rides the same i.
-              const cfg = draft.layout.groups[i];
-              const rows = canvasRows(g.fields);
-              return (
-                <Fragment key={g.id}>
-                  {/* Block-reorder targets bracket every group shell. */}
-                  <DropSlot id={`groupslot:${i}`} size="block" />
-                  <BlockShell
-                    container={g.id}
-                    label={g.name}
-                    onOpen={openEditor(g.id)}
-                    shellRef={registerShell(g.id)}
-                    dragId={`group:${g.id}`}
-                  >
-                    {rows.length === 0 ? (
-                      // Structurally empty (the editor's drop target) and
-                      // emptied by FOLDING both keep the shell; the hint tells
-                      // them apart, because "hidden" and "absent" are
-                      // different sentences. Either way the group keeps ONE
-                      // slot at its config end — the shell persists, so its
-                      // drop target must too.
-                      <>
-                        <InertContent>
-                          <ShellEmptyHint structural={g.fields.length === 0} />
-                        </InertContent>
-                        <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
-                      </>
-                    ) : (
-                      // No inner GroupLabel here (M45.5): the shell's
-                      // always-visible header IS the zone's one label. The
-                      // real record page keeps its GroupLabel — canvas only.
-                      <div data-testid="property-group" data-group={g.id} className="flex flex-col">
-                        {rows.map((f) => (
-                          <Fragment key={f.name}>
-                            <DropSlot id={`slot:${g.id}:${cfg.fields.indexOf(f.name)}`} />
-                            <FieldRow name={f.name}>{previewRow(f)}</FieldRow>
-                          </Fragment>
-                        ))}
-                        <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
-                      </div>
-                    )}
-                  </BlockShell>
-                </Fragment>
-              );
-            })}
-            <DropSlot id={`groupslot:${previewLayout.groups.length}`} size="block" />
-            {/* Notion's circular + below the last block (M45.5 Task 3), the
+          {bearsProperties && (
+            <div className="flex flex-col">
+              {previewLayout.groups.map((g) => {
+                // The preview is FILTERED to the active tab (M45.6), so a render
+                // position is NOT a config position — and every id below speaks
+                // to an editor that operates on the whole config, across every
+                // tab. `cfg` is addressed by ID (a folded row still occupies its
+                // config slot, so the field slots need the real field list) and
+                // the block slots by CONFIG index, because moveGroup reorders
+                // the global list. Reading either off the render index moves the
+                // wrong section, or lands a field in another group's slot.
+                const at = draft.layout.groups.findIndex((c) => c.id === g.id);
+                const cfg = draft.layout.groups[at];
+                const rows = canvasRows(g.fields);
+                return (
+                  <Fragment key={g.id}>
+                    {/* Block-reorder targets bracket every group shell. The id
+                      names the gap BEFORE this group's config slot, so a drop
+                      lands the dragged section immediately before it — with
+                      any other tab's sections in between left where they
+                      are. */}
+                    <DropSlot id={`groupslot:${at}`} size="block" />
+                    <BlockShell
+                      container={g.id}
+                      label={g.name}
+                      onOpen={openEditor(g.id)}
+                      shellRef={registerShell(g.id)}
+                      dragId={`group:${g.id}`}
+                    >
+                      {rows.length === 0 ? (
+                        // Structurally empty (the editor's drop target) and
+                        // emptied by FOLDING both keep the shell; the hint tells
+                        // them apart, because "hidden" and "absent" are
+                        // different sentences. Either way the group keeps ONE
+                        // slot at its config end — the shell persists, so its
+                        // drop target must too.
+                        <>
+                          <InertContent>
+                            <ShellEmptyHint structural={g.fields.length === 0} />
+                          </InertContent>
+                          <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
+                        </>
+                      ) : (
+                        // No inner GroupLabel here (M45.5): the shell's
+                        // always-visible header IS the zone's one label. The
+                        // real record page keeps its GroupLabel — canvas only.
+                        <div
+                          data-testid="property-group"
+                          data-group={g.id}
+                          className="flex flex-col"
+                        >
+                          {rows.map((f) => (
+                            <Fragment key={f.name}>
+                              <DropSlot id={`slot:${g.id}:${cfg.fields.indexOf(f.name)}`} />
+                              <FieldRow name={f.name}>{previewRow(f)}</FieldRow>
+                            </Fragment>
+                          ))}
+                          <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
+                        </div>
+                      )}
+                    </BlockShell>
+                  </Fragment>
+                );
+              })}
+              {/* The trailing gap is the CONFIG end, never the preview's: a
+                section dropped past this tab's last one goes last overall. */}
+              <DropSlot id={`groupslot:${draft.layout.groups.length}`} size="block" />
+              {/* Notion's circular + below the last block (M45.5 Task 3), the
                 canvas door onto the same staging the group editor's footer
                 entry walks — two doors, one editor, one `stageNewSection`.
                 A real <button>, so Tab reaches it and Enter fires it, and
@@ -412,49 +469,56 @@ export function LayoutCanvas({
                 as a dark disc with a plus-shaped hole, on the one control
                 whose whole job is being found. Hover (cortex-700, a light
                 tint in dark) was never the problem; the resting state was. */}
-            <div className="flex justify-center pb-3">
-              <Tooltip label="Add section">
-                <button
-                  type="button"
-                  aria-label="Add section"
-                  data-testid="layout-add-section"
-                  onClick={() => stageNewSection(draft, update, setEditing)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-inverse hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
-                >
-                  <Icon name="plus" size={16} />
-                </button>
-              </Tooltip>
-            </div>
-            {/* Rest LAST and headerless, RecordProperties' own order.
+              <div className="flex justify-center pb-3">
+                <Tooltip label="Add section">
+                  <button
+                    type="button"
+                    aria-label="Add section"
+                    data-testid="layout-add-section"
+                    onClick={() =>
+                      stageNewSection(draft, update, setEditing, activeTab?.id ?? null)
+                    }
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-inverse hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+                  >
+                    <Icon name="plus" size={16} />
+                  </button>
+                </Tooltip>
+              </div>
+              {/* Rest LAST and headerless, RecordProperties' own order.
                 Its shell says "Properties" — the block's Notion name,
                 since headerless content has no label of its own. */}
-            <BlockShell
-              container="rest"
-              label="Properties"
-              onOpen={openEditor('rest')}
-              shellRef={registerShell('rest')}
-            >
-              {/* rest is DERIVED — roster-ordered, its index ignored by
+              <BlockShell
+                container="rest"
+                label="Properties"
+                onOpen={openEditor('rest')}
+                shellRef={registerShell('rest')}
+              >
+                {/* rest is DERIVED — roster-ordered, its index ignored by
                   moveField — so an insertion LINE would promise a position
                   it cannot deliver; the whole area is the honest target. */}
-              <AreaDrop id="slot:rest:0">
-                {restRows.length > 0 ? (
-                  <div className="flex flex-col gap-[7px]">
-                    {restRows.map((f) => (
-                      <FieldRow key={f.name} name={f.name}>
-                        {previewRow(f)}
-                      </FieldRow>
-                    ))}
-                  </div>
-                ) : (
-                  <InertContent>
-                    <ShellEmptyHint structural={previewLayout.rest.length === 0} />
-                  </InertContent>
-                )}
-              </AreaDrop>
-            </BlockShell>
-          </div>
-          {draft.display.showBody && (
+                <AreaDrop id="slot:rest:0">
+                  {restRows.length > 0 ? (
+                    <div className="flex flex-col gap-[7px]">
+                      {restRows.map((f) => (
+                        <FieldRow key={f.name} name={f.name}>
+                          {previewRow(f)}
+                        </FieldRow>
+                      ))}
+                    </div>
+                  ) : (
+                    <InertContent>
+                      <ShellEmptyHint structural={previewLayout.rest.length === 0} />
+                    </InertContent>
+                  )}
+                </AreaDrop>
+              </BlockShell>
+            </div>
+          )}
+          {/* The body stands down on a tab that IS its own content (M45.6):
+              DocPage renders no editor under a `sections` or `view` tab, so a
+              Content block there would be the Overview leaking through — the
+              same leak the property zones above just stopped. */}
+          {draft.display.showBody && bearsProperties && (
             <BlockShell container="content" label="Content">
               {/* The body as a placeholder block: the preview stages the page's
                   SHAPE, and a real body would need a real read. */}

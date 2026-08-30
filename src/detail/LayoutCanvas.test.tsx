@@ -428,6 +428,185 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
   });
 });
 
+// M45.6 Task 4 — the canvas stands ON a tab: the group blocks are the ACTIVE
+// tab's, the + stages onto it, and a tab that holds no properties shows its
+// OWN content instead of the Overview's zones (the M45.5 recorded gap).
+describe('the canvas swaps by the active tab (M45.6 Task 4)', () => {
+  beforeEach(() => {
+    resetLayers();
+  });
+  afterEach(() => {
+    cleanup();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  // Two property-bearing tabs, and a config whose groups INTERLEAVE them —
+  // g2 sits between g1 and g3 while belonging to the other tab, so the
+  // preview index and the config index diverge. That divergence is the whole
+  // hazard: it is what makes a position-mapped `cfg` address the wrong group.
+  const TABBED = [
+    { id: 'one', name: 'One', content: 'overview' },
+    { id: 'two', name: 'Two', content: 'properties' },
+  ];
+  const INTERLEAVED = {
+    heading: [],
+    groups: [
+      { id: 'g1', name: 'Planning', fields: ['status'], tab: 'one' },
+      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+      { id: 'g3', name: 'Later', fields: ['owner', 'due'], tab: 'one' },
+    ],
+  };
+  const FILLED = makeEntry({
+    path: 'items/alpha.md',
+    title: 'Alpha record',
+    type: 'Work item',
+    properties: {
+      status: 'todo',
+      priority: 'high',
+      notes: 'keep',
+      owner: 'ada',
+      due: '2026-01-01',
+    },
+  });
+
+  function interleaved() {
+    return [
+      makeEntry({
+        path: DOC,
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            status: 'text',
+            priority: 'text',
+            notes: 'text',
+            owner: 'text',
+            due: 'text',
+          },
+          layout: INTERLEAVED,
+          tabs: TABBED,
+        } as unknown as ReturnType<typeof makeEntry>['properties'],
+      }),
+      FILLED,
+    ];
+  }
+
+  const groupBlocks = () =>
+    screen
+      .getAllByTestId('layout-block')
+      .map((b) => b.getAttribute('data-block'))
+      .filter((b) => b !== null && b.startsWith('g'));
+
+  it('shows the ACTIVE tab’s sections, and switching tabs swaps them', () => {
+    setup(interleaved());
+    // Standing on the first tab: its two sections, never the other tab's.
+    expect(groupBlocks()).toEqual(['g1', 'g3']);
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    expect(groupBlocks()).toEqual(['g2']);
+    fireEvent.click(screen.getByTestId('record-tab-one'));
+    expect(groupBlocks()).toEqual(['g1', 'g3']);
+  });
+
+  it('the group slots speak CONFIG indexes, so a filtered drag reorders the right section', () => {
+    setup(interleaved());
+    // Preview index 1 is CONFIG index 2 — a render-indexed slot would say
+    // `groupslot:1` here and moveGroup would land g3 where g2 sits.
+    expect(bySlot('groupslot:0')).toBeTruthy();
+    expect(bySlot('groupslot:2')).toBeTruthy();
+    expect(bySlot('groupslot:3')).toBeTruthy();
+    expect(bySlot('groupslot:1')).toBeNull();
+
+    // End to end over the SAME config the canvas rendered from: dragging the
+    // second visible section into the gap before the first must put it there
+    // GLOBALLY, without disturbing the tab it does not belong to.
+    const commit = vi.fn();
+    handleLayoutDragEnd(drag('group:g3', 'groupslot:0'), {
+      layout: INTERLEAVED as LayoutConfig,
+      commit,
+    });
+    expect((commit.mock.calls[0][0] as LayoutConfig).groups.map((g) => g.id)).toEqual([
+      'g3',
+      'g1',
+      'g2',
+    ]);
+  });
+
+  it('a field slot addresses its OWN group’s config, not the group at its render index', () => {
+    setup(interleaved());
+    // g3 declares two fields, so its row slots are 0 and 1 and its config-end
+    // slot is 2. Read off the group at PREVIEW index 1 — g2, one field — the
+    // rows would claim `slot:g3:-1` (indexOf on the wrong list) and the end
+    // slot would stop at 1.
+    expect(bySlot('slot:g3:0')).toBeTruthy();
+    expect(bySlot('slot:g3:1')).toBeTruthy();
+    expect(bySlot('slot:g3:2')).toBeTruthy();
+    expect(bySlot('slot:g3:-1')).toBeNull();
+  });
+
+  it('the + stages the new section ON the active tab, and Apply carries the tab', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup(interleaved());
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    await user.click(screen.getByRole('button', { name: 'Add section' }));
+    // The fresh section stands on the tab that raised it — not on the default.
+    expect(groupBlocks()).toEqual(['g2', 'group-1']);
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    fireEvent.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    expect(
+      ((patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout as LayoutConfig)
+        .groups,
+    ).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['status'], tab: 'one' },
+      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+      { id: 'g3', name: 'Later', fields: ['owner', 'due'], tab: 'one' },
+      { id: 'group-1', name: 'New group', fields: [], tab: 'two' },
+    ]);
+  });
+
+  it('a view tab shows its own content and NO property zones (the M45.5 gap, closed)', () => {
+    setup([
+      typeDoc(undefined, [
+        { id: 'o1', name: 'Overview', content: 'overview' },
+        { id: 'v1', name: 'Blocked', content: 'view', source: { type: 'Work item' } },
+      ]),
+      RECORD,
+    ]);
+    expect(groupBlocks()).toEqual(['g1']);
+    fireEvent.click(screen.getByTestId('record-tab-v1'));
+    // The tab's own content stands …
+    expect(screen.getByTestId('layout-preview-viewtab')).toBeTruthy();
+    // … and the Overview's zones do not stack underneath it.
+    const blocks = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+    expect(blocks).toEqual(['heading', 'tabs']);
+    expect(screen.queryByRole('button', { name: 'Add section' })).toBeNull();
+    expect(screen.queryByTestId('layout-preview-body')).toBeNull();
+  });
+
+  it('a sections tab shows the free-text stand-in instead of the zones', () => {
+    setup([
+      typeDoc(undefined, [
+        { id: 'o1', name: 'Overview', content: 'overview' },
+        { id: 's1', name: 'Notes', content: 'sections' },
+      ]),
+      RECORD,
+    ]);
+    fireEvent.click(screen.getByTestId('record-tab-s1'));
+    expect(screen.getByTestId('layout-preview-sectionstab').textContent).toBe(
+      'Free text, written on each record — shown on the record page',
+    );
+    const blocks = screen.getAllByTestId('layout-block').map((b) => b.getAttribute('data-block'));
+    expect(blocks).toEqual(['heading', 'tabs']);
+    // Preview, not surface — the stand-in lives inside an inert fragment.
+    expect(
+      screen
+        .getByTestId('layout-preview-sectionstab')
+        .closest('[data-testid="layout-preview-content"]'),
+    ).not.toBeNull();
+  });
+});
+
 // M45.5 Task 3 — Notion's circular + below the last block. It walks the SAME
 // staging the popover footer's "Add section" walks (two doors, one editor),
 // so the assertions are the popover suite's: the fresh shell stands, its
