@@ -14,7 +14,7 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
-import { resolveLayout, type LayoutTab } from '@/engine/layout';
+import { resolveLayout, revealableFields, type LayoutTab } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
 import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
@@ -91,18 +91,13 @@ export function RecordProperties({
   // container's folds in place.
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, folds).shown;
-  // The pooled hidden count is what THIS stack can reveal, container by
-  // container. It used to be the whole roster's, which was the same number
-  // while every section rendered on every surface; once `tab` scopes the
-  // groups it is not — a folded field inside another tab's section is not
-  // hidden here, it is elsewhere, and counting it would promise a row the
-  // expander cannot produce. Absent `tab`, heading ∪ groups ∪ rest partitions
-  // the roster exactly (claim-once at parse) and the flat case's `rest` IS
-  // the roster, so this is the old global count verbatim.
-  const hidden = splitByVisibility(
-    [...layout.heading, ...layout.groups.flatMap((g) => g.fields), ...layout.rest],
-    folds,
-  ).hidden;
+  // The pooled hidden count is what THIS stack can reveal. It used to be the
+  // whole roster's, which was the same number while every section rendered on
+  // every surface; once `tab` scopes the groups it is not — a folded field
+  // inside another tab's section is hidden THERE, and counting it here would
+  // promise a row this expander cannot produce. `revealableFields` owns the
+  // union and the invariants that make it exact (engine/layout.ts).
+  const hidden = splitByVisibility(revealableFields(layout), folds).hidden;
   // Heading fields the strip folded. The strip cannot reveal them, so on
   // reveal they surface at the TOP of the stack — the heading is the topmost
   // container — headerless. The strip's SHOWN fields stay out of the stack.

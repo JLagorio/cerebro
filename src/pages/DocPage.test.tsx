@@ -307,37 +307,26 @@ describe('DocPage', () => {
   describe('sections belong to tabs (M45.6)', () => {
     const TYPE_DOC = 'types/work-item.md';
     // The heading-strip block's idiom: strip the corpus `layout:` first, or
-    // the splice mints a duplicate key and the frontmatter parse fails
-    // whole. Both tabs bear properties, so the stack renders on each without
-    // the strip's toggle in the way — the tab filter is what is under test.
+    // the splice mints a duplicate key and the frontmatter parse fails whole.
+    // The same goes for `tabs:`, which this fixture also stages — hence the
+    // second tripwire, which the first splice would otherwise not cover.
     const CORPUS_LAYOUT =
       'layout:\n' +
       '  heading: [status, priority]\n' +
       '  groups:\n' +
       '    - { id: planning, name: Planning, fields: [assignee, due, estimate] }\n';
-    const stageTabbedSections = async () => {
+    const stage = async (frontmatter: string) => {
       const typeDoc = fs().get(TYPE_DOC);
       if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
       if (!typeDoc.includes(CORPUS_LAYOUT)) {
         throw new Error('work-item.md corpus layout drifted — update CORPUS_LAYOUT here');
       }
+      if (typeDoc.includes('\ntabs:')) {
+        throw new Error('work-item.md grew tabs — this fixture splices its own');
+      }
       fs().set(
         TYPE_DOC,
-        typeDoc
-          .replace(CORPUS_LAYOUT, '')
-          .replace(
-            '\n---\n',
-            '\ntabs:\n' +
-              '  - { id: one, name: One, content: properties }\n' +
-              '  - { id: two, name: Two, content: properties }\n' +
-              'layout:\n' +
-              '  heading: [status]\n' +
-              '  groups:\n' +
-              '    - { id: planning, name: Planning, fields: [assignee, due], tab: one }\n' +
-              '    - { id: links, name: Links, fields: [epic, blocked_by], tab: two }\n' +
-              '    - { id: extra, name: Extra, fields: [estimate] }\n' +
-              '---\n',
-          ),
+        typeDoc.replace(CORPUS_LAYOUT, '').replace('\n---\n', `\n${frontmatter}---\n`),
       );
       await useVaultStore.getState().rescan();
       const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
@@ -345,8 +334,32 @@ describe('DocPage', () => {
       return record;
     };
 
+    // Planning belongs to tab one, Links to tab two, Extra to no tab at all —
+    // the three cases one fixture has to hold. `status` heads the strip and
+    // `priority`/`window` fall to the loose remainder, both global.
+    const SECTIONS =
+      'layout:\n' +
+      '  heading: [status]\n' +
+      '  groups:\n' +
+      '    - { id: planning, name: Planning, fields: [assignee, due], tab: one }\n' +
+      '    - { id: links, name: Links, fields: [epic, blocked_by], tab: two }\n' +
+      '    - { id: extra, name: Extra, fields: [estimate] }\n';
+    // Both tabs bear properties, so the stack renders on each without the
+    // strip's toggle in the way — the tab filter is what is under test.
+    const TWO_PROPERTY_TABS =
+      'tabs:\n' +
+      '  - { id: one, name: One, content: properties }\n' +
+      '  - { id: two, name: Two, content: properties }\n';
+    const stageTabbedSections = () => stage(TWO_PROPERTY_TABS + SECTIONS);
+
+    // Everything is asserted INSIDE the stack. The doc side panel renders a
+    // second, unscoped `DocProperties` holding every group (and a "Links" tab
+    // of its own), and it is only off screen here because `docPanelTab`
+    // happens to default to 'outline' — a default this file must not depend
+    // on to tell a scoped stack from an unscoped one.
+    const props = () => within(screen.getByTestId('page-properties'));
     const groupIds = () =>
-      within(screen.getByTestId('page-properties'))
+      props()
         .queryAllByTestId('property-group')
         .map((g) => g.getAttribute('data-group'));
 
@@ -354,20 +367,24 @@ describe('DocPage', () => {
       const record = await stageTabbedSections();
       render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(groupIds()).toEqual(['planning', 'extra']);
-      // Scoped: the doc side panel wears a "Links" tab of its own.
-      expect(within(screen.getByTestId('page-properties')).queryByText('Links')).toBeNull();
+      expect(props().queryByText('Links')).toBeNull();
+      // …and the leak in the direction the group ids cannot see: under a
+      // filter-before-resolve regression these two would look unclaimed here
+      // and render loose in the headerless rest block, section and all.
+      expect(props().queryByText('Epic')).toBeNull();
+      expect(props().queryByText('Blocked by')).toBeNull();
     });
 
     it('a second tab shows only its own sections', async () => {
       const record = await stageTabbedSections();
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
       expect(groupIds()).toEqual(['links']);
-      expect(screen.queryByText('Planning')).toBeNull();
-      expect(screen.queryByText('Extra')).toBeNull();
-      // The leak `rest` would spring if the tab filter ran before the roster
-      // was counted: `assignee` is claimed by the other tab's section, so it
-      // is not loose here — one property, one tab.
-      expect(screen.queryByText('Assignee')).toBeNull();
+      expect(props().queryByText('Planning')).toBeNull();
+      expect(props().queryByText('Extra')).toBeNull();
+      // The same leak from the other side: `assignee` and `due` are claimed
+      // by the other tab's section, so they are not loose here.
+      expect(props().queryByText('Assignee')).toBeNull();
+      expect(props().queryByText('Due')).toBeNull();
     });
 
     // Two globals, by decision: the heading strip sits above the tab bar, and
@@ -376,11 +393,60 @@ describe('DocPage', () => {
       const record = await stageTabbedSections();
       const { unmount } = render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
       expect(screen.getByTestId('heading-strip')).toBeTruthy();
-      expect(screen.getByText('Priority')).toBeTruthy();
+      expect(props().getByText('Priority')).toBeTruthy();
       unmount();
       render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'two' }} />);
       expect(screen.getByTestId('heading-strip')).toBeTruthy();
-      expect(screen.getByText('Priority')).toBeTruthy();
+      expect(props().getByText('Priority')).toBeTruthy();
+    });
+
+    /**
+     * The doc side panel's Info tab passes NO tab, and these two cases are
+     * why: they stand where the page renders no property stack at all, so
+     * the panel is the last surface holding the record's sections.
+     *
+     * Sections outlive the tab they were assigned to — the tab is deleted, or
+     * re-kinded to one that renders no stack — and the properties inside them
+     * are still the user's data.
+     */
+    describe('the side panel is the surface of last resort', () => {
+      const panelGroupIds = () =>
+        within(screen.getByTestId('doc-properties'))
+          .queryAllByTestId('property-group')
+          .map((g) => g.getAttribute('data-group'));
+
+      it('a type with no property-bearing tab left shows its sections in the panel', async () => {
+        // Every tab is its own content now, so DocPage skips the stack on
+        // each of them and `page-properties` exists nowhere.
+        const record = await stage(
+          'tabs:\n' +
+            '  - { id: spec, name: Spec, content: sections }\n' +
+            '  - { id: items, name: Items, content: view, source: { type: Work item } }\n' +
+            SECTIONS,
+        );
+        render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+        expect(screen.queryByTestId('page-properties')).toBeNull();
+        fireEvent.click(screen.getByTestId('doc-panel-tab-info'));
+        expect(panelGroupIds()).toEqual(['planning', 'links', 'extra']);
+      });
+
+      // The discriminating one: this type HAS a property-bearing tab, so a
+      // scope threaded into the panel would resolve `spec` as a non-default
+      // tab and hide all three sections — every one of them, with the page
+      // showing none either. Passing no tab is what keeps them readable.
+      it('and so does a sections tab on a type that has one', async () => {
+        const record = await stage(
+          'tabs:\n' +
+            '  - { id: one, name: One, content: properties }\n' +
+            '  - { id: spec, name: Spec, content: sections }\n' +
+            SECTIONS,
+        );
+        render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
+        expect(screen.getByTestId('tab-sections')).toBeTruthy();
+        expect(screen.queryByTestId('page-properties')).toBeNull();
+        fireEvent.click(screen.getByTestId('doc-panel-tab-info'));
+        expect(panelGroupIds()).toEqual(['planning', 'links', 'extra']);
+      });
     });
   });
 

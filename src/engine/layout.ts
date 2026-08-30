@@ -131,3 +131,34 @@ export function resolveLayout(
   const flat = heading.length === 0 && resolved.every((g) => g.fields.length === 0);
   return { heading, groups, rest, flat };
 }
+
+/**
+ * Every field this resolution puts in front of a reader — the union of its
+ * containers, in render order (M45.6).
+ *
+ * It lives here, beside the invariant it depends on, because it is a
+ * derivation of `ResolvedLayout` rather than of any one stack: the property
+ * surfaces use it for the pooled hidden count, which promises rows the
+ * expander must be able to produce. Two hand-rolled unions in two components
+ * would both have to be found and edited the day a FIFTH container joins
+ * heading/groups/rest — and the one that was missed would go on quietly
+ * miscounting.
+ *
+ * Two facts make it exact rather than approximate:
+ *
+ * - Nothing is double-counted. Parse guarantees a field name appears at most
+ *   once across `heading` and all `groups`, and `rest` is the complement of
+ *   what those claimed.
+ * - Nothing is missed. With no tab the containers PARTITION the roster —
+ *   `rest` is exactly the fields no container claimed — so this returns the
+ *   same members as the declared `fields` list, which is what makes the
+ *   absent-tab path identical to the pre-M45.6 count. Scoped to a tab it
+ *   shrinks by exactly the sections another tab holds, which is the point:
+ *   those folds are hidden ELSEWHERE, not here.
+ *
+ * `flat` needs no special case. A flat resolution claimed nothing, so `rest`
+ * IS the whole roster and the union comes out the same either way.
+ */
+export function revealableFields(layout: ResolvedLayout): FieldDef[] {
+  return [...layout.heading, ...layout.groups.flatMap((g) => g.fields), ...layout.rest];
+}

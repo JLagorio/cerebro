@@ -19,7 +19,7 @@ import {
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
-import { resolveLayout, type LayoutTab } from '@/engine/layout';
+import { resolveLayout, revealableFields, type LayoutTab } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import { LAYOUT_DEFAULTS } from '@/engine/types';
@@ -101,8 +101,10 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
  * `tab` is RecordProperties' seam (M45.6) on this stack, so the two cannot
  * disagree about which sections a tab holds. Its shipped host passes none on
  * purpose: the side panel stands BESIDE the page rather than on one of its
- * tabs, and it is where every property stays reachable while a `sections` or
- * `view` tab is open — a tab that renders no stack at all.
+ * tabs, and it is where the record's SECTIONS AND REMAINDER stay reachable
+ * while a `sections` or `view` tab is open — a tab that renders no stack at
+ * all. The page's own strip carries the HEADING on every tab; this panel
+ * does not — see `headingFolds` below for the exclusion and its cost.
  */
 export function DocProperties({
   entry,
@@ -141,15 +143,10 @@ export function DocProperties({
   const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared, tab);
   const containerRows = (fields: FieldDef[]) =>
     revealed ? fields : splitByVisibility(fields, folds).shown;
-  // The one expander counts what THIS stack can reveal, container by
-  // container — the record panel's rule and its reason: with `tab` scoping
-  // the groups, the roster's total would count folds that live on another
-  // tab and promise rows nothing here can produce. Absent `tab` the
-  // containers partition the roster exactly, so the number is unchanged.
-  const hidden = splitByVisibility(
-    [...layout.heading, ...layout.groups.flatMap((g) => g.fields), ...layout.rest],
-    folds,
-  ).hidden;
+  // The one expander counts what THIS stack can reveal — the record panel's
+  // rule, through the record panel's helper, so one derivation answers for
+  // both stacks.
+  const hidden = splitByVisibility(revealableFields(layout), folds).hidden;
   // The strip cannot reveal its own folds; revealed, they surface headerless
   // at the top of the stack. Its SHOWN fields stay out of the stack — an
   // exclusion that is only sound because the host page (DocPage) co-mounts

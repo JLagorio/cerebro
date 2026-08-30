@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLayout } from './layout';
+import { resolveLayout, revealableFields } from './layout';
 import type { LayoutTab } from './layout';
 import { layoutTabScope } from './typeCatalog';
 import { LAYOUT_DEFAULTS } from './types';
@@ -280,5 +280,35 @@ describe('resolveLayout tab filter (M45.6)', () => {
     expect(
       resolveLayout(orphan, fields, layoutTabScope(tabs, 'plan')).groups.map((g) => g.id),
     ).toEqual(['g-plan']);
+  });
+
+  // `revealableFields` is the union of a resolution's containers, and the
+  // property stacks count the folds inside it to size their one expander —
+  // an expander that promises rows it must be able to produce. The claim
+  // that makes the absent-tab count identical to the pre-M45.6 one is pinned
+  // HERE, on the derivation, instead of being inferred from two component
+  // surfaces.
+  it('reveals the whole roster when no tab scopes the resolve', () => {
+    // Same MEMBERS as the declared list: the containers partition it, so a
+    // count taken over this is the count taken over `fields`.
+    const byName = (defs: FieldDef[]) => defs.map((d) => d.name).sort();
+    expect(byName(revealableFields(resolveLayout(tabbed, fields)))).toEqual(byName(fields));
+    // And the flat case needs no special arm — a resolution that claimed
+    // nothing puts the whole roster in `rest`.
+    expect(revealableFields(resolveLayout({ heading: ['ghost'], groups: [] }, fields))).toEqual(
+      fields,
+    );
+  });
+
+  it('reveals less by exactly the sections another tab holds', () => {
+    // The heading and the loose remainder are global, so the spec tab
+    // reveals `status` and `budget` alongside its own `due`. `team` is the
+    // plan tab's, and it is revealed THERE — never counted here, where
+    // nothing could produce the row.
+    expect(revealableFields(resolveLayout(tabbed, fields, on('spec', true)))).toEqual([
+      f('status'),
+      f('due'),
+      f('budget'),
+    ]);
   });
 });
