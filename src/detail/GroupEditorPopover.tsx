@@ -9,10 +9,11 @@ import { Popover } from '@/components/ui/Popover';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { draftRoster, overlayVisibility, stageNewSection } from '@/detail/LayoutCanvas';
 import { VISIBILITIES } from '@/detail/PropertyMenu';
-import { moveField, removeGroup, renameGroup } from '@/engine/layoutEdit';
+import { moveField, removeGroup, renameGroup, setGroupTab } from '@/engine/layoutEdit';
 import { resolveLayout } from '@/engine/layout';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
+import { layoutTabScope, tabBearsProperties } from '@/engine/typeCatalog';
 import type { FieldDef, FieldKind, TypeDef } from '@/engine/types';
 import { useSortableList } from '@/hooks/useSortableList';
 
@@ -33,6 +34,7 @@ export function GroupEditorPopover({
   container,
   typeDef,
   draft,
+  activeTab,
   update,
   anchorRef,
   onClose,
@@ -42,6 +44,10 @@ export function GroupEditorPopover({
   container: string;
   typeDef: TypeDef;
   draft: TypeLayoutDraft;
+  /** The tab the canvas is standing on (M45.6), or null for simple
+   * structure. The footer's "Add section" stages onto it, so the two doors
+   * onto one editor cannot mean different things. */
+  activeTab: string | null;
   /** The draft's one door (LayoutEditorDialog's `update`). */
   update: (patch: Partial<TypeLayoutDraft>) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
@@ -52,7 +58,7 @@ export function GroupEditorPopover({
   const [query, setQuery] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [step, setStep] = useState<'main' | 'add' | 'create'>('main');
+  const [step, setStep] = useState<'main' | 'add' | 'create' | 'tab'>('main');
   /** The staging guard's inline refusal — a form refuses in place, never by
    * toast (the store-layer toast contract is for vault writes; nothing here
    * writes). */
@@ -181,6 +187,36 @@ export function GroupEditorPopover({
     onClose();
   };
 
+  /** The tabs a section can be moved ONTO (M45.6). `sections` and `view` tabs
+   * ARE their content and render no property stack — a section moved onto one
+   * would be invisible — so they are not offered, and the drill-in says so
+   * rather than leaving the absence to be inferred. The refusal is not a
+   * guarantee, and cannot be: a tab's content kind changes AFTER the
+   * assignment, which is why the engine falls a stranded section back onto
+   * the default tab instead of trusting this door. */
+  const tabTargets = draft.tabs.filter(tabBearsProperties);
+
+  /** Does this section show on that tab? Asked of `resolveLayout` itself
+   * rather than re-derived from `group.tab`: untabbed means the default tab,
+   * and a section whose tab stopped bearing properties falls back onto the
+   * default one too. Both answers are the engine's, and a second copy here
+   * would be free to drift from the first. */
+  const showsOnTab = (tabId: string) =>
+    isGroup &&
+    resolveLayout(draft.layout, overlaid, layoutTabScope(draft.tabs, tabId)).groups.some(
+      (g) => g.id === container,
+    );
+
+  const moveToTab = (tabId: string) => {
+    // Picking the tab it already shows on stages nothing: setGroupTab would
+    // still WRITE the id onto an untabbed group, dirtying the draft — and
+    // asking to discard — over a move that moves nothing.
+    if (!showsOnTab(tabId)) update({ layout: setGroupTab(draft.layout, container, tabId) });
+    // Either way this editor goes: it is anchored to a shell on the tab the
+    // canvas stands on, and the section may have just left it.
+    onClose();
+  };
+
   // Where a landed field goes: after the container's last CONFIG slot. Rest
   // ignores the index (it orders by roster declaration).
   const appendIndex = isGroup ? group.fields.length : draft.layout.heading.length;
@@ -257,7 +293,7 @@ export function GroupEditorPopover({
   // The staging lives with the canvas's + button (M45.5 Task 3): two doors,
   // one editor. `onOpenGroup` is the hand-off addGroup reports its id for —
   // the canvas remounts us keyed by the new container.
-  const addSection = () => stageNewSection(draft, update, onOpenGroup);
+  const addSection = () => stageNewSection(draft, update, onOpenGroup, activeTab);
 
   const eyeRow = (f: FieldDef, i: number) => {
     const label = humanize(f.name);
@@ -402,6 +438,19 @@ export function GroupEditorPopover({
             onSelect={addSection}
           />
         )}
+        {isGroup && draft.tabs.length > 0 && (
+          // Groups only, and only when there are tabs to move BETWEEN: the
+          // heading is global by decision (it renders above the strip) and
+          // rest is the roster's derived remainder — neither is a section, so
+          // neither belongs to a tab.
+          <MenuItem
+            icon="panel-top"
+            label="Move to tab…"
+            submenu
+            testId="group-editor-move-tab"
+            onSelect={() => setStep('tab')}
+          />
+        )}
         {isGroup && (
           <MenuItem
             icon="trash-2"
@@ -454,6 +503,31 @@ export function GroupEditorPopover({
     </MenuSurface>
   );
 
+  const tabStep = (
+    <MenuSurface width={264} autoFocus={false}>
+      <div data-testid="group-editor-tab-list" className="flex min-w-0 flex-col">
+        <MenuBack title="Move to tab" onBack={() => setStep('main')} />
+        {tabTargets.map((t) => (
+          <MenuItem
+            key={t.id}
+            icon={t.icon ?? 'panel-top'}
+            label={t.name}
+            checked={showsOnTab(t.id)}
+            testId={`group-editor-tab-${t.id}`}
+            onSelect={() => moveToTab(t.id)}
+          />
+        ))}
+        {tabTargets.length < draft.tabs.length && (
+          // The reason, in place. A tab missing from a list of tabs is an
+          // absence the user has to explain to themselves otherwise.
+          <div className="px-2 py-1.5 text-xs text-n-400">
+            Tabs that hold their own content — free text or a view — can’t hold sections.
+          </div>
+        )}
+      </div>
+    </MenuSurface>
+  );
+
   const createStep = (
     // The panel's INLINE variant on purpose (the view-settings precedent): a
     // page inside a popover that already exists — an anchored second surface
@@ -495,7 +569,13 @@ export function GroupEditorPopover({
       {/* autoFocus off on every surface (PropertyMenu's drill-in idiom): the
           Popover's trap already hands focus to the first control once placed,
           and a drill-in must not steal focus mid-flow. */}
-      {step === 'main' ? mainStep : step === 'add' ? addStep : createStep}
+      {step === 'main'
+        ? mainStep
+        : step === 'add'
+          ? addStep
+          : step === 'tab'
+            ? tabStep
+            : createStep}
       {menuFor !== null && menuDef !== null && (
         <Popover
           anchorRef={menuAnchorRef}

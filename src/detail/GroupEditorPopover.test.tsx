@@ -750,3 +750,139 @@ describe('panel rows reorder within their container (M45.5 Task 4)', () => {
     expect(editor().queryAllByTestId('group-editor-grip')).toHaveLength(0);
   });
 });
+
+// M45.6 Task 4 — "Move to tab…": a section belongs to a tab, and this is the
+// door that says which. Only the PROPERTY-BEARING tabs are offered; a
+// `sections` or `view` tab IS its content and renders no stack, so a section
+// moved onto one would be invisible.
+describe('Move to tab (M45.6 Task 4)', () => {
+  const TABS = [
+    { id: 'one', name: 'One', icon: null, content: 'overview' },
+    { id: 'two', name: 'Two', icon: null, content: 'properties' },
+    { id: 's1', name: 'Notes', icon: null, content: 'sections' },
+  ];
+
+  function tabbedDoc(tabs: unknown[] = TABS) {
+    return makeEntry({
+      path: DOC,
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: 'text', priority: 'text', notes: 'text' },
+        display: { show_file: true },
+        layout: {
+          heading: ['status'],
+          groups: [
+            { id: 'g1', name: 'Planning', fields: ['priority'] },
+            { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+          ],
+        },
+        tabs,
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+  }
+
+  const checked = (testId: string) =>
+    screen.getByTestId(testId).querySelector('[data-icon="check"]') !== null;
+
+  it('offers the property-bearing tabs only, names why, and marks where the section shows', async () => {
+    const user = userEvent.setup();
+    setup([tabbedDoc(), RECORD]);
+    await user.click(shellOf('g1'));
+    await user.click(screen.getByTestId('group-editor-move-tab'));
+    // Both property-bearing tabs, and NOT the sections tab.
+    expect(screen.getByTestId('group-editor-tab-one')).toBeTruthy();
+    expect(screen.getByTestId('group-editor-tab-two')).toBeTruthy();
+    expect(screen.queryByTestId('group-editor-tab-s1')).toBeNull();
+    // The refusal is named in place, not left to be inferred from an absence.
+    expect(screen.getByTestId('group-editor-tab-list').textContent).toContain(
+      'Tabs that hold their own content — free text or a view — can’t hold sections.',
+    );
+    // g1 is UNTABBED, which means the default tab: the check says so.
+    expect(checked('group-editor-tab-one')).toBe(true);
+    expect(checked('group-editor-tab-two')).toBe(false);
+  });
+
+  it('picking a tab restages the section and Apply carries the new tab', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    await user.click(shellOf('g1'));
+    await user.click(screen.getByTestId('group-editor-move-tab'));
+    await user.click(screen.getByTestId('group-editor-tab-two'));
+
+    // The section left the tab the canvas stands on, so its shell — and the
+    // editor anchored to it — go with it.
+    expect(screen.queryByTestId('group-editor')).toBeNull();
+    expect(
+      screen
+        .getAllByTestId('layout-block')
+        .map((b) => b.getAttribute('data-block'))
+        .filter((b) => b !== null && b.startsWith('g')),
+    ).toEqual([]);
+
+    const payload = await apply(patchFrontmatter);
+    expect((payload.layout as { groups: unknown[] }).groups).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['priority'], tab: 'two' },
+      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+    ]);
+  });
+
+  it('marks the tab a tabbed section already wears, and re-picking it stages nothing', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    // g2 lives on the second tab — stand there to reach its shell.
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    await user.click(shellOf('g2'));
+    await user.click(screen.getByTestId('group-editor-move-tab'));
+    expect(checked('group-editor-tab-two')).toBe(true);
+    expect(checked('group-editor-tab-one')).toBe(false);
+
+    // Picking the tab it already shows on is a no-op: the draft stays clean,
+    // so Apply sends the fixture's bytes back unchanged.
+    await user.click(screen.getByTestId('group-editor-tab-two'));
+    const payload = await apply(patchFrontmatter);
+    expect((payload.layout as { groups: unknown[] }).groups).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['priority'] },
+      { id: 'g2', name: 'Details', fields: ['notes'], tab: 'two' },
+    ]);
+  });
+
+  it('a tabless type offers no move — and heading and rest never do', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(shellOf('g1'));
+    // Simple structure: there is no tab to move to.
+    expect(screen.queryByTestId('group-editor-move-tab')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    cleanup();
+    resetLayers();
+    setup([tabbedDoc(), RECORD]);
+    // The heading is global by decision, and rest is derived — neither is a
+    // section, so neither belongs to a tab.
+    await user.click(shellOf('heading'));
+    expect(screen.queryByTestId('group-editor-move-tab')).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await user.click(shellOf('rest'));
+    expect(screen.queryByTestId('group-editor-move-tab')).toBeNull();
+  });
+
+  it('the editor’s own Add section lands on the active tab, like the canvas + does', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup([tabbedDoc(), RECORD]);
+    fireEvent.click(screen.getByTestId('record-tab-two'));
+    await user.click(shellOf('rest'));
+    await user.click(screen.getByTestId('group-editor-add-section'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    const payload = await apply(patchFrontmatter);
+    // Two doors, one editor: the footer entry cannot stage a different tab
+    // from the + button standing on the same canvas.
+    expect((payload.layout as { groups: Record<string, unknown>[] }).groups[2]).toEqual({
+      id: 'group-1',
+      name: 'New group',
+      fields: [],
+      tab: 'two',
+    });
+  });
+});

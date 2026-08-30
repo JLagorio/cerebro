@@ -560,6 +560,7 @@ export function LayoutCanvas({
             container={editing}
             typeDef={typeDef}
             draft={draft}
+            activeTab={activeTab?.id ?? null}
             update={update}
             anchorRef={anchorRef}
             onClose={() => setEditing(null)}
