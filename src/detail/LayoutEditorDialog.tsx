@@ -23,6 +23,14 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  * (they are the editor's drop targets). Dead pointers thus vanish from the
  * draft at seed and from the vault on the next Apply — spec §4's pointer
  * hygiene without a special pass.
+ *
+ * The resolve is deliberately TAB-BLIND (no `LayoutTab` argument): the seed
+ * must carry EVERY group, not the active tab's, or opening the editor would
+ * delete every section of every other tab on the next Apply. What each group
+ * carries THROUGH the rebuild is its `tab` (M45.6) — the rebuild is what Apply
+ * serializes, so a key dropped here is a key erased from the vault by an Apply
+ * that changed nothing. Absent stays ABSENT rather than becoming `undefined`:
+ * the deviations-only serializer must not learn a `tab:` key from a rebuild.
  */
 export function seedDraft(typeDef: TypeDef): TypeLayoutDraft {
   const resolved = resolveLayout(typeDef.layout, typeDef.fields);
@@ -30,11 +38,10 @@ export function seedDraft(typeDef: TypeDef): TypeLayoutDraft {
     display: { ...typeDef.display },
     layout: {
       heading: resolved.heading.map((d) => d.name),
-      groups: resolved.groups.map((g) => ({
-        id: g.id,
-        name: g.name,
-        fields: g.fields.map((d) => d.name),
-      })),
+      groups: resolved.groups.map((g) => {
+        const base = { id: g.id, name: g.name, fields: g.fields.map((d) => d.name) };
+        return g.tab === undefined ? base : { ...base, tab: g.tab };
+      }),
     },
     tabs: typeDef.tabs.map((t) => ({ ...t })),
     visibility: {},

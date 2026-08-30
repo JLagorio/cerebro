@@ -122,6 +122,33 @@ describe('seedDraft', () => {
       ],
     });
   });
+
+  it('carries each section’s tab through the rebuild, and leaves the key ABSENT when untabbed', () => {
+    // The rebuild is what Apply serializes, so a tab the seed drops is a tab
+    // the vault LOSES on an Apply that changed nothing else (M45.6 Task 4).
+    const draft = seedDraft(
+      def({
+        layout: {
+          heading: [],
+          groups: [
+            { id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' },
+            { id: 'g2', name: 'Loose', fields: ['status'] },
+          ],
+        },
+        tabs: [
+          { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+          { id: 'plan', name: 'Plan', icon: null, content: 'properties' },
+        ],
+      }),
+    );
+    expect(draft.layout.groups).toEqual([
+      { id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' },
+      { id: 'g2', name: 'Loose', fields: ['status'] },
+    ]);
+    // ABSENT, not `undefined`: `toEqual` cannot tell those apart, and the
+    // deviations-only serializer must never learn a `tab:` key from a rebuild.
+    expect('tab' in draft.layout.groups[1]).toBe(false);
+  });
 });
 
 describe('draftDirty', () => {
@@ -339,6 +366,36 @@ describe('LayoutEditorDialog', () => {
     await waitFor(() => expect(useUiStore.getState().layoutEditor).toBeNull());
     expect(patchFrontmatter).toHaveBeenCalledTimes(1);
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, FIXTURE_PATCH);
+  });
+
+  it('an Apply that changed nothing keeps the vault’s tab assignments (M45.6)', async () => {
+    const user = userEvent.setup();
+    const tabbedDoc = makeEntry({
+      path: DOC,
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: 'text', priority: 'text', notes: 'text' },
+        display: { show_file: true },
+        layout: {
+          heading: ['status'],
+          groups: [{ id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' }],
+        },
+        tabs: [
+          { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+          { id: 'plan', name: 'Plan', icon: null, content: 'properties' },
+        ],
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+    const { patchFrontmatter } = setup({ entries: [tabbedDoc] });
+    await user.click(screen.getByTestId('layout-apply'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    // Open, Apply, changed nothing — the bytes must come back unchanged. A
+    // seed that rebuilds groups as {id,name,fields} silently ERASES `tab:`.
+    expect((patchFrontmatter.mock.calls[0][1] as Record<string, unknown>).layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'g1', name: 'Planning', fields: ['priority'], tab: 'plan' }],
+    });
   });
 
   it('a failed Apply keeps the editor open with the EDITED draft intact', async () => {
