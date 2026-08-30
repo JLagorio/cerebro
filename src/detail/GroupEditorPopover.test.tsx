@@ -806,7 +806,11 @@ describe('the group editor’s Add section, on a tabbed type (M46.1)', () => {
       { id: 'group-1', name: 'New group', fields: [] },
     ]);
     // `toEqual` fails on a surplus key, but absent and undefined read alike
-    // through it — so the no-tab claim is made in its own words too.
+    // through it — so the no-tab claim is made in its own words too. It
+    // pins the WRITE CONTRACT, not a draft guard: serializeLayoutConfig
+    // rebuilds every group as {id,name,fields}, so a stray draft `tab`
+    // could never reach the payload. The behavioural guard against
+    // re-scoping lives in LayoutCanvas.test.tsx.
     for (const g of stagedGroups(patch)) expect('tab' in g).toBe(false);
   });
 

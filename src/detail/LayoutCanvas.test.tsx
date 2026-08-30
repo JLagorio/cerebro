@@ -582,6 +582,10 @@ describe('properties stand above the tabs, on every tab (M46.1)', () => {
       { id: 'g3', name: 'Later', fields: ['owner', 'due'] },
       { id: 'group-1', name: 'New group', fields: [] },
     ]);
+    // Pins the WRITE CONTRACT, not a draft guard: serializeLayoutConfig
+    // rebuilds every group as {id,name,fields}, so a stray draft `tab`
+    // could never reach the payload anyway. The behavioural guard against
+    // re-scoping is this file's every-section-on-every-tab describe.
     for (const g of groups) expect('tab' in g).toBe(false);
   });
 
