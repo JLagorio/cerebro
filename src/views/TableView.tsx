@@ -11,6 +11,7 @@ import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { useDragGesture } from '@/hooks/useDragGesture';
 import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
@@ -2543,6 +2544,18 @@ export function TableView({
   const suppressClick = useRef(false);
   const [drag, setDrag] = useState<{ key: string; slot: number } | null>(null);
 
+  /**
+   * The drag's claim on Escape, and the teardown an unmount runs (M46.2).
+   *
+   * Measured before this existed: `Escape` cancelled nothing, the loop kept
+   * tracking the pointer and the RELEASE COMMITTED the reorder — the opposite
+   * of what the user asked for, and the app has no undo. Two leaks came with
+   * it, both closed by the same teardown: a table unmounted mid-drag stranded
+   * its window listeners, and left `cb-col-dragging` on `<body>`, which is
+   * `cursor: grabbing !important` on every element in the app, permanently.
+   */
+  const gesture = useDragGesture();
+
   const startHeaderDrag = useCallback(
     (key: string) => (e: React.PointerEvent) => {
       if (onPresentationChange === undefined || e.button !== 0) return;
@@ -2562,6 +2575,7 @@ export function TableView({
       const startY = e.clientY;
       const slotAt = (x: number) => mids.filter((m) => x > m).length;
       let started = false;
+      let cancelled = false;
       const move = (ev: PointerEvent) => {
         // 5px threshold keeps a plain click on the label opening the menu.
         if (!started && Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) {
@@ -2574,14 +2588,28 @@ export function TableView({
         }
         setDrag({ key, slot: slotAt(ev.clientX) });
       };
-      const up = (ev: PointerEvent) => {
+      /**
+       * Everything the drag paints and tracks, minus the release listener.
+       * Escape stops here: the pointer is still down, and its release still
+       * fires a `click` on the header label — which is also the column menu's
+       * trigger — so `up` has to outlive the cancel or one keystroke would
+       * abandon the drag and open a menu.
+       */
+      const stop = () => {
         window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
         document.body.classList.remove('cb-col-dragging');
         setDrag(null);
+      };
+      const teardown = () => {
+        stop();
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      const up = (ev: PointerEvent) => {
+        const commit = started && !cancelled;
+        gesture.end();
         if (!started) return;
-        reorderDisplay(key, slotAt(ev.clientX));
+        if (commit) reorderDisplay(key, slotAt(ev.clientX));
         // Cleared on a timeout so the click event this pointerup produces is
         // still inside the suppression window.
         setTimeout(() => {
@@ -2591,8 +2619,15 @@ export function TableView({
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', up);
+      // Nothing else moved on screen during the drag — the insertion line is
+      // the whole of its visible state — so stripping that state IS the
+      // restore, and the release simply finds nothing to commit.
+      gesture.begin(teardown, () => {
+        cancelled = true;
+        stop();
+      });
     },
-    [onPresentationChange, reorderDisplay],
+    [gesture, onPresentationChange, reorderDisplay],
   );
 
   const swallowDraggedClick = (e: React.MouseEvent) => {
