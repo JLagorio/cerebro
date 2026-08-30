@@ -674,7 +674,14 @@ function InertContent({ children }: { children: ReactNode }) {
  * the `row` default's 6px doubles as a group's row gap, while `block` slots
  * between bordered shells stand 12px — a shell's label chip overhangs its
  * border by 8px (M45.5), and the slot's height is what keeps that chip off
- * the block above. Hover paint is identical for both. */
+ * the block above. Hover paint is identical for both.
+ *
+ * The paint is an `opacity` on a slot that is always the accent colour, not a
+ * background swapped in and out, so `motion-move` can cross-fade it: the
+ * outgoing slot fades over the same 200ms the incoming one arrives in, which
+ * is the reference's §D7. That only reads as a cross-fade because the targets
+ * now MEET — over a dead band it would have been a fade to nothing and back.
+ */
 function DropSlot({ id, size = 'row' }: { id: string; size?: 'row' | 'block' }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
@@ -684,8 +691,8 @@ function DropSlot({ id, size = 'row' }: { id: string; size?: 'row' | 'block' }) 
       data-slot={id}
       className={[
         size === 'block' ? 'h-3' : 'h-1.5',
-        'w-full flex-none rounded',
-        isOver ? 'bg-cortex-500' : 'bg-transparent',
+        'motion-move w-full flex-none rounded bg-cortex-500',
+        isOver ? 'opacity-100' : 'opacity-0',
       ].join(' ')}
     />
   );
@@ -694,7 +701,8 @@ function DropSlot({ id, size = 'row' }: { id: string; size?: 'row' | 'block' }) 
 /** A whole-container drop target for the containers where an insertion line
  * would lie — heading (appends at config end) and rest (index ignored). It
  * wears the cortex ring while a drag hovers, the drag-hover grammar the
- * shells already speak. */
+ * shells already speak. The ring arrives on `motion-move` — a ring is a thing
+ * appearing, and it hands off to and from the slot bars in the same 200ms. */
 function AreaDrop({ id, children }: { id: string; children: ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
@@ -702,18 +710,24 @@ function AreaDrop({ id, children }: { id: string; children: ReactNode }) {
       ref={setNodeRef}
       data-testid="layout-droparea"
       data-slot={id}
-      className={['rounded-md', isOver ? 'ring-1 ring-cortex-500' : ''].join(' ')}
+      className={['motion-move rounded-md', isOver ? 'ring-1 ring-cortex-500' : ''].join(' ')}
     >
       {children}
     </div>
   );
 }
 
-/** One draggable field row: a gutter grip (the draggable NODE — its small
- * rect tracks the pointer into the thin slots, and the inert row keeps its
- * geometry; DashboardView's grip pattern) beside the row's inert preview.
- * The grip stops click propagation so a press that never became a drag does
- * not double as the shell's click-to-edit. */
+/** One draggable field row: a gutter grip (the draggable NODE, kept small so
+ * it stays out of the row's own geometry while the row itself is inert;
+ * DashboardView's grip pattern) beside the row's inert preview. The grip stops
+ * click propagation so a press that never became a drag does not double as the
+ * shell's click-to-edit.
+ *
+ * The grip's REVEAL is `motion-move`, the same 200ms fade the reference
+ * measured on Notion's gutter cluster (§B7). The dim on the source row is
+ * deliberately NOT transitioned: it is inline, it belongs to the drag's own
+ * hot path, and a source that faded out over 200ms would still be at full
+ * strength for the first frames of the gesture that moved it. */
 function FieldRow({ name, children }: { name: string; children: ReactNode }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${name}` });
   return (
@@ -725,7 +739,7 @@ function FieldRow({ name, children }: { name: string; children: ReactNode }) {
         {...listeners}
         aria-label={`Drag ${humanize(name)}`}
         onClick={(e) => e.stopPropagation()}
-        className="absolute -left-5 top-0.5 z-10 flex h-6 w-4 cursor-grab touch-none items-center justify-center rounded text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100"
+        className="motion-move absolute -left-5 top-0.5 z-10 flex h-6 w-4 cursor-grab touch-none items-center justify-center rounded text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100"
       >
         <Icon name="grip-vertical" size={12} />
       </span>

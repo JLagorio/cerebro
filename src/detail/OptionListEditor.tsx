@@ -46,6 +46,11 @@ function ColorPicker({
               aria-label={`Use color ${name}`}
               aria-pressed={picked}
               onClick={() => onPick(name === 'default' ? null : name)}
+              // No motion token (M46.2 Task 3). The swatch IS the value being
+              // chosen, and the outline is the answer to "which one is
+              // selected" — a colour the user is actively editing must read
+              // true the instant they click it, not one frame's worth of
+              // interpolation later.
               className="h-4 w-4 rounded-full border-0 p-0"
               style={{
                 background: sw.solid,

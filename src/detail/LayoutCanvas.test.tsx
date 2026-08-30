@@ -511,6 +511,35 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
     expect(labels[0].closest('[data-testid="layout-preview-content"]')).toBeNull();
   });
 
+  it('the drop indicator cross-fades instead of snapping on and off', () => {
+    // M46.2 Task 3. Always the accent colour, revealed by OPACITY, so the
+    // outgoing slot fades over the same 200ms the incoming one arrives in
+    // (reference §D7). It only reads as a cross-fade because the targets now
+    // meet — over a dead band it would be a fade to nothing and back.
+    setup();
+    const slot = bySlot('slot:g1:0');
+    expect(slot?.className).toContain('motion-move');
+    expect(slot?.className).toContain('bg-cortex-500');
+    expect(slot?.className).toContain('opacity-0');
+    // The drag-hover ring on the whole-container targets hands off in the
+    // same 200ms, so travel between the two grammars is one movement.
+    const area = screen
+      .getAllByTestId('layout-droparea')
+      .find((a) => a.getAttribute('data-slot')?.startsWith('slot:heading:'));
+    expect(area?.className).toContain('motion-move');
+  });
+
+  it('the gutter grip fades in — but the dragged row is never given a transition', () => {
+    setup();
+    const grip = screen.getAllByTestId('layout-grip')[0];
+    expect(grip.className).toContain('motion-move');
+    // The row's own dim is inline and in the drag's hot path: a source that
+    // faded over 200ms would still look undragged for the first frames of the
+    // gesture that moved it.
+    const row = grip.parentElement;
+    expect(row?.className).not.toContain('motion-move');
+  });
+
   it('block slots stand taller than row slots — the chip overhang needs the headroom', () => {
     setup();
     // Between bordered shells only 6px would leave the -top-2 chip (8px
@@ -870,12 +899,16 @@ describe('a live canvas drag owns Escape (M46.2)', () => {
     expect(screen.queryByTestId('layout-editor')).not.toBeNull();
   });
 
-  it('hands Escape back the moment the drag is cancelled', async () => {
+  it('hands Escape back once the cancel has settled', async () => {
     setup();
     const grip = await pickUp();
     escape(grip);
-    // The next press is the dialog's again — a claim that outlived its
-    // gesture would leave the editor with no way out but the mouse.
+    // The claim outlives the keystroke that ended the drag, and not a moment
+    // longer (M46.2 Task 1b review): dnd-kit cancels from `document` bubble,
+    // so a layer released there is gone before the `window`-bubble surfaces
+    // have been asked. One task later it is the dialog's key again — a claim
+    // that outlived THAT would leave the editor no way out but the mouse.
+    await new Promise((r) => setTimeout(r, 0));
     escape(grip);
     expect(screen.queryByTestId('layout-editor')).toBeNull();
   });

@@ -43,4 +43,46 @@
   --ease-out: cubic-bezier(0.2, 0.6, 0.2, 1); /* @kind other */
   --dur-fast: 120ms; /* @kind other */
   --dur-med: 180ms; /* @kind other */
+
+  /* Motion by KIND, not by number (M46.2 Task 3).
+   *
+   * The baseline found every `transition` on every surface computing to
+   * `all` — the CSS initial value, i.e. none declared — while Notion declares
+   * exactly two timings, measured in
+   * docs/superpowers/specs/2026-08-29-notion-drag-and-row-reference.md:
+   *
+   * - HOVER, 20ms ease-in. Not a fade — at 20ms nothing is perceptibly
+   *   animating. It is an anti-flicker guard: a wash that is DECLARED does
+   *   not strobe when the pointer crosses a list of rows at speed, and one
+   *   long enough to see would lag the pointer instead. Rounding it up is
+   *   the one way to get this wrong.
+   * - MOVEMENT, 200ms. Anything that slides, appears or resizes. This is
+   *   what makes a reflow read as motion rather than as teleportation.
+   *
+   * A call site names the kind and never the number: `var(--motion-hover)`
+   * and `var(--motion-move)` are whole `<duration> <easing>` pairs, so
+   * `transition: background-color var(--motion-hover)` is the whole
+   * declaration. The `motion-hover` / `motion-move` utilities in
+   * styles/motion.css are the same two pairs for Tailwind call sites. */
+  --dur-hover: 20ms; /* @kind other */
+  --dur-move: 200ms; /* @kind other */
+  --ease-hover: ease-in; /* @kind other */
+  --ease-move: ease; /* @kind other */
+  --motion-hover: var(--dur-hover) var(--ease-hover); /* @kind other */
+  --motion-move: var(--dur-move) var(--ease-move); /* @kind other */
+}
+
+/* Reduced motion collapses MOVEMENT and leaves hover alone.
+ *
+ * The blanket `* { transition-duration: 0.01ms !important }` idiom would take
+ * the 20ms hover guard with it and restore the strobing it exists to stop —
+ * and a 20ms background swap is not motion by any reading of the preference.
+ * So the lever is the movement token itself: everything that slides, appears
+ * or resizes spends `--motion-move`, and here it stops taking time. Anything
+ * that hard-codes a duration instead of spending a token opts itself out of
+ * this, which is the strongest reason not to hard-code one. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-move: 0s;
+  }
 }

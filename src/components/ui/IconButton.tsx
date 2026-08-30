@@ -2,8 +2,11 @@ import React from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Tooltip } from '@/components/ui/Tooltip';
 
+/* The hover wash spends `--motion-hover` (M46.2): 120ms was long enough to
+ * trail the pointer across a toolbar of these, which is the lag Notion's
+ * measured 20ms exists to avoid. Colour only — `background`, never `all`. */
 const css = `
-.cb-ibtn{display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--n-600);cursor:pointer;transition:background var(--dur-fast) var(--ease-out);outline:none;padding:0}
+.cb-ibtn{display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--n-600);cursor:pointer;transition:background var(--motion-hover),color var(--motion-hover);outline:none;padding:0}
 .cb-ibtn:hover:not([disabled]){background:var(--n-100);color:var(--n-800)}
 .cb-ibtn:active:not([disabled]){background:var(--n-200)}
 .cb-ibtn:focus-visible{border-color:var(--border-focus);box-shadow:var(--ring)}

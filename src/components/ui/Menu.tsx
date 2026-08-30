@@ -15,8 +15,10 @@ import { Icon } from '@/components/ui/Icon';
  * itself would be a second answer to a question that has one.
  */
 
+/** `motion-hover`: a menu is read by sweeping down it, which is the fastest a
+ * pointer ever crosses a stack of rows in this app. 20ms declared (M46.2). */
 const ITEM_BASE =
-  'flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-sm';
+  'motion-hover flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-sm';
 
 /** A disabled item is still in the DOM and still reads as a menuitem, but it
  * must not take an arrow-key stop — a keyboard user would land on something

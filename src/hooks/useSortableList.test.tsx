@@ -353,7 +353,7 @@ describe('useSortableList C-I lifecycle (guard)', () => {
     expect(row('c').style.boxShadow).toBe('');
   });
 
-  it('slides the neighbour out of the way over 200ms', () => {
+  it('slides the neighbour out of the way on the movement token', () => {
     render(<List />);
     stubRows();
 
@@ -362,7 +362,11 @@ describe('useSortableList C-I lifecycle (guard)', () => {
 
     // b takes slot 0 — the gap that opens IS the drop indicator.
     expect(row('b').style.transform).toBe('translate(0px, 0px)');
-    expect(row('b').style.transition).toBe('transform 200ms ease');
+    // The token, not the number (M46.2 Task 3): `--motion-move` is 200ms ease
+    // in tokens/spacing.css and 0s for a reader who asked for reduced motion,
+    // and a test that pinned the literal would have to be wrong in one of
+    // those two worlds.
+    expect(row('b').style.transition).toBe('transform var(--motion-move)');
     // c has not been passed, so it stays in its own slot.
     expect(row('c').style.transform).toBe('translate(0px, 40px)');
   });

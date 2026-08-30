@@ -366,8 +366,11 @@ export function useSortableList({
         height: `${axis === 'y' ? size : crossSize}px`,
         transform: `translate(${axis === 'y' ? cross : main}px, ${axis === 'y' ? main : cross}px)`,
         // The row under the cursor must not lag it, and the ones getting out
-        // of its way must not teleport (§C-I.3).
-        transition: held ? 'none' : 'transform 200ms ease',
+        // of its way must not teleport (§C-I.3). The 200ms is spelled as the
+        // movement token (M46.2 Task 3) rather than as a literal, so this and
+        // every other sliding thing stay one number — and so a reader who has
+        // asked for reduced motion gets the reflow without the slide.
+        transition: held ? 'none' : 'transform var(--motion-move)',
         // Lifted by this ALONE: no shadow, no scale, no dimming. What tells you
         // which row you are holding is that it is the one moving.
         zIndex: held ? 1 : undefined,

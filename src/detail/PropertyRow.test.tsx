@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropertyRow, PROPERTY_LABEL_W } from '@/detail/PropertyRow';
+import type { GripProps } from '@/hooks/useSortableList';
 import { kindMeta } from '@/engine/properties';
 import { FIELD_KINDS } from '@/engine/types';
 import { resolveIcon } from '@/components/ui/Icon';
@@ -10,6 +11,17 @@ afterEach(cleanup);
 
 const row = () => screen.getByTestId('property-row');
 const labelCell = () => row().firstElementChild as HTMLElement;
+
+/** The shape `useSortableList().gripProps` hands over, inert. */
+const stubGrip: GripProps = {
+  ref: () => {},
+  role: 'button',
+  tabIndex: 0,
+  'aria-label': 'Drag a',
+  'data-sortable-grip': 'a',
+  onPointerDown: () => {},
+  onKeyDown: () => {},
+};
 
 /**
  * The anatomy every property row in a detail panel now shares (M16.6).
@@ -163,6 +175,33 @@ describe('PropertyRow', () => {
     // The value control's own hover is --n-50; a row painted the same colour
     // reads flat under it.
     expect(row().className).not.toContain('hover:bg-n-50');
+  });
+
+  it('declares the hover wash, so a pointer run down the list does not strobe', () => {
+    // M46.2 Task 3: the wash used to compute to `transition: all`, the initial
+    // value — no transition at all. `motion-hover` is 20ms ease-in, which is
+    // an anti-flicker guard rather than a fade. Colour only: the row also
+    // carries the drag's inline transform transition and the two must not be
+    // the same declaration.
+    render(
+      <PropertyRow kind="text" name="a">
+        <span>v</span>
+      </PropertyRow>,
+    );
+    expect(row().className).toContain('motion-hover');
+    expect(row().className).not.toContain('motion-move');
+  });
+
+  it('cross-fades the icon and the grip rather than cutting between them', () => {
+    render(
+      <PropertyRow kind="text" name="a" grip={stubGrip}>
+        <span>v</span>
+      </PropertyRow>,
+    );
+    // Both halves of the one 13px cell, so the swap is a fade in each
+    // direction rather than a hard cut (reference §B1).
+    expect(screen.getByLabelText('Drag a').className).toContain('motion-move');
+    expect(labelCell().querySelector('svg')?.getAttribute('class')).toContain('motion-move');
   });
 
   it('reveals a trailing action on focus, not only on hover', () => {

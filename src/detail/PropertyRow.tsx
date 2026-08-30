@@ -121,7 +121,11 @@ export function PropertyRow({
       // sides or it reads as a highlight on the label rather than on the row.
       className={[
         'group -mx-1 flex min-w-0 gap-1.5 rounded-sm px-1',
-        'hover:bg-n-25',
+        // 20ms, declared (M46.2): a property list is read by running the
+        // pointer down it, and an undeclared wash strobes on the way past.
+        // Colour only — the row's `style` carries the drag's own transform
+        // transition and an inline rule beats this one while that is live.
+        'motion-hover hover:bg-n-25',
         align === 'center' ? 'items-center' : 'items-start',
       ].join(' ')}
     >
@@ -134,13 +138,22 @@ export function PropertyRow({
       >
         {/* Icon and grip occupy the same 13px cell — Notion swaps them in
             place, and a grip that appended itself would shove every name a
-            glyph to the right the moment the pointer arrived. */}
+            glyph to the right the moment the pointer arrived.
+
+            Both halves carry `motion-move`, which turns the swap from a hard
+            cut into the cross-fade the reference measured (§B1). Notion times
+            this one at 0.15s and its gutter cluster at 0.2s; we spend the
+            movement token for both rather than mint a third number for a
+            difference nobody can see. The grip's OWN hover wash is left
+            undeclared: it arrives with the grip, so there is no pointer travel
+            for a 20ms guard to smooth, and one element cannot carry two
+            timings in one utility. */}
         <span className="relative flex h-[13px] w-[13px] flex-none items-center justify-center">
           <Icon
             name={icon ?? kindMeta(kind).icon}
             size={13}
             color="var(--n-400)"
-            className={grip === undefined ? undefined : 'group-hover:opacity-0'}
+            className={grip === undefined ? undefined : 'motion-move group-hover:opacity-0'}
           />
           {grip !== undefined && (
             <Tooltip label={gripHint ?? ''}>
@@ -149,7 +162,7 @@ export function PropertyRow({
                 // Opacity, not `hidden`: a hidden grip is out of the tab
                 // order, and arrow-key reordering is the whole point of the
                 // primitive underneath this.
-                className="absolute inset-0 flex cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                className="motion-move absolute inset-0 flex cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <Icon name="grip-vertical" size={13} />
               </span>
