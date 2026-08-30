@@ -8,12 +8,15 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import type { CollisionDetection } from '@dnd-kit/core';
+import { DragGhostLayer, InsertionLine, lineHosts } from '@/components/ui/BlockDrag';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { useDndGesture, useDragGesture } from '@/hooks/useDragGesture';
+import { alongX, resolveDropTarget } from '@/hooks/dropPartition';
 import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
 import {
@@ -187,21 +190,126 @@ export function handleWidgetDragEnd(
   args.commit(edit.spec);
 }
 
-/** A droppable insertion point (Edit mode only). Invisible until a drag
- * hovers it — then it paints itself as the insertion line, the repo's own
- * inset-line style rather than a DragOverlay. */
+/**
+ * Which insertion gaps widget `id` draws, pure (M46.2 Task 4).
+ *
+ * The row's gaps run `slot:<row>:0` through `slot:<row>:<n>` — one before each
+ * widget and one past the last — which is exactly the shape `lineHosts` pairs
+ * with the blocks between them. Derived from the spec rather than threaded
+ * through six widget components, because `WidgetShell` already has the spec in
+ * context and nothing else needs to know.
+ */
+export function widgetLines(
+  spec: DashboardSpec,
+  id: string,
+): { above: string; below?: string } | undefined {
+  const row = spec.rows.find((r) => r.widgets.some((w) => w.id === id));
+  if (row === undefined) return undefined;
+  const gaps = [
+    ...row.widgets.map((_, i) => `slot:${row.id}:${i}`),
+    `slot:${row.id}:${row.widgets.length}`,
+  ];
+  return lineHosts(gaps)[row.widgets.findIndex((w) => w.id === id)];
+}
+
+/**
+ * The dashboard's drop targeting (M46.2 Task 4) — the layout canvas's rule
+ * (`dropPartition.ts`), applied once per axis because these targets are laid
+ * out in two dimensions.
+ *
+ * The defect it closes is the canvas's, twice over. dnd-kit's default
+ * `rectIntersection` makes a target live only while the DRAGGED rect overlaps
+ * it, and what is dragged here is a 16x24 grip in the widget's header — so the
+ * 6px slots between widgets were live across a band narrower than the gaps
+ * between them (the dead-band arithmetic of §D7/D9), and reaching another ROW
+ * meant dragging that small rect down into its slots rather than pointing at
+ * the row. The POINTER decides now, and the two stages partition their axes
+ * with no arithmetic left that could fail to meet:
+ *
+ * 1. the rows partition Y — a lane is one row's slots taken together, and
+ *    `slot:new-row` is its own lane, being the only target below the last row;
+ * 2. inside the resolved row, the slots partition X, so the flip between two
+ *    insertion points is the midpoint between them, which is the widget's own
+ *    middle. That is Notion's above/below rule read sideways (§C-II.4).
+ */
+export function resolveWidgetSlot(
+  point: { x: number; y: number },
+  targets: { id: string; rect: { top: number; bottom: number; left: number; right: number } }[],
+): string | null {
+  const lanes = new Map<string, typeof targets>();
+  for (const t of targets) {
+    // The row id, greedy to the last colon — `moveToSlot`'s own rule, so a
+    // lane can never be split by a row id that carries one. `slot:new-row`
+    // ends in no index and is therefore already its own lane.
+    const lane = t.id.replace(/:\d+$/, '');
+    const held = lanes.get(lane);
+    if (held === undefined) lanes.set(lane, [t]);
+    else held.push(t);
+  }
+  const laneAt = resolveDropTarget(
+    point.y,
+    [...lanes].map(([id, members]) => ({
+      id,
+      rect: {
+        top: Math.min(...members.map((m) => m.rect.top)),
+        bottom: Math.max(...members.map((m) => m.rect.bottom)),
+      },
+    })),
+  );
+  if (laneAt === null) return null;
+  const members = lanes.get(laneAt) ?? [];
+  return resolveDropTarget(
+    point.x,
+    members.map((m) => ({ id: m.id, rect: alongX(m.rect) })),
+  );
+}
+
+export const widgetCollision: CollisionDetection = ({
+  collisionRect,
+  droppableRects,
+  droppableContainers,
+}) => {
+  const targets = [];
+  for (const container of droppableContainers) {
+    const rect = droppableRects.get(container.id);
+    if (rect !== undefined) targets.push({ id: String(container.id), rect });
+  }
+  // The pointer, or — for a keyboard drag, which reports none — the centre of
+  // the rect it is moving, the only coordinate that gesture has.
+  const hit = resolveWidgetSlot(
+    {
+      x: collisionRect.left + collisionRect.width / 2,
+      y: collisionRect.top + collisionRect.height / 2,
+    },
+    targets,
+  );
+  return hit === null ? [] : [{ id: hit }];
+};
+
+/**
+ * A droppable insertion point (Edit mode only): the gap between two widgets,
+ * and the rect the partition resolves against.
+ *
+ * It stopped painting in M46.2 Task 4 — Notion's insertion line is a child of
+ * the TARGET, so it inherits that block's box (reference §C-II.3), and the
+ * widgets draw their own. `slot:new-row` is the exception and draws its own
+ * line: it sits below every row, pointing at a row that does not exist yet,
+ * so there is no block whose edge it could hug.
+ */
 function WidgetSlot({ id, wide = false }: { id: string; wide?: boolean }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+  const { setNodeRef } = useDroppable({ id });
   return (
     <div
       ref={setNodeRef}
       data-testid="dashboard-slot"
       data-slot={id}
       className={[
-        wide ? 'h-1.5 w-full flex-none rounded' : 'w-1.5 flex-none self-stretch rounded',
-        isOver ? 'bg-cortex-500' : 'bg-transparent',
+        'relative',
+        wide ? 'h-1.5 w-full flex-none' : 'w-1.5 flex-none self-stretch',
       ].join(' ')}
-    />
+    >
+      {wide && <InsertionLine gap={id} side="top" />}
+    </div>
   );
 }
 
@@ -464,26 +572,32 @@ function WidgetShell({
   const hasCustom = widget.title !== undefined && widget.title !== '';
   // Registered even outside Edit mode (a hook cannot be conditional) but
   // disabled then — and with Edit off the grip never renders, so setNodeRef
-  // stays unattached and the registration costs nothing. The GRIP is
-  // the draggable node, not the whole tile: its small rect tracks the pointer
-  // into the thin slot strips, and the menu button and rename input keep
-  // their clicks — the listeners never touch them.
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  // stays unattached and the registration costs nothing. The GRIP is the
+  // draggable node, not the whole tile, so the menu button and the rename
+  // input keep their clicks — the listeners never touch them.
+  const { attributes, listeners, setNodeRef } = useDraggable({
     id: widget.id,
     disabled: edit === null,
   });
+  // The gaps this widget draws. Absent outside Edit mode, where no slot is
+  // rendered for a line to stand for.
+  const lines = edit === null ? undefined : widgetLines(edit.spec, widget.id);
   return (
     <section
       data-testid={`widget-${widget.id}`}
-      style={{
-        flexGrow: widget.w ?? 1,
-        flexBasis: 0,
-        minWidth: 280,
-        // The source dims in place; no DragOverlay (BoardView precedent).
-        opacity: isDragging ? 0.6 : undefined,
-      }}
-      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
+      // What `DragGhostLayer` clones (M46.2 Task 4). The widget stays put at
+      // full strength while a 40% copy of it follows the cursor; it used to
+      // dim to 0.6 in place and leave nothing under the pointer at all.
+      data-drag-id={widget.id}
+      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
+      className="relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
+      {/* The column variant of the insertion line (§C-II.3): 4px wide, full
+          height, on the leading edge. Inside the tile's own border rather than
+          out in the gap, because the tile clips its overflow — and a line the
+          target clips is a line that is not there. */}
+      {lines !== undefined && <InsertionLine gap={lines.above} side="start" />}
+      {lines?.below !== undefined && <InsertionLine gap={lines.below} side="end" />}
       <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
         {edit !== null && (
           <span
@@ -1521,7 +1635,10 @@ export function DashboardView({
           // wrapper would remount every widget on the Edit toggle. With Edit
           // off there is nothing to drag (grips absent, draggables disabled)
           // and nothing to hit (slots unrendered), so it is inert chrome.
-          <DndContext sensors={sensors} {...gesture}>
+          <DndContext sensors={sensors} collisionDetection={widgetCollision} {...gesture}>
+            {/* The C-II ghost (M46.2 Task 4): a 40% clone of the dragged
+                widget follows the cursor while the tile stays put. */}
+            <DragGhostLayer />
             <div className="flex flex-col gap-3">
               {spec.rows.map((row, rowIndex) => (
                 // One over-wide row scrolls alone inside its own wrapper —

@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
-import { DashboardView, handleWidgetDragEnd } from '@/views/DashboardView';
+import {
+  DashboardView,
+  handleWidgetDragEnd,
+  resolveWidgetSlot,
+  widgetLines,
+} from '@/views/DashboardView';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { buildSchema } from '@/engine/schema';
 import { parseListYaml } from '@/engine/views';
@@ -1034,6 +1039,139 @@ describe('handleWidgetDragEnd (M44.4)', () => {
   });
 });
 
+/**
+ * Where a widget drag lands (M46.2 Task 4).
+ *
+ * The geometry is described rather than measured, because jsdom measures
+ * nothing: a row is stated as widget boxes and the 6px slots between them, and
+ * the extents fall out of it — so the same sweep runs over a family of
+ * layouts rather than over one hard-coded set of numbers.
+ */
+describe('resolveWidgetSlot', () => {
+  const SLOT = 6;
+  const GAP = 12;
+  /** Two rows of `widths` widgets, then the full-width new-row strip. */
+  const layout = (rows: number[][], widgetH = 200) => {
+    const targets: {
+      id: string;
+      rect: { top: number; bottom: number; left: number; right: number };
+    }[] = [];
+    let top = 0;
+    rows.forEach((widths, r) => {
+      let x = 0;
+      widths.forEach((w, i) => {
+        targets.push({
+          id: `slot:r${r}:${i}`,
+          rect: { top, bottom: top + widgetH, left: x, right: x + SLOT },
+        });
+        x += SLOT + w;
+      });
+      targets.push({
+        id: `slot:r${r}:${widths.length}`,
+        rect: { top, bottom: top + widgetH, left: x, right: x + SLOT },
+      });
+      top += widgetH + GAP;
+    });
+    targets.push({
+      id: 'slot:new-row',
+      rect: { top, bottom: top + SLOT, left: 0, right: 1000 },
+    });
+    return { targets, height: top + SLOT };
+  };
+
+  it('lights a target at EVERY pixel across a row — no dead band', () => {
+    // The defect this rule exists to close, which the baseline measured on
+    // the canvas (§D7) and the dashboard's slots share by construction: with
+    // `rectIntersection` a 6px slot is live only while the dragged rect
+    // touches it, so consecutive slots' bands miss each other by whatever the
+    // pitch minus the slot minus the grip happens to be, and the indicator
+    // blinks out mid-travel.
+    const { targets } = layout([[300, 300]]);
+    const row = targets.filter((t) => t.id.startsWith('slot:r0:'));
+    const from = Math.min(...row.map((t) => t.rect.left));
+    const to = Math.max(...row.map((t) => t.rect.right));
+    for (let x = from; x <= to; x += 1) {
+      expect(resolveWidgetSlot({ x, y: 100 }, targets)).not.toBeNull();
+    }
+  });
+
+  it('flips between two insertion points at the widget between them', () => {
+    // The first widget spans x 6..306, so its middle is 156. Notion's
+    // above/below rule read sideways (§C-II.4).
+    const { targets } = layout([[300, 300]]);
+    expect(resolveWidgetSlot({ x: 150, y: 100 }, targets)).toBe('slot:r0:0');
+    expect(resolveWidgetSlot({ x: 160, y: 100 }, targets)).toBe('slot:r0:1');
+  });
+
+  it('resolves the ROW first, so a widget can be pointed into another one', () => {
+    // Under `rectIntersection` reaching a second row meant dragging a 16x24
+    // grip until its own rect overlapped that row's slots. The pointer says
+    // which row it is in.
+    const { targets } = layout([[300, 300], [300]]);
+    expect(resolveWidgetSlot({ x: 20, y: 100 }, targets)).toBe('slot:r0:0');
+    expect(resolveWidgetSlot({ x: 20, y: 300 }, targets)).toBe('slot:r1:0');
+  });
+
+  it('the gap BETWEEN two rows belongs to one of them, not to nothing', () => {
+    // 12px of margin separates the rows and no slot occupies it; the midpoint
+    // partition still hands every pixel of it to a lane.
+    const { targets } = layout([[300], [300]]);
+    for (let y = 200; y <= 212; y += 1) {
+      expect(resolveWidgetSlot({ x: 20, y }, targets)).not.toBeNull();
+    }
+  });
+
+  it('past the last row is the new-row strip, and past THAT is nothing', () => {
+    const { targets, height } = layout([[300]]);
+    expect(resolveWidgetSlot({ x: 400, y: height - 1 }, targets)).toBe('slot:new-row');
+    expect(resolveWidgetSlot({ x: 400, y: height + 40 }, targets)).toBeNull();
+  });
+
+  it('two rows whose ids differ only after a colon stay two lanes', () => {
+    // `moveToSlot`'s own lesson, held here too: the index is the LAST colon's
+    // tail and everything before it is the row, so a row id carrying a colon
+    // cannot merge two rows into one lane — which would make a pointer in the
+    // lower row resolve to a slot in the upper one.
+    const targets = [
+      { id: 'slot:a:b:0', rect: { top: 0, bottom: 100, left: 0, right: 6 } },
+      { id: 'slot:a:b:1', rect: { top: 0, bottom: 100, left: 106, right: 112 } },
+      { id: 'slot:a:c:0', rect: { top: 200, bottom: 300, left: 0, right: 6 } },
+      { id: 'slot:a:c:1', rect: { top: 200, bottom: 300, left: 106, right: 112 } },
+    ];
+    expect(resolveWidgetSlot({ x: 3, y: 50 }, targets)).toBe('slot:a:b:0');
+    expect(resolveWidgetSlot({ x: 3, y: 250 }, targets)).toBe('slot:a:c:0');
+    expect(resolveWidgetSlot({ x: 109, y: 250 }, targets)).toBe('slot:a:c:1');
+  });
+});
+
+describe('widgetLines', () => {
+  const spec = (): DashboardSpec => ({
+    rows: [{ id: 'r1', widgets: [countWidget('a'), countWidget('b')] }],
+  });
+
+  it('gives each widget the gap before it, and the last one the gap after', () => {
+    expect(widgetLines(spec(), 'a')).toEqual({ above: 'slot:r1:0' });
+    expect(widgetLines(spec(), 'b')).toEqual({ above: 'slot:r1:1', below: 'slot:r1:2' });
+  });
+
+  it('draws every gap in the row exactly once', () => {
+    // A gap has a widget on either side and both could hug it; drawn twice,
+    // one drop point lights twice.
+    const s = spec();
+    const drawn = s.rows[0].widgets
+      .map((w) => widgetLines(s, w.id))
+      .flatMap((l) =>
+        l === undefined ? [] : l.below === undefined ? [l.above] : [l.above, l.below],
+      );
+    expect(drawn).toHaveLength(s.rows[0].widgets.length + 1);
+    expect(new Set(drawn).size).toBe(drawn.length);
+  });
+
+  it('a widget the spec does not hold draws nothing', () => {
+    expect(widgetLines(spec(), 'ghost')).toBeUndefined();
+  });
+});
+
 describe('DashboardView drag chrome (M44.4)', () => {
   it('grips and slots render only in Edit mode', () => {
     const entries = editVault();
@@ -1051,6 +1189,37 @@ describe('DashboardView drag chrome (M44.4)', () => {
     expect(screen.getAllByTestId('widget-grip')).toHaveLength(2);
     // One row of two widgets: slots 0..2 inside it, plus the new-row strip.
     expect(screen.getAllByTestId('dashboard-slot')).toHaveLength(4);
+  });
+
+  it('the widget wears the insertion line, and the slot paints nothing (M46.2)', () => {
+    const entries = editVault();
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={oneRow([countWidget('a'), countWidget('b')])}
+        schema={buildSchema(entries)}
+        onPresentationChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    // Reference §C-II.3: a child of the TARGET at `inset-inline: 0`, so it
+    // takes the widget's own box. A row's lines are the COLUMN variant — 4px
+    // wide, full height, on the leading edge.
+    const line = document.querySelector('[data-line="slot:r1:1"]');
+    expect(line?.closest('[data-drag-id="b"]')).not.toBeNull();
+    expect(line?.className).toContain('w-1');
+    expect(line?.className).toContain('bg-cortex-500/43');
+    expect(line?.className).toContain('opacity-0');
+    // Every gap the row offers is drawn, and the strip that appends a new row
+    // draws its own — there is no widget below it whose edge it could hug.
+    const drawn = [...document.querySelectorAll('[data-line]')].map((l) =>
+      l.getAttribute('data-line'),
+    );
+    expect([...drawn].sort()).toEqual(['slot:new-row', 'slot:r1:0', 'slot:r1:1', 'slot:r1:2']);
+    // The gap itself is now spacing and a rect, nothing more.
+    for (const slot of screen.getAllByTestId('dashboard-slot')) {
+      expect(slot.className).not.toContain('bg-cortex');
+    }
   });
 
   it('a read-only host renders neither grips nor slots', () => {
@@ -1104,7 +1273,12 @@ describe('DashboardView drag chrome (M44.4)', () => {
       grip.focus();
       fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
       // Vacuity guard: with no drag in flight this case is about nothing.
-      expect(announced()).toContain('Picked up draggable item');
+      // Matched on the ITEM rather than on the pick-up sentence, because since
+      // M46.2 Task 4 the dashboard resolves a target from the pointer and the
+      // pick-up announcement is superseded by the first "moved over" in the
+      // same tick. Either sentence proves what this guard is for: a drag is
+      // live, and it is this grip's.
+      expect(announced().toLowerCase()).toContain('draggable item a');
       await new Promise((r) => setTimeout(r, 0));
       return grip;
     };
@@ -1164,6 +1338,42 @@ describe('DashboardView drag chrome (M44.4)', () => {
       // Escape in the app finds it there instead of the surface it was
       // aimed at.
       expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('sends a 40% clone and leaves the widget where it was (M46.2)', async () => {
+      dashboard();
+      const source = document.querySelector<HTMLElement>('[data-drag-id="a"]');
+      if (source === null) throw new Error('the widget is not marked as a drag source');
+      expect(screen.queryByTestId('drag-layer')).toBeNull();
+
+      await pickUp();
+
+      const ghost = screen.getByTestId('drag-ghost');
+      expect(ghost.style.opacity).toBe('0.4');
+      expect(ghost.children).toHaveLength(1);
+      // Ours dimmed the tile to 0.6 and left a hole where it had been
+      // (baseline §D3). The tile stays, at full strength.
+      expect(source.style.opacity).toBe('');
+      // A duplicated `data-testid` would make `getAllByTestId('widget-grip')`
+      // count double for the length of every drag.
+      expect(ghost.querySelectorAll('[data-testid]')).toHaveLength(0);
+    });
+
+    it('the ghost and the lit line go together on Escape (M46.2)', async () => {
+      dashboard();
+      const grip = await pickUp();
+      const lit = () =>
+        [...document.querySelectorAll('[data-line]')].filter(
+          (l) => l.getAttribute('data-lit') === 'true',
+        );
+      // One pointer, one insertion point — jsdom's rects are all 0x0, so
+      // WHICH one is arbitrary here and only the count is the claim.
+      expect(lit()).toHaveLength(1);
+
+      fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
+
+      expect(screen.queryByTestId('drag-layer')).toBeNull();
+      expect(lit()).toHaveLength(0);
     });
   });
 });

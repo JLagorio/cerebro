@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDropTarget, targetBands, type DropTarget } from '@/hooks/dropPartition';
+import { alongX, resolveDropTarget, targetBands, type DropTarget } from '@/hooks/dropPartition';
 
 /**
  * The canvas's drop targets, built the way the DOM builds them (M46.2 Task 3).
@@ -169,5 +169,26 @@ describe('resolveDropTarget — containment and the ends of the stack', () => {
     expect(bands[1].from).toBe(219);
     expect(resolveDropTarget(219, targets)).toBe('slot:g1:0');
     expect(resolveDropTarget(220, targets)).toBe('slot:g1:1');
+  });
+});
+
+describe('alongX (M46.2 Task 4)', () => {
+  it('reads a rect end-for-end on the other axis', () => {
+    expect(alongX({ left: 40, right: 46 })).toEqual({ top: 40, bottom: 46 });
+  });
+
+  it('gives a row of side-by-side targets the same partition, sideways', () => {
+    // The dashboard's case: thin vertical slots between widgets. The rule is
+    // about an AXIS — `top`/`bottom` are only what the first caller and
+    // `DOMRect` named this one — so a second copy of the midpoint arithmetic
+    // is exactly what this mapping exists to avoid.
+    const row = [
+      { id: 'a', rect: { left: 0, right: 6 } },
+      { id: 'b', rect: { left: 306, right: 312 } },
+    ].map((t) => ({ id: t.id, rect: alongX(t.rect) }));
+    // Centres 3 and 309 -> the flip is 156, the middle of the widget between.
+    for (let x = 0; x <= 312; x += 1) {
+      expect(resolveDropTarget(x, row)).toBe(x <= 156 ? 'a' : 'b');
+    }
   });
 });

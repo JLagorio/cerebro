@@ -51,7 +51,9 @@
  * it would actively lie: the canvas's field grips sit in a gutter 20px OUTSIDE
  * the slots' own left edge, so a cross-axis bound would blank the target for
  * the whole gesture. A surface whose targets sit side by side needs this rule
- * applied on ITS axis, not this function applied to a second one.
+ * applied on ITS axis, not this function applied to a second one — `alongX`
+ * below is that mapping, and the dashboard (M46.2 Task 4) spends it twice,
+ * once per stage, rather than once over both dimensions.
  */
 
 /** The part of a rect this file needs — `DOMRect` and dnd-kit's `ClientRect`
@@ -59,6 +61,24 @@
 export interface TargetRect {
   top: number;
   bottom: number;
+}
+
+/**
+ * The same rule read along X (M46.2 Task 4).
+ *
+ * The rule above is about an AXIS; `top` and `bottom` are only the names the
+ * first caller — and `DOMRect` — gave that axis's two ends. A surface whose
+ * targets sit side by side (the dashboard's widget row: thin vertical slots
+ * between widgets) needs the identical partition on its own axis, so it maps
+ * its rects through here rather than growing a second, drifting copy of the
+ * midpoint rule.
+ *
+ * Two dimensions are two applications of it, never one function over both: a
+ * dashboard resolves the ROW by y and then the slot within that row by x, and
+ * each stage is a column of siblings on one axis.
+ */
+export function alongX(rect: { left: number; right: number }): TargetRect {
+  return { top: rect.left, bottom: rect.right };
 }
 
 /** One registered drop target and where it sits on the axis. */
