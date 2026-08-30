@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { DashboardView, handleWidgetDragEnd } from '@/views/DashboardView';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { buildSchema } from '@/engine/schema';
@@ -1063,6 +1064,87 @@ describe('DashboardView drag chrome (M44.4)', () => {
     );
     expect(screen.queryAllByTestId('widget-grip')).toHaveLength(0);
     expect(screen.queryAllByTestId('dashboard-slot')).toHaveLength(0);
+  });
+
+  /**
+   * A live widget drag owns Escape (M46.2). dnd-kit cancels correctly, but
+   * from a `document` bubble listener with no `preventDefault` and no
+   * `stopPropagation` — so the same keystroke also reached the surface behind
+   * the dashboard. A `'gesture'` layer for the drag's life makes that surface
+   * defer through the `ownsEscape` it already asks; a capture listener that
+   * swallowed the key would beat dnd-kit to it and cancel nothing.
+   */
+  describe('Escape while a widget drag is live', () => {
+    beforeEach(() => resetLayers());
+    afterEach(() => resetLayers());
+
+    const announced = () =>
+      [...document.querySelectorAll('[role="status"]')].map((n) => n.textContent).join(' ');
+
+    function dashboard() {
+      const entries = editVault();
+      render(
+        <DashboardView
+          entries={records(entries)}
+          presentation={oneRow([countWidget('a'), countWidget('b')])}
+          schema={buildSchema(entries)}
+          onPresentationChange={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('dashboard-edit-toggle'));
+    }
+
+    /**
+     * The keyboard sensor's pick-up. The await is not optional:
+     * `KeyboardSensor.attach` adds its own keydown listener inside a
+     * `setTimeout(0)`, so a synchronous Escape never reaches dnd-kit at all.
+     */
+    const pickUp = async () => {
+      const grip = screen.getAllByTestId('widget-grip')[0];
+      grip.focus();
+      fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
+      // Vacuity guard: with no drag in flight this case is about nothing.
+      expect(announced()).toContain('Picked up draggable item');
+      await new Promise((r) => setTimeout(r, 0));
+      return grip;
+    };
+
+    it('takes Escape off the surface underneath, and hands it back on the cancel', async () => {
+      dashboard();
+      // What DetailPanel and Dialog both register; their handlers ask the
+      // stack who owns the keystroke.
+      pushLayer('panel');
+      const grip = await pickUp();
+      expect(ownsEscape('panel')).toBe(false);
+
+      fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
+
+      // dnd-kit's cancel still ran — the proof that the layer did not swallow.
+      expect(announced()).toContain('Dragging was cancelled');
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('hands the layer back on a drop too', async () => {
+      dashboard();
+      pushLayer('panel');
+      const grip = await pickUp();
+      // Space again is the keyboard sensor's DROP, not a cancel.
+      fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('hands the layer back when the dashboard unmounts mid-drag', async () => {
+      dashboard();
+      pushLayer('panel');
+      await pickUp();
+
+      cleanup();
+
+      // A leaked gesture layer sits on the stack forever, and every later
+      // Escape in the app finds it there instead of the surface it was
+      // aimed at.
+      expect(ownsEscape('panel')).toBe(true);
+    });
   });
 });
 

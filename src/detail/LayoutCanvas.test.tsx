@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { handleLayoutDragEnd } from '@/detail/LayoutCanvas';
 import { LayoutEditorDialog } from '@/detail/LayoutEditorDialog';
-import { resetLayers } from '@/components/ui/layers';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -703,5 +703,102 @@ describe('the add-section button (M45.5 Task 3)', () => {
     expect(document.activeElement).toBe(btn);
     await user.keyboard('{Enter}');
     expect(blocks()).toContain('group-1');
+  });
+});
+
+/**
+ * A live canvas drag owns Escape (M46.2).
+ *
+ * Measured: dnd-kit cancels correctly, but its `handleKeydown` calls
+ * `handleCancel()` from a `document` BUBBLE listener with no `preventDefault`
+ * and no `stopPropagation` — so one Escape cancelled the drag AND closed the
+ * whole layout editor dialog.
+ *
+ * The fix is a `'gesture'` layer for the drag's life, NOT a capture listener
+ * that swallows the key: swallowing would stop the event before dnd-kit's own
+ * handler ever ran, and cancel nothing at all. Both halves are asserted below —
+ * the drag must cancel, and the dialog must survive.
+ */
+describe('a live canvas drag owns Escape (M46.2)', () => {
+  beforeEach(() => resetLayers());
+  afterEach(() => {
+    cleanup();
+    resetLayers();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  /** dnd-kit's own announcements, which say what the drag actually did. */
+  const announced = () =>
+    [...document.querySelectorAll('[role="status"]')].map((n) => n.textContent).join(' ');
+
+  /**
+   * The keyboard sensor's pick-up: `keyboardCodes.start` is `Space` by CODE.
+   *
+   * The await is not optional. `KeyboardSensor.attach` adds its own keydown
+   * listener inside a `setTimeout(0)`, so a synchronous Escape after the
+   * pick-up reaches every OTHER handler in the app and never reaches dnd-kit —
+   * which would make this whole suite pass over a drag nothing could cancel.
+   */
+  const pickUp = async () => {
+    const grip = screen.getAllByTestId('layout-grip')[0];
+    grip.focus();
+    fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
+    // Vacuity guard: with no drag in flight every case below is about nothing.
+    expect(announced()).toContain('Picked up draggable item');
+    await new Promise((r) => setTimeout(r, 0));
+    return grip;
+  };
+  const escape = (on: Element) => fireEvent.keyDown(on, { key: 'Escape', code: 'Escape' });
+
+  it('cancels the drag without closing the editor behind it', async () => {
+    setup();
+    const grip = await pickUp();
+
+    escape(grip);
+
+    // dnd-kit's cancel still ran — the proof that the layer did not swallow.
+    expect(announced()).toContain('Dragging was cancelled');
+    // The measured defect: the same keystroke closed the whole dialog.
+    expect(screen.queryByTestId('layout-editor')).not.toBeNull();
+  });
+
+  it('hands Escape back the moment the drag is cancelled', async () => {
+    setup();
+    const grip = await pickUp();
+    escape(grip);
+    // The next press is the dialog's again — a claim that outlived its
+    // gesture would leave the editor with no way out but the mouse.
+    escape(grip);
+    expect(screen.queryByTestId('layout-editor')).toBeNull();
+  });
+
+  it('hands Escape back on a drop too', async () => {
+    setup();
+    const grip = await pickUp();
+    // Space again is the keyboard sensor's DROP, not a cancel.
+    fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
+    escape(grip);
+    expect(screen.queryByTestId('layout-editor')).toBeNull();
+  });
+
+  it('leaves Escape alone when no drag is running', () => {
+    setup();
+    escape(document.body);
+    expect(screen.queryByTestId('layout-editor')).toBeNull();
+  });
+
+  it('hands the layer back when the canvas unmounts mid-drag', async () => {
+    setup();
+    // What DetailPanel and Dialog both register; their handlers ask the stack
+    // who owns the keystroke.
+    pushLayer('panel');
+    await pickUp();
+    expect(ownsEscape('panel')).toBe(false);
+
+    cleanup();
+
+    // A leaked gesture layer sits on the stack forever, and every later Escape
+    // in the app finds it there instead of the surface it was aimed at.
+    expect(ownsEscape('panel')).toBe(true);
   });
 });

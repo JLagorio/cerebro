@@ -16,6 +16,7 @@ import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
 import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { PropertyRow } from '@/detail/PropertyRow';
 import { RecordTabs } from '@/detail/RecordTabs';
+import { useDndGesture } from '@/hooks/useDragGesture';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { resolveLayout } from '@/engine/layout';
 import { addGroup, moveField, moveGroup } from '@/engine/layoutEdit';
@@ -206,6 +207,19 @@ export function LayoutCanvas({
       keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space'] },
     }),
   );
+  /**
+   * The drag's claim on Escape (M46.2). dnd-kit's cancel above is real, but it
+   * fires from a `document` bubble listener that neither prevents the default
+   * nor stops propagation — so the same keystroke cancelled the drag AND closed
+   * this editor's dialog. The layer makes the dialog defer through the
+   * `ownsEscape` it already asks, and dnd-kit's cancel still runs.
+   */
+  const gesture = useDndGesture<DragEndEvent>((e) =>
+    handleLayoutDragEnd(e, {
+      layout: draft.layout,
+      commit: (next) => update({ layout: next }),
+    }),
+  );
 
   // Simple structure (`tabs: []`) has no tab to stand on, and no strip.
   const activeTab =
@@ -261,15 +275,7 @@ export function LayoutCanvas({
     // The DndContext stands UNCONDITIONALLY (DashboardView's lesson: a
     // conditional wrapper remounts every shell — and here every open
     // popover — the moment it appears).
-    <DndContext
-      sensors={sensors}
-      onDragEnd={(e) =>
-        handleLayoutDragEnd(e, {
-          layout: draft.layout,
-          commit: (next) => update({ layout: next }),
-        })
-      }
-    >
+    <DndContext sensors={sensors} {...gesture}>
       {/* The canvas container is LIVE (M45.3): interactivity belongs to the
           BlockShells inside it, and the `inert` that used to sit here moved
           inward — see InertContent for the boundary's rationale. */}

@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { useDndGesture } from '@/hooks/useDragGesture';
 import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
 import {
@@ -1343,6 +1344,19 @@ export function DashboardView({
     [toast, write, spec],
   );
 
+  /**
+   * The drag's claim on Escape (M46.2). dnd-kit cancels correctly on its own,
+   * but from a `document` bubble listener that neither prevents the default nor
+   * stops propagation — so the keystroke also reached whatever surface the
+   * dashboard is drawn inside. The layer makes those defer through the
+   * `ownsEscape` they already ask, and dnd-kit's cancel still runs. A capture
+   * listener that swallowed the key would beat dnd-kit to it and cancel
+   * nothing.
+   */
+  const gesture = useDndGesture<DragEndEvent>((event) =>
+    handleWidgetDragEnd(event, { spec, commit: write, toast }),
+  );
+
   const globalDefs = useMemo(
     () =>
       filterFieldDefs(
@@ -1475,10 +1489,7 @@ export function DashboardView({
           // wrapper would remount every widget on the Edit toggle. With Edit
           // off there is nothing to drag (grips absent, draggables disabled)
           // and nothing to hit (slots unrendered), so it is inert chrome.
-          <DndContext
-            sensors={sensors}
-            onDragEnd={(event) => handleWidgetDragEnd(event, { spec, commit: write, toast })}
-          >
+          <DndContext sensors={sensors} {...gesture}>
             <div className="flex flex-col gap-3">
               {spec.rows.map((row, rowIndex) => (
                 // One over-wide row scrolls alone inside its own wrapper —

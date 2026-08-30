@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { BoardView, handleDragEnd, type BoardColumnNode } from '@/views/BoardView';
 import { bandKind } from '@/engine/grouping';
@@ -632,5 +633,82 @@ describe('handleDragEnd', () => {
       status: 'doing',
       assignee: null,
     });
+  });
+});
+
+/**
+ * A live card drag owns Escape (M46.2).
+ *
+ * dnd-kit cancels the drag correctly, but from a `document` bubble listener
+ * with no `preventDefault` and no `stopPropagation` — so the same keystroke
+ * also reached the record panel or dialog behind the board. The fix is a
+ * `'gesture'` layer for the drag's life, never a capture listener: swallowing
+ * the key would stop it before dnd-kit's own handler ran, and cancel nothing.
+ */
+describe('a live board drag owns Escape (M46.2)', () => {
+  beforeEach(() => resetLayers());
+  afterEach(() => resetLayers());
+
+  const announced = () =>
+    [...document.querySelectorAll('[role="status"]')].map((n) => n.textContent).join(' ');
+
+  function board() {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
+    render(
+      <BoardView filtered={false} entries={items} presentation={presentation} schema={schema} />,
+    );
+  }
+
+  /**
+   * The keyboard sensor's pick-up. The await is not optional:
+   * `KeyboardSensor.attach` adds its own keydown listener inside a
+   * `setTimeout(0)`, so a synchronous Escape never reaches dnd-kit at all.
+   */
+  const pickUp = async () => {
+    const card = screen.getAllByTestId('board-card')[0];
+    card.focus();
+    fireEvent.keyDown(card, { key: ' ', code: 'Space' });
+    // Vacuity guard: with no drag in flight this case is about nothing.
+    expect(announced()).toContain('Picked up draggable item');
+    await new Promise((r) => setTimeout(r, 0));
+    return card;
+  };
+
+  it('takes Escape off the surface underneath, and hands it back on the cancel', async () => {
+    board();
+    // What DetailPanel and Dialog both register; their handlers ask the stack
+    // who owns the keystroke.
+    pushLayer('panel');
+    const card = await pickUp();
+    expect(ownsEscape('panel')).toBe(false);
+
+    fireEvent.keyDown(card, { key: 'Escape', code: 'Escape' });
+
+    // dnd-kit's cancel still ran — the proof that the layer did not swallow.
+    expect(announced()).toContain('Dragging was cancelled');
+    expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('hands the layer back on a drop too', async () => {
+    board();
+    pushLayer('panel');
+    const card = await pickUp();
+    // Space again is the keyboard sensor's DROP, not a cancel.
+    fireEvent.keyDown(card, { key: ' ', code: 'Space' });
+    expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('hands the layer back when the board unmounts mid-drag', async () => {
+    board();
+    pushLayer('panel');
+    await pickUp();
+
+    cleanup();
+
+    // A leaked gesture layer sits on the stack forever, and every later Escape
+    // in the app finds it there instead of the surface it was aimed at.
+    expect(ownsEscape('panel')).toBe(true);
   });
 });

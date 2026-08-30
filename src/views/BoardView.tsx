@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useDndGesture } from '@/hooks/useDragGesture';
 import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FieldChip } from '@/views/FieldChip';
@@ -456,6 +457,19 @@ export function BoardView({
   // and an empty column has no entry of its own to resolve it from.
   const bandFields = laneSpec === undefined ? [groupBy] : [groupBy, laneSpec.field];
 
+  /**
+   * The drag's claim on Escape (M46.2). dnd-kit cancels correctly on its own,
+   * but from a `document` bubble listener that neither prevents the default nor
+   * stops propagation — so the keystroke also reached the record panel or
+   * dialog behind the board. The layer makes those defer through the
+   * `ownsEscape` they already ask, and dnd-kit's cancel still runs. A capture
+   * listener that swallowed the key would beat dnd-kit to it and cancel
+   * nothing.
+   */
+  const gesture = useDndGesture<DragEndEvent>((event) =>
+    handleDragEnd(event, { groupBy, columns, schema, patchFrontmatter, toast }),
+  );
+
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract
     // requires data-testid="board-view" on the root (the plan's block omitted
@@ -482,12 +496,7 @@ export function BoardView({
           }
         />
       ) : (
-        <DndContext
-          sensors={sensors}
-          onDragEnd={(event) =>
-            handleDragEnd(event, { groupBy, columns, schema, patchFrontmatter, toast })
-          }
-        >
+        <DndContext sensors={sensors} {...gesture}>
           {lanes === null ? (
             <div className="flex items-start gap-3 overflow-x-auto">
               {columns.map((c) => (
