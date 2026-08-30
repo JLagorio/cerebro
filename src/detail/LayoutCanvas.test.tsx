@@ -511,22 +511,46 @@ describe('Notion order and persistent zone boundaries (M45.5 Task 1)', () => {
     expect(labels[0].closest('[data-testid="layout-preview-content"]')).toBeNull();
   });
 
-  it('the drop indicator cross-fades instead of snapping on and off', () => {
-    // M46.2 Task 3. Always the accent colour, revealed by OPACITY, so the
-    // outgoing slot fades over the same 200ms the incoming one arrives in
-    // (reference §D7). It only reads as a cross-fade because the targets now
-    // meet — over a dead band it would be a fade to nothing and back.
+  it('the drop indicator cross-fades — on the TARGET, not on the gap', () => {
+    // M46.2 Task 3 put the cross-fade on the slot: always the accent colour,
+    // revealed by opacity, so the outgoing target fades over the same 200ms
+    // the incoming one arrives in (reference §D7). Task 4 kept that mechanism
+    // and moved it onto the block being pointed at (§C-II.3), because a line
+    // owned by the CONTAINER is one fixed width for every row it will ever
+    // point at, while a child at `inset-inline: 0` inherits its target's own
+    // width and indent.
     setup();
-    const slot = bySlot('slot:g1:0');
-    expect(slot?.className).toContain('motion-move');
-    expect(slot?.className).toContain('bg-cortex-500');
-    expect(slot?.className).toContain('opacity-0');
+    const line = document.querySelector('[data-line="slot:g1:0"]');
+    expect(line?.className).toContain('motion-move');
+    expect(line?.className).toContain('bg-cortex-500/43');
+    expect(line?.className).toContain('opacity-0');
+    expect(line?.className).toContain('inset-x-0');
+    // It hangs inside the row it points at, so it moves and indents with it.
+    expect(line?.closest('[data-drag-id="field:priority"]')).not.toBeNull();
+    // And the gap it stands for no longer paints anything itself.
+    expect(bySlot('slot:g1:0')?.className).not.toContain('bg-cortex');
     // The drag-hover ring on the whole-container targets hands off in the
     // same 200ms, so travel between the two grammars is one movement.
     const area = screen
       .getAllByTestId('layout-droparea')
       .find((a) => a.getAttribute('data-slot')?.startsWith('slot:heading:'));
     expect(area?.className).toContain('motion-move');
+  });
+
+  it('every insertion gap is drawn exactly once, by a block it sits against', () => {
+    // The invariant `lineHosts` exists for. A gap has a block on either side
+    // and both could legitimately hug it; if both do, one drop point lights
+    // twice. Held over the REAL canvas rather than over a fabricated list, so
+    // a call site that forgets to pass its hosts fails here too.
+    setup();
+    const gaps = [...document.querySelectorAll('[data-testid="layout-slot"]')].map((s) =>
+      s.getAttribute('data-slot'),
+    );
+    const drawn = [...document.querySelectorAll('[data-line]')].map((l) =>
+      l.getAttribute('data-line'),
+    );
+    expect(gaps.length).toBeGreaterThan(0);
+    expect([...drawn].sort()).toEqual([...gaps].sort());
   });
 
   it('the gutter grip fades in — but the dragged row is never given a transition', () => {
@@ -948,5 +972,120 @@ describe('a live canvas drag owns Escape (M46.2)', () => {
     // A leaked gesture layer sits on the stack forever, and every later Escape
     // in the app finds it there instead of the surface it was aimed at.
     expect(ownsEscape('panel')).toBe(true);
+  });
+});
+
+/**
+ * The C-II ghost, live (M46.2 Task 4).
+ *
+ * Driven through the keyboard sensor, which is the only pick-up jsdom can
+ * honestly perform — the pointer sensor needs real geometry. That is enough
+ * for what these cases are about: WHAT EXISTS during a drag and what does not.
+ * The ghost's placement is arithmetic, and it is held against the measured
+ * numbers in `BlockDrag.test.tsx`; here every rect is 0x0, so nothing below
+ * asserts a coordinate.
+ */
+describe('a dragged block sends a ghost and keeps its source (M46.2 Task 4)', () => {
+  beforeEach(() => resetLayers());
+  afterEach(() => {
+    cleanup();
+    resetLayers();
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  /** See the Escape suite's twin: the await is not optional, because
+   * `KeyboardSensor.attach` registers its listener inside a `setTimeout(0)`. */
+  const pickUp = async () => {
+    const grip = screen.getAllByTestId('layout-grip')[0];
+    grip.focus();
+    fireEvent.keyDown(grip, { key: ' ', code: 'Space' });
+    await new Promise((r) => setTimeout(r, 0));
+    return grip;
+  };
+
+  it('puts a 40% clone under the cursor and leaves the source at full strength', async () => {
+    setup();
+    const source = document.querySelector<HTMLElement>('[data-drag-id="field:priority"]');
+    if (source === null) throw new Error('the dragged row is not marked as a drag source');
+    expect(screen.queryByTestId('drag-layer')).toBeNull();
+
+    await pickUp();
+
+    // The clone: a real copy of the source subtree, at the measured 0.4.
+    const ghost = screen.getByTestId('drag-ghost');
+    expect(ghost.style.opacity).toBe('0.4');
+    expect(ghost.style.pointerEvents).toBe('none');
+    expect(ghost.children).toHaveLength(1);
+    // The inverted half of the old grammar: ours dimmed the source to 0.6 and
+    // put nothing at all under the pointer (baseline §D3). The source now
+    // stays exactly where it was, undimmed.
+    expect(source.style.opacity).toBe('');
+    expect(source.isConnected).toBe(true);
+  });
+
+  it('the clone answers to no identity of its own', async () => {
+    setup();
+    await pickUp();
+    const ghost = screen.getByTestId('drag-ghost');
+    // Duplicated `data-testid`s would make `getAllByTestId('layout-grip')[0]`
+    // a coin toss for the length of every drag — including this suite's own
+    // pick-up — and a clone still wearing `data-drag-id` could be picked up as
+    // the SOURCE of the next one.
+    expect(ghost.querySelectorAll('[data-testid]')).toHaveLength(0);
+    expect(ghost.querySelectorAll('[data-drag-id]')).toHaveLength(0);
+    expect(ghost.querySelectorAll('[data-line]')).toHaveLength(0);
+    // The layer is inert, so the cloned preview is as unreachable as the
+    // preview it copies — the invariant the layout editor is built on.
+    expect(screen.getByTestId('drag-layer').hasAttribute('inert')).toBe(true);
+  });
+
+  it('lights exactly ONE drop indicator anywhere on the canvas', async () => {
+    setup();
+    // The canvas speaks two drop grammars — an insertion LINE where there is a
+    // box to insert against, a whole-area RING where an index would be a lie
+    // (heading appends, rest is derived). This holds the seam between them:
+    // one pointer, one indicator, whichever grammar owns it. Both were
+    // separately capable of lighting, and the old slot bar plus the ring could
+    // both be on at once for the same drag.
+    const lit = () => [
+      ...[...document.querySelectorAll('[data-line]')].filter(
+        (l) => l.getAttribute('data-lit') === 'true',
+      ),
+      ...[...screen.getAllByTestId('layout-droparea')].filter((a) =>
+        a.className.includes('ring-1'),
+      ),
+    ];
+    expect(lit()).toHaveLength(0);
+    // Vacuity guard: the unlit lines must be MOUNTED, or "exactly one" is
+    // satisfied by there being nothing to light. Their staying mounted is
+    // also what the outgoing half of the cross-fade fades.
+    expect(document.querySelectorAll('[data-line]').length).toBeGreaterThan(1);
+
+    await pickUp();
+
+    expect(lit()).toHaveLength(1);
+    // jsdom measures every rect at 0x0, so WHICH target the partition
+    // resolves to is arbitrary here — the reason this asserts the count and
+    // the id grammar rather than a position. That the resolution is
+    // continuous and midpoint-based is `dropPartition.test.ts`'s case.
+    const gap = lit()[0].getAttribute('data-line') ?? lit()[0].getAttribute('data-slot');
+    expect(document.querySelector(`[data-slot="${gap}"]`)).not.toBeNull();
+  });
+
+  it('Escape takes the ghost and the line with it, and leaves the editor open', async () => {
+    setup();
+    const grip = await pickUp();
+    expect(screen.queryByTestId('drag-layer')).not.toBeNull();
+
+    fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
+
+    expect(screen.queryByTestId('drag-layer')).toBeNull();
+    expect(
+      [...document.querySelectorAll('[data-line]')].filter(
+        (l) => l.getAttribute('data-lit') === 'true',
+      ),
+    ).toHaveLength(0);
+    // The editor behind it is still standing — Task 1b's claim, unbroken.
+    expect(screen.queryByTestId('layout-editor')).not.toBeNull();
   });
 });

@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import type { CollisionDetection, DragEndEvent } from '@dnd-kit/core';
 import type { TypeLayoutDraft } from '@/app/typeActions';
+import { DragGhostLayer, InsertionLine, lineHosts } from '@/components/ui/BlockDrag';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { GroupEditorPopover } from '@/detail/GroupEditorPopover';
@@ -322,6 +323,24 @@ export function LayoutCanvas({
     </PropertyRow>
   );
 
+  /**
+   * The block-reorder gaps, in render order, and which shell draws each one
+   * (M46.2 Task 4). The ids are the CONFIG's — `moveGroup` reorders the
+   * config's list — while the order is the preview's, which is the same pair
+   * of facts the `at`/`cfg` lookup inside the map keeps apart.
+   *
+   * `lineHosts` is what stops one gap from being drawn twice: a gap sits
+   * between two shells and either could hug it, so it belongs to the shell
+   * that FOLLOWS it, and only the final gap hangs below its predecessor.
+   */
+  const groupGaps = [
+    ...previewLayout.groups.map(
+      (g) => `groupslot:${draft.layout.groups.findIndex((c) => c.id === g.id)}`,
+    ),
+    `groupslot:${draft.layout.groups.length}`,
+  ];
+  const groupHosts = lineHosts(groupGaps);
+
   const openEditor = (container: string) => () => setEditing(container);
   const registerShell = (container: string) => (el: HTMLDivElement | null) => {
     if (el === null) shells.current.delete(container);
@@ -333,6 +352,12 @@ export function LayoutCanvas({
     // conditional wrapper remounts every shell — and here every open
     // popover — the moment it appears).
     <DndContext sensors={sensors} collisionDetection={canvasCollision} {...gesture}>
+      {/* The C-II ghost (M46.2 Task 4): a 40% clone of the dragged section or
+          row follows the cursor while the source stays put at full strength.
+          It listens to the context rather than taking props, so the per-frame
+          state never re-renders this preview — and it finds its source by the
+          `data-drag-id` each draggable block wears. */}
+      <DragGhostLayer />
       {/* The canvas container is LIVE (M45.3): interactivity belongs to the
           BlockShells inside it, and the `inert` that used to sit here moved
           inward — see InertContent for the boundary's rationale. */}
@@ -387,7 +412,7 @@ export function LayoutCanvas({
               scoped; a tab holds the page body or a data source, never a
               property section. */}
           <div className="flex flex-col">
-            {previewLayout.groups.map((g) => {
+            {previewLayout.groups.map((g, gi) => {
               // Every id below speaks to an editor that operates on the CONFIG,
               // and a render position is not guaranteed to be a config position
               // — so nothing is read off the render index. `cfg` is addressed
@@ -411,6 +436,7 @@ export function LayoutCanvas({
                     onOpen={openEditor(g.id)}
                     shellRef={registerShell(g.id)}
                     dragId={`group:${g.id}`}
+                    lines={groupHosts[gi]}
                   >
                     {rows.length === 0 ? (
                       // Structurally empty (the editor's drop target) and
@@ -419,25 +445,33 @@ export function LayoutCanvas({
                       // different sentences. Either way the group keeps ONE
                       // slot at its config end — the shell persists, so its
                       // drop target must too.
-                      <>
+                      // Its one gap is a whole-AREA target, not a line
+                      // (M46.2 Task 4): a section with no rows has no box for
+                      // a line to hug and no position to insert at, which is
+                      // the same reason heading and rest wear the ring. It
+                      // keeps the gap's own id, so what lights is what commits.
+                      <AreaDrop id={`slot:${g.id}:${cfg.fields.length}`}>
                         <InertContent>
                           <ShellEmptyHint structural={g.fields.length === 0} />
                         </InertContent>
-                        <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
-                      </>
+                      </AreaDrop>
                     ) : (
                       // No inner GroupLabel here (M45.5): the shell's
                       // always-visible header IS the zone's one label. The
                       // real record page keeps its GroupLabel — canvas only.
-                      <div data-testid="property-group" data-group={g.id} className="flex flex-col">
-                        {rows.map((f) => (
-                          <Fragment key={f.name}>
-                            <DropSlot id={`slot:${g.id}:${cfg.fields.indexOf(f.name)}`} />
-                            <FieldRow name={f.name}>{previewRow(f)}</FieldRow>
-                          </Fragment>
-                        ))}
-                        <DropSlot id={`slot:${g.id}:${cfg.fields.length}`} />
-                      </div>
+                      <RowStack
+                        group={g.id}
+                        // The gaps this section offers, in render order: one
+                        // before each rendered row at that field's CONFIG
+                        // index (a folded row still holds its slot, so the
+                        // indexes skip), and the config-end gap last.
+                        gaps={[
+                          ...rows.map((f) => `slot:${g.id}:${cfg.fields.indexOf(f.name)}`),
+                          `slot:${g.id}:${cfg.fields.length}`,
+                        ]}
+                        rows={rows}
+                        render={previewRow}
+                      />
                     )}
                   </BlockShell>
                 </Fragment>
@@ -668,33 +702,64 @@ function InertContent({ children }: { children: ReactNode }) {
   );
 }
 
-/** A droppable insertion point between rows or group shells — WidgetSlot's
- * idiom: invisible until a drag hovers it, then it paints itself as the
- * insertion line (the repo's inset-line style, no DragOverlay). Two sizes:
- * the `row` default's 6px doubles as a group's row gap, while `block` slots
- * between bordered shells stand 12px — a shell's label chip overhangs its
- * border by 8px (M45.5), and the slot's height is what keeps that chip off
- * the block above. Hover paint is identical for both.
+/**
+ * A droppable insertion point between rows or group shells: the GAP itself
+ * and the rect that decides which gap the pointer is in. Two sizes: the `row`
+ * default's 6px doubles as a group's row gap, while `block` slots between
+ * bordered shells stand 12px — a shell's label chip overhangs its border by
+ * 8px (M45.5), and the slot's height is what keeps that chip off the block
+ * above.
  *
- * The paint is an `opacity` on a slot that is always the accent colour, not a
- * background swapped in and out, so `motion-move` can cross-fade it: the
- * outgoing slot fades over the same 200ms the incoming one arrives in, which
- * is the reference's §D7. That only reads as a cross-fade because the targets
- * now MEET — over a dead band it would have been a fade to nothing and back.
+ * It no longer paints (M46.2 Task 4). Notion's insertion line is a CHILD OF
+ * THE TARGET at `inset-inline: 0`, so it inherits that block's width and
+ * indent — where a bar owned by the container is one fixed width for every
+ * row it will ever point at (reference §C-II.3, baseline §D5). So the slot
+ * kept the two jobs only it can do, the gap and the rect, and the line moved
+ * onto the box it is actually pointing at. `lineHosts` says which box that is.
  */
 function DropSlot({ id, size = 'row' }: { id: string; size?: 'row' | 'block' }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+  const { setNodeRef } = useDroppable({ id });
   return (
     <div
       ref={setNodeRef}
       data-testid="layout-slot"
       data-slot={id}
-      className={[
-        size === 'block' ? 'h-3' : 'h-1.5',
-        'motion-move w-full flex-none rounded bg-cortex-500',
-        isOver ? 'opacity-100' : 'opacity-0',
-      ].join(' ')}
+      className={[size === 'block' ? 'h-3' : 'h-1.5', 'w-full flex-none'].join(' ')}
     />
+  );
+}
+
+/**
+ * One section's rows with the gaps that bracket them (M46.2 Task 4).
+ *
+ * Split out of the group map so the gap list and the lines it feeds sit
+ * together: `gaps[i]` is the gap ABOVE row `i` and `gaps[rows.length]` is the
+ * section's config-end gap, which is exactly the shape `lineHosts` pairs.
+ */
+function RowStack({
+  group,
+  gaps,
+  rows,
+  render,
+}: {
+  group: string;
+  gaps: string[];
+  rows: FieldDef[];
+  render: (f: FieldDef) => ReactNode;
+}) {
+  const hosts = lineHosts(gaps);
+  return (
+    <div data-testid="property-group" data-group={group} className="flex flex-col">
+      {rows.map((f, i) => (
+        <Fragment key={f.name}>
+          <DropSlot id={gaps[i]} />
+          <FieldRow name={f.name} lines={hosts[i]}>
+            {render(f)}
+          </FieldRow>
+        </Fragment>
+      ))}
+      <DropSlot id={gaps[rows.length]} />
+    </div>
   );
 }
 
@@ -724,14 +789,30 @@ function AreaDrop({ id, children }: { id: string; children: ReactNode }) {
  * shell's click-to-edit.
  *
  * The grip's REVEAL is `motion-move`, the same 200ms fade the reference
- * measured on Notion's gutter cluster (§B7). The dim on the source row is
- * deliberately NOT transitioned: it is inline, it belongs to the drag's own
- * hot path, and a source that faded out over 200ms would still be at full
- * strength for the first frames of the gesture that moved it. */
-function FieldRow({ name, children }: { name: string; children: ReactNode }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `field:${name}` });
+ * measured on Notion's gutter cluster (§B7).
+ *
+ * The row does NOT dim while it is dragged (M46.2 Task 4). Ours faded the
+ * source to 0.6 and put nothing under the cursor at all; Notion leaves the
+ * source exactly where it was, at full strength, and sends a 40% clone
+ * (§C-II.2) — which `DragGhostLayer` builds from the `data-drag-id` below.
+ * The insertion lines hang here rather than on the gaps because a line that
+ * is a child of its target inherits the target's width and indent. */
+function FieldRow({
+  name,
+  lines,
+  children,
+}: {
+  name: string;
+  /** The gaps this row draws: `above` as a `top` line, `below` when it is the
+   * last row of its section and so the only host the trailing gap has. */
+  lines?: { above: string; below?: string };
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: `field:${name}` });
   return (
-    <div className="group/row relative" style={{ opacity: isDragging ? 0.6 : undefined }}>
+    <div className="group/row relative" data-drag-id={`field:${name}`}>
+      {lines !== undefined && <InsertionLine gap={lines.above} side="top" />}
+      {lines?.below !== undefined && <InsertionLine gap={lines.below} side="bottom" />}
       <span
         ref={setNodeRef}
         data-testid="layout-grip"
@@ -781,6 +862,7 @@ function BlockShell({
   onOpen,
   shellRef,
   dragId,
+  lines,
   children,
 }: {
   /** 'heading' | groupId | 'rest' | 'content' | 'tabs' — Task 5/6's address. */
@@ -793,13 +875,15 @@ function BlockShell({
   /** Makes the whole block draggable by a shell grip (`group:<id>`, block
    * reorder). Only group shells pass one. */
   dragId?: string;
+  /** The block-reorder gaps this shell draws (M46.2 Task 4) — see FieldRow. */
+  lines?: { above: string; below?: string };
   children: ReactNode;
 }) {
   const interactive = onOpen !== undefined;
   // Registered even without a dragId (a hook cannot be conditional) but
   // disabled then — and the grip never renders, so setNodeRef stays
   // unattached and the registration costs nothing (DashboardView's idiom).
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef } = useDraggable({
     id: dragId ?? `nodrag:${container}`,
     disabled: dragId === undefined,
   });
@@ -809,10 +893,10 @@ function BlockShell({
       {...(interactive ? { role: 'button', tabIndex: 0, 'aria-label': label } : {})}
       data-testid="layout-block"
       data-block={container}
+      // What `DragGhostLayer` clones. Only a draggable shell carries one: the
+      // ghost stands for the thing that MOVES (M46.2 Task 4).
+      {...(dragId === undefined ? {} : { 'data-drag-id': dragId })}
       onClick={onOpen}
-      // The source dims in place while its grip drags; no DragOverlay
-      // (BoardView precedent).
-      style={{ opacity: isDragging ? 0.6 : undefined }}
       // Enter AND Space on keydown — role=button's activation contract, the
       // same editor the click opens. Own target only: a grip's Space must
       // start a drag, not open the editor over it (M45.3 Task 6).
@@ -831,6 +915,8 @@ function BlockShell({
         interactive ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-1' : '',
       ].join(' ')}
     >
+      {lines !== undefined && <InsertionLine gap={lines.above} side="top" />}
+      {lines?.below !== undefined && <InsertionLine gap={lines.below} side="bottom" />}
       <span
         data-testid="layout-block-label"
         className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700"
