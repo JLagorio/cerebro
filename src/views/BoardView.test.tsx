@@ -3,7 +3,13 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { BoardView, handleDragEnd, type BoardColumnNode } from '@/views/BoardView';
+import {
+  BoardView,
+  handleDragEnd,
+  resolveBoardColumn,
+  type BoardColumnNode,
+  type BoardTarget,
+} from '@/views/BoardView';
 import { bandKind } from '@/engine/grouping';
 import { buildSchema } from '@/engine/schema';
 import { groupEntries } from '@/engine/grouping';
@@ -637,6 +643,120 @@ describe('handleDragEnd', () => {
 });
 
 /**
+ * Where a card drag lands (M46.2 Task 5).
+ *
+ * The geometry is described rather than measured, because jsdom measures
+ * nothing: a lane is stated as column boxes at a pitch, and the extents fall
+ * out of it — so the same sweep runs over a family of boards rather than over
+ * one screenshot.
+ */
+describe('resolveBoardColumn', () => {
+  const WIDTH = 280;
+  const GAP = 12;
+  const HEIGHT = 400;
+  /** `lanes` rows of `n` columns each, laid out the way BoardView lays them. */
+  const layout = (lanes: { key: string; columns: number }[]): BoardTarget[] => {
+    const targets: BoardTarget[] = [];
+    let top = 0;
+    for (const lane of lanes) {
+      for (let i = 0; i < lane.columns; i += 1) {
+        const left = i * (WIDTH + GAP);
+        targets.push({
+          id: `${lane.key}/c${i}`,
+          lane: lane.key,
+          rect: { top, bottom: top + HEIGHT, left, right: left + WIDTH },
+        });
+      }
+      top += HEIGHT + 32;
+    }
+    return targets;
+  };
+
+  it('lights a column at EVERY pixel across a lane — no dead band', () => {
+    // The rule's whole point, and the defect the baseline measured on the
+    // canvas (§D7): with an overlap test, targets are live only where the
+    // dragged rect touches them and the indicator blinks out between them.
+    // Here the 12px gutters between columns belong to a column too.
+    const targets = layout([{ key: '', columns: 3 }]);
+    const from = Math.min(...targets.map((t) => t.rect.left));
+    const to = Math.max(...targets.map((t) => t.rect.right));
+    for (let x = from; x <= to; x += 1) {
+      expect(resolveBoardColumn({ x, y: 200 }, targets)).not.toBeNull();
+    }
+  });
+
+  it('flips between two columns at the middle of the gutter they share', () => {
+    // Column 0 spans x 0..280 and column 1 spans 292..572, so their centres
+    // are 140 and 432 and the flip is at 286 — Notion's above/below midpoint
+    // rule (§C-II.4) read sideways.
+    const targets = layout([{ key: '', columns: 2 }]);
+    expect(resolveBoardColumn({ x: 285, y: 200 }, targets)).toBe('/c0');
+    expect(resolveBoardColumn({ x: 287, y: 200 }, targets)).toBe('/c1');
+  });
+
+  it('resolves the SWIMLANE first, so a card can be pointed into another lane', () => {
+    // The same x in two lanes is two different columns. An overlap test scored
+    // by the dragged card's own box could hand a card straddling both lanes to
+    // the wrong one; the pointer says which lane it is in.
+    const targets = layout([
+      { key: 'alpha', columns: 2 },
+      { key: 'beta', columns: 2 },
+    ]);
+    expect(resolveBoardColumn({ x: 100, y: 200 }, targets)).toBe('alpha/c0');
+    expect(resolveBoardColumn({ x: 100, y: 600 }, targets)).toBe('beta/c0');
+  });
+
+  it('the vertical gap BETWEEN two lanes belongs to one of them, not to nothing', () => {
+    // 32px of swimlane heading and margin separates the lanes and no column
+    // occupies it; the midpoint partition still hands every pixel to a lane.
+    const targets = layout([
+      { key: 'alpha', columns: 1 },
+      { key: 'beta', columns: 1 },
+    ]);
+    for (let y = HEIGHT; y <= HEIGHT + 32; y += 1) {
+      expect(resolveBoardColumn({ x: 100, y }, targets)).not.toBeNull();
+    }
+  });
+
+  it('carrying a card off the board commits nothing', () => {
+    // Off the ends is deliberately still no target, as everywhere else this
+    // rule is spent: dragging a card out past the last column and letting go
+    // is not a drop.
+    const targets = layout([{ key: '', columns: 2 }]);
+    expect(resolveBoardColumn({ x: 700, y: 200 }, targets)).toBeNull();
+    expect(resolveBoardColumn({ x: -40, y: 200 }, targets)).toBeNull();
+    expect(resolveBoardColumn({ x: 100, y: -40 }, targets)).toBeNull();
+    expect(resolveBoardColumn({ x: 100, y: 900 }, targets)).toBeNull();
+  });
+
+  it('a lane key is read from the target, never parsed out of its path', () => {
+    // Column paths are `groupTree`'s to shape and a band key is a frontmatter
+    // value, so two lanes' columns can share every prefix a parser could take.
+    // These two are written so that deriving the lane from the id — the
+    // dashboard's rule, which its own slot ids can afford — collapses them
+    // into one lane called `g`, and a pointer sitting in the LOWER lane then
+    // resolves to a column of the upper one.
+    const targets: BoardTarget[] = [
+      { id: 'g/c0', lane: 'alpha', rect: { top: 0, bottom: 100, left: 0, right: 280 } },
+      { id: 'g/c1', lane: 'beta', rect: { top: 300, bottom: 400, left: 292, right: 572 } },
+    ];
+    expect(resolveBoardColumn({ x: 100, y: 50 }, targets)).toBe('g/c0');
+    expect(resolveBoardColumn({ x: 400, y: 350 }, targets)).toBe('g/c1');
+    // The lower lane holds no column at x 100, so pointing there is off the
+    // end of that lane — never a reach back up into the lane above.
+    expect(resolveBoardColumn({ x: 100, y: 350 }, targets)).toBeNull();
+  });
+
+  // GUARD, not a behaviour: a board with no columns renders an empty state
+  // and no DndContext, so nothing can reach this. It is here because the two
+  // stages both spread rects into `Math.min`/`Math.max`, and an empty spread
+  // is `Infinity` — a shape that answers "everywhere" rather than "nowhere".
+  it('an empty board offers nothing to hit (guard)', () => {
+    expect(resolveBoardColumn({ x: 0, y: 0 }, [])).toBeNull();
+  });
+});
+
+/**
  * A live card drag owns Escape (M46.2).
  *
  * dnd-kit cancels the drag correctly, but from a `document` bubble listener
@@ -671,7 +791,13 @@ describe('a live board drag owns Escape (M46.2)', () => {
     card.focus();
     fireEvent.keyDown(card, { key: ' ', code: 'Space' });
     // Vacuity guard: with no drag in flight this case is about nothing.
-    expect(announced()).toContain('Picked up draggable item');
+    // Matched on the ITEM rather than on the pick-up sentence, because since
+    // M46.2 Task 5 the board resolves a column from the pointer — or, for this
+    // keyboard drag, from the card's own centre — so a drag has a target from
+    // its first frame and the pick-up announcement is superseded by the first
+    // "moved over" in the same tick. Either sentence proves what the guard is
+    // for: a drag is live, and it is this card's.
+    expect(announced()).toContain(card.getAttribute('data-path'));
     await new Promise((r) => setTimeout(r, 0));
     return card;
   };
@@ -732,5 +858,161 @@ describe('a live board drag owns Escape (M46.2)', () => {
     // A leaked gesture layer sits on the stack forever, and every later Escape
     // in the app finds it there instead of the surface it was aimed at.
     expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('sends a 40% clone and leaves the card where it was (M46.2)', async () => {
+    board();
+    const card = screen.getAllByTestId('board-card')[0];
+    expect(card.getAttribute('data-drag-id')).toBe(card.getAttribute('data-path'));
+    expect(screen.queryByTestId('drag-layer')).toBeNull();
+
+    await pickUp();
+
+    const ghost = screen.getByTestId('drag-ghost');
+    expect(ghost.style.opacity).toBe('0.4');
+    expect(ghost.children).toHaveLength(1);
+    // The third grammar, gone: the card used to BE the ghost — translated at
+    // 1:1 pointer delta, dimmed to 0.6 and lifted to z-index 20, leaving a
+    // hole behind it (baseline §D2/D3). It stays put, at full strength.
+    expect(card.style.opacity).toBe('');
+    expect(card.style.zIndex).toBe('');
+    expect(card.style.transform).toBe('');
+    // A duplicated `data-testid` would make `getAllByTestId('board-card')`
+    // count double for the length of every drag.
+    expect(ghost.querySelectorAll('[data-testid]')).toHaveLength(0);
+  });
+
+  it('the ghost and the lit line go together on Escape (M46.2)', async () => {
+    board();
+    const card = await pickUp();
+    const lit = () =>
+      [...document.querySelectorAll('[data-line]')].filter(
+        (l) => l.getAttribute('data-lit') === 'true',
+      );
+    // One pointer, one column — jsdom's rects are all 0x0, so WHICH column is
+    // arbitrary here and only the count is the claim.
+    expect(lit()).toHaveLength(1);
+    // Both halves have to be there for "go together" to mean anything.
+    expect(screen.queryByTestId('drag-layer')).not.toBeNull();
+
+    fireEvent.keyDown(card, { key: 'Escape', code: 'Escape' });
+
+    expect(screen.queryByTestId('drag-layer')).toBeNull();
+    expect(lit()).toHaveLength(0);
+  });
+});
+
+/**
+ * The board's drop indicator (M46.2 Task 5).
+ *
+ * It was a whole-column background wash — `--cortex-50` at full opacity over a
+ * measured 280 x 2040px area, no transition, and carrying no position at all
+ * (baseline §D4). It is the reference's measured COLUMN variant now.
+ */
+describe('BoardView drop indicator (M46.2)', () => {
+  beforeEach(() => resetLayers());
+  afterEach(() => resetLayers());
+
+  const boardOf = (extra?: Partial<Presentation>) => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
+    render(
+      <BoardView
+        filtered={false}
+        entries={items}
+        presentation={{ ...presentation, ...extra }}
+        schema={schema}
+      />,
+    );
+  };
+
+  it('every column wears its own line, hugging the column and nothing wider', () => {
+    boardOf();
+    const columns = screen.getAllByTestId('board-column');
+    expect(columns.length).toBeGreaterThan(1);
+    for (const column of columns) {
+      const path = column.getAttribute('data-column-path');
+      const line = document.querySelector(`[data-line="${path}"]`);
+      // A child of the TARGET (§C-II.3), so it takes that column's own box
+      // rather than a fixed width the container chose.
+      expect(line?.closest('[data-testid="board-column"]')).toBe(column);
+    }
+    // Exactly one line per column — a second host would light one drop point
+    // twice.
+    expect(document.querySelectorAll('[data-line]')).toHaveLength(columns.length);
+  });
+
+  it('a sub-grouped board draws one line per column, in every lane', () => {
+    // The lane case is the one a path-parsing shortcut breaks: every lane has
+    // a "Doing", so a line keyed on the group KEY would light N columns at
+    // once. It is keyed on the column's path, which is unique per node.
+    boardOf({ group: [{ field: 'status' }, { field: 'assignee' }] });
+    expect(screen.getAllByTestId('board-swimlane').length).toBeGreaterThan(1);
+    const columns = screen.getAllByTestId('board-column');
+    for (const column of columns) {
+      const line = column.querySelector('[data-line]');
+      expect(line?.getAttribute('data-line')).toBe(column.getAttribute('data-column-path'));
+    }
+    expect(document.querySelectorAll('[data-line]')).toHaveLength(columns.length);
+  });
+
+  it('the line carries the measured values, and starts unlit', () => {
+    boardOf();
+    const line = document.querySelector('[data-line]');
+    // 4px on the leading edge, full height, accent at 43%, radius 0,
+    // z-index 88, pointer-transparent — and `motion-move`, so travel between
+    // two columns cross-fades over one declared duration instead of snapping.
+    expect(line?.className).toContain('w-1');
+    expect(line?.className).toContain('inset-y-0');
+    expect(line?.className).toContain('start-0');
+    expect(line?.className).toContain('bg-cortex-500/43');
+    expect(line?.className).toContain('rounded-none');
+    expect(line?.className).toContain('z-[88]');
+    expect(line?.className).toContain('pointer-events-none');
+    expect(line?.className).toContain('motion-move');
+    expect(line?.className).toContain('opacity-0');
+    expect(line?.getAttribute('data-side')).toBe('start');
+  });
+
+  it('an empty column is a target like any other, with no special case', () => {
+    // "Done" holds nothing in the fixture. The line is a child of the COLUMN,
+    // so a column with no cards has the same target and the same mark as a
+    // full one — which is the reason the indicator is not hung on a card.
+    boardOf();
+    const done = screen
+      .getAllByTestId('board-column')
+      .find((c) => c.getAttribute('data-group-key') === 'done');
+    expect(done?.querySelectorAll('[data-testid="board-card"]')).toHaveLength(0);
+    expect(done?.querySelector('[data-line]')).not.toBeNull();
+  });
+
+  it('the column under the pointer paints no wash — the line says it instead', async () => {
+    // Asserted with a drag IN FLIGHT and a column actually `isOver`. Read at
+    // rest this case could not tell the wash from its own absence: nothing is
+    // over anything, so the old `isOver ? 'var(--cortex-50)' : tint` and a
+    // plain `tint` render the same bytes.
+    boardOf({ colorColumns: true });
+    const card = screen.getAllByTestId('board-card')[0];
+    card.focus();
+    fireEvent.keyDown(card, { key: ' ', code: 'Space' });
+    await new Promise((r) => setTimeout(r, 0));
+    // Vacuity guard: a column IS the target, so a wash would be painted now.
+    const lit = [...document.querySelectorAll('[data-line]')].filter(
+      (l) => l.getAttribute('data-lit') === 'true',
+    );
+    expect(lit).toHaveLength(1);
+
+    for (const column of screen.getAllByTestId('board-column')) {
+      const stack = column.querySelector<HTMLElement>('[data-tinted]');
+      expect(stack?.style.background).not.toContain('cortex');
+    }
+    // And the tinted column still shows the colour the user chose for it.
+    const tinted = screen
+      .getAllByTestId('board-column')
+      .map((c) => c.querySelector<HTMLElement>('[data-tinted]')?.style.background)
+      .filter((bg) => bg !== undefined && bg !== '' && bg !== 'transparent');
+    expect(tinted.length).toBeGreaterThan(0);
+    fireEvent.keyDown(card, { key: 'Escape', code: 'Escape' });
   });
 });

@@ -8,9 +8,11 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { CollisionDetection, DragEndEvent } from '@dnd-kit/core';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useDndGesture } from '@/hooks/useDragGesture';
+import { DragGhostLayer, InsertionLine } from '@/components/ui/BlockDrag';
+import { alongX, resolveDropTarget } from '@/hooks/dropPartition';
 import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FieldChip } from '@/views/FieldChip';
@@ -118,6 +120,98 @@ function toColumns(nodes: GroupNode[], lane: BoardColumnNode['lane']): BoardColu
   }));
 }
 
+/** One column as the resolver sees it: an axis-aligned box and the lane it
+ * belongs to. `DOMRect` and dnd-kit's `ClientRect` both satisfy the rect. */
+export interface BoardTarget {
+  id: string;
+  /** The swimlane's key, or `''` on a board with no sub-grouping. */
+  lane: string;
+  rect: { top: number; bottom: number; left: number; right: number };
+}
+
+/**
+ * Which column a card drag is pointing at (M46.2 Task 5) — `dropPartition`'s
+ * rule applied once per axis, because a board's targets are laid out in two
+ * dimensions.
+ *
+ * The defect it closes is the one the baseline measured on the canvas
+ * (§D7/D9), latent here for a different reason. dnd-kit's default
+ * `rectIntersection` scores a target by how much the DRAGGED rect overlaps
+ * it, so on a board the winner was decided by where the card's own box had
+ * got to rather than by where the user was pointing — a 280px card and 280px
+ * columns put those up to 140px apart, and on a sub-grouped board the same
+ * rule let a card whose box straddled two lanes land in the wrong one.
+ *
+ * The partition instead, in two stages, each a column of siblings on one axis:
+ *
+ * 1. the swimlanes partition Y — a lane is its columns' rects taken together,
+ *    so the vertical gap between two lanes still belongs to one of them;
+ * 2. inside the resolved lane, the columns partition X, and the flip between
+ *    two neighbours is the midpoint of their centres — the middle of the gap
+ *    they share, which is Notion's above/below rule read sideways (§C-II.4).
+ *
+ * Off the ends is still nothing, as everywhere else this rule is spent:
+ * carrying a card past the last column and letting go commits no move.
+ */
+export function resolveBoardColumn(
+  point: { x: number; y: number },
+  targets: BoardTarget[],
+): string | null {
+  const lanes = new Map<string, BoardTarget[]>();
+  for (const t of targets) {
+    const held = lanes.get(t.lane);
+    if (held === undefined) lanes.set(t.lane, [t]);
+    else held.push(t);
+  }
+  const laneAt = resolveDropTarget(
+    point.y,
+    [...lanes].map(([id, members]) => ({
+      id,
+      rect: {
+        top: Math.min(...members.map((m) => m.rect.top)),
+        bottom: Math.max(...members.map((m) => m.rect.bottom)),
+      },
+    })),
+  );
+  if (laneAt === null) return null;
+  return resolveDropTarget(
+    point.x,
+    (lanes.get(laneAt) ?? []).map((m) => ({ id: m.id, rect: alongX(m.rect) })),
+  );
+}
+
+/**
+ * `resolveBoardColumn` as dnd-kit's collision detection.
+ *
+ * The POINTER decides, and falls back to the centre of the rect being moved
+ * only for a keyboard drag, which reports no pointer at all. That fallback is
+ * not the primary here the way it is on the dashboard: what a dashboard drags
+ * is a 16x24 grip whose centre is the pointer to within a few pixels, and what
+ * a board drags is the whole card.
+ */
+export const boardCollision: CollisionDetection = ({
+  collisionRect,
+  droppableRects,
+  droppableContainers,
+  pointerCoordinates,
+}) => {
+  const targets: BoardTarget[] = [];
+  for (const container of droppableContainers) {
+    const rect = droppableRects.get(container.id);
+    if (rect === undefined) continue;
+    const lane: unknown = container.data.current?.lane;
+    targets.push({ id: String(container.id), lane: typeof lane === 'string' ? lane : '', rect });
+  }
+  const hit = resolveBoardColumn(
+    pointerCoordinates ?? {
+      x: collisionRect.left + collisionRect.width / 2,
+      y: collisionRect.top + collisionRect.height / 2,
+    },
+    targets,
+  );
+  return hit === null ? [] : [{ id: hit }];
+};
+
 export function handleDragEnd(
   event: DragEndEvent,
   args: {
@@ -186,7 +280,7 @@ function BoardCard({
 }) {
   // M9.3: one open rule across all four layouts (see useOpenPath).
   const openPath = useOpenPath('in-place');
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef } = useDraggable({
     id: entry.path,
   });
   const dragKeyDown = listeners?.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
@@ -210,6 +304,19 @@ function BoardCard({
       ref={setNodeRef}
       data-testid="board-card"
       data-path={entry.path}
+      /**
+       * What `DragGhostLayer` clones (M46.2 Task 5, reference §C-II.2).
+       *
+       * The card used to be its own ghost: the REAL element translated at 1:1
+       * pointer delta while dimming to `opacity: 0.6` under a `z-index: 20`
+       * lift, so the thing under the cursor was a 60%-opaque original and the
+       * place it came from was an empty hole. That is neither of Notion's two
+       * grammars — it crosses C-I's mechanism with a bad ghost — and the
+       * baseline named it a third one (§D2/D3). A card moving between columns
+       * is a block move, so it takes C-II: the card stays exactly where it is
+       * at full strength, and a 40% copy of it follows the cursor.
+       */
+      data-drag-id={entry.path}
       {...listeners}
       {...attributes}
       onClick={() => openPath(entry.path)}
@@ -229,12 +336,9 @@ function BoardCard({
         dragKeyDown?.(e);
       }}
       style={{
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         borderLeft: `3px solid ${
           column.ghost || !column.color ? 'var(--n-300)' : resolveOptionColor(column.color).solid
         }`,
-        opacity: isDragging ? 0.6 : 1,
-        zIndex: isDragging ? 20 : undefined,
       }}
       className={`relative cursor-pointer rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
@@ -281,7 +385,14 @@ function BoardColumn({
   bandFields: string[];
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: column.path });
+  const { setNodeRef } = useDroppable({
+    id: column.path,
+    // Which swimlane this column sits in, so `boardCollision` can partition Y
+    // by lane before it partitions X by column. Carried as data rather than
+    // parsed back out of `column.path`: the path's shape is `groupTree`'s
+    // business and a key may contain anything a frontmatter value may.
+    data: { lane: column.lane?.key ?? '' },
+  });
   const metrics = CARD_METRICS[presentation.cardSize ?? 'medium'];
   // M16.20 — Notion's "Color columns". A ghost or uncoloured column gets the
   // neutral tint rather than nothing: half a board painted and half of it
@@ -293,14 +404,36 @@ function BoardColumn({
 
   return (
     <div
+      ref={setNodeRef}
       data-testid="board-column"
       data-group-key={column.key}
       // The droppable id, exposed so a test can prove the board never
       // registers two of them under one id (see BoardColumnNode).
       data-column-path={column.path}
-      className="flex-none"
+      className="relative flex-none"
       style={{ width: metrics.column }}
     >
+      {/* The drop indicator (M46.2 Task 5), replacing a 280 x 2040px wash of
+          `--cortex-50` at full opacity with the reference's measured COLUMN
+          variant (§C-II.3): 4px wide, full height, on the target's leading
+          edge, accent at 43%, radius 0, `z-index: 88`, cross-fading against
+          the column being left over the same `motion-move`.
+
+          It is a child of the column and not of a card, and that is a claim
+          about what a board drop DECIDES. A card's only stored position is
+          which band it is in: `handleDragEnd` writes the column's field (and
+          the lane's), and the rank inside a column is the view's own sort
+          chain — `groupEntries` preserves the caller's order and the caller
+          sorted (`grouping.ts`, `surface.ts:sortEntries`). There is no
+          per-card index to write, exactly as there is none for table rows
+          (`TableView.tsx:451`), and minting one is a schema decision rather
+          than a drag-polish one. So a line hung between two cards would draw
+          a rank the drop cannot honour — the card would land wherever the
+          sort put it — and a mark that names the column is the whole truth
+          about where the card is going. It is also why the empty column and
+          the space below the last card need no special case: the column IS
+          the target, cards or not, and it lights identically either way. */}
+      <InsertionLine gap={column.path} side="start" />
       <div className="flex items-center gap-[7px] px-1 pb-[9px]">
         <span
           className="box-border h-2.5 w-2.5 rounded-full"
@@ -319,12 +452,13 @@ function BoardColumn({
         </span>
       </div>
       <div
-        ref={setNodeRef}
         data-tinted={tinted ? 'true' : undefined}
         className={`flex min-h-[60px] flex-col gap-2 rounded-lg ${tinted ? 'p-1.5' : 'p-0.5'}`}
-        style={{
-          background: isOver ? 'var(--cortex-50)' : tinted ? tint : 'transparent',
-        }}
+        // The "Color columns" tint only. The drag-over wash that used to
+        // override it is the line above now: a target is told by a 4px mark,
+        // not by repainting a screen-height area, and a column that IS tinted
+        // could not show the wash and its own colour at once anyway.
+        style={{ background: tinted ? tint : 'transparent' }}
       >
         {column.entries.map((e) => (
           <BoardCard
@@ -496,7 +630,10 @@ export function BoardView({
           }
         />
       ) : (
-        <DndContext sensors={sensors} {...gesture}>
+        <DndContext sensors={sensors} collisionDetection={boardCollision} {...gesture}>
+          {/* The C-II ghost (M46.2 Task 5): a 40% clone of the dragged card
+              follows the cursor while the card itself stays put. */}
+          <DragGhostLayer />
           {lanes === null ? (
             <div className="flex items-start gap-3 overflow-x-auto">
               {columns.map((c) => (
