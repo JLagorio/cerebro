@@ -1114,14 +1114,34 @@ describe('DashboardView drag chrome (M44.4)', () => {
       // What DetailPanel and Dialog both register; their handlers ask the
       // stack who owns the keystroke.
       pushLayer('panel');
-      const grip = await pickUp();
-      expect(ownsEscape('panel')).toBe(false);
+      /**
+       * And a REAL listener in DetailPanel's own phase. The `ownsEscape`
+       * assertions around this read the stack BEFORE and AFTER the keystroke;
+       * the defect the review found was a layer released DURING it, which only
+       * a listener can see — dnd-kit cancels from `document` bubble, one phase
+       * before the `window` bubble the panel listens on.
+       */
+      const panelClosed = vi.fn();
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && ownsEscape('panel')) panelClosed();
+      };
+      window.addEventListener('keydown', onKey);
 
-      fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
+      try {
+        const grip = await pickUp();
+        expect(ownsEscape('panel')).toBe(false);
 
-      // dnd-kit's cancel still ran — the proof that the layer did not swallow.
-      expect(announced()).toContain('Dragging was cancelled');
-      expect(ownsEscape('panel')).toBe(true);
+        fireEvent.keyDown(grip, { key: 'Escape', code: 'Escape' });
+
+        // dnd-kit's cancel still ran — the proof the layer did not swallow.
+        expect(announced()).toContain('Dragging was cancelled');
+        expect(panelClosed).not.toHaveBeenCalled();
+        // Handed back, but only once the dispatch is over.
+        await new Promise((r) => setTimeout(r, 0));
+        expect(ownsEscape('panel')).toBe(true);
+      } finally {
+        window.removeEventListener('keydown', onKey);
+      }
     });
 
     it('hands the layer back on a drop too', async () => {
