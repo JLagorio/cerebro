@@ -184,17 +184,23 @@
 
 /* Page columns (M48.1).
  *
- * The whole layout is these three rules over the nesting BlockNote already
- * does. A `columnList` block renders nothing; its CHILDREN, which BlockNote
- * puts in a sibling `.bn-block-group`, become a flex row. A `column` renders
- * nothing either, and its own children group goes on stacking the way every
- * block group stacks. There is no second document model here, only CSS.
+ * The layout is these rules over the nesting BlockNote already does. A
+ * `columnList` block renders nothing; its CHILDREN, which BlockNote puts in a
+ * sibling `.bn-block-group`, become a flex row. A `column` renders nothing
+ * either, and its own children group goes on stacking the way every block
+ * group stacks. There is no second document model here, only CSS.
  *
- * `--cb-column-width` is set by ColumnSizer on the flex item itself, because
- * the ratio lives two levels below it in the DOM and CSS cannot reach upward.
+ * The doubled `:has()` is not defensive vagueness. MEASURED: a custom React
+ * block is wrapped in an extra `.react-renderer` element in the browser and
+ * NOT in jsdom, so `> .bn-block-content` matches under test and nothing at
+ * all in the app — which is exactly the failure that passes every unit test
+ * and ships a page of stacked columns.
  */
 .cerebro-editor
-  .bn-block:has(> .bn-block-content[data-content-type='columnList'])
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList']
+  )
   > .bn-block-group {
   display: flex;
   align-items: flex-start;
@@ -202,14 +208,31 @@
 }
 
 .cerebro-editor
-  .bn-block:has(> .bn-block-content[data-content-type='columnList'])
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList']
+  )
   > .bn-block-group
   > .bn-block-outer {
   /* `min-width: 0` or a long word in one column pushes every other column off
      the page: the flex default is `min-width: auto`, which refuses to shrink
      below the content's intrinsic size. */
-  flex: var(--cb-column-width, 1) 1 0;
+  flex-basis: 0;
+  flex-shrink: 1;
   min-width: 0;
+}
+
+/* The default ratio, and it lives in a `:where()` on purpose.
+ *
+ * A column that wants a different ratio overrides this from a stylesheet of
+ * its own, rendered inside its node view — the only way a block can style the
+ * ancestor the browser actually lays out (see ColumnView in blocks.tsx). That
+ * rule is keyed on one `data-id`, so it is far less specific than the selector
+ * above; `:where()` drops this declaration's specificity to almost nothing so
+ * the more specific intent wins without anybody reaching for `!important`.
+ * Harmless on a block outer that is not a flex item, which ignores it. */
+.cerebro-editor :where(.bn-block-outer) {
+  flex-grow: 1;
 }
 
 /* The container blocks draw nothing. They are structure, and a structural

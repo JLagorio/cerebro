@@ -92,7 +92,13 @@ describe('a column list is nesting BlockNote already does', () => {
   /* The DOM shape the CSS depends on. A column is laid out by turning the
      SIBLING block group into a flex row, so if BlockNote ever renders children
      somewhere else the layout silently stops happening — with no error, and
-     with the page still showing every word in one long stack. */
+     with the page still showing every word in one long stack.
+
+     Read this test knowing what it CANNOT see: in a real browser BlockNote
+     wraps a custom React block in an extra `.react-renderer` element that
+     jsdom never creates. MEASURED, after a first version of the CSS matched
+     here and matched nothing in the app. The selectors in editor.css allow for
+     both, and only a browser can prove they do — e2e/columns.spec.ts. */
   it('renders each column as a block outer inside the list\u2019s sibling group', () => {
     const editor = editorWithNest();
     const host = document.createElement('div');
@@ -108,5 +114,19 @@ describe('a column list is nesting BlockNote already does', () => {
     expect(columns?.length).toBe(2);
     editor.mount(undefined as unknown as HTMLElement);
     host.remove();
+  });
+
+  /* This block renders a STYLESHEET — the only way a descendant can size the
+     ancestor the browser lays out. Without `toExternalHTML`, BlockNote derives
+     text/plain from the rendered text, so copying a column would put a CSS
+     selector on somebody's clipboard. */
+  it('puts the marker line on the clipboard, never the rule that sizes it', async () => {
+    const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+    const html = await editor.blocksToHTMLLossy([
+      { type: 'column', props: { width: 2 }, children: [{ type: 'paragraph', content: 'x' }] },
+    ] as never);
+    expect(html).toContain('::::column width=2');
+    expect(html).not.toContain('flex-grow');
+    expect(html).not.toContain('.cerebro-editor');
   });
 });

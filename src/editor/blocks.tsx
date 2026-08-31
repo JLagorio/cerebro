@@ -4,7 +4,12 @@ import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
 import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
-import { DEFAULT_COLUMN_WIDTH } from '@/engine/pageColumns';
+import {
+  BASE_MARKER_DEPTH,
+  DEFAULT_COLUMN_WIDTH,
+  openColumnMarker,
+  openListMarker,
+} from '@/engine/pageColumns';
 
 /**
  * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:
@@ -379,6 +384,7 @@ export const ColumnListBlock = createReactBlockSpec(
     // element rather than nothing at all because the block needs a node to
     // hang its data attributes and, in M48.4, its drop targets on.
     render: () => <div className="cb-column-list" aria-hidden />,
+    toExternalHTML: () => <p>{openListMarker(BASE_MARKER_DEPTH)}</p>,
   },
 );
 
@@ -392,13 +398,63 @@ export const ColumnBlock = createReactBlockSpec(
     content: 'none',
   },
   {
-    // Renders nothing, and does not render the ratio either: BlockNote hoists
-    // a custom block's props onto the content element as data attributes
-    // itself, omitting any that still sit at their default. Getting that value
-    // onto the element the browser actually lays out is `syncColumnWidths`'
-    // job (columnLayout.ts) — that element is two levels ABOVE anything this
-    // render can see, and MEASURED, a `useLayoutEffect` here runs before
-    // ProseMirror has attached the node view and never finds it.
-    render: () => <div className="cb-column" aria-hidden />,
+    render: (props) => (
+      <ColumnView
+        id={props.block.id}
+        width={Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH)}
+      />
+    ),
+    /**
+     * What leaves the app when a selection crosses a column.
+     *
+     * Without this BlockNote falls back to the block's RENDERED text — and
+     * this block renders a stylesheet, so copying a column would put a CSS
+     * rule on the clipboard. Same defect the mermaid block documents above,
+     * with a sharper edge: there the leak was chrome labels, here it is a
+     * selector. The marker line is what markdown.ts already demotes this
+     * block to for the disk, so a paste into a text editor is the file.
+     */
+    toExternalHTML: (props) => (
+      <p>
+        {openColumnMarker(
+          BASE_MARKER_DEPTH + 1,
+          Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH),
+        )}
+      </p>
+    ),
   },
 );
+
+/**
+ * A column, and the one rule that sizes it.
+ *
+ * The element the browser lays out is this column's `.bn-block-outer`, two
+ * levels ABOVE anything a block can render — and it belongs to ProseMirror,
+ * which resets its attributes whenever it re-renders the node view. MEASURED
+ * in a browser, not assumed: a pass that wrote `--cb-column-width` onto that
+ * element reported moving two columns and left nothing behind, because
+ * ProseMirror had already wiped both the inline style and the marker
+ * attribute the probe went looking for. A `useLayoutEffect` inside the render
+ * fared worse still — it runs before ProseMirror attaches the node view, so
+ * it never found the ancestor at all.
+ *
+ * A stylesheet is how a descendant styles an ancestor. This one is rendered
+ * INSIDE the node view, so it lives and dies with the block and ProseMirror
+ * never touches it, and it is keyed on the `data-id` BlockNote already stamps
+ * on the block outer. Nothing is emitted for a column at the default ratio:
+ * the base rule in editor.css already says `flex: 1 1 0`, and a stylesheet
+ * per column on a page of ordinary columns is noise.
+ */
+function ColumnView({ id, width }: { id: string; width: number }) {
+  // BlockNote ids are uuids, but this string is interpolated into a
+  // stylesheet: anything that is not one does not get a rule.
+  const usable = /^[A-Za-z0-9_-]+$/.test(id) && Number.isFinite(width) && width > 0;
+  return (
+    <>
+      {width !== DEFAULT_COLUMN_WIDTH && usable && (
+        <style>{`.cerebro-editor .bn-block-outer[data-id="${id}"]{flex-grow:${width};}`}</style>
+      )}
+      <div className="cb-column" aria-hidden />
+    </>
+  );
+}
