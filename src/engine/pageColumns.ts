@@ -183,3 +183,46 @@ export function tightenColumnMarkers(markdown: string): string {
   }
   return out.join('\n');
 }
+
+/**
+ * The narrowest a column may be dragged, as a share of its pair.
+ *
+ * Not zero, and not a pixel floor: a ratio that can reach zero is a column you
+ * can make disappear, with its contents still in the file and nowhere on the
+ * page. 15% is narrow enough to be a real sidebar and wide enough to still
+ * hold a word.
+ */
+export const MIN_COLUMN_SHARE = 0.15;
+
+/**
+ * Two adjacent columns after the gutter between them has been dragged.
+ *
+ * Only the PAIR changes. The columns either side of them keep the ratios they
+ * had, so dragging one gutter cannot reflow the whole row — which is what
+ * makes a multi-column layout adjustable rather than a balancing act.
+ *
+ * The pair's combined ratio is conserved, so the arithmetic is a share of a
+ * fixed total rather than an accumulation: a fast drag lands where the pointer
+ * is rather than drifting away from it (the lesson `ResizeHandle` records).
+ */
+export function resizeColumnPair(
+  left: number,
+  right: number,
+  deltaPx: number,
+  pairWidthPx: number,
+): [number, number] {
+  const total = left + right;
+  // A pair with no width on screen cannot be resized meaningfully, and the
+  // division would be by zero.
+  if (pairWidthPx <= 0 || total <= 0) return [left, right];
+  const leftPx = (left / total) * pairWidthPx + deltaPx;
+  const share = Math.min(1 - MIN_COLUMN_SHARE, Math.max(MIN_COLUMN_SHARE, leftPx / pairWidthPx));
+  return [round2(share * total), round2((1 - share) * total)];
+}
+
+/**
+ * Two decimals, because the ratio is written into somebody's file. A drag that
+ * recorded `1.7000000000000002` would put that in the markdown, and the next
+ * person to read it would wonder what it meant.
+ */
+const round2 = (n: number): number => Math.round(n * 100) / 100;

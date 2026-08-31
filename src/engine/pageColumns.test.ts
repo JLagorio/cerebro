@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   closeMarker,
   DEFAULT_COLUMN_WIDTH,
+  MIN_COLUMN_SHARE,
+  resizeColumnPair,
   loosenColumnMarkers,
   openColumnMarker,
   openListMarker,
@@ -169,5 +171,50 @@ describe('loosening and tightening', () => {
       ':::',
     ].join('\n');
     expect(tightenColumnMarkers(loosenColumnMarkers(nested))).toBe(nested);
+  });
+});
+
+describe('dragging the gutter between two columns', () => {
+  /* 600px of pair, split 1:1, so each column is 300px wide. */
+  const pair = (delta: number, left = 1, right = 1) => resizeColumnPair(left, right, delta, 600);
+
+  it('does nothing when the gutter does not move', () => {
+    expect(pair(0)).toEqual([1, 1]);
+  });
+
+  it('moves the split by the distance dragged', () => {
+    // 300 + 150 = 450 of 600 = three quarters of a combined ratio of 2.
+    expect(pair(150)).toEqual([1.5, 0.5]);
+    expect(pair(-150)).toEqual([0.5, 1.5]);
+  });
+
+  /* Only the PAIR changes. Conserving their combined ratio is what stops one
+     gutter from reflowing the whole row. */
+  it('conserves the pair’s combined ratio', () => {
+    for (const delta of [-200, -40, 0, 40, 200]) {
+      const [l, r] = pair(delta, 2, 3);
+      expect(l + r).toBeCloseTo(5, 5);
+    }
+  });
+
+  /* A ratio that can reach zero is a column you can make disappear, with its
+     contents still in the file and nowhere on the page. */
+  it('refuses to let either column vanish, however far it is dragged', () => {
+    const [farLeft, farRight] = pair(-10_000);
+    expect(farLeft / (farLeft + farRight)).toBeCloseTo(MIN_COLUMN_SHARE, 5);
+    const [l, r] = pair(10_000);
+    expect(r / (l + r)).toBeCloseTo(MIN_COLUMN_SHARE, 5);
+  });
+
+  /* The ratio is written into somebody's markdown file. */
+  it('rounds to two decimals, so nothing floating-point reaches the file', () => {
+    const [l, r] = resizeColumnPair(1, 1, 37, 511);
+    expect(String(l)).toMatch(/^\d+(\.\d{1,2})?$/);
+    expect(String(r)).toMatch(/^\d+(\.\d{1,2})?$/);
+  });
+
+  it('answers unchanged rather than dividing by zero on a pair with no width', () => {
+    expect(resizeColumnPair(1, 2, 50, 0)).toEqual([1, 2]);
+    expect(resizeColumnPair(0, 0, 50, 600)).toEqual([0, 0]);
   });
 });

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
+import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
@@ -398,12 +399,31 @@ export const ColumnBlock = createReactBlockSpec(
     content: 'none',
   },
   {
-    render: (props) => (
-      <ColumnView
-        id={props.block.id}
-        width={Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH)}
-      />
-    ),
+    render: (props) => {
+      const siblings = (props.editor.getParentBlock?.(props.block)?.children ?? []) as {
+        id: string;
+      }[];
+      const at = siblings.findIndex((c) => c.id === props.block.id);
+      return (
+        <ColumnView
+          id={props.block.id}
+          width={Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH)}
+          // The handle belongs to the column on the RIGHT of a gutter, because
+          // that is the only column sure there IS one. The first column of a
+          // row has nothing to its left, so it renders no handle — a row of N
+          // columns gets N-1 gutters, which is how many a row of N columns
+          // has. Not rendered rather than hidden: a hidden handle is still in
+          // the document, still counted, and still something to explain.
+          gutter={at > 0}
+          onResize={(left, right) => {
+            const before = siblings[at - 1];
+            if (before === undefined) return;
+            props.editor.updateBlock(before.id as never, { props: { width: left } } as never);
+            props.editor.updateBlock(props.block, { props: { width: right } } as never);
+          }}
+        />
+      );
+    },
     /**
      * What leaves the app when a selection crosses a column.
      *
@@ -445,7 +465,17 @@ export const ColumnBlock = createReactBlockSpec(
  * the base rule in editor.css already says `flex: 1 1 0`, and a stylesheet
  * per column on a page of ordinary columns is noise.
  */
-function ColumnView({ id, width }: { id: string; width: number }) {
+function ColumnView({
+  id,
+  width,
+  gutter,
+  onResize,
+}: {
+  id: string;
+  width: number;
+  gutter: boolean;
+  onResize: (left: number, right: number) => void;
+}) {
   // BlockNote ids are uuids, but this string is interpolated into a
   // stylesheet: anything that is not one does not get a rule.
   const usable = /^[A-Za-z0-9_-]+$/.test(id) && Number.isFinite(width) && width > 0;
@@ -454,7 +484,9 @@ function ColumnView({ id, width }: { id: string; width: number }) {
       {width !== DEFAULT_COLUMN_WIDTH && usable && (
         <style>{`.cerebro-editor .bn-block-outer[data-id="${id}"]{flex-grow:${width};}`}</style>
       )}
-      <div className="cb-column" aria-hidden />
+      <div className="cb-column" aria-hidden>
+        {gutter && <ColumnGutter id={id} onResize={onResize} />}
+      </div>
     </>
   );
 }

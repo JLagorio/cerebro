@@ -170,9 +170,9 @@ it is wrong.
 | **M48.1** | The `columnList`/`column` block specs, the CSS that lays them out, and the schema registration. Renders a hand-built nest; nothing creates one yet. | **done** `8977879` |
 | **M48.2** | The markdown round trip: loosen/tighten, `promoteColumns`/`demoteColumns`, byte-stability tests, and the malformed-input tolerance. | **done** `536b478` |
 | **M48.3** | The `/` menu: **2 / 3 / 4 / 5 columns**, and the "turn into" variants that wrap the current block. | **done** `aa43061` |
-| **M48.4** | Drag rebuilt on `useDragGesture`: the grip, the insertion line, and drop targets that include the gaps between and inside columns. | **done** |
-| **M48.5** | Column resize by dragging the gutter, writing `width=`. | |
-| **M48.6** | Demo-vault content that uses a column layout. | |
+| **M48.4** | Drag rebuilt on `useDragGesture`: the grip, the insertion line, and drop targets that include the gaps between and inside columns. | **done** `1085054` |
+| **M48.5** | Column resize by dragging the gutter, writing `width=`. | **done** |
+| **M48.6** | Demo-vault content that uses a column layout. | **done** |
 
 ### What the built slices changed about the plan
 
@@ -211,6 +211,23 @@ it is wrong.
   greater depth rather than a rule about columns. The nesting ban is enforced
   where layouts are CREATED (the `/` menu), which is the only place it can be
   reached.
+- **M48.5 found the gutter already occupied.** BlockNote draws its side menu
+  24px to the LEFT of the block it is hovering, which for every column after
+  the first is the gutter — MEASURED, a 28px column gap put the menu (x 549, 48
+  wide) straight over the resize handle (x 553, 12 wide), and the handle became
+  unclickable the moment the pointer arrived to use it. The gap is 48px now,
+  which leaves a clear strip on the far side of the menu. It is also about what
+  Notion uses, but that is a coincidence rather than the reason.
+- **A React `onPointerDown` inside a custom block never fires.** ProseMirror
+  stops the event on its way up, so it never reaches the React root where React
+  19 dispatches from. MEASURED: a synthetic `dispatchEvent` on the element ran
+  the handler and a real pointer did not. The gutter binds `pointerdown`
+  natively on its own element instead. The block grip has no such trouble —
+  the side menu is drawn OUTSIDE the ProseMirror content.
+- **The column element could not stay `display: none`.** It hosts the gutter
+  handle, so it is taken out of flow and stretched over the column instead. The
+  first version of that rule was appended after the `display: none` one and set
+  only `position`, so the hiding survived and the handle had no box at all.
 - **`isNoOpDrop` cannot read document order alone**, and the case that proves
   it is this milestone's own: the block directly below a paragraph may be the
   first block of a column, so a drop that looks like "where it already was" by

@@ -176,3 +176,106 @@ test('turn into moves the block you are standing in, and does not leave a copy',
   expect(lines.filter((l) => l.includes('Beside me'))).toHaveLength(1);
   expect(lines.indexOf(':::columns')).toBeLessThan(lines.findIndex((l) => l.includes('Beside me')));
 });
+
+/**
+ * Dragging the gutter (M48.5).
+ *
+ * Asserted in geometry AND against the file, because the two can disagree in
+ * both directions: a handle that moves pixels and writes nothing loses the
+ * layout on reload, and one that writes a ratio the browser does not honour is
+ * a number in a file that means nothing.
+ */
+test('dragging the gutter re-proportions the pair and writes the new ratios', async ({ page }) => {
+  await openTwoUp(page);
+  const [beforeLeft, beforeRight] = await columnBoxes(page);
+
+  const gutter = page.getByTestId('column-gutter');
+  await expect(gutter).toHaveCount(1); // two columns, one gutter
+  const box = await gutter.boundingBox();
+  if (box === null) throw new Error('no gutter');
+
+  // Drag it 120px to the RIGHT: the left column grows, the right shrinks.
+  await page.mouse.move(box.x + box.width / 2, box.y + 40);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i += 1) {
+    await page.mouse.move(box.x + box.width / 2 + 20 * i, box.y + 40);
+  }
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => (await columnBoxes(page))[0].width, { timeout: 6_000 })
+    .toBeGreaterThan(beforeLeft.width + 60);
+  const [afterLeft, afterRight] = await columnBoxes(page);
+  expect(afterRight.width).toBeLessThan(beforeRight.width - 60);
+  // The pair still spans what it spanned: one gutter does not reflow the row.
+  expect(afterLeft.width + afterRight.width).toBeCloseTo(beforeLeft.width + beforeRight.width, 0);
+
+  // And it reached the file, as ratios rather than pixels.
+  await expect
+    .poll(() => readMockFile(page, 'delivery/how-we-schedule.md'), { timeout: 6_000 })
+    .toMatch(/::::column width=\d+(\.\d+)?\n## Left/);
+});
+
+/* A pointer-only resize is a resize keyboard users do not have. */
+test('the gutter resizes from the keyboard too', async ({ page }) => {
+  await openTwoUp(page);
+  const [beforeLeft] = await columnBoxes(page);
+  await page.getByTestId('column-gutter').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect
+    .poll(async () => (await columnBoxes(page))[0].width, { timeout: 6_000 })
+    .toBeGreaterThan(beforeLeft.width);
+});
+
+/* The first column of a row has nothing to its left. A handle there would
+   resize a pair that does not exist. */
+test('there are N-1 gutters for N columns', async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Expand Delivery' }).click();
+  await page
+    .getByTestId('collection-node-doc')
+    .filter({ hasText: 'How we schedule' })
+    .getByRole('button', { name: 'How we schedule' })
+    .click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
+  const editor = page.locator('[data-testid="markdown-editor"] .bn-editor');
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/4 columns');
+  await page.getByText('An empty side-by-side layout').first().click();
+  await expect.poll(async () => (await columnBoxes(page)).length, { timeout: 6_000 }).toBe(4);
+  await expect(page.getByTestId('column-gutter')).toHaveCount(3);
+});
+
+/**
+ * The corpus uses the feature (M48.6).
+ *
+ * Not a decoration: a layout nobody's own vault uses is a layout whose round
+ * trip nothing exercises on a real file with real neighbours. Strategy's page
+ * puts the OKR tree beside the prose that explains how to read it, which is
+ * the arrangement the whole milestone exists to make possible — and the
+ * database block inside a column proves the contents stay live blocks rather
+ * than becoming inert text.
+ */
+test('the demo vault has a page that uses columns, and it survives being opened', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Strategy', exact: true }).first().click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
+
+  await expect.poll(async () => (await columnBoxes(page)).length, { timeout: 10_000 }).toBe(2);
+  const [wide, narrow] = await columnBoxes(page);
+  // The tree gets twice the room, as the file asks.
+  expect(wide.width / narrow.width).toBeGreaterThan(1.8);
+  expect(narrow.x).toBeGreaterThan(wide.x + wide.width - 1);
+
+  // The database inside the column is a live block, not text.
+  await expect(page.getByTestId('database-block').first()).toBeVisible();
+
+  // Opening it and letting the debounce fire rewrites nothing.
+  const before = await readMockFile(page, 'strategy/strategy.md');
+  await page.waitForTimeout(1200);
+  expect(await readMockFile(page, 'strategy/strategy.md')).toBe(before);
+});

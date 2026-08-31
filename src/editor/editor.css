@@ -204,7 +204,14 @@
   > .bn-block-group {
   display: flex;
   align-items: flex-start;
-  gap: 28px;
+  /* 48px, and the number is measured rather than chosen for looks. BlockNote
+     draws its side menu 24px to the LEFT of the block it is hovering, which
+     for every column after the first is the gutter — MEASURED, a 28px gap put
+     the menu (x 549, 48 wide) straight over the resize handle (x 553, 12
+     wide) and the handle became unclickable the moment the pointer arrived.
+     48px leaves a clear strip on the far side of the menu for the handle to
+     live in. It is also, as it happens, about what Notion uses. */
+  gap: 48px;
 }
 
 .cerebro-editor
@@ -235,11 +242,11 @@
   flex-grow: 1;
 }
 
-/* The container blocks draw nothing. They are structure, and a structural
-   block that reserved a line of height would put a blank gap above every
-   column on the page. */
-.cerebro-editor .bn-block-content[data-content-type='columnList'],
-.cerebro-editor .bn-block-content[data-content-type='column'] {
+/* The list draws nothing. It is structure, and a structural block that
+   reserved a line of height would put a blank gap above every column on the
+   page. The COLUMN is not hidden the same way — it hosts the gutter handle,
+   and is taken out of flow instead. See the M48.5 block below. */
+.cerebro-editor .bn-block-content[data-content-type='columnList'] {
   display: none;
 }
 
@@ -264,4 +271,68 @@
 .cerebro-editor.cb-block-dragging {
   user-select: none;
   cursor: grabbing;
+}
+
+/* The gutter handle (M48.5).
+ *
+ * The column block renders nothing but this, so its content element stops
+ * being `display: none` and becomes the handle's host instead — taken out of
+ * flow so it still reserves no height, and stretched over the column so the
+ * handle can run the column's full depth the way Notion's does.
+ *
+ * `position: relative` is scoped to a COLUMN's block outer rather than put on
+ * every block outer: the side menu and the drop line are positioned against
+ * boxes further up, and a new containing block on every block in the document
+ * would move them.
+ */
+.cerebro-editor
+  .bn-block-outer:has(> .bn-block > * > .bn-block-content[data-content-type='column']),
+.cerebro-editor .bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type='column']) {
+  position: relative;
+}
+
+.cerebro-editor .bn-block-content[data-content-type='column'] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 0;
+  /* The column itself catches nothing; the handle inside it opts back in. */
+  pointer-events: none;
+}
+
+/* Sits in the gutter, on the far side of BlockNote's side menu — see the gap
+   above for why that side and not the middle. The first column of a row
+   renders no handle at all: ColumnView knows its index and does not draw one. */
+.cerebro-editor .cb-column-gutter {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -40px;
+  width: 12px;
+  cursor: col-resize;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+/* Shows what it does on hover, and stays visible while it is being dragged.
+   The bar is drawn by a child pseudo-element so the hit area stays 12px wide
+   while the line itself is 2px — the same split every resize handle in the app
+   uses (M11). */
+.cerebro-editor .cb-column-gutter:hover,
+.cerebro-editor .cb-column-gutter:focus-visible,
+.cerebro-editor .cb-column-gutter[data-active='true'] {
+  opacity: 1;
+}
+
+.cerebro-editor .cb-column-gutter::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cortex-500);
 }
