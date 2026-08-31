@@ -13,7 +13,15 @@ import { isTemplate } from '@/lib/templates';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
-import type { Entry, FieldDef, FieldOption, Presentation, Schema, ViewDefinition } from './types';
+import type {
+  Entry,
+  FieldDef,
+  FieldOption,
+  Presentation,
+  Schema,
+  TabDef,
+  ViewDefinition,
+} from './types';
 import { defaultColumnsFor, hasStatusField } from './columns';
 import { DEFAULT_PRESENTATION } from './views';
 
@@ -31,7 +39,7 @@ export const SYSTEM_TYPES: SystemTypeSpec[] = [
     // The meta-type: `type: Type` docs ARE the schema. Fully locked — its
     // reserved frontmatter keys are the schema format itself.
     name: 'Type',
-    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views'],
+    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views', 'display', 'tabs'],
     fallbackIcon: 'shapes',
     fallbackColor: '#8B7CF6',
   },
@@ -259,4 +267,15 @@ export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
       presentation: typePresentation(typeName, schema),
     },
   ];
+}
+
+/**
+ * The record page's tabs for a type (M44.5) — same contract as `typeViews`:
+ * a type that saved none gets the Overview default, and nothing is written
+ * to its Type doc until the user makes the tabs their own.
+ */
+export function typeTabs(typeName: string, schema: Schema): TabDef[] {
+  const saved = schema.types.get(typeName)?.tabs ?? [];
+  if (saved.length > 0) return saved;
+  return [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
 }

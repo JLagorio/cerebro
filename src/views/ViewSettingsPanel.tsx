@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Select } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -25,7 +26,9 @@ import {
   CARD_PREVIEWS,
   CARD_SIZES,
   CHART_AGGS,
+  CHART_HEIGHTS,
   CHART_KINDS,
+  CHART_SORTS,
   ROW_HEIGHTS,
   bandLevels,
   nestLevels,
@@ -34,11 +37,13 @@ import type {
   CardPreview,
   CardSize,
   ChartAgg,
+  ChartHeight,
   ChartKind,
+  ChartSort,
   ChartSpec,
   ChipStyle,
   ColumnSpec,
-  DashboardBlock,
+  DashboardSpec,
   FieldDef,
   GallerySpec,
   GroupSpec,
@@ -49,15 +54,10 @@ import type {
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import {
-  MAX_GROUP_DEPTH,
-  MAX_NEST_DEPTH,
-  MAX_SORT_KEYS,
-  moveSortKey,
-  nextDashboardBlockId,
-} from '@/engine/views';
+import { widgetCount } from '@/engine/dashboard';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
-import { useVaultStore } from '@/stores/vaultStore';
+import { PICKABLE_OPTION_COLORS } from '@/lib/swatch';
 import {
   VIEW_KINDS,
   axesFor,
@@ -127,6 +127,7 @@ const CHART_KIND_LABEL: Record<ChartKind, string> = {
   bar: 'Bar',
   line: 'Line',
   donut: 'Donut',
+  number: 'Number',
 };
 
 /** What one band of a chart is CALLED, per kind — the word the Chart page's
@@ -136,12 +137,19 @@ const CHART_PARTS: Record<ChartKind, string> = {
   bar: 'bars',
   line: 'points',
   donut: 'slices',
+  number: 'totals',
 };
 
 const CHART_AGG_LABEL: Record<ChartAgg, string> = {
   count: 'Count of records',
   sum: 'Sum',
   avg: 'Average',
+};
+
+const CHART_SORT_LABEL: Record<ChartSort, string> = {
+  'value-desc': 'Biggest first',
+  'value-asc': 'Smallest first',
+  label: 'A to Z',
 };
 
 const META_SORTS = [
@@ -378,8 +386,9 @@ export function ViewSettingsPanel({
               />
             )}
 
-            {/* M16.27: the chart's shape and measure. Its X axis is NOT here —
-                that is the Group row above, which every layout shares. */}
+            {/* The chart's shape, measure and axis (M16.27; since M44.3 the X
+                axis can be set on this page too — the Group row above stays
+                its default source). */}
             {isCharted(p.type) && (
               <Row
                 icon="chart-column"
@@ -389,12 +398,12 @@ export function ViewSettingsPanel({
               />
             )}
 
-            {/* M16.28: the dashboard's blocks. */}
+            {/* M16.28: the dashboard's widgets (rows of them since M44.4). */}
             {hasBlocks(p.type) && (
               <Row
                 icon="layout-dashboard"
                 label="Blocks"
-                value={String(p.dashboard?.blocks.length ?? 0)}
+                value={String(widgetCount(p.dashboard ?? { rows: [] }))}
                 onClick={() => setPage('blocks')}
               />
             )}
@@ -1184,16 +1193,19 @@ function CardsPage({
 }
 
 /**
- * The chart's shape and measure (M16.27).
+ * The chart's shape, measure and axes (M16.27; the axis decoupled in M44.3).
  *
- * Its X AXIS IS ABSENT ON PURPOSE — that is the Group row, the same control
- * every other layout uses, and duplicating it here would give a chart two
- * grouping settings that could disagree. The panel says so rather than leaving
- * the reader hunting for it.
+ * The X axis is set HERE when `xField` names a property, and falls back to
+ * the Group row — the control every other layout shares — when it does not,
+ * so a chart configured before `xField` existed keeps drawing what its
+ * grouping says. `groupBy` is the second dimension: stacked bars and
+ * multi-series lines. The footnote under the controls names whichever axis
+ * source is live.
  *
  * The properties offered for sum/average come from the `numeric` flag on
- * KIND_META, not a `kind === 'number'` compare — the rule M16.4 established
- * and M16.13 applied to grouping and sorting.
+ * KIND_META, not a field-kind `=== 'number'` compare — the rule M16.4
+ * established and M16.13 applied to grouping and sorting. (The CHART kind
+ * named `number` is unrelated: it is the big-stat layout, M44.2.)
  */
 function ChartPage({
   presentation,
@@ -1207,10 +1219,38 @@ function ChartPage({
   const NONE = '__none__';
   const chart = presentation.chart ?? {};
   const agg: ChartAgg = chart.agg ?? 'count';
+  const kind: ChartKind = chart.kind ?? 'bar';
+  const axisKind = kind === 'bar' || kind === 'line' || kind === 'donut';
+  const horizontal = kind === 'bar' && chart.horizontal === true;
   const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+  // The same roster the Group control offers (GROUPABLE_KINDS, M16.13): the
+  // axis and the second dimension band records exactly the way a grouping
+  // level does, so a field one can offer the other must offer too.
+  const groupable = fields.filter((f) => GROUPABLE_KINDS.has(f.kind));
   const band = bandLevels(presentation.group)[0];
 
+  /**
+   * Stores only DEVIATIONS (M44.2): a value equal to its default is a deleted
+   * key, a key the chosen kind cannot read is deleted too — so switching
+   * kinds sheds the settings the new kind has no use for, and a `number`
+   * chart keeps only kind/agg/value — and the whole `chart` block goes when
+   * nothing is off-default.
+   */
   const patch = (next: ChartSpec) => {
+    const nextKind = next.kind ?? 'bar';
+    const nextAxisKind = nextKind === 'bar' || nextKind === 'line' || nextKind === 'donut';
+    // `HBarChart` draws no grid and no axis by design — it labels its own
+    // bands — so on a horizontal bar those two keys would be stored words
+    // nothing reads.
+    const nextHorizontal = nextKind === 'bar' && next.horizontal === true;
+    // The axis keys (M44.3). `xField` is read by every axis kind — the donut
+    // bands its ring by it too — while `groupBy` splits bands into
+    // stacked/series parts, which only bar and line draw.
+    const nextXField = next.xField !== undefined && nextAxisKind ? next.xField : undefined;
+    const nextGroupBy =
+      next.groupBy !== undefined && (nextKind === 'bar' || nextKind === 'line')
+        ? next.groupBy
+        : undefined;
     const cleaned: ChartSpec = {
       ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
       ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
@@ -1219,7 +1259,59 @@ function ChartPage({
       ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
         ? { value: next.value }
         : {}),
-      ...(next.omitZero === true ? { omitZero: true } : {}),
+      ...(nextXField !== undefined ? { xField: nextXField } : {}),
+      ...(nextGroupBy !== undefined ? { groupBy: nextGroupBy } : {}),
+      // The legend's hidden rosters are written through onChartChange, never
+      // by a control on this page — so each is carried from the CURRENT spec,
+      // and dropped exactly when its own dimension changes (absent⇄present
+      // included): a new axis or groupBy mints new band/series keys, and the
+      // stale ones would silently hide nothing, or the wrong thing.
+      ...(chart.hidden !== undefined && nextAxisKind && nextXField === chart.xField
+        ? { hidden: chart.hidden }
+        : {}),
+      ...(chart.hiddenG !== undefined && nextGroupBy !== undefined && nextGroupBy === chart.groupBy
+        ? { hiddenG: chart.hiddenG }
+        : {}),
+      ...(next.omitZero === true && nextAxisKind ? { omitZero: true } : {}),
+      ...(nextHorizontal ? { horizontal: true } : {}),
+      ...(next.sort !== undefined && nextAxisKind ? { sort: next.sort } : {}),
+      ...(next.cumulative === true && (nextKind === 'bar' || nextKind === 'line')
+        ? { cumulative: true }
+        : {}),
+      // Height only drives the svg geometry BarChart/HBarChart/LineChart
+      // build — a donut is fixed at 240px and a number chart draws no svg.
+      ...(next.height !== undefined &&
+      next.height !== 'm' &&
+      (nextKind === 'bar' || nextKind === 'line')
+        ? { height: next.height }
+        : {}),
+      ...(next.palette !== undefined && nextAxisKind ? { palette: next.palette } : {}),
+      ...(next.colorByValue === true && next.palette !== undefined && nextAxisKind
+        ? { colorByValue: true }
+        : {}),
+      // hideGrid/hideAxis are read only by the Axes path — a vertical bar and
+      // a line. HBarChart labels its own bands and DonutChart has no axis.
+      ...(next.hideGrid === true && ((nextKind === 'bar' && !nextHorizontal) || nextKind === 'line')
+        ? { hideGrid: true }
+        : {}),
+      ...(next.hideAxis === true && ((nextKind === 'bar' && !nextHorizontal) || nextKind === 'line')
+        ? { hideAxis: true }
+        : {}),
+      // hideLabels is read only by the two bar layouts (vertical + horizontal).
+      ...(next.hideLabels === true && nextKind === 'bar' ? { hideLabels: true } : {}),
+      ...(next.smooth === true && nextKind === 'line' ? { smooth: true } : {}),
+      // `area` is single-series only: LineChart never reads it under groupBy
+      // (overlapping washes at one opacity are unreadable), so with a second
+      // dimension it would be a stored word nothing draws.
+      ...(next.area === true && nextKind === 'line' && nextGroupBy === undefined
+        ? { area: true }
+        : {}),
+      ...(next.hideDonutCenter === true && nextKind === 'donut' ? { hideDonutCenter: true } : {}),
+      // The legend defaults ON for a donut and OFF elsewhere, so "off-default"
+      // is a comparison against the kind, not a constant.
+      ...(next.legend !== undefined && nextAxisKind && next.legend !== (nextKind === 'donut')
+        ? { legend: next.legend }
+        : {}),
     };
     const { chart: _drop, ...rest } = presentation;
     onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, chart: cleaned });
@@ -1237,6 +1329,46 @@ function ChartPage({
           width="100%"
         />
       </div>
+      {/* The axis is the first question a chart answers, so its picker sits
+          above the measure. The sentinel keeps the M16.27 default honest:
+          "View grouping" IS where the axis comes from until xField says
+          otherwise (M44.3). */}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">X axis</span>
+          <Select
+            size="sm"
+            value={chart.xField ?? NONE}
+            options={[
+              { value: NONE, label: 'View grouping' },
+              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, xField: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+        </div>
+      )}
+      {/* Bar and line only: a donut ignores groupBy and a number chart reads
+          no axis at all — a picker there would write a key nothing reads. */}
+      {(kind === 'bar' || kind === 'line') && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Group by</span>
+          <Select
+            size="sm"
+            value={chart.groupBy ?? NONE}
+            options={[
+              { value: NONE, label: 'None' },
+              ...groupable.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, groupBy: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+        </div>
+      )}
       <div>
         <span className="mb-1 block text-xs font-medium text-n-600">Measure</span>
         <Select
@@ -1269,37 +1401,189 @@ function ChartPage({
           )}
         </div>
       )}
-      <div className="border-t border-n-100 pt-2">
-        <Switch
-          checked={chart.omitZero === true}
-          onChange={(omitZero) => patch({ ...chart, omitZero })}
-          label="Omit zero values"
-          ariaLabel="Omit zero values"
-        />
-      </div>
-      {/* M16.29: the shape is named from the chart kind. This said "bars"
-          whatever was selected, so the one sentence explaining where a chart's
-          X axis comes from described a bar chart to someone looking at a
-          donut. */}
+      {axisKind && (
+        <div className="border-t border-n-100 pt-2">
+          <Switch
+            checked={chart.omitZero === true}
+            onChange={(omitZero) => patch({ ...chart, omitZero })}
+            label="Omit zero values"
+            ariaLabel="Omit zero values"
+          />
+        </div>
+      )}
+      {kind === 'bar' && (
+        <div>
+          <Switch
+            checked={chart.horizontal === true}
+            onChange={(on) => patch({ ...chart, horizontal: on })}
+            label="Horizontal"
+            ariaLabel="Horizontal"
+          />
+        </div>
+      )}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Sort</span>
+          <Select
+            size="sm"
+            value={chart.sort ?? NONE}
+            options={[
+              { value: NONE, label: 'Declared order' },
+              ...CHART_SORTS.map((s) => ({ value: s, label: CHART_SORT_LABEL[s] })),
+            ]}
+            onChange={(e) =>
+              patch({
+                ...chart,
+                sort: e.target.value === NONE ? undefined : (e.target.value as ChartSort),
+              })
+            }
+            width="100%"
+          />
+        </div>
+      )}
+      {(kind === 'bar' || kind === 'line') && (
+        <div>
+          <Switch
+            checked={chart.cumulative === true}
+            onChange={(cumulative) => patch({ ...chart, cumulative })}
+            label="Cumulative"
+            ariaLabel="Cumulative"
+          />
+        </div>
+      )}
+      {/* Height only feeds the svg viewBox BarChart/HBarChart/LineChart share
+          — a donut is a fixed 240px ring and a number chart draws no svg. */}
+      {(kind === 'bar' || kind === 'line') && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Height</span>
+          <SegmentedControl
+            ariaLabel="Height"
+            options={CHART_HEIGHTS.map((h) => ({ value: h, label: h.toUpperCase() }))}
+            value={chart.height ?? 'm'}
+            onChange={(h) => patch({ ...chart, height: h as ChartHeight })}
+          />
+        </div>
+      )}
+      {axisKind && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Palette</span>
+          <Select
+            size="sm"
+            value={chart.palette ?? NONE}
+            options={[
+              { value: NONE, label: 'By option colour' },
+              ...PICKABLE_OPTION_COLORS.map((c) => ({ value: c, label: humanize(c) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, palette: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+          {chart.palette !== undefined && (
+            <div className="pt-2">
+              <Switch
+                checked={chart.colorByValue === true}
+                onChange={(colorByValue) => patch({ ...chart, colorByValue })}
+                label="Shade by value"
+                ariaLabel="Shade by value"
+              />
+            </div>
+          )}
+        </div>
+      )}
+      {/* The hide-flavoured specs invert at the control: the SWITCH says what
+          the user sees ("Grid lines on"), the SPEC stores the deviation.
+          Grid/Axis labels show only for a vertical bar and a line — the two
+          shapes that draw through Axes. A horizontal bar labels its own
+          bands and a donut has no axis, so neither switch would change
+          anything there. Value labels shows for both bar orientations —
+          BarChart and HBarChart each read hideLabels themselves. */}
+      {axisKind && (
+        <div className="flex flex-col gap-2 border-t border-n-100 pt-2">
+          {((kind === 'bar' && !horizontal) || kind === 'line') && (
+            <Switch
+              checked={chart.hideGrid !== true}
+              onChange={(on) => patch({ ...chart, hideGrid: !on })}
+              label="Grid lines"
+              ariaLabel="Grid lines"
+            />
+          )}
+          {((kind === 'bar' && !horizontal) || kind === 'line') && (
+            <Switch
+              checked={chart.hideAxis !== true}
+              onChange={(on) => patch({ ...chart, hideAxis: !on })}
+              label="Axis labels"
+              ariaLabel="Axis labels"
+            />
+          )}
+          {kind === 'bar' && (
+            <Switch
+              checked={chart.hideLabels !== true}
+              onChange={(on) => patch({ ...chart, hideLabels: !on })}
+              label="Value labels"
+              ariaLabel="Value labels"
+            />
+          )}
+          {kind === 'line' && (
+            <Switch
+              checked={chart.smooth === true}
+              onChange={(smooth) => patch({ ...chart, smooth })}
+              label="Smooth line"
+              ariaLabel="Smooth line"
+            />
+          )}
+          {/* Single-series lines only: under groupBy LineChart never reads
+              `area`, and a switch that changes nothing is the calendar's
+              M16.3 bug. */}
+          {kind === 'line' && chart.groupBy === undefined && (
+            <Switch
+              checked={chart.area === true}
+              onChange={(area) => patch({ ...chart, area })}
+              label="Area fill"
+              ariaLabel="Area fill"
+            />
+          )}
+          {kind === 'donut' && (
+            <Switch
+              checked={chart.hideDonutCenter !== true}
+              onChange={(on) => patch({ ...chart, hideDonutCenter: !on })}
+              label="Centre total"
+              ariaLabel="Centre total"
+            />
+          )}
+          <Switch
+            checked={chart.legend ?? kind === 'donut'}
+            onChange={(legend) => patch({ ...chart, legend })}
+            label="Legend"
+            ariaLabel="Legend"
+          />
+        </div>
+      )}
+      {/* The footnote names the LIVE axis source (M44.3): xField when set,
+          the view's grouping otherwise. And the shape comes from the chart
+          kind (M16.29): this said "bars" whatever was selected, so the one
+          sentence explaining the axis described a bar chart to someone
+          looking at a donut. */}
       <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
-        {band === undefined
-          ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
-          : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+        {kind === 'number'
+          ? 'A number chart totals every visible row — grouping does not apply.'
+          : chart.xField !== undefined
+            ? `The ${CHART_PARTS[kind]} come from ${humanize(chart.xField)}, the X axis set here.`
+            : band === undefined
+              ? `The ${CHART_PARTS[kind]} come from the view’s grouping, and this view has none yet — pick an X axis above, or a property under Group.`
+              : `The ${CHART_PARTS[kind]} come from the view’s grouping, currently ${humanize(band.field)}. Pick an X axis above to override it.`}
       </p>
     </div>
   );
 }
 
 /**
- * The dashboard's blocks (M16.28): add, name, widen, reorder, remove.
- *
- * A view block stores a REFERENCE to a saved view — the List's id and folder,
- * addressed exactly as a selection addresses one — rather than a copy of its
- * configuration. Editing that List updates every dashboard showing it, which
- * is the whole reason to point at one instead of building a second view.
- *
- * Reordering goes through `useSortableList`, the one drag implementation, so a
- * block moves from the keyboard like a property row does.
+ * The dashboard's widget count and its Global filter (M16.28; M44.4 shrank
+ * this from a flat widget editor to a pointer — Task 1 through 7 made the
+ * canvas's own Edit mode the widget editor, add popover, drag and all, so a
+ * second editor here would only drift from it). The Global filter stays: it
+ * is a `spec`-level rule with no home on the canvas itself, and the two
+ * surfaces share `spec.global` and the null-deletes-key rule.
  */
 function BlocksPage({
   presentation,
@@ -1310,169 +1594,38 @@ function BlocksPage({
   fields: ColumnDef[];
   onChange: (next: Presentation) => void;
 }) {
-  const lists = useVaultStore((s) => s.views);
-  const blocks = presentation.dashboard?.blocks ?? [];
-  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
-
-  const write = (next: DashboardBlock[]) =>
-    onChange(
-      next.length === 0
-        ? ((): Presentation => {
-            const { dashboard: _drop, ...rest } = presentation;
-            return rest;
-          })()
-        : { ...presentation, dashboard: { blocks: next } },
-    );
-  const patch = (id: string, next: Partial<DashboardBlock>) =>
-    write(blocks.map((b) => (b.id === id ? ({ ...b, ...next } as DashboardBlock) : b)));
-
-  const sortable = useSortableList({
-    ids: blocks.map((b) => b.id),
-    onReorder: (id, to) => {
-      const from = blocks.findIndex((b) => b.id === id);
-      if (from === -1) return;
-      const next = blocks.filter((b) => b.id !== id);
-      next.splice(to, 0, blocks[from]);
-      write(next);
-    },
-    labelFor: (id) => blocks.find((b) => b.id === id)?.title ?? id,
-  });
-
-  const addNumber = () =>
-    write([
-      ...blocks,
-      { id: nextDashboardBlockId(blocks), kind: 'number', agg: 'count' } as DashboardBlock,
-    ]);
-  const addView = (value: string) => {
-    const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
-    if (hit === undefined) return;
-    write([
-      ...blocks,
-      {
-        id: nextDashboardBlockId(blocks),
-        kind: 'view',
-        list: hit.id,
-        ...(hit.collection !== null ? { collection: hit.collection } : {}),
-      } as DashboardBlock,
-    ]);
-  };
+  const spec = presentation.dashboard ?? { rows: [] };
+  const write = (next: DashboardSpec) => onChange({ ...presentation, dashboard: next });
+  const count = widgetCount(spec);
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
-        {blocks.map((block, i) => (
-          <div
-            key={block.id}
-            data-testid={`block-row-${block.id}`}
-            className={[
-              'mb-1.5 rounded-md border border-n-200 p-1.5',
-              sortable.dragging === block.id ? 'opacity-60' : '',
-            ].join(' ')}
-            style={sortable.dropIndicator(i)}
-          >
-            <div className="flex items-center gap-1">
-              <span
-                {...sortable.gripProps(block.id, i)}
-                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
-              >
-                <Icon name="grip-vertical" size={12} />
-              </span>
-              <Icon
-                name={block.kind === 'number' ? 'hash' : 'table-2'}
-                size={12}
-                color="var(--n-400)"
-              />
-              <Input
-                size="sm"
-                ariaLabel={`Block ${i + 1} title`}
-                placeholder={block.kind === 'number' ? 'Number' : block.list}
-                value={block.title ?? ''}
-                onChange={(e) =>
-                  patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
-                }
-                width="100%"
-              />
-              <IconButton
-                icon="trash-2"
-                label={`Remove block ${i + 1}`}
-                size="sm"
-                onClick={() => write(blocks.filter((b) => b.id !== block.id))}
-              />
-            </div>
-            {block.kind === 'number' && (
-              <div className="mt-1.5 flex items-center gap-1.5 pl-5">
-                <Select
-                  size="sm"
-                  value={block.agg}
-                  options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
-                  onChange={(e) => patch(block.id, { agg: e.target.value as ChartAgg })}
-                  width="100%"
-                />
-                {block.agg !== 'count' && (
-                  <Select
-                    size="sm"
-                    value={block.value ?? ''}
-                    options={[
-                      { value: '', label: 'Property…' },
-                      ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
-                    ]}
-                    onChange={(e) =>
-                      patch(block.id, {
-                        value: e.target.value === '' ? undefined : e.target.value,
-                      })
-                    }
-                    width="100%"
-                  />
-                )}
-              </div>
-            )}
-            <div className="mt-1.5 pl-5">
-              <Switch
-                checked={block.wide === true}
-                onChange={(wide) => patch(block.id, { wide: wide ? true : undefined })}
-                label="Full width"
-                ariaLabel={`Block ${i + 1} full width`}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <button
-        type="button"
-        data-testid="add-number-block"
-        onClick={addNumber}
-        className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
-      >
-        <Icon name="hash" size={13} />
-        Add a number
-      </button>
-      {lists.length > 0 ? (
-        <Select
-          size="sm"
-          value={ADD}
-          options={[
-            { value: ADD, label: 'Add a saved view…' },
-            ...lists.map((l) => ({
-              value: `${l.collection ?? ''}::${l.id}`,
-              label: l.definition.name,
-            })),
-          ]}
-          onChange={(e) => {
-            if (e.target.value !== ADD) addView(e.target.value);
-          }}
-          width="100%"
-        />
-      ) : (
-        <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
-          There are no saved lists in the vault to embed yet.
-        </p>
-      )}
-
-      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
-        A number measures this view’s own records, so its filters apply. A saved view is shown as it
-        is configured where it lives.
+      <p className="m-0 px-2 text-xs text-n-600">
+        {count} {count === 1 ? 'widget' : 'widgets'}
       </p>
+      <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
+        Widgets are edited on the dashboard itself — toggle Edit in its corner.
+      </p>
+      <div className="border-t border-n-100 pt-2">
+        <div className="px-0.5 pb-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+          Global filter — every widget’s rows pass it
+        </div>
+        <FilterBuilder
+          filters={spec.global ?? null}
+          fields={fields}
+          onChange={(g) => {
+            // An emptied group DELETES the key (FilterChips' null rule) — the
+            // same wiring as the canvas's own Global filter popover, because
+            // this is the same `spec.global`, edited from a second door.
+            if (g === null) {
+              const { global: _drop, ...rest } = spec;
+              write(rest);
+            } else {
+              write({ ...spec, global: g });
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

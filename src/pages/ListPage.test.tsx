@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListFile, Presentation, ViewDefinition } from '@/engine/types';
+import { parseListYaml } from '@/engine/views';
 import { resetMockFs } from '@/lib/mockIpc';
 import { ListPage } from '@/pages/ListPage';
 import { useNavStore } from '@/stores/navStore';
@@ -277,5 +278,69 @@ describe('ListPage hosts a whiteboard tab (M29.48)', () => {
     await opened();
     expect(fs().get('work/whiteboards/plan-b.mmd')).toBeTruthy();
     expect(fs().has('work/whiteboards/sketch.mmd')).toBe(false);
+  });
+});
+
+/**
+ * The chart drilldown's Save-as-view closure, end to end (M44.3): the page's
+ * `onSaveView` appends through `addView` and opens the minted tab. Same
+ * harness rules as the whiteboard describe above — the store's rescan is
+ * stubbed (a real one reloads `views` from the demo corpus and deletes the
+ * list mid-test), so the assertions read the disk the write landed on, plus
+ * the navigation it caused.
+ */
+describe('ListPage saves a chart drilldown as a view (M44.3)', () => {
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  const realRescan = useVaultStore.getState().rescan;
+
+  afterEach(() => {
+    cleanup();
+    useVaultStore.setState({ rescan: realRescan });
+  });
+
+  it('Save as view writes the minted List view to the file and opens its tab', async () => {
+    resetMockFs();
+    const chartTab: ViewDefinition = {
+      ...view('chart', 'Chart', 'chart'),
+      filters: { all: [{ field: 'status', op: 'is_not_empty' as const, value: '' }] },
+      presentation: { ...presentation('chart'), group: [{ field: 'status' }] },
+    };
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entries: fixtureVault(),
+      views: [mkList([view('grid', 'All work', 'table'), chartTab])],
+      collections: [],
+      status: 'ready',
+      error: null,
+      rescan: vi.fn(async () => {}),
+    });
+    const selection = { kind: 'list' as const, id: 'delivery', collection: 'work', view: 'chart' };
+    useNavStore.setState({ selection, history: [selection], historyIndex: 0 });
+    useUiStore.setState({ collapsed: {} });
+    render(<ListPage selection={selection} />);
+
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+
+    // addView persisted through the mock ipc and openTab navigated.
+    await waitFor(() => expect(fs().get('work/delivery.list.yml')).toContain('status-todo'));
+    const written = parseListYaml('delivery', fs().get('work/delivery.list.yml')!);
+    const minted = written.definition.views.find((v) => v.id === 'status-todo');
+    expect(minted?.name).toBe('Status: Todo');
+    expect(minted?.presentation.type).toBe('list');
+    expect(minted?.filters).toEqual({
+      all: [
+        { field: 'status', op: 'is_not_empty', value: '' },
+        { field: 'status', op: 'equals', value: 'todo' },
+      ],
+    });
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'list',
+      id: 'delivery',
+      collection: 'work',
+      view: 'status-todo',
+    });
   });
 });

@@ -129,10 +129,11 @@ describe('view kind registration', () => {
     }
   });
 
-  // A chart's X axis IS its grouping chain (M16.27) — a charted kind that
-  // could not group would have no axis and would render an empty state
-  // nobody could clear.
-  it('only lets a charted kind exist if it can group', () => {
+  // The Group control is still a chart's DEFAULT axis source — `chart.xField`
+  // merely overrides it per chart (M44.3) — so a charted kind stays groupable:
+  // dropping the capability would strand every saved chart that never set an
+  // xField with an axis it has no control left to change.
+  it('keeps a charted kind groupable, because group is the default axis source', () => {
     for (const kind of VIEW_KINDS) {
       if (kind.charted === true) expect(kind.groupable).toBe(true);
     }
@@ -213,7 +214,7 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
     dependencyField: 'blocked_by',
     gallery: { cover: 'artwork', fit: true },
     chart: { kind: 'donut' },
-    dashboard: { blocks: [{ id: 'b1', kind: 'number', agg: 'count' }] },
+    dashboard: { rows: [{ id: 'r1', widgets: [{ id: 'b1', kind: 'number', agg: 'count' }] }] },
     calendarSpan: 'week',
     showWeekends: false,
     weekStart: 'monday',

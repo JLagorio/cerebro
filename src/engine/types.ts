@@ -127,6 +127,37 @@ export interface FieldDef {
 export const FIELD_VISIBILITIES = ['show', 'hide_when_empty', 'hide'] as const;
 export type FieldVisibility = (typeof FIELD_VISIBILITIES)[number];
 
+/** The record panel's per-type presentation (M44.1). Defaults are the
+ * pre-M44.1 behaviour: empty properties fold, no file row, body shown. */
+export interface DisplayConfig {
+  /** Empty declared properties render unfolded instead of behind the count. */
+  showEmpty: boolean;
+  /** A muted file-path row above the timestamps. */
+  showFile: boolean;
+  /** The Description section and its editor. */
+  showBody: boolean;
+}
+
+export const DISPLAY_DEFAULTS: DisplayConfig = {
+  showEmpty: false,
+  showFile: false,
+  showBody: true,
+};
+
+/** What a record tab renders (M44.5). A closed vocabulary on purpose: an
+ * unrecognised kind from hand-edited YAML must not reach the renderer. */
+export const TAB_CONTENTS = ['overview', 'properties', 'sections'] as const;
+export type TabContent = (typeof TAB_CONTENTS)[number];
+
+/** One tab of a type's record page (M44.5) — the same contract a view tab
+ * has: a stable id the selection addresses, a name, an optional icon. */
+export interface TabDef {
+  id: string;
+  name: string;
+  icon: string | null;
+  content: TabContent;
+}
+
 export interface TypeDef {
   name: string;
   icon: string | null;
@@ -140,6 +171,13 @@ export interface TypeDef {
   /** Saved views of the type screen (M12.3), stored under `views:` on the
    * Type doc — the same shape a List keeps. [] means none saved yet. */
   views: ViewDefinition[];
+  /** `display:` on the Type doc (M44.1) — how the record panel presents this
+   * type. Always resolved: absent frontmatter yields the defaults, so no
+   * consumer null-checks. */
+  display: DisplayConfig;
+  /** `tabs:` on the Type doc (M44.5) — the record page's tab set. [] means
+   * none saved yet; `typeTabs` synthesizes the Overview default. */
+  tabs: TabDef[];
 }
 
 export interface ResolvedField {
@@ -201,7 +239,15 @@ export type Selection =
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
-  | { kind: 'doc'; path: string } // full-page markdown document (M2 Task 10)
+  | {
+      kind: 'doc';
+      path: string; // full-page markdown document (M2 Task 10)
+      /** Which record tab is open (M44.5). Rides on the selection rather than
+       * in component state so "the Spec tab of DOC-14" is a place the back
+       * button returns to — the same contract `list.view` follows. Absent =
+       * the type's first tab. */
+      tab?: string;
+    }
   // M29.21 — a standalone .mmd file. Raw diagram source has no frontmatter
   // and no record shape, so it gets its own full-page editor surface rather
   // than being forced through the doc canvas.
@@ -416,7 +462,7 @@ export interface GallerySpec {
   fit?: boolean;
 }
 
-export const CHART_KINDS = ['bar', 'line', 'donut'] as const;
+export const CHART_KINDS = ['bar', 'line', 'donut', 'number'] as const;
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 /**
@@ -427,14 +473,21 @@ export type ChartKind = (typeof CHART_KINDS)[number];
 export const CHART_AGGS = ['count', 'sum', 'avg'] as const;
 export type ChartAgg = Extract<RollupCalc, (typeof CHART_AGGS)[number]>;
 
+/** Band order on the X axis. Absent = the grouping's own declared order. */
+export const CHART_SORTS = ['value-desc', 'value-asc', 'label'] as const;
+export type ChartSort = (typeof CHART_SORTS)[number];
+
+/** Plot height preset. Absent = 'm', today's 320px. */
+export const CHART_HEIGHTS = ['s', 'm', 'l', 'xl'] as const;
+export type ChartHeight = (typeof CHART_HEIGHTS)[number];
+
 /**
- * The chart's own settings (M16.27).
+ * The chart's own settings (M16.27; the axis decoupled in M44.3).
  *
- * Its X AXIS IS NOT HERE — that is `group`, the same grouping chain every
- * other layout reads, and its first band level is the axis. The chart is
- * therefore configured by the Group control the toolbar already has, a saved
- * board re-opened as a chart charts what the board was banded by, and there is
- * no second "group by" for the two to drift apart on.
+ * The X axis lives here when `xField` names it. Absent, the axis is `group`'s
+ * first band level — the same grouping chain every other layout reads — so a
+ * saved board re-opened as a chart still charts what the board was banded by,
+ * and every chart saved before `xField` existed renders unchanged.
  */
 export interface ChartSpec {
   /** Absent = 'bar'. */
@@ -445,51 +498,116 @@ export interface ChartSpec {
   value?: string;
   /** Drop bands that measure zero. Notion's "Omit zero values". */
   omitZero?: boolean;
+  /** Bar kind only: bands run down the page and bars extend right. */
+  horizontal?: boolean;
+  /** Band order. Absent = the grouping's declared order carries over. */
+  sort?: ChartSort;
+  /** Bar/line only: each band adds every band before it (running total). */
+  cumulative?: boolean;
+  /** Absent = 'm'. */
+  height?: ChartHeight;
+  /** One hue for every band (an option-colour word). Absent = per-option. */
+  palette?: string;
+  /** With `palette`: deeper shade = bigger value. */
+  colorByValue?: boolean;
+  /** Style switches, stored only when true — true is always the off-default. */
+  hideGrid?: boolean;
+  hideAxis?: boolean;
+  hideLabels?: boolean;
+  /** Line kind: curve through the points instead of straight segments. */
+  smooth?: boolean;
+  /** Line kind: wash the region under the line. */
+  area?: boolean;
+  /** Donut kind: drop the centre total. */
+  hideDonutCenter?: boolean;
+  /** Absent = the kind's own default: a donut shows one, the rest don't. */
+  legend?: boolean;
+  /** The X axis property (M44.3). Absent = the view's grouping chain's first
+   * band — the M16.27 default, kept so every saved chart renders unchanged. */
+  xField?: string;
+  /** Second dimension: splits each band into stacked/series parts (M44.3).
+   * Unread by donut and number. */
+  groupBy?: string;
+  /** Band keys the legend has hidden. Totals and the ring reflect the rest. */
+  hidden?: string[];
+  /** Series keys the legend has hidden. */
+  hiddenG?: string[];
 }
 
 /**
- * One block of a dashboard (M16.28).
+ * One widget of a dashboard (M44.4; blocks[] was M16.28's shape).
  *
- * Two kinds, and they read different data on purpose:
+ * Two data flows, on purpose:
  *
- * - `view` embeds a SAVED VIEW from the vault — a List and one of its tabs,
- *   addressed the way a selection addresses one. That is what makes a
- *   dashboard worth having: widgets spanning several sources, which is
- *   Notion's model too. It carries the reference, never a copy of the view's
- *   configuration; editing the List updates every dashboard showing it.
- * - `number` measures the DASHBOARD'S OWN rows, so the dashboard's filters
- *   scope it. A number block that ignored them would be a constant.
+ * - `view` embeds a SAVED VIEW from the vault by reference — a List and one
+ *   of its tabs, addressed the way a selection addresses one. Widgets
+ *   spanning several sources is what makes a dashboard worth having, and it
+ *   carries the reference, never a copy of the view's configuration; editing
+ *   the List updates every dashboard showing it.
+ * - every other kind reads the DASHBOARD'S OWN rows, so the view's filters,
+ *   the Global filter, and the widget's own filter all scope it.
  */
-export type DashboardBlock =
-  | {
-      /** Unique within the dashboard; what a reorder and a delete address. */
-      id: string;
+export type DashboardWidget =
+  | (DashboardWidgetBase & {
       kind: 'view';
       /** List id. Ids are unique per folder, hence `collection` beside it. */
       list: string;
       collection?: string | null;
       /** Which of the List's tabs; absent = its first. */
       view?: string;
-      /** Overrides the List's own name in the block header. */
-      title?: string;
-      /** Spans both columns. Absent = one. */
-      wide?: boolean;
-    }
-  | {
-      id: string;
+    })
+  | (DashboardWidgetBase & {
       kind: 'number';
       agg: ChartAgg;
       /** Property summed or averaged. Unread when the measure is count. */
       value?: string;
-      title?: string;
-      wide?: boolean;
-    };
+    })
+  | (DashboardWidgetBase & { kind: 'table' })
+  | (DashboardWidgetBase & {
+      kind: 'board';
+      /** Property to band by. Absent = the source's status field. */
+      group?: string;
+    })
+  | (DashboardWidgetBase & { kind: 'timeline' })
+  | (DashboardWidgetBase & {
+      kind: 'chart';
+      /** The X axis property. Absent = the chart draws its no-group refusal. */
+      group?: string;
+      chart?: ChartSpec;
+    });
+
+export interface DashboardWidgetBase {
+  /** Unique within the dashboard; what a move, a resize and a delete address. */
+  id: string;
+  /** Overrides the computed name in the widget header. */
+  title?: string;
+  /** Width weight within the row, >= 1. Absent = 1 — equal shares. */
+  w?: number;
+  /** This widget's own filter, ANDed under the Global filter. */
+  filter?: FilterGroup;
+}
+
+export interface DashboardRow {
+  id: string;
+  /** Row height in px. Absent = 300, the M16.28 tile height. */
+  h?: number;
+  /** Left to right. 1..MAX_ROW_WIDGETS. */
+  widgets: DashboardWidget[];
+}
 
 export interface DashboardSpec {
-  /** In render order. Never absent — a dashboard with no blocks is [] and
+  /** Top to bottom. Never absent — an emptied dashboard is `rows: []` and
    * says so, rather than being indistinguishable from an unparsed one. */
-  blocks: DashboardBlock[];
+  rows: DashboardRow[];
+  /** ANDed onto every own-scope widget, under the view's own filters. */
+  global?: FilterGroup;
 }
+
+export const MAX_ROW_WIDGETS = 4;
+export const MAX_DASHBOARD_WIDGETS = 12;
+export const ROW_HEIGHT_DEFAULT = 300;
+export const ROW_HEIGHT_MIN = 200;
+export const ROW_HEIGHT_MAX = 640;
 /**
  * What a board card previews above its properties (M16.20).
  *
@@ -567,7 +685,7 @@ export interface Presentation {
   gallery?: GallerySpec;
   /** Chart settings (M16.27). Absent = a bar chart counting records. */
   chart?: ChartSpec;
-  /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
+  /** Dashboard rows of widgets (M44.4). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
   /**
    * The whiteboard's canvas (M29.45): a vault-relative `.mmd` path, created

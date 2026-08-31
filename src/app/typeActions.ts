@@ -11,17 +11,35 @@
  */
 
 import { kindMeta } from '@/engine/properties';
-import { humanize } from '@/engine/schema';
+import { humanize, serializeDisplayConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
-import { serializeViewList } from '@/engine/views';
-import type { Entry, FieldKind, FieldOption, StatusDef, ViewDefinition } from '@/engine/types';
+import { serializeTabList, serializeViewList } from '@/engine/views';
+import type {
+  DisplayConfig,
+  Entry,
+  FieldKind,
+  FieldOption,
+  StatusDef,
+  TabDef,
+  ViewDefinition,
+} from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /** Frontmatter keys with schema meaning on a Type doc — never field names. */
-const RESERVED = new Set(['type', 'icon', 'color', 'fields', 'statuses', 'folder', 'views']);
+const RESERVED = new Set([
+  'type',
+  'icon',
+  'color',
+  'fields',
+  'statuses',
+  'folder',
+  'views',
+  'display',
+  'tabs',
+]);
 
 /** Leading underscores are stripped: `_`-prefixed keys are the app-managed
  * namespace (M4, see engine/properties.isSystemProperty) and a user-declared
@@ -106,7 +124,7 @@ export async function addFieldToType(
     if (doc === null) {
       await ensureTypeDoc({ name: typeName, docPath: null }, { fields });
     } else {
-      await patchFrontmatter(doc.path, { fields });
+      if (!(await patchFrontmatter(doc.path, { fields }))) return false;
     }
   } catch {
     toast(`Couldn't add "${name}" to ${typeName}`);
@@ -175,7 +193,6 @@ export async function changeFieldKind(
   kind: FieldKind,
 ): Promise<boolean> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return false;
   if (!guardEditable(doc, typeName)) return false;
@@ -237,17 +254,17 @@ export async function changeFieldKind(
   }
   fields[actual] = spec;
 
-  try {
-    // Schema first: patchFrontmatter validates records against the CURRENT
-    // schema, and the optimistic update makes the new kind visible before
-    // the value writes run.
-    await patchFrontmatter(doc.path, { fields });
-    for (const c of conversions) {
-      await patchFrontmatter(c.path, { [actual]: c.value });
-    }
-  } catch {
-    toast(`Couldn't change "${fieldName}" to ${kind}`);
-    return false;
+  // Schema first: patchFrontmatter validates records against the CURRENT
+  // schema, and the optimistic update makes the new kind visible before the
+  // value writes run — so a schema write that didn't land must stop the
+  // conversions rather than run them against a schema that never changed.
+  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
+  // Accepted asymmetry: the schema change is what this function's return
+  // value answers for. Each conversion's own patchFrontmatter call already
+  // self-toasts on failure (vaultStore's contract), so an individual record
+  // keeping its old value doesn't turn a landed kind change into a `false`.
+  for (const c of conversions) {
+    await patchFrontmatter(c.path, { [actual]: c.value });
   }
   return true;
 }
@@ -261,7 +278,6 @@ export async function duplicateFieldOnType(
   fieldName: string,
 ): Promise<string | null> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return null;
   if (!guardEditable(doc, typeName)) return null;
@@ -280,21 +296,20 @@ export async function duplicateFieldOnType(
       rebuilt[copy] = typeof spec === 'object' && spec !== null ? { ...(spec as object) } : spec;
     }
   }
-  try {
-    await patchFrontmatter(doc.path, { fields: rebuilt });
-    for (const record of entries) {
-      if (record.type !== typeName || record.path === doc.path) continue;
-      const stored =
-        record.relationships[actual] !== undefined
-          ? // Relationships come back bracket-stripped; re-wrap for disk.
-            record.relationships[actual].map((v) => `[[${v}]]`)
-          : record.properties[actual];
-      if (stored === undefined || stored === null || stored === '') continue;
-      await patchFrontmatter(record.path, { [copy]: stored });
-    }
-  } catch {
-    toast(`Couldn't duplicate "${fieldName}"`);
-    return null;
+  if (!(await patchFrontmatter(doc.path, { fields: rebuilt }))) return null;
+  // Accepted asymmetry: the schema declaration is what this function's
+  // return value answers for. Each copy's own patchFrontmatter call already
+  // self-toasts on failure (vaultStore's contract), so a record that doesn't
+  // get the copied value doesn't turn a landed duplicate into a `null`.
+  for (const record of entries) {
+    if (record.type !== typeName || record.path === doc.path) continue;
+    const stored =
+      record.relationships[actual] !== undefined
+        ? // Relationships come back bracket-stripped; re-wrap for disk.
+          record.relationships[actual].map((v) => `[[${v}]]`)
+        : record.properties[actual];
+    if (stored === undefined || stored === null || stored === '') continue;
+    await patchFrontmatter(record.path, { [copy]: stored });
   }
   return copy;
 }
@@ -309,7 +324,6 @@ export async function insertFieldOnType(
   side: 'left' | 'right',
 ): Promise<string | null> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return null;
   if (!guardEditable(doc, typeName)) return null;
@@ -336,12 +350,7 @@ export async function insertFieldOnType(
     }
   }
   if (!placed) rebuilt[name] = 'text';
-  try {
-    await patchFrontmatter(doc.path, { fields: rebuilt });
-  } catch {
-    toast(`Couldn't insert a property`);
-    return null;
-  }
+  if (!(await patchFrontmatter(doc.path, { fields: rebuilt }))) return null;
   return name;
 }
 
@@ -360,12 +369,7 @@ export async function removeFieldFromType(typeName: string, fieldName: string): 
   const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
   if (actual === undefined) return false;
   delete fields[actual];
-  try {
-    await patchFrontmatter(doc.path, { fields });
-  } catch {
-    toast(`Couldn't remove "${fieldName}"`);
-    return false;
-  }
+  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
   return true;
 }
 
@@ -405,14 +409,11 @@ export async function renameFieldOnType(
   const renamed = Object.fromEntries(
     Object.entries(fields).map(([k, v]) => (k === actual ? [next, v] : [k, v])),
   );
-  try {
-    await patchFrontmatter(doc.path, { fields: renamed });
-  } catch {
-    toast(`Couldn't rename "${fieldName}"`);
-    return false;
-  }
-  // Move stored values on every record of this type. A record whose write
-  // fails keeps its old key — the schema rename already landed, so the value
+  if (!(await patchFrontmatter(doc.path, { fields: renamed }))) return false;
+  // Move stored values on every record of this type. patchFrontmatter never
+  // throws — a record whose write fails reports it by returning false, not
+  // by rejecting — so failure is counted from that boolean. A record that
+  // fails keeps its old key: the schema rename already landed, so the value
   // still resolves as an undeclared property rather than vanishing.
   const records = entries.filter(
     (e) => e.type === typeName && (actual in e.properties || actual in e.relationships),
@@ -422,11 +423,7 @@ export async function renameFieldOnType(
     const targets = record.relationships[actual];
     const value =
       targets !== undefined ? targets.map((t) => `[[${t}]]`) : record.properties[actual];
-    try {
-      await patchFrontmatter(record.path, { [next]: value, [actual]: null });
-    } catch {
-      failed += 1;
-    }
+    if (!(await patchFrontmatter(record.path, { [next]: value, [actual]: null }))) failed += 1;
   }
   if (failed > 0) toast(`Renamed, but ${failed} record(s) kept the old value`);
   return true;
@@ -457,12 +454,7 @@ export async function setFieldOptions(
       : { kind: typeof raw === 'string' ? raw : 'select' };
   spec.options = serializeOptions(options);
   fields[actual] = spec;
-  try {
-    await patchFrontmatter(doc.path, { fields });
-  } catch {
-    toast(`Couldn't update "${fieldName}" options`);
-    return false;
-  }
+  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
   return true;
 }
 
@@ -499,7 +491,6 @@ export async function setFieldConfig(
   >,
 ): Promise<boolean> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return false;
   if (!guardEditable(doc, typeName)) return false;
@@ -517,12 +508,7 @@ export async function setFieldConfig(
     else spec[key] = value;
   }
   fields[actual] = spec;
-  try {
-    await patchFrontmatter(doc.path, { fields });
-  } catch {
-    toast(`Couldn't update "${fieldName}"`);
-    return false;
-  }
+  if (!(await patchFrontmatter(doc.path, { fields }))) return false;
   return true;
 }
 
@@ -552,7 +538,7 @@ export async function setTypeStatuses(
     if (doc === null) {
       await ensureTypeDoc({ name: listing.name, docPath: null }, { statuses: serialized });
     } else {
-      await patchFrontmatter(doc.path, { statuses: serialized });
+      if (!(await patchFrontmatter(doc.path, { statuses: serialized }))) return false;
     }
   } catch {
     toast(`Couldn't update ${listing.name} statuses`);
@@ -579,10 +565,67 @@ export async function setTypeViews(
     if (doc === null) {
       await ensureTypeDoc({ name: listing.name, docPath: null }, { views: serialized });
     } else {
-      await patchFrontmatter(doc.path, { views: serialized });
+      if (!(await patchFrontmatter(doc.path, { views: serialized }))) return false;
     }
   } catch {
     toast(`Couldn't update ${listing.name} views`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Persist the record panel's per-type display config onto its Type doc
+ * (M44.1). Deviations only — a type left at the defaults carries no
+ * `display:` key at all.
+ */
+export async function setTypeDisplay(
+  listing: { name: string; docPath: string | null },
+  display: DisplayConfig,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = serializeDisplayConfig(display);
+  try {
+    if (doc === null) {
+      if (serialized === null) return true; // nothing to write and nowhere to write it
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { display: serialized });
+    } else {
+      if (!(await patchFrontmatter(doc.path, { display: serialized }))) return false;
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} display`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Persist a type's record-page tabs onto its Type doc (M44.5). The whole
+ * array is written each time, same contract as `setTypeViews`; an empty
+ * list deletes the key so the synthesized Overview default returns.
+ */
+export async function setTypeTabs(
+  listing: { name: string; docPath: string | null },
+  tabs: TabDef[],
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = tabs.length === 0 ? null : serializeTabList(tabs);
+  try {
+    if (doc === null) {
+      if (serialized === null) return true;
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { tabs: serialized });
+    } else if (!(await patchFrontmatter(doc.path, { tabs: serialized }))) {
+      // patchFrontmatter toasts and reverts itself — read its answer, add nothing.
+      return false;
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} tabs`);
     return false;
   }
   return true;
@@ -625,12 +668,7 @@ export async function addPropertyToEntry(
     toast('Computed properties need a Type — assign one first');
     return false;
   }
-  try {
-    await patchFrontmatter(entry.path, { [name]: kindMeta(kind).seed });
-  } catch {
-    toast(`Couldn't add "${name}"`);
-    return false;
-  }
+  if (!(await patchFrontmatter(entry.path, { [name]: kindMeta(kind).seed }))) return false;
   return true;
 }
 
@@ -651,7 +689,6 @@ export async function moveFieldOnType(
   delta: number,
 ): Promise<boolean> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
   if (doc === null) return false;
   if (!guardEditable(doc, typeName)) return false;
@@ -669,11 +706,6 @@ export async function moveFieldOnType(
   const next: Record<string, unknown> = {};
   for (const name of reordered) next[name] = fields[name];
 
-  try {
-    await patchFrontmatter(doc.path, { fields: next });
-  } catch {
-    toast(`Couldn't reorder "${fieldName}"`);
-    return false;
-  }
+  if (!(await patchFrontmatter(doc.path, { fields: next }))) return false;
   return true;
 }

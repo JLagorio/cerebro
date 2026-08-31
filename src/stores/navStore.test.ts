@@ -109,6 +109,17 @@ describe('navStore', () => {
       });
     });
 
+    it('a doc selection keeps its tab through a rename (M44.5)', () => {
+      const { navigate, replacePath } = useNavStore.getState();
+      navigate({ kind: 'doc', path: 'a.md', tab: 'spec' });
+      replacePath('a.md', 'b.md');
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'b.md',
+        tab: 'spec',
+      });
+    });
+
     it('carries descendants when a folder moves', () => {
       const { navigate, replacePath } = useNavStore.getState();
       navigate({ kind: 'doc', path: 'notes/trip/day-one.md' });

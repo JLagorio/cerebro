@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ChartView, sliceColor } from '@/views/ChartView';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { ChartSlice } from '@/engine/chart';
-import type { Entry, Presentation } from '@/engine/types';
+import type { Entry, FilterGroup, Presentation, ViewDefinition } from '@/engine/types';
+
+// The drilldown opens records through the app's one routing law (see
+// useOpenPath) — mocked whole, the RecordChipOverlay convention, so a spec can
+// assert the call without standing up the nav stores.
+const { openPathSpy } = vi.hoisted(() => ({ openPathSpy: vi.fn() }));
+vi.mock('@/app/useOpenPath', () => ({ useOpenPath: () => openPathSpy }));
 
 /**
  * The chart's rendering (M16.27).
@@ -49,6 +55,68 @@ const vault = (): Entry[] => [
   }),
 ];
 
+/** vault() plus a third status and record — a curve needs three points. */
+const wide = (): Entry[] => {
+  const entries = vault();
+  (
+    entries[0].properties as unknown as { statuses: { id: string; group: string; color: string }[] }
+  ).statuses.push({ id: 'done', group: 'done', color: 'green' });
+  entries.push(
+    makeEntry({
+      path: 'items/d.md',
+      title: 'D',
+      type: 'Work item',
+      properties: { status: 'done', estimate: 1 },
+    }),
+  );
+  return entries;
+};
+
+/** vault() with a second groupable dimension — the stacked/series fixture. */
+const stacked = (): Entry[] => [
+  makeEntry({
+    path: 'types/work-item.md',
+    title: 'Work item',
+    type: 'Type',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        estimate: { kind: 'number' },
+        priority: {
+          kind: 'select',
+          options: [
+            { id: 'high', color: 'red' },
+            { id: 'low', color: 'gray' },
+          ],
+        },
+      },
+      statuses: [
+        { id: 'todo', group: 'active', color: 'blue' },
+        { id: 'doing', group: 'active', color: 'orange' },
+      ],
+    } as unknown as Entry['properties'],
+  }),
+  makeEntry({
+    path: 'items/a.md',
+    title: 'A',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'high', estimate: 3 },
+  }),
+  makeEntry({
+    path: 'items/b.md',
+    title: 'B',
+    type: 'Work item',
+    properties: { status: 'todo', priority: 'low', estimate: 5 },
+  }),
+  // Doing holds no `low` row — the gap-rule band for a multi-series line.
+  makeEntry({
+    path: 'items/c.md',
+    title: 'C',
+    type: 'Work item',
+    properties: { status: 'doing', priority: 'high', estimate: 2 },
+  }),
+];
+
 const records = (entries: Entry[]) => entries.filter((e) => e.path.startsWith('items/'));
 
 const view = (over: Partial<Presentation> = {}): Presentation => ({
@@ -76,6 +144,19 @@ describe('ChartView', () => {
     expect(bars.map((b) => b.getAttribute('data-label'))).toEqual(['Todo', 'Doing']);
     expect(bars.map((b) => b.getAttribute('data-value'))).toEqual(['2', '1']);
     expect(screen.getByTestId('chart-view').getAttribute('data-chart-measure')).toBe('Count');
+  });
+
+  it('height preset drives the svg viewBox', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { height: 'xl' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 640 560');
   });
 
   it('draws a line with a point per band when asked for one', () => {
@@ -106,7 +187,11 @@ describe('ChartView', () => {
     // Two bands hold records; a third declared status would contribute an arc
     // of length zero, which paints a hairline at twelve o'clock.
     expect(screen.getAllByTestId('chart-arc')).toHaveLength(2);
-    expect(screen.getAllByTestId('chart-legend-item')).toHaveLength(2);
+    // Each legend row carries its band's value, not just its name.
+    expect(screen.getAllByTestId('chart-legend-item').map((r) => r.textContent)).toEqual([
+      'Todo2',
+      'Doing1',
+    ]);
   });
 
   it('sums a numeric property when the measure says so', () => {
@@ -158,7 +243,9 @@ describe('ChartView', () => {
       />,
     );
     expect(screen.getByTestId('chart-empty').getAttribute('data-reason')).toBe('no-group');
-    expect(screen.getByText(/under Group in view settings/)).toBeTruthy();
+    // Both controls fix it now (M44.3): an xField in chart settings, or the
+    // view grouping the axis defaults to.
+    expect(screen.getByText(/Pick an X axis in chart settings, or group the view/)).toBeTruthy();
     unmount();
 
     render(
@@ -178,6 +265,343 @@ describe('ChartView', () => {
     expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
   });
 
+  it('renders a number chart as one big stat, no axes', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [], chart: { kind: 'number' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const stat = screen.getByTestId('chart-number');
+    expect(stat.textContent).toContain('3');
+    expect(stat.textContent).toContain('Count');
+    expect(container.querySelector('svg')).toBeNull();
+  });
+
+  it('horizontal bars grow along x, one per band', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const bars = screen.getAllByTestId('chart-bar');
+    expect(bars.length).toBeGreaterThan(0);
+    for (const bar of bars) expect(Number(bar.getAttribute('height'))).toBeLessThanOrEqual(40);
+  });
+
+  it('hideGrid keeps the base line and drops the rest', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const on = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(on.container.querySelectorAll('[data-testid="chart-grid-line"]').length).toBeGreaterThan(
+      0,
+    );
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hideGrid: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-grid-line"]').length).toBe(0);
+    // The base line survives — a floating chart with no ground reads broken.
+    expect(container.querySelectorAll('svg line').length).toBe(1);
+  });
+
+  it('hideAxis drops tick numbers and band labels', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const on = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(on.container.querySelectorAll('[data-testid="chart-tick"]').length).toBeGreaterThan(0);
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hideAxis: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-tick"]').length).toBe(0);
+    // Everything textual left in the svg is a value label — no ticks, no
+    // measure label, no band labels under the axis.
+    const texts = [...container.querySelectorAll('svg text')].map((t) => t.textContent);
+    expect(texts).toEqual(['2', '1']);
+  });
+
+  it('a smooth line is a curve, a plain line is segments', () => {
+    // Three bands: a Catmull-Rom curve through two points is just the segment.
+    const entries = wide();
+    const schema = buildSchema(entries);
+    const plain = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    const straight = plain.container.querySelector('[data-testid="chart-line"]')?.getAttribute('d');
+    expect(straight).toMatch(/^M/);
+    expect(straight).not.toContain('C');
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', smooth: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('[data-testid="chart-line"]')?.getAttribute('d')).toContain('C');
+  });
+
+  it('smooth degrades to straight segments when there are fewer than three points', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', smooth: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const d = container.querySelector('[data-testid="chart-line"]')?.getAttribute('d');
+    expect(d).toMatch(/^M/);
+    expect(d).not.toContain('C');
+  });
+
+  it('area fill draws a closed wash under the line', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', area: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-area')).toBeTruthy();
+    expect(screen.getByTestId('chart-area').getAttribute('d')).toContain('Z');
+  });
+
+  it('hideDonutCenter empties the ring', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-donut-total')).toHaveLength(1);
+    cleanup();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', hideDonutCenter: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelectorAll('[data-testid="chart-donut-total"]').length).toBe(0);
+  });
+
+  it('legend: true puts a legend under a bar chart, and a donut can refuse its own', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-legend-item').length).toBeGreaterThan(0);
+    cleanup();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', legend: false } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.queryAllByTestId('chart-legend-item').length).toBe(0);
+  });
+
+  // A no-palette line draws every point in one uniform stroke (LineChart's
+  // `stroke = 'var(--cortex-500)'`); a legend that swatched per-band option
+  // hues here would show colours nothing on the chart actually uses.
+  it('a no-palette line legend swatches to the line colour, not per-band hues', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    // Each legend item renders two spans — the colour swatch, then the
+    // formatted value — so scope to the swatch by its rounded-sm class.
+    const swatches = [
+      ...container.querySelectorAll('[data-testid="chart-legend-item"] span.rounded-sm'),
+    ];
+    expect(swatches.length).toBeGreaterThan(0);
+    expect(
+      swatches.every((s) => (s as HTMLElement).style.background.includes('--cortex-500')),
+    ).toBe(true);
+  });
+
+  // A palette line already colours its points via sliceColor (LineChart's
+  // circle `stroke`), so the legend keeping the same per-slice call is
+  // correct as-is — the fix above must not touch this path.
+  it('a palette line legend keeps sliceColor’s per-slice colours', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true, palette: 'purple' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const swatch = container.querySelector('[data-testid="chart-legend-item"] span');
+    expect((swatch as HTMLElement).style.background).toContain('--opt-purple');
+  });
+
+  it('a palette paints every band the one hue, tokens only', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { palette: 'purple' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const fills = [...container.querySelectorAll('[data-testid="chart-bar"]')].map((b) =>
+      b.getAttribute('fill'),
+    );
+    expect(new Set(fills).size).toBe(1);
+    expect(fills[0]).toContain('--opt-purple');
+  });
+
+  it('colorByValue shades by share of the max via color-mix', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { palette: 'purple', colorByValue: true, agg: 'sum', value: 'estimate' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const fills = [...container.querySelectorAll('[data-testid="chart-bar"]')].map((b) =>
+      b.getAttribute('fill'),
+    );
+    expect(fills.some((f) => f?.startsWith('color-mix('))).toBe(true);
+  });
+
+  it('a maxed horizontal bar draws its value label inside the bar end', () => {
+    // The Todo band sums to exactly its nice ceiling, so its bar spans the
+    // whole plot and the outside label would run past the 640 viewBox.
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', estimate: 10000 },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', estimate: 2 },
+      }),
+    ];
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true, agg: 'sum', value: 'estimate' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const bar = container.querySelector('[data-testid="chart-bar"][data-label="Todo"]');
+    const label = bar?.parentElement?.querySelector('text:last-of-type');
+    expect(label?.getAttribute('text-anchor')).toBe('end');
+    expect(label?.getAttribute('fill')).toBe('var(--n-0)');
+  });
+
+  it('the caption names the deviations: cumulative and sort', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { agg: 'sum', value: 'estimate', cumulative: true, sort: 'value-desc' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const caption = screen.getByTestId('chart-caption');
+    expect(caption.textContent).toContain('cumulative');
+    expect(caption.textContent).toContain('biggest first');
+  });
+
+  /** computeChart ignores `cumulative` for a donut (a ring of running
+   * totals lies), so the caption must not claim one either — even for a
+   * hand-edited spec the panel itself would never produce (parseChart
+   * allows the key on any kind; the vault, not the panel, is the source of
+   * truth). */
+  it('a donut never claims cumulative, even when the spec says so', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'donut', agg: 'sum', value: 'estimate', cumulative: true },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const caption = screen.getByTestId('chart-caption');
+    expect(caption.textContent).not.toContain('cumulative');
+  });
+
   // Every colour must come from the token layer, so the chart follows the
   // theme instead of shipping its own palette.
   it('paints only in tokens — no literal hex anywhere in the svg', () => {
@@ -194,6 +618,959 @@ describe('ChartView', () => {
   });
 });
 
+/**
+ * The second dimension on screen (M44.3): stacked segments, one line per
+ * series, and a legend that answers back — rows toggle `hidden`/`hiddenG`
+ * through `onChartChange` when a host supplies one, and stay static spans
+ * when none does (an embedded dashboard chart).
+ */
+describe('ChartView stacks, series and the interactive legend (M44.3)', () => {
+  it('groupBy renders stacked segments that sum to the band height', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segments = [...container.querySelectorAll('[data-testid="chart-bar-segment"]')];
+    // Todo splits high+low; Doing holds only high. No whole-band rect remains
+    // underneath — the segments ARE the bar.
+    expect(segments).toHaveLength(3);
+    expect(container.querySelectorAll('[data-testid="chart-bar"]')).toHaveLength(0);
+    const heights = (label: string) =>
+      segments
+        .filter((r) => r.getAttribute('data-label') === label)
+        .reduce((sum, r) => sum + Number(r.getAttribute('height')), 0);
+    for (const r of segments) expect(Number(r.getAttribute('height'))).toBeGreaterThan(0);
+    // Values 2 vs 1 on a linear scale: the stacks keep the same ratio.
+    expect(heights('Todo') / heights('Doing')).toBeCloseTo(2, 5);
+    // The two Todo segments wear their series' own hues, not one paint.
+    const fills = segments
+      .filter((r) => r.getAttribute('data-label') === 'Todo')
+      .map((r) => r.getAttribute('fill'));
+    expect(new Set(fills).size).toBe(2);
+    expect(fills).toContain('var(--opt-red)');
+  });
+
+  it('horizontal stacked bars run their segments along x', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { horizontal: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segments = [...container.querySelectorAll('[data-testid="chart-bar-segment"]')];
+    expect(segments).toHaveLength(3);
+    const widths = (label: string) =>
+      segments
+        .filter((r) => r.getAttribute('data-label') === label)
+        .reduce((sum, r) => sum + Number(r.getAttribute('width')), 0);
+    expect(widths('Todo') / widths('Doing')).toBeCloseTo(2, 5);
+  });
+
+  it('a multi-series line draws one path per visible series, strokes distinct', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const lines = [...container.querySelectorAll('[data-testid="chart-line"]')];
+    expect(lines).toHaveLength(2);
+    expect(new Set(lines.map((l) => l.getAttribute('stroke'))).size).toBe(2);
+  });
+
+  // The stack sum is not the Y extent: a line draws PART values, and against
+  // a ceiling built from `data.max` (the band stack) no series could ever
+  // reach the top of its own chart.
+  it('a multi-series line scales to the tallest part, not the stack sum', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'line', groupBy: 'priority', agg: 'sum', value: 'estimate' },
+        })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    // Parts: Todo high 3 / low 5, Doing high 2. The Todo stack is 8, so a
+    // stack ceiling (10) would pin every point to the bottom half; the part
+    // ceiling is niceCeiling(5) = 5, and the max part touches the top pad.
+    const top = [...container.querySelectorAll('[data-testid="chart-point"]')].find(
+      (p) => p.getAttribute('data-value') === '5',
+    );
+    expect(Number(top?.getAttribute('cy'))).toBe(16);
+  });
+
+  // Decision B (M44.3), plain half: a band without the series gets NO point —
+  // and no bridge either; the path breaks into one subpath per run of
+  // consecutive present bands. Doing has no `low` row.
+  it('a band without the series is a gap: no point drawn there', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const points = [...container.querySelectorAll('[data-testid="chart-point"]')];
+    expect(points.filter((p) => p.getAttribute('data-series') === 'High')).toHaveLength(2);
+    expect(points.filter((p) => p.getAttribute('data-series') === 'Low')).toHaveLength(1);
+  });
+
+  // A straight connector across the missing band would be an interpolated
+  // value nobody measured — the path must break, not bridge.
+  it('a missing middle band breaks the path: a gap is a gap, not a bridge', () => {
+    const entries = stacked();
+    (
+      entries[0].properties as unknown as {
+        statuses: { id: string; group: string; color: string }[];
+      }
+    ).statuses.push({ id: 'done', group: 'done', color: 'green' });
+    // `low` lives in Todo and Done but not Doing; `high` runs Todo→Doing.
+    entries.push(
+      makeEntry({
+        path: 'items/d.md',
+        title: 'D',
+        type: 'Work item',
+        properties: { status: 'done', priority: 'low', estimate: 1 },
+      }),
+    );
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const d = (label: string) =>
+      container
+        .querySelector(`[data-testid="chart-line"][data-series="${label}"]`)
+        ?.getAttribute('d');
+    expect(d('Low')?.match(/M/g)).toHaveLength(2);
+    expect(d('High')?.match(/M/g)).toHaveLength(1);
+  });
+
+  // Decision B, cumulative half: the engine's plateau parts make every band
+  // hold a point, so the lines are continuous.
+  it('under cumulative the plateau parts make every series continuous', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', groupBy: 'priority', cumulative: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const points = [...container.querySelectorAll('[data-testid="chart-point"]')];
+    expect(points.filter((p) => p.getAttribute('data-series') === 'Low')).toHaveLength(2);
+  });
+
+  // With MULTIPLE series the per-series strokes ARE what is drawn, so the
+  // series swatches must show them — the uniform-cortex rule is single-series
+  // only (see the no-palette line legend test above).
+  it('multi-series legend swatches match the drawn strokes, not cortex', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line', legend: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const strokes = [...container.querySelectorAll('[data-testid="chart-line"]')].map((l) =>
+      l.getAttribute('stroke'),
+    );
+    const swatches = [
+      ...container.querySelectorAll('[data-testid="chart-legend-series"] span.rounded-sm'),
+    ].map((s) => (s as HTMLElement).style.background);
+    expect(new Set(swatches)).toEqual(new Set(strokes));
+  });
+
+  it('legend rows are buttons that toggle the band into hidden', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ legend: true, hidden: ['todo'] });
+  });
+
+  it('unhiding drops the key, and an emptied array leaves the spec entirely', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ legend: true });
+  });
+
+  it('series legend rows toggle hiddenG', () => {
+    const entries = stacked();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /High/ }));
+    expect(onChartChange).toHaveBeenCalledWith({
+      legend: true,
+      groupBy: 'priority',
+      hiddenG: ['high'],
+    });
+  });
+
+  it('a hidden row is struck through, unpressed, and shows its label only', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true, hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={vi.fn()}
+      />,
+    );
+    const rows = screen.getAllByTestId('chart-legend-item');
+    const todo = rows.find((r) => r.textContent?.startsWith('Todo'));
+    // Its display value is stale by definition — the label alone remains.
+    expect(todo?.textContent).toBe('Todo');
+    expect(todo?.className).toContain('line-through');
+    expect(todo?.className).toContain('text-n-400');
+    expect(todo?.querySelector('button')?.getAttribute('aria-pressed')).toBe('false');
+    const doing = rows.find((r) => r.textContent?.startsWith('Doing'));
+    expect(doing?.textContent).toBe('Doing1');
+    expect(doing?.querySelector('button')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('without onChartChange the legend is static — no buttons, as today', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { legend: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(screen.getAllByTestId('chart-legend-item').length).toBeGreaterThan(0);
+    // Scoped to the legend rows: the figure grew an export trigger (M44.3),
+    // and THAT button is not a legend toggle.
+    expect(container.querySelectorAll('[data-testid="chart-legend-item"] button')).toHaveLength(0);
+  });
+
+  // The all-hidden empty state without a legend would be a dead end: the
+  // legend below it is the way back, and it must work.
+  it('all-hidden renders the legend below the empty state as the recovery path', () => {
+    const entries = vault();
+    const onChartChange = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { hidden: ['todo', 'doing'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onChartChange={onChartChange}
+      />,
+    );
+    expect(screen.getByTestId('chart-empty').getAttribute('data-reason')).toBe('all-hidden');
+    expect(screen.getAllByTestId('chart-legend-item')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /Todo/ }));
+    expect(onChartChange).toHaveBeenCalledWith({ hidden: ['doing'] });
+  });
+
+  // The engine already filtered the hidden slice out of `total`, so the arcs
+  // must still close the ring — their lengths sum to the circumference.
+  it('a donut with hidden slices still closes its ring', () => {
+    const entries = wide();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut', hidden: ['todo'] } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const arcs = [...container.querySelectorAll('[data-testid="chart-arc"]')];
+    expect(arcs.length).toBeGreaterThan(0);
+    const total = arcs.reduce(
+      (sum, a) => sum + Number(a.getAttribute('stroke-dasharray')?.split(' ')[0]),
+      0,
+    );
+    expect(total).toBeCloseTo(2 * Math.PI * 92, 6);
+  });
+
+  // Decision C (M44.3): the caption reads "Average of X", but a stacked BAR
+  // under groupBy draws each segment as its sub-band's average and the bar as
+  // their SUM — the clause names that deviation. Bars only: a multi-series
+  // line draws each series' own averages and stacks nothing (the summed value
+  // appears nowhere), and a donut ignores groupBy entirely.
+  it('the caption says "stacked averages" only where a stack is drawn — avg + groupBy on a bar', () => {
+    const entries = stacked();
+    const schema = buildSchema(entries);
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'avg', value: 'estimate', groupBy: 'priority' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).toContain('stacked averages');
+    cleanup();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'line', agg: 'avg', value: 'estimate', groupBy: 'priority' },
+        })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).not.toContain('stacked averages');
+    cleanup();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({
+          chart: { kind: 'donut', agg: 'avg', value: 'estimate', groupBy: 'priority' },
+        })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(screen.getByTestId('chart-caption').textContent).not.toContain('stacked averages');
+  });
+});
+
+/**
+ * The hover tooltip (M44.3): one DOM card, `chart-tooltip`, that follows the
+ * pointer across bars, segments, points and arcs. It REPLACES the SVG-native
+ * `<title>` children — two tooltips is one too many — so those are asserted
+ * gone. Under cumulative the Share row is refused: a band's `value` there IS
+ * the running total, so a percentage of it would be a lie, and the honest
+ * number is the band's true row count.
+ */
+describe('ChartView hover tooltip (M44.3)', () => {
+  it('hovering a bar shows the band label and value, and leaving hides it', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        filtered={false}
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+    const bar = screen
+      .getAllByTestId('chart-bar')
+      .find((b) => b.getAttribute('data-label') === 'Todo')!;
+    fireEvent.mouseEnter(bar, { clientX: 120, clientY: 60 });
+    fireEvent.mouseMove(bar, { clientX: 124, clientY: 64 });
+    const tip = screen.getByTestId('chart-tooltip');
+    expect(tip.textContent).toContain('Todo');
+    expect(tip.textContent).toContain('2');
+    fireEvent.mouseLeave(bar);
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+  });
+
+  it('a stacked band lists its series with swatches, a total, and its share of the visible whole', () => {
+    const entries = stacked();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const segment = container.querySelector('[data-testid="chart-bar-segment"][data-label="Todo"]');
+    fireEvent.mouseEnter(segment!, { clientX: 120, clientY: 60 });
+    const tip = screen.getByTestId('chart-tooltip');
+    // Both series of the band, whichever segment sits under the pointer.
+    expect(tip.textContent).toContain('High');
+    expect(tip.textContent).toContain('Low');
+    const swatches = [...tip.querySelectorAll('span.rounded-sm')].map(
+      (s) => (s as HTMLElement).style.background,
+    );
+    expect(swatches).toHaveLength(2);
+    expect(swatches).toContain('var(--opt-red)');
+    expect(tip.textContent).toContain('Total');
+    // Todo counts 2 of the 3 visible rows: Math.round(2/3 * 100) = 67.
+    expect(tip.textContent).toContain('67%');
+    expect(tip.textContent).toContain('2 records');
+  });
+
+  it('under cumulative the tooltip reports the true row count and refuses a share', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { agg: 'sum', value: 'estimate', cumulative: true } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    const doing = container.querySelector('[data-testid="chart-bar"][data-label="Doing"]');
+    fireEvent.mouseEnter(doing!, { clientX: 0, clientY: 0 });
+    const tip = screen.getByTestId('chart-tooltip');
+    // Doing holds ONE row; its cumulative `value` is the running total 10.
+    // The count line uses `count` — the rows actually in the band — and the
+    // Share row is absent: a share of a running total is not a share.
+    expect(tip.textContent).toContain('1 record');
+    expect(tip.textContent).not.toContain('%');
+  });
+
+  it('the svg-native titles are gone — the DOM card is the only tooltip', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const bar = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(bar.container.querySelector('svg title')).toBeNull();
+    cleanup();
+    const line = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'line' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(line.container.querySelector('svg title')).toBeNull();
+    // The points hover like the bars do.
+    fireEvent.mouseEnter(line.container.querySelector('[data-testid="chart-point"]')!, {
+      clientX: 100,
+      clientY: 40,
+    });
+    expect(screen.getByTestId('chart-tooltip').textContent).toContain('Todo');
+    cleanup();
+    const donut = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={schema}
+        filtered={false}
+      />,
+    );
+    expect(donut.container.querySelector('svg title')).toBeNull();
+    fireEvent.mouseEnter(
+      donut.container.querySelector('[data-testid="chart-arc"][data-label="Doing"]')!,
+      { clientX: 100, clientY: 100 },
+    );
+    expect(screen.getByTestId('chart-tooltip').textContent).toContain('Doing');
+  });
+
+  it('a number chart never grows a tooltip — there is nothing to point at', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [], chart: { kind: 'number' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    expect(container.querySelector('svg')).toBeNull();
+    expect(screen.queryByTestId('chart-tooltip')).toBeNull();
+  });
+
+  /** The card grows a row per series, so a fixed-size clamp escapes the
+   * bottom edge exactly when a tall stack is hovered near it. The card
+   * measures its rendered self (offsetWidth/offsetHeight in a layout effect)
+   * and clamps with the REAL size — pinned here with five series in one band
+   * and a hover in the figure's bottom-right corner. */
+  it('the card measures itself and never escapes the figure box', () => {
+    // Five priorities, every record in the last band — the tall card.
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            status: { kind: 'status' },
+            priority: {
+              kind: 'select',
+              options: [
+                { id: 'p1', color: 'red' },
+                { id: 'p2', color: 'blue' },
+                { id: 'p3', color: 'green' },
+                { id: 'p4', color: 'yellow' },
+                { id: 'p5', color: 'purple' },
+              ],
+            },
+          },
+          statuses: [
+            { id: 'todo', group: 'active', color: 'blue' },
+            { id: 'doing', group: 'active', color: 'orange' },
+          ],
+        } as unknown as Entry['properties'],
+      }),
+      ...['p1', 'p2', 'p3', 'p4', 'p5'].map((p) =>
+        makeEntry({
+          path: `items/${p}.md`,
+          title: p,
+          type: 'Work item',
+          properties: { status: 'doing', priority: p },
+        }),
+      ),
+    ];
+    // jsdom gives every element zero geometry; the card and the figure get
+    // real numbers so the clamp has something to push against.
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    const forCard = (el: HTMLElement, n: number) =>
+      el.getAttribute('data-testid') === 'chart-tooltip' ? n : 0;
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return forCard(this, 200);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return forCard(this, 120);
+      },
+    });
+    try {
+      const { container } = render(
+        <ChartView
+          entries={records(entries)}
+          presentation={view({ chart: { groupBy: 'priority' } })}
+          schema={buildSchema(entries)}
+          filtered={false}
+        />,
+      );
+      const figure = container.querySelector('figure')!;
+      figure.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 640, height: 300 }) as DOMRect;
+      const segments = container.querySelectorAll(
+        '[data-testid="chart-bar-segment"][data-label="Doing"]',
+      );
+      expect(segments).toHaveLength(5);
+      fireEvent.mouseEnter(segments[segments.length - 1], { clientX: 620, clientY: 290 });
+      const tip = screen.getByTestId('chart-tooltip');
+      expect(tip.querySelectorAll('span.rounded-sm')).toHaveLength(5);
+      // Unclamped the card would sit at (632, 302) — outside a 640×300 box.
+      expect(parseFloat(tip.style.top) + 120).toBeLessThanOrEqual(300);
+      expect(parseFloat(tip.style.left) + 200).toBeLessThanOrEqual(640);
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', width!);
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height!);
+    }
+  });
+});
+
+/**
+ * The drilldown (M44.3): a click on any band shape opens the band's records in
+ * a Dialog, a record row opens the record itself, and "Save as view" mints the
+ * band as a saved List view whose filters keep BOTH the tab's existing filters
+ * and the band's own rule. Records are openable through the app's one routing
+ * law, so the dialog always opens; Save is the host-gated affordance —
+ * an embedded dashboard chart passes no `onSaveView` and offers no Save.
+ */
+describe('ChartView drilldown (M44.3)', () => {
+  afterEach(() => {
+    openPathSpy.mockClear();
+  });
+
+  it('clicking a bar opens the drilldown titled by the band, listing its records', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getByRole('dialog', { name: 'Todo' })).toBeTruthy();
+    const rows = screen.getAllByTestId('drilldown-record');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('A');
+    expect(rows[0].textContent).toContain('items/a.md');
+    expect(rows[1].textContent).toContain('B');
+  });
+
+  it('a donut arc drills the same way a bar does', () => {
+    const entries = vault();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { kind: 'donut' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(container.querySelector('[data-testid="chart-arc"][data-label="Doing"]')!);
+    expect(screen.getByRole('dialog', { name: 'Doing' })).toBeTruthy();
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(1);
+  });
+
+  it('a 10-plus band lists nine records and is honest about the remainder', () => {
+    const entries: Entry[] = [
+      vault()[0],
+      ...Array.from({ length: 11 }, (_, i) =>
+        makeEntry({
+          path: `items/i${i}.md`,
+          title: `Item ${i}`,
+          type: 'Work item',
+          properties: { status: 'todo' },
+        }),
+      ),
+    ];
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(9);
+    expect(screen.getByText('…and 2 more')).toBeTruthy();
+  });
+
+  it('clicking a record opens it and closes the dialog', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('drilldown-record').find((r) => r.textContent?.includes('A'))!,
+    );
+    expect(openPathSpy).toHaveBeenCalledWith('items/a.md');
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+  });
+
+  it('Save as view mints a List view whose filters keep the tab’s rules AND the band rule', () => {
+    const entries = vault();
+    const onSaveView = vi.fn();
+    const viewFilters: FilterGroup = { all: [{ field: 'estimate', op: 'gt', value: 1 }] };
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered
+        viewFilters={viewFilters}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    // The name input arrives seeded "<axis>: <band>".
+    const input = screen.getByTestId('drilldown-view-name') as HTMLInputElement;
+    expect(input.value).toBe('Status: Todo');
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    expect(onSaveView).toHaveBeenCalledTimes(1);
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.name).toBe('Status: Todo');
+    expect(saved.filters).toEqual({
+      all: [
+        { field: 'estimate', op: 'gt', value: 1 },
+        { field: 'status', op: 'equals', value: 'todo' },
+      ],
+    });
+    // A LIST presentation — and carryOver drops the chart spec on the way.
+    expect(saved.presentation.type).toBe('list');
+    expect(saved.presentation.chart).toBeUndefined();
+    expect(screen.queryByTestId('chart-drilldown')).toBeNull();
+  });
+
+  it('the seeded name is editable before saving', () => {
+    const entries = vault();
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    fireEvent.change(screen.getByTestId('drilldown-view-name'), {
+      target: { value: 'Still open' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    expect((onSaveView.mock.calls[0][0] as ViewDefinition).name).toBe('Still open');
+  });
+
+  it('without onSaveView the records still open, but no Save affordance renders', () => {
+    const entries = vault();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Todo')!,
+    );
+    expect(screen.getByTestId('chart-drilldown')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save as view' })).toBeNull();
+    expect(screen.queryByTestId('drilldown-view-name')).toBeNull();
+  });
+
+  it('a stacked segment drills its sub-band: part rows, band · series title, both rules', () => {
+    const entries = stacked();
+    const onSaveView = vi.fn();
+    const { container } = render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ chart: { groupBy: 'priority' } })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      container.querySelector(
+        '[data-testid="chart-bar-segment"][data-label="Todo"][data-series="High"]',
+      )!,
+    );
+    expect(screen.getByRole('dialog', { name: 'Todo · High' })).toBeTruthy();
+    const rows = screen.getAllByTestId('drilldown-record');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('A');
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({
+      all: [
+        { field: 'status', op: 'equals', value: 'todo' },
+        { field: 'priority', op: 'equals', value: 'high' },
+      ],
+    });
+  });
+
+  it('the no-value band saves as an is-empty rule — null is a band a filter CAN name', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({ path: 'items/n.md', title: 'N', type: 'Work item', properties: {} }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'No status')!,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({ all: [{ field: 'status', op: 'is_empty', value: '' }] });
+  });
+
+  it('a multiselect band saves as any_of — equality would claim a scalar the field never holds', () => {
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            tags: {
+              kind: 'multiselect',
+              options: [{ id: 'infra' }, { id: 'sensor' }],
+            },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { tags: ['infra', 'sensor'] },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { tags: ['sensor'] },
+      }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'tags' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'Infra')!,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save as view' }));
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    // Membership, not equality: grouping bands a multi-value record by its
+    // FIRST value, and any_of catches every record the band holds.
+    expect(saved.filters).toEqual({ all: [{ field: 'tags', op: 'any_of', value: ['infra'] }] });
+  });
+
+  it('a person band saves — any_of on the bare stem, the ops its family really has', () => {
+    // Person/relation file under the `multi` filter family, which offers NO
+    // `equals` — so the rule is membership on the scanner's bracket-stripped
+    // stem, the value evaluateFilters actually compares (M44.3 review fix:
+    // gating this on `equals` disabled Save for the mainstream group-by-
+    // assignee case, with an untrue explanation).
+    const entries: Entry[] = [
+      makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: { assignee: { kind: 'person' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        relationships: { assignee: ['ana-marte'] },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        relationships: { assignee: ['ana-marte'] },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        relationships: { assignee: ['bo-riis'] },
+      }),
+    ];
+    const onSaveView = vi.fn();
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'assignee' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={onSaveView}
+      />,
+    );
+    // Person bands sort by label; ana-marte's is first either as stem or as
+    // resolved title. The two-record row count pins that this IS her band.
+    fireEvent.click(screen.getAllByTestId('chart-bar')[0]);
+    expect(screen.getAllByTestId('drilldown-record')).toHaveLength(2);
+    const save = screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    const saved = onSaveView.mock.calls[0][0] as ViewDefinition;
+    expect(saved.filters).toEqual({
+      all: [{ field: 'assignee', op: 'any_of', value: ['ana-marte'] }],
+    });
+  });
+
+  it('an undeclared field disables Save with the reason — a quiet refusal, not a missing button', () => {
+    // No Type doc declares `flavor`, so its kind — and therefore which filter
+    // op could restate the band — is unknowable.
+    const entries: Entry[] = [
+      vault()[0],
+      makeEntry({
+        path: 'items/x.md',
+        title: 'X',
+        type: 'Work item',
+        properties: { status: 'todo', flavor: 'sweet' },
+      }),
+    ];
+    render(
+      <ChartView
+        entries={records(entries)}
+        presentation={view({ group: [{ field: 'flavor' }] })}
+        schema={buildSchema(entries)}
+        filtered={false}
+        onSaveView={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getAllByTestId('chart-bar').find((b) => b.getAttribute('data-label') === 'sweet')!,
+    );
+    const save = screen.getByRole('button', { name: 'Save as view' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(screen.getByText(/No filter can express this band/)).toBeTruthy();
+  });
+});
+
 describe('sliceColor', () => {
   const slice = (over: Partial<ChartSlice> = {}): ChartSlice => ({
     key: 'todo',
@@ -203,6 +1580,8 @@ describe('sliceColor', () => {
     count: 1,
     value: 1,
     display: '1',
+    hue: 0,
+    entries: [],
     ...over,
   });
 

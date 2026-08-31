@@ -247,6 +247,23 @@ describe('TableView column resizing (M11)', () => {
     expect(onColumnsChange).not.toHaveBeenCalled();
   });
 
+  /**
+   * M44.4: a pointer grab used to leave the keyboard's `pending` ref intact,
+   * so a later blur — after the drag had already committed its own width —
+   * settled the STALE arrow-key value as a second, wrong write. `begin` now
+   * clears `pending` as its first act (mirrors RowResizeHandle's fix).
+   */
+  it('a pointer drag clears a half-built keyboard nudge, so a later blur writes nothing more', () => {
+    const { onColumnsChange } = grid();
+    const handle = screen.getByLabelText('Resize Status column');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    drag(handle, 100, 160);
+    expect(onColumnsChange).toHaveBeenCalledTimes(1);
+    fireEvent.blur(handle);
+    expect(onColumnsChange).toHaveBeenCalledTimes(1);
+  });
+
   it('offers no resizer on a surface with no view file to write to', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);

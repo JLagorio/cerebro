@@ -1,4 +1,5 @@
 import type {
+  DisplayConfig,
   Entry,
   FieldDef,
   FieldKind,
@@ -9,7 +10,7 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
-import { FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES } from './types';
 import {
   DATE_DISPLAY_FORMATS,
   DEFAULT_TIME_FORMAT,
@@ -20,7 +21,7 @@ import {
 } from './dates';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
-import { parseViewList } from './views';
+import { parseTabList, parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -158,6 +159,26 @@ function parseStatuses(raw: unknown): StatusDef[] {
   return out;
 }
 
+/** `display:` is advisory, like every Type-doc block: malformed → defaults. */
+function parseDisplayConfig(raw: unknown): DisplayConfig {
+  const obj = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  return {
+    showEmpty: obj.show_empty === true,
+    showFile: obj.show_file === true,
+    showBody: obj.show_body !== false,
+  };
+}
+
+/** DisplayConfig → the `display:` frontmatter value. Deviations only; all
+ * defaults = null, which patchFrontmatter spells "delete the key". */
+export function serializeDisplayConfig(d: DisplayConfig): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (d.showEmpty !== DISPLAY_DEFAULTS.showEmpty) out.show_empty = d.showEmpty;
+  if (d.showFile !== DISPLAY_DEFAULTS.showFile) out.show_file = d.showFile;
+  if (d.showBody !== DISPLAY_DEFAULTS.showBody) out.show_body = d.showBody;
+  return Object.keys(out).length === 0 ? null : out;
+}
+
 function isEmptyValue(raw: unknown): boolean {
   return (
     raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
@@ -179,6 +200,8 @@ export function buildSchema(entries: Entry[]): Schema {
           ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
           : null,
       views: parseViewList((e.properties as Record<string, unknown>).views),
+      display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
+      tabs: parseTabList((e.properties as Record<string, unknown>).tabs),
     });
   }
 

@@ -257,6 +257,17 @@ export function exportPng(defaultName: string, bytes: Uint8Array): Promise<strin
     : mock.exportPng(defaultName, bytes);
 }
 
+/**
+ * Save an SVG document via the native save dialog (M44.3). A plain string
+ * lane — text needs no base64. Returns the chosen absolute path, or null
+ * when the user cancels.
+ */
+export function exportSvg(defaultName: string, svg: string): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('export_svg', { defaultName, svg })
+    : mock.exportSvg(defaultName, svg);
+}
+
 /** The ledger chain head, as `{ seq, hash }` — or null when the vault has no
  * readable ledger. Best-effort by design (M21.7): checkpoint trailers are
  * periodic anchoring, and a missing head must change nothing about a commit. */

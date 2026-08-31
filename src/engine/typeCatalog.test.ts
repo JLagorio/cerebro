@@ -9,6 +9,7 @@ import {
   systemTypeSpec,
   typePresentation,
   typeStyle,
+  typeTabs,
 } from './typeCatalog';
 import type { Entry, FieldDef } from './types';
 
@@ -150,5 +151,23 @@ describe('typePresentation', () => {
   it('invents no columns for a type that has no Type doc at all', () => {
     const p = typePresentation('Nothing declared this', buildSchema([]));
     expect(p.columns).toEqual([]);
+  });
+});
+
+describe('typeTabs (M44.5)', () => {
+  it('synthesizes Overview when a type saved none — nothing written until owned', () => {
+    const entries = [typeDoc('Work item')];
+    expect(typeTabs('Work item', buildSchema(entries))).toEqual([
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+    ]);
+  });
+
+  it('returns the saved list verbatim when one exists', () => {
+    const entries = [
+      typeDoc('Work item', {
+        properties: { tabs: [{ id: 'spec', name: 'Spec', content: 'sections' }] },
+      }),
+    ];
+    expect(typeTabs('Work item', buildSchema(entries)).map((t) => t.id)).toEqual(['spec']);
   });
 });

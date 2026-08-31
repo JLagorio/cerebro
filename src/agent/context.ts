@@ -116,7 +116,13 @@ function summarize(entry: Entry, schema: Schema, fields?: string[]): RecordSumma
 function describeSelection(selection: Selection): Record<string, unknown> {
   switch (selection.kind) {
     case 'doc':
-      return { kind: selection.kind, path: selection.path };
+      // The open record tab (M44.5) is part of where the user is standing —
+      // omitted when absent, so a plain doc selection stays two keys.
+      return {
+        kind: selection.kind,
+        path: selection.path,
+        ...(selection.tab === undefined ? {} : { tab: selection.tab }),
+      };
     case 'collection':
       return { kind: 'collection', folder: selection.folder };
     case 'list':

@@ -7,7 +7,12 @@ import {
   findTypeDoc,
   normalizeFieldName,
   removeFieldFromType,
+  renameFieldOnType,
   setFieldOptions,
+  setTypeDisplay,
+  setTypeStatuses,
+  setTypeTabs,
+  setTypeViews,
 } from '@/app/typeActions';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
@@ -143,6 +148,40 @@ describe('removeFieldFromType', () => {
   });
 });
 
+describe('renameFieldOnType', () => {
+  // M44.1 follow-up: the per-record migration loop used to count failures
+  // inside a try/catch waiting for a rejection patchFrontmatter never
+  // produces — the `failed` counter, and the aggregate toast it gates, were
+  // dead code. This pins the now-live path: a record write that comes back
+  // `false` is counted, and the toast fires with the real count.
+  it('counts records whose value write reports false, and toasts the aggregate', async () => {
+    useVaultStore.setState({
+      entries: [
+        typeDoc,
+        makeEntry({
+          path: 'recipes/a.md',
+          title: 'A',
+          type: 'Recipe',
+          properties: { cuisine: 'thai' },
+        }),
+        makeEntry({
+          path: 'recipes/b.md',
+          title: 'B',
+          type: 'Recipe',
+          properties: { cuisine: 'oaxacan' },
+        }),
+      ],
+      patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
+        patches.push({ path, patch });
+        return path !== 'recipes/b.md';
+      }),
+    });
+    const ok = await renameFieldOnType('Recipe', 'cuisine', 'flavor');
+    expect(ok).toBe(true);
+    expect(toasts).toEqual(['Renamed, but 1 record(s) kept the old value']);
+  });
+});
+
 describe('setFieldOptions', () => {
   it('writes the option list onto the field spec', async () => {
     expect(
@@ -161,6 +200,208 @@ describe('setFieldOptions', () => {
 
   it('refuses built-in fields of system types', async () => {
     expect(await setFieldOptions('Work item', 'priority', [])).toBe(false);
+    expect(patches).toEqual([]);
+  });
+});
+
+// M44.1 follow-up: patchFrontmatter never rejects on a real disk failure — it
+// catches internally, toasts, and returns false. setTypeStatuses/setTypeViews
+// have to READ that boolean instead of assuming the write landed whenever
+// nothing threw.
+describe('setTypeStatuses (M44.1 follow-up)', () => {
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeStatuses({ name: 'Recipe', docPath: 'types/recipe.md' }, [
+      { id: 'todo', label: 'Todo', color: null, group: 'active' },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+});
+
+describe('setTypeViews (M44.1 follow-up)', () => {
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeViews({ name: 'Recipe', docPath: 'types/recipe.md' }, [
+      {
+        id: 'v1',
+        name: 'Board',
+        icon: null,
+        filters: null,
+        presentation: { type: 'table', group: [], sort: [], columns: [] },
+      },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+});
+
+describe('setTypeDisplay (M44.1)', () => {
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: { fields: {} } as unknown as typeof typeDoc.properties,
+  };
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes only the deviations, snake_case, under display', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: false },
+    );
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: { show_empty: true, show_body: false } },
+      },
+    ]);
+  });
+
+  it('all-defaults deletes the key — reset IS the write', async () => {
+    await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: false, showFile: false, showBody: true },
+    );
+    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { display: null } }]);
+  });
+
+  it('toasts and returns false when the write fails', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockRejectedValue(new Error('disk')),
+    });
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(false);
+    expect(toasts[0]).toMatch(/display/i);
+  });
+
+  // M44.1 follow-up: patchFrontmatter never rejects on a real disk failure —
+  // it catches internally, toasts, and returns false. The action has to READ
+  // that boolean instead of assuming the write landed whenever nothing threw.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeDisplay(
+      { name: 'Work item', docPath: 'types/work-item.md' },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+
+  it('doc-null and deviating from defaults creates the Type doc via ensureTypeDoc', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Ghost Type', docPath: null },
+      { showEmpty: true, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(true);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: { type: 'Type', display: { show_empty: true } },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and all-defaults returns true and writes nothing', async () => {
+    const ok = await setTypeDisplay(
+      { name: 'Ghost Type', docPath: null },
+      { showEmpty: false, showFile: false, showBody: true },
+    );
+    expect(ok).toBe(true);
+    expect(created).toEqual([]);
+    expect(patches).toEqual([]);
+  });
+});
+
+describe('setTypeTabs (M44.5)', () => {
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: { fields: {} } as unknown as typeof typeDoc.properties,
+  };
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes the whole serialized list', async () => {
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, [
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+      { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+    ]);
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: {
+          tabs: [
+            { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+            { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('an empty list deletes the key — back to the synthesized default', async () => {
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, []);
+    expect(ok).toBe(true);
+    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { tabs: null } }]);
+  });
+
+  // M44.1-family follow-up: patchFrontmatter never rejects on a real disk
+  // failure — it catches internally, toasts, and returns false. The action
+  // has to READ that boolean instead of assuming the write landed whenever
+  // nothing threw.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({
+      patchFrontmatter: vi.fn().mockResolvedValue(false),
+    });
+    const ok = await setTypeTabs({ name: 'Work item', docPath: 'types/work-item.md' }, [
+      { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
+    ]);
+    expect(ok).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+
+  it('doc-null and a saved list creates the Type doc via ensureTypeDoc', async () => {
+    const ok = await setTypeTabs({ name: 'Ghost Type', docPath: null }, [
+      { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+    ]);
+    expect(ok).toBe(true);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: {
+          type: 'Type',
+          tabs: [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }],
+        },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and an empty list returns true and writes nothing', async () => {
+    const ok = await setTypeTabs({ name: 'Ghost Type', docPath: null }, []);
+    expect(ok).toBe(true);
+    expect(created).toEqual([]);
     expect(patches).toEqual([]);
   });
 });

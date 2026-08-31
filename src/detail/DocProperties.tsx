@@ -110,10 +110,17 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const allDeclared = typeDef?.fields ?? [];
   const declaredNames = new Set(allDeclared.map((f) => f.name));
 
-  // M16.10, the same split the record panel makes.
+  const showEmpty = typeDef?.display.showEmpty === true;
+
+  // M16.10, the same split the record panel makes — M44.1 follow-up: including
+  // show_empty. A show-empty type only unfolds rows hidden for BEING EMPTY;
+  // a field hidden on purpose (`visibility: hide`) stays behind the toggle
+  // either way, or the per-field eye-toggle would be lying about show-empty
+  // types.
   const [revealed, setRevealed] = useState(false);
-  const { shown, hidden } = splitByVisibility(allDeclared, (f) =>
-    isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+  const { shown, hidden } = splitByVisibility(
+    allDeclared,
+    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
   );
   const declared = revealed ? allDeclared : shown;
   const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(

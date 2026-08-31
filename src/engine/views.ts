@@ -4,13 +4,16 @@ import type {
   CardPreview,
   CardSize,
   ChartAgg,
+  ChartHeight,
   ChartKind,
+  ChartSort,
   ChartSpec,
   ChildrenSpec,
   ChipStyle,
   ColumnSpec,
-  DashboardBlock,
+  DashboardRow,
   DashboardSpec,
+  DashboardWidget,
   FilterGroup,
   FilterOp,
   FilterRule,
@@ -22,6 +25,7 @@ import type {
   Presentation,
   Scalar,
   SortSpec,
+  TabDef,
   ViewDefinition,
   ViewType,
 } from './types';
@@ -29,8 +33,14 @@ import {
   CARD_PREVIEWS,
   CARD_SIZES,
   CHART_AGGS,
+  CHART_HEIGHTS,
   CHART_KINDS,
+  CHART_SORTS,
   FILTER_OPS,
+  MAX_ROW_WIDGETS,
+  ROW_HEIGHT_MAX,
+  ROW_HEIGHT_MIN,
+  TAB_CONTENTS,
   VIEW_TYPES,
 } from './types';
 
@@ -67,12 +77,49 @@ export function clonePresentation(p: Presentation): Presentation {
     // hand two views the same one — editing the gallery's card size in a
     // duplicated tab would change it in the tab it was duplicated from.
     ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
-    ...(p.chart !== undefined ? { chart: { ...p.chart } } : {}),
+    ...(p.chart !== undefined ? { chart: cloneChart(p.chart) } : {}),
     ...(p.dashboard !== undefined
-      ? { dashboard: { blocks: p.dashboard.blocks.map((b) => ({ ...b })) } }
+      ? {
+          dashboard: {
+            rows: p.dashboard.rows.map((r) => ({ ...r, widgets: r.widgets.map(cloneWidget) })),
+            ...(p.dashboard.global !== undefined
+              ? { global: cloneFilters(p.dashboard.global) }
+              : {}),
+          },
+        }
       : {}),
     ...(p.whiteboard !== undefined ? { whiteboard: { ...p.whiteboard } } : {}),
   };
+}
+
+function cloneChart(c: ChartSpec): ChartSpec {
+  return {
+    ...c,
+    ...(c.hidden !== undefined ? { hidden: [...c.hidden] } : {}),
+    ...(c.hiddenG !== undefined ? { hiddenG: [...c.hiddenG] } : {}),
+  };
+}
+
+/** Deep copy of one widget — exported so `dashboard.ts`'s `duplicateWidget`
+ * reuses this instead of a second copy of the same shape-walk. */
+export function cloneWidget(w: DashboardWidget): DashboardWidget {
+  return {
+    ...w,
+    ...(w.filter !== undefined ? { filter: cloneFilters(w.filter) } : {}),
+    ...(w.kind === 'chart' && w.chart !== undefined ? { chart: cloneChart(w.chart) } : {}),
+  };
+}
+
+function cloneFilterNode(node: FilterRule | FilterGroup): FilterRule | FilterGroup {
+  if ('all' in node) return { all: node.all.map(cloneFilterNode) };
+  if ('any' in node) return { any: node.any.map(cloneFilterNode) };
+  return { ...node, ...(Array.isArray(node.value) ? { value: [...node.value] } : {}) };
+}
+
+/** Deep copy of a filter group — plain JSON, but nested, so a spread is not
+ * enough: two views sharing one `all` array would edit each other's rules. */
+function cloneFilters(g: FilterGroup): FilterGroup {
+  return 'all' in g ? { all: g.all.map(cloneFilterNode) } : { any: g.any.map(cloneFilterNode) };
 }
 
 /** The visible columns, in order — what every layout actually renders. */
@@ -280,6 +327,8 @@ function parsePresentation(raw: unknown): Presentation {
 
 const KINDS = new Set<string>(CHART_KINDS);
 const AGGS = new Set<string>(CHART_AGGS);
+const CHART_SORT_SET = new Set<string>(CHART_SORTS);
+const CHART_HEIGHT_SET = new Set<string>(CHART_HEIGHTS);
 
 /**
  * Gallery card settings (M16.22). Every member is optional and only stored
@@ -306,6 +355,10 @@ function parseCardSize(raw: unknown): CardSize | undefined {
  * off their defaults, and an unrecognised one is dropped rather than trusted —
  * a hand-edited `kind: sankey` must not reach the renderer as a chart type
  * nothing draws.
+ *
+ * Keys are validated by VALUE, never by kind: a hand-switched `kind:` must
+ * not silently delete the settings the previous kind wrote — the panel's
+ * patch, not the parser, owns kind-scoping (M44.2).
  */
 function parseChart(raw: unknown): ChartSpec | undefined {
   if (raw === undefined || raw === null) return undefined;
@@ -315,6 +368,36 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (typeof obj.agg === 'string' && AGGS.has(obj.agg)) spec.agg = obj.agg as ChartAgg;
   if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
   if (obj.omitZero === true) spec.omitZero = true;
+  if (obj.horizontal === true) spec.horizontal = true;
+  if (typeof obj.sort === 'string' && CHART_SORT_SET.has(obj.sort))
+    spec.sort = obj.sort as ChartSort;
+  if (obj.cumulative === true) spec.cumulative = true;
+  if (typeof obj.height === 'string' && CHART_HEIGHT_SET.has(obj.height))
+    spec.height = obj.height as ChartHeight;
+  if (typeof obj.palette === 'string' && obj.palette.trim() !== '')
+    spec.palette = obj.palette.trim();
+  if (obj.colorByValue === true) spec.colorByValue = true;
+  if (obj.hideGrid === true) spec.hideGrid = true;
+  if (obj.hideAxis === true) spec.hideAxis = true;
+  if (obj.hideLabels === true) spec.hideLabels = true;
+  if (obj.smooth === true) spec.smooth = true;
+  if (obj.area === true) spec.area = true;
+  if (obj.hideDonutCenter === true) spec.hideDonutCenter = true;
+  // legend is a real boolean either way: donuts store `legend: false`, bars `legend: true`.
+  if (typeof obj.legend === 'boolean') spec.legend = obj.legend;
+  if (typeof obj.xField === 'string' && obj.xField.trim() !== '') spec.xField = obj.xField.trim();
+  if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '')
+    spec.groupBy = obj.groupBy.trim();
+  // The hidden lists hold band/series KEYS. Only non-blank strings are keys;
+  // a list that filters to nothing stores nothing (M44.3).
+  if (Array.isArray(obj.hidden)) {
+    const keys = obj.hidden.filter((k): k is string => typeof k === 'string' && k.trim() !== '');
+    if (keys.length > 0) spec.hidden = keys;
+  }
+  if (Array.isArray(obj.hiddenG)) {
+    const keys = obj.hiddenG.filter((k): k is string => typeof k === 'string' && k.trim() !== '');
+    if (keys.length > 0) spec.hiddenG = keys;
+  }
   return Object.keys(spec).length === 0 ? undefined : spec;
 }
 
@@ -331,44 +414,85 @@ function parseWhiteboard(raw: unknown): Presentation['whiteboard'] | undefined {
 }
 
 /**
- * Dashboard blocks (M16.28).
+ * Dashboard rows of widgets (M44.4; blocks[] was M16.28's shape).
  *
  * Unlike the gallery and chart blocks this one is a LIST, so a malformed
- * member is dropped individually — one hand-edited block must not take the
- * other five down with it. Ids are made unique here for the same reason view
- * ids are: they address a reorder and a delete, and two blocks answering to
- * one name means deleting either one deletes whichever sorted first.
+ * member is dropped individually — one hand-edited widget must not take the
+ * other five down with it, and a row it empties goes quietly with it. Ids are
+ * made unique here for the same reason view ids are: they address a move, a
+ * resize and a delete, and two widgets answering to one name means deleting
+ * either one deletes whichever sorted first.
  */
 function parseDashboard(raw: unknown): DashboardSpec | undefined {
-  if (!Array.isArray(raw) && asRecord(raw).blocks === undefined) return undefined;
-  const list = Array.isArray(raw) ? raw : (asRecord(raw).blocks as unknown);
-  if (!Array.isArray(list)) return { blocks: [] };
-  const taken = new Set<string>();
-  const blocks: DashboardBlock[] = [];
-  for (const entry of list) {
-    const block = parseBlock(entry, taken, blocks.length);
-    if (block !== null) blocks.push(block);
+  if (raw === undefined || raw === null) return undefined;
+  const obj = asRecord(raw);
+  // Legacy shapes (M16.28): a bare array, or { blocks: [...] } — migrated on
+  // read. A wide block keeps its own row; neighbours pair up two to a row,
+  // the shape the old auto-fit grid drew. Ids survive so collapse scopes hold.
+  if (Array.isArray(raw) || obj.blocks !== undefined) {
+    return { rows: pairLegacy(parseLegacyBlocks(Array.isArray(raw) ? raw : obj.blocks)) };
   }
-  return { blocks };
+  if (obj.rows === undefined) return undefined;
+  if (!Array.isArray(obj.rows)) return { rows: [] };
+  const takenRows = new Set<string>();
+  const takenWidgets = new Set<string>();
+  const rows: DashboardRow[] = [];
+  for (const r of obj.rows) {
+    const ro = asRecord(r);
+    if (!Array.isArray(ro.widgets)) continue;
+    const widgets: DashboardWidget[] = [];
+    for (const w of ro.widgets) {
+      const widget = parseWidget(w, takenWidgets);
+      if (widget !== null) widgets.push(widget);
+    }
+    if (widgets.length === 0) continue;
+    const declared = typeof ro.id === 'string' && ro.id.trim() !== '' ? ro.id.trim() : '';
+    const id =
+      declared !== '' && !takenRows.has(declared)
+        ? declared
+        : nextId('row', takenRows, rows.length);
+    takenRows.add(id);
+    rows.push({
+      id,
+      ...(typeof ro.h === 'number' && Number.isFinite(ro.h)
+        ? { h: Math.round(Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, ro.h))) }
+        : {}),
+      widgets: widgets.slice(0, MAX_ROW_WIDGETS),
+    });
+  }
+  const global = parseFilters(obj.global);
+  return { rows, ...(global !== null ? { global } : {}) };
 }
 
-function parseBlock(raw: unknown, taken: Set<string>, index: number): DashboardBlock | null {
+/**
+ * One widget. `legacy` reads the M16.28 block vocabulary: number and view
+ * only, where any other kind that named a `list` was read as a view — the
+ * rows world requires every kind to be spelled out, and drops the rest.
+ */
+function parseWidget(raw: unknown, taken: Set<string>, legacy = false): DashboardWidget | null {
   const obj = asRecord(raw);
   const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
-  const id = declared !== '' && !taken.has(declared) ? declared : nextBlockId(taken, index);
-  const shared = {
+  const id =
+    declared !== '' && !taken.has(declared) ? declared : nextId('widget', taken, taken.size);
+  const filter = parseFilters(obj.filter);
+  const base = {
     id,
     ...(typeof obj.title === 'string' && obj.title.trim() !== ''
       ? { title: obj.title.trim() }
       : {}),
-    ...(obj.wide === true ? { wide: true } : {}),
+    // A weight below one would draw a widget thinner than its equal share;
+    // two decimals so a seam drag stores 1.33, not a float tail.
+    ...(typeof obj.w === 'number' && Number.isFinite(obj.w) && obj.w >= 1
+      ? { w: Math.round(obj.w * 100) / 100 }
+      : {}),
+    ...(filter !== null ? { filter } : {}),
   };
   if (obj.kind === 'number') {
     taken.add(id);
     const agg: ChartAgg =
       typeof obj.agg === 'string' && AGGS.has(obj.agg) ? (obj.agg as ChartAgg) : 'count';
     return {
-      ...shared,
+      ...base,
       kind: 'number',
       agg,
       ...(agg !== 'count' && typeof obj.value === 'string' && obj.value.trim() !== ''
@@ -376,12 +500,42 @@ function parseBlock(raw: unknown, taken: Set<string>, index: number): DashboardB
         : {}),
     };
   }
-  // A view block with no List to point at is not a block — it would render as
-  // a permanent "that view is gone" tile nobody deliberately made.
+  if (!legacy) {
+    if (obj.kind === 'table' || obj.kind === 'timeline') {
+      taken.add(id);
+      return { ...base, kind: obj.kind };
+    }
+    if (obj.kind === 'board') {
+      taken.add(id);
+      return {
+        ...base,
+        kind: 'board',
+        ...(typeof obj.group === 'string' && obj.group.trim() !== ''
+          ? { group: obj.group.trim() }
+          : {}),
+      };
+    }
+    if (obj.kind === 'chart') {
+      taken.add(id);
+      const chart = parseChart(obj.chart);
+      return {
+        ...base,
+        kind: 'chart',
+        ...(typeof obj.group === 'string' && obj.group.trim() !== ''
+          ? { group: obj.group.trim() }
+          : {}),
+        ...(chart !== undefined ? { chart } : {}),
+      };
+    }
+    // A kind nothing draws is dropped like any other malformed widget.
+    if (obj.kind !== 'view') return null;
+  }
+  // A view widget with no List to point at is not a widget — it would render
+  // as a permanent "that view is gone" tile nobody deliberately made.
   if (typeof obj.list !== 'string' || obj.list.trim() === '') return null;
   taken.add(id);
   return {
-    ...shared,
+    ...base,
     kind: 'view',
     list: obj.list.trim(),
     ...(typeof obj.collection === 'string' && obj.collection.trim() !== ''
@@ -391,16 +545,55 @@ function parseBlock(raw: unknown, taken: Set<string>, index: number): DashboardB
   };
 }
 
-function nextBlockId(taken: Set<string>, index: number): string {
+/** The pre-M44.4 per-block parse. `wide` is read for the pairing below and
+ * dropped from the widget — row structure encodes width now. */
+function parseLegacyBlocks(raw: unknown): { widget: DashboardWidget; wide: boolean }[] {
+  if (!Array.isArray(raw)) return [];
+  const taken = new Set<string>();
+  const blocks: { widget: DashboardWidget; wide: boolean }[] = [];
+  for (const entry of raw) {
+    const widget = parseWidget(entry, taken, true);
+    if (widget !== null) blocks.push({ widget, wide: asRecord(entry).wide === true });
+  }
+  return blocks;
+}
+
+function pairLegacy(blocks: { widget: DashboardWidget; wide: boolean }[]): DashboardRow[] {
+  const rows: DashboardRow[] = [];
+  let buffer: DashboardWidget[] = [];
+  const flush = () => {
+    if (buffer.length > 0) rows.push({ id: `row-${rows.length + 1}`, widgets: buffer });
+    buffer = [];
+  };
+  for (const { widget, wide } of blocks) {
+    if (wide) {
+      flush();
+      rows.push({ id: `row-${rows.length + 1}`, widgets: [widget] });
+    } else {
+      buffer.push(widget);
+      if (buffer.length === 2) flush();
+    }
+  }
+  flush();
+  return rows;
+}
+
+function nextId(prefix: string, taken: Set<string>, index: number): string {
   for (let n = index + 1; ; n += 1) {
-    const candidate = `block-${n}`;
+    const candidate = `${prefix}-${n}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
 
-/** An id no sibling block holds — what "add a block" needs. */
-export function nextDashboardBlockId(blocks: DashboardBlock[]): string {
-  return nextBlockId(new Set(blocks.map((b) => b.id)), blocks.length);
+/** An id no sibling widget holds — what "add a widget" needs. */
+export function nextDashboardWidgetId(spec: DashboardSpec): string {
+  const widgets = spec.rows.flatMap((r) => r.widgets);
+  return nextId('widget', new Set(widgets.map((w) => w.id)), widgets.length);
+}
+
+/** An id no sibling row holds — what a splice-in-a-new-row edit needs. */
+export function nextDashboardRowId(spec: DashboardSpec): string {
+  return nextId('row', new Set(spec.rows.map((r) => r.id)), spec.rows.length);
 }
 
 /**
@@ -736,6 +929,66 @@ export function serializeViewList(views: ViewDefinition[]): unknown[] {
     filters: v.filters,
     presentation: serializePresentation(v.presentation),
   }));
+}
+
+const TAB_CONTENT_SET = new Set<string>(TAB_CONTENTS);
+
+/** A minted `tab-N` id, checked against a `taken` set that already holds
+ * every id ANY entry in the list legitimately owns — declared earlier or
+ * later — so a blind `tab-${i + 1}` guess can never steal an id another
+ * entry declares. */
+function mintTabId(i: number, taken: Set<string>): string {
+  let n = i + 1;
+  while (taken.has(`tab-${n}`)) n += 1;
+  return `tab-${n}`;
+}
+
+/**
+ * Tabs persisted on a Type doc (M44.5): an array under `tabs:`, one entry per
+ * record-page tab. Tolerant like every Type-doc block — absent or malformed
+ * means "no saved tabs yet" and the page renders its Overview default.
+ *
+ * Two passes, deliberately: a single forward pass would let a blind mint on
+ * entry 1 claim an id entry 3 declares for itself, re-minting the LATER
+ * entry instead — and since a tab's id is what `_sections` keys per-record
+ * content by, that's not a cosmetic collision, it's content silently
+ * reattaching to the wrong tab. Pass one reserves every validly declared id
+ * (first occurrence wins a duplicate, same as before); pass two hands each
+ * entry its reservation or, lacking one, the first `tab-N` nothing already
+ * answers to.
+ */
+export function parseTabList(raw: unknown): TabDef[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const items = raw.map((r) => asRecord(r));
+  const declaredIds = items.map((obj) =>
+    typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '',
+  );
+  const taken = new Set<string>();
+  const owns = declaredIds.map((id) => {
+    if (id === '' || taken.has(id)) return false;
+    taken.add(id);
+    return true;
+  });
+
+  return items.map((obj, i) => {
+    const id = owns[i] ? declaredIds[i] : mintTabId(i, taken);
+    taken.add(id);
+    return {
+      id,
+      name:
+        typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name.trim() : `Tab ${i + 1}`,
+      icon: typeof obj.icon === 'string' && obj.icon.trim() !== '' ? obj.icon.trim() : null,
+      content:
+        typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
+          ? (obj.content as TabDef['content'])
+          : 'sections',
+    };
+  });
+}
+
+/** TabDef[] → the plain objects stored under `tabs:`. Inverse of parseTabList. */
+export function serializeTabList(tabs: TabDef[]): unknown[] {
+  return tabs.map((t) => ({ id: t.id, name: t.name, icon: t.icon, content: t.content }));
 }
 
 /** The view a selection names, or the first tab when it names none. */

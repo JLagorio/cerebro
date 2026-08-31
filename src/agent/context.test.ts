@@ -143,6 +143,22 @@ describe('buildSnapshot', () => {
     expect('startedIn' in snap).toBe(false);
   });
 
+  // M44.5: the open record tab is part of "where the user is" — an agent told
+  // only the path would describe the Overview while the user reads the Spec.
+  it('a doc selection carries its open tab, and only when one is open', () => {
+    const withTab = buildSnapshot({
+      selection: { kind: 'doc', path: 'a.md', tab: 'spec' },
+      entries,
+      schema,
+    });
+    expect(withTab.selection).toEqual({ kind: 'doc', path: 'a.md', tab: 'spec' });
+    const without = buildSnapshot({ selection: { kind: 'doc', path: 'a.md' }, entries, schema });
+    expect(without.selection).toEqual({ kind: 'doc', path: 'a.md' });
+    // toEqual ignores undefined-valued keys — the `in` check is what catches
+    // a regression to `tab: undefined`, which would serialize as a real key.
+    expect('tab' in (without.selection ?? {})).toBe(false);
+  });
+
   it('says nothing about where the user is when the place chip was removed', () => {
     // "Do not tell it where I am standing" is a thing the user is allowed to
     // say. An empty object would say it badly — the key is simply absent.

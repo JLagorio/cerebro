@@ -427,6 +427,17 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M44.3: the chart drilldown's Save-as-view. The view arrives fully
+          // seeded (the same seedView chain createView uses, with the band
+          // rule merged into these filters); addView re-keys its id against
+          // the real sibling roster, exactly as createView's append does.
+          viewFilters={activeView.filters}
+          onSaveView={(view) => {
+            void (async () => {
+              const id = await addView(list, view);
+              if (id !== null) openTab(id);
+            })();
+          }}
           // M29.48: where a whiteboard tab keeps its canvas. The folder of the
           // List's OWN file — `delivery` for a list in a Collection, '' for a
           // root-level one, which has no collection folder to speak of and

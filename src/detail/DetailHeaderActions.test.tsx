@@ -21,8 +21,14 @@ vi.mock('@/lib/ipc', async (orig) => ({
   readNote: (...args: unknown[]) => readNote(...args),
 }));
 
+// setTypeDisplay finds the Type doc BY NAME (findTypeDoc), so the fixture
+// must seed a `types/work-item.md` Type doc whose title matches `type:
+// 'Work item'` above — without it the schema has no TypeDef for the type at
+// all, `listing` stays null, and the menu offers no "Customize display" row.
+const TYPE_DOC = makeEntry({ path: 'types/work-item.md', title: 'Work item', type: 'Type' });
+
 function setup(siblings: string[] = [A, B, C], open = B) {
-  const entries = [A, B, C].map((p) =>
+  const records = [A, B, C].map((p) =>
     makeEntry({
       path: p,
       title: p.slice(-4, -3).toUpperCase(),
@@ -31,19 +37,36 @@ function setup(siblings: string[] = [A, B, C], open = B) {
       relationships: { epic: ['Launch'] },
     }),
   );
+  const entries = [...records, TYPE_DOC];
   const createItem = vi.fn().mockResolvedValue('records/work/b-copy.md');
   const rescan = vi.fn().mockResolvedValue(undefined);
-  useVaultStore.setState({ entries, vaultPath: '/vault', createItem, rescan });
+  const patchFrontmatter = vi.fn().mockResolvedValue(true);
+  useVaultStore.setState({ entries, vaultPath: '/vault', createItem, rescan, patchFrontmatter });
   useUiStore.setState({
     detailPath: open,
     detailSiblings: siblings,
     detailWidth: DETAIL_WIDTH_DEFAULT,
     toasts: [],
   });
-  const entry = entries.find((e) => e.path === open);
+  const entry = records.find((e) => e.path === open);
   if (entry === undefined) throw new Error('no entry');
   render(<DetailHeaderActions entry={entry} />);
   return { createItem, rescan };
+}
+
+/** A record whose type is null — no type schema, so no display config to
+ * customize. */
+function setupUntyped() {
+  const entry = makeEntry({ path: 'records/untyped.md', title: 'Untyped', type: null });
+  const patchFrontmatter = vi.fn().mockResolvedValue(true);
+  useVaultStore.setState({ entries: [entry], vaultPath: '/vault', patchFrontmatter });
+  useUiStore.setState({
+    detailPath: entry.path,
+    detailSiblings: [entry.path],
+    detailWidth: DETAIL_WIDTH_DEFAULT,
+    toasts: [],
+  });
+  render(<DetailHeaderActions entry={entry} />);
 }
 
 /**
@@ -226,6 +249,43 @@ describe('DetailHeaderActions', () => {
       ),
     );
     expect(useUiStore.getState().detailPath).toBe(B);
+  });
+});
+
+describe('customize display (M44.1)', () => {
+  afterEach(cleanup);
+
+  it('drills into a display panel and toggles write through setTypeDisplay', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    await user.click(await screen.findByTestId('record-customize-display'));
+    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
+    const patchFrontmatter = useVaultStore.getState().patchFrontmatter as ReturnType<typeof vi.fn>;
+    await waitFor(() =>
+      expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', {
+        display: { show_empty: true },
+      }),
+    );
+  });
+
+  it('reset writes display: null', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    await user.click(await screen.findByTestId('record-customize-display'));
+    await user.click(await screen.findByTestId('display-reset'));
+    const patchFrontmatter = useVaultStore.getState().patchFrontmatter as ReturnType<typeof vi.fn>;
+    await waitFor(() =>
+      expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', { display: null }),
+    );
+  });
+
+  it('an untyped record offers no customize entry', async () => {
+    const user = userEvent.setup();
+    setupUntyped();
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    expect(screen.queryByTestId('record-customize-display')).toBeNull();
   });
 });
 

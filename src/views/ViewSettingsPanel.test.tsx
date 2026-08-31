@@ -220,8 +220,8 @@ describe('card settings (M16.29)', () => {
  * "The bars come from the view's grouping" is correct for a bar chart and a
  * lie for the other two thirds of the control right above it: a donut has
  * slices and a line has points. The one sentence explaining where a chart's X
- * axis comes from — which is the Group row, not this page — was the sentence
- * describing the wrong chart.
+ * axis comes from — which was the Group row alone until `xField` joined this
+ * page (M44.3) — was the sentence describing the wrong chart.
  */
 /**
  * Row height and "Wrap all columns" are settings for the WHOLE table, and the
@@ -304,6 +304,287 @@ describe('chart settings (M16.29)', () => {
   });
 });
 
+/**
+ * Every M44.2 chart setting gets a panel control, and `patch` stores only
+ * DEVIATIONS: a value equal to its default is a deleted key, and a key the
+ * current kind cannot read is deleted too — so switching kinds sheds the
+ * settings the new kind has no use for, and the YAML never claims a setting
+ * the chart is not drawing.
+ */
+describe('chart controls (M44.2)', () => {
+  const openChart = () => fireEvent.click(screen.getByTestId('view-settings-chart'));
+  const NONE = '__none__';
+  const chartSetup = (chart?: Presentation['chart']) =>
+    setup({ type: 'chart', group: [{ field: 'status' }], chart });
+
+  it('stores horizontal only while true, and deletes it when switched back', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Horizontal' }));
+    expect(first.nextPresentation().chart).toEqual({ horizontal: true });
+    cleanup();
+    const second = chartSetup({ horizontal: true });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Horizontal' }));
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('a height preset off m is stored, and m is deleted', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('tab', { name: 'XL' }));
+    expect(first.nextPresentation().chart).toEqual({ height: 'xl' });
+    cleanup();
+    const second = chartSetup({ height: 'xl' });
+    openChart();
+    fireEvent.click(screen.getByRole('tab', { name: 'M' }));
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('legend is stored only off the kind default — a donut stores false, a bar stores true', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Legend' }));
+    expect(first.nextPresentation().chart).toEqual({ legend: true });
+    cleanup();
+    const second = chartSetup({ kind: 'donut' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Legend' }));
+    expect(second.nextPresentation().chart).toEqual({ kind: 'donut', legend: false });
+  });
+
+  /** A number chart reads NO axis (M44.2), so the M44.3 axis keys —
+   * `xField`, `groupBy` and both hidden rosters — are shed with the rest. */
+  it('switching to the number kind keeps the measure and drops the axis-only settings', () => {
+    const { nextPresentation } = chartSetup({
+      sort: 'value-desc',
+      horizontal: true,
+      height: 'l',
+      legend: true,
+      xField: 'priority',
+      groupBy: 'status',
+      hidden: ['todo'],
+      hiddenG: ['active'],
+    });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'number' } });
+    expect(nextPresentation().chart).toEqual({ kind: 'number' });
+  });
+
+  it('stores a band sort, and Declared order deletes it', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Declared order'), {
+      target: { value: 'value-desc' },
+    });
+    expect(first.nextPresentation().chart).toEqual({ sort: 'value-desc' });
+    cleanup();
+    const second = chartSetup({ sort: 'value-desc' });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Biggest first'), { target: { value: NONE } });
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  it('a palette stores its hue, and Shade by value appears only once there is one', () => {
+    const first = chartSetup();
+    openChart();
+    expect(screen.queryByRole('switch', { name: 'Shade by value' })).toBeNull();
+    fireEvent.change(screen.getByDisplayValue('By option colour'), { target: { value: 'blue' } });
+    expect(first.nextPresentation().chart).toEqual({ palette: 'blue' });
+    cleanup();
+    const second = chartSetup({ palette: 'blue' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Shade by value' }));
+    expect(second.nextPresentation().chart).toEqual({ palette: 'blue', colorByValue: true });
+  });
+
+  /** The hide-flavoured keys invert at the control: the switch says what the
+   * user sees ("Grid lines on"), the spec stores the deviation. */
+  it('turning Grid lines off stores hideGrid, and the line and donut extras store true', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Grid lines' }));
+    expect(first.nextPresentation().chart).toEqual({ hideGrid: true });
+    cleanup();
+    const second = chartSetup({ kind: 'line' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Smooth line' }));
+    expect(second.nextPresentation().chart).toEqual({ kind: 'line', smooth: true });
+    cleanup();
+    const third = chartSetup({ kind: 'donut' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Centre total' }));
+    expect(third.nextPresentation().chart).toEqual({ kind: 'donut', hideDonutCenter: true });
+  });
+
+  /** `HBarChart` draws no grid and no axis by design — it labels its own
+   * bands — so on a horizontal bar those two switches would change nothing,
+   * and a stored `hideGrid`/`hideAxis` would be a key nothing reads. */
+  it('a horizontal bar hides the grid and axis switches, and patch drops their keys', () => {
+    const { nextPresentation } = chartSetup({ horizontal: true, hideGrid: true, hideAxis: true });
+    openChart();
+    expect(screen.queryByRole('switch', { name: 'Grid lines' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Axis labels' })).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Value labels' }));
+    expect(nextPresentation().chart).toEqual({ horizontal: true, hideLabels: true });
+  });
+
+  /** `DonutChart` reads none of `hideGrid`/`hideAxis`/`hideLabels`/`height` —
+   * they only drive the Axes path and the bar/line svg geometry — so
+   * switching a spec that carries all four into a donut must shed them
+   * rather than leave stored words the renderer never looks at. */
+  it('switching to donut drops the settings only bar/line render', () => {
+    const { nextPresentation } = chartSetup({
+      hideGrid: true,
+      hideAxis: true,
+      hideLabels: true,
+      height: 'xl',
+      // A donut ignores `groupBy` (M44.3), so the second dimension and its
+      // hidden roster are shed with the bar/line-only style keys.
+      groupBy: 'priority',
+      hiddenG: ['low'],
+    });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Bar'), { target: { value: 'donut' } });
+    expect(nextPresentation().chart).toEqual({ kind: 'donut' });
+  });
+
+  /** The old patch rebuilt from a four-key allowlist, so a hand-edited
+   * `sort:`/`height:` was DROPPED the next time any control was touched. */
+  it('touching an unrelated control preserves every stored M44.2 key', () => {
+    const { nextPresentation } = chartSetup({ sort: 'value-desc', height: 'xl' });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Omit zero values' }));
+    expect(nextPresentation().chart).toEqual({ sort: 'value-desc', height: 'xl', omitZero: true });
+  });
+});
+
+/**
+ * The chart names its own axis (M44.3): `xField` overrides the view grouping,
+ * `groupBy` adds the second dimension. The panel's patch must also carry the
+ * legend's `hidden`/`hiddenG` — written through onChartChange, not by any
+ * control here — and drop each exactly when its dimension changes, because
+ * stale keys name bands or series that no longer exist.
+ */
+describe('chart axis pickers (M44.3)', () => {
+  const openChart = () => fireEvent.click(screen.getByTestId('view-settings-chart'));
+  const NONE = '__none__';
+  const chartSetup = (chart?: Presentation['chart'], extra: ColumnDef[] = []) =>
+    setup({ type: 'chart', group: [{ field: 'status' }], chart }, extra);
+
+  it('the X axis select stores xField, and the View grouping sentinel deletes it', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('View grouping'), { target: { value: 'priority' } });
+    expect(first.nextPresentation().chart).toEqual({ xField: 'priority' });
+    cleanup();
+    const second = chartSetup({ xField: 'priority' });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: NONE } });
+    expect(second.nextPresentation().chart).toBeUndefined();
+  });
+
+  /** Only bar and line stack: a donut ignores `groupBy` and a number chart
+   * reads no axis at all — a picker there would write a key nothing reads. */
+  it('the Group by select stores groupBy, and appears only for bar and line', () => {
+    const first = chartSetup();
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('None'), { target: { value: 'priority' } });
+    expect(first.nextPresentation().chart).toEqual({ groupBy: 'priority' });
+    cleanup();
+    chartSetup({ kind: 'donut' });
+    openChart();
+    expect(screen.getByText('X axis')).toBeTruthy();
+    expect(screen.queryByText('Group by')).toBeNull();
+    cleanup();
+    chartSetup({ kind: 'number' });
+    openChart();
+    expect(screen.queryByText('X axis')).toBeNull();
+    expect(screen.queryByText('Group by')).toBeNull();
+  });
+
+  it('an unrelated control preserves hidden and hiddenG', () => {
+    const { nextPresentation } = chartSetup({
+      groupBy: 'priority',
+      hidden: ['todo'],
+      hiddenG: ['low'],
+    });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Omit zero values' }));
+    expect(nextPresentation().chart).toEqual({
+      groupBy: 'priority',
+      hidden: ['todo'],
+      hiddenG: ['low'],
+      omitZero: true,
+    });
+  });
+
+  it('changing the X axis drops hidden and keeps hiddenG — and vice versa', () => {
+    const extra: ColumnDef[] = [{ name: 'team', kind: 'select' }];
+    const first = chartSetup({ groupBy: 'team', hidden: ['todo'], hiddenG: ['a'] }, extra);
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('View grouping'), { target: { value: 'priority' } });
+    expect(first.nextPresentation().chart).toEqual({
+      xField: 'priority',
+      groupBy: 'team',
+      hiddenG: ['a'],
+    });
+    cleanup();
+    const second = chartSetup(
+      { xField: 'priority', groupBy: 'status', hidden: ['high'], hiddenG: ['active'] },
+      extra,
+    );
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Status'), { target: { value: 'team' } });
+    expect(second.nextPresentation().chart).toEqual({
+      xField: 'priority',
+      groupBy: 'team',
+      hidden: ['high'],
+    });
+  });
+
+  /** The matrix's remaining cells (Task 4 review): set→different-field on X,
+   * and set→absent on Group by. Each drops exactly its own roster — the other
+   * dimension's bands or series did not change, so its keys stay. */
+  it('a set X axis moving to another field drops hidden; Group by cleared drops hiddenG', () => {
+    const extra: ColumnDef[] = [{ name: 'team', kind: 'select' }];
+    const first = chartSetup(
+      { xField: 'priority', groupBy: 'team', hidden: ['todo'], hiddenG: ['a'] },
+      extra,
+    );
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: 'status' } });
+    expect(first.nextPresentation().chart).toEqual({
+      xField: 'status',
+      groupBy: 'team',
+      hiddenG: ['a'],
+    });
+    cleanup();
+    const second = chartSetup({ groupBy: 'priority', hidden: ['todo'], hiddenG: ['low'] });
+    openChart();
+    fireEvent.change(screen.getByDisplayValue('Priority'), { target: { value: NONE } });
+    expect(second.nextPresentation().chart).toEqual({ hidden: ['todo'] });
+  });
+
+  /** Multi-series lines never read `area` — overlapping washes at one opacity
+   * are unreadable, so LineChart draws the fill single-series only. A switch
+   * under groupBy would be dead, and a stored `area` a key nothing reads. */
+  it('Area fill is absent under groupBy, and patch drops a seeded area', () => {
+    chartSetup({ kind: 'line' });
+    openChart();
+    expect(screen.getByRole('switch', { name: 'Area fill' })).toBeTruthy();
+    cleanup();
+    chartSetup({ kind: 'line', groupBy: 'priority' });
+    openChart();
+    expect(screen.queryByRole('switch', { name: 'Area fill' })).toBeNull();
+    cleanup();
+    const { nextPresentation } = chartSetup({ kind: 'line', groupBy: 'priority', area: true });
+    openChart();
+    fireEvent.click(screen.getByRole('switch', { name: 'Omit zero values' }));
+    expect(nextPresentation().chart).toEqual({ kind: 'line', groupBy: 'priority', omitZero: true });
+  });
+});
+
 describe('sort page (M16.26)', () => {
   const twoKeys = {
     sort: [
@@ -364,5 +645,63 @@ describe('the root page on a canvas (M29.46)', () => {
   it('still offers Properties on a table', () => {
     setup({ type: 'table' });
     expect(screen.getByText('Properties')).toBeTruthy();
+  });
+});
+
+/**
+ * M44.4 Task 8: the canvas's own Edit mode became the widget editor (add
+ * popover, menu, drag, resize, filters) in Tasks 1-7, so this page shrinks to
+ * the Global filter plus a pointer back to the canvas — a second flat-widget
+ * editor over the same rows would only drift from it.
+ */
+describe('blocks page (M44.4)', () => {
+  const oneWidget: Partial<Presentation> = {
+    type: 'dashboard',
+    group: [],
+    dashboard: { rows: [{ id: 'r', widgets: [{ id: 'a', kind: 'table' }] }] },
+  };
+
+  it('counts widgets and points at the canvas instead of editing blocks', () => {
+    setup(oneWidget);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    expect(screen.getByText('1 widget')).toBeTruthy();
+    expect(screen.getByText(/edited on the dashboard itself/i)).toBeTruthy();
+    expect(screen.queryByTestId('add-number-block')).toBeNull();
+    expect(screen.queryByTestId('block-row-a')).toBeNull();
+  });
+
+  it('shows the widget count on the nav row without opening the page', () => {
+    setup(oneWidget);
+    expect(screen.getByTestId('view-settings-blocks').textContent).toContain('1');
+  });
+
+  it('reads zero widgets off an absent dashboard rather than throwing', () => {
+    setup({ type: 'dashboard', group: [] });
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    expect(screen.getByText('0 widgets')).toBeTruthy();
+  });
+
+  it('wires the Global filter to spec.global', () => {
+    const { nextPresentation } = setup(oneWidget);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    fireEvent.click(screen.getByText('Add filter'));
+    expect(nextPresentation().dashboard?.global).toEqual({
+      all: [{ field: 'status', op: 'is_not_empty' }],
+    });
+    // The widget rows themselves are untouched — this page no longer writes
+    // them at all.
+    expect(nextPresentation().dashboard?.rows).toEqual(oneWidget.dashboard?.rows);
+  });
+
+  it('an emptied Global filter deletes the key rather than storing an empty group', () => {
+    const withGlobal: Partial<Presentation> = {
+      type: 'dashboard',
+      group: [],
+      dashboard: { rows: [], global: { all: [{ field: 'status', op: 'is_not_empty' }] } },
+    };
+    const { nextPresentation } = setup(withGlobal);
+    fireEvent.click(screen.getByTestId('view-settings-blocks'));
+    fireEvent.click(screen.getByLabelText('Remove filter'));
+    expect(nextPresentation().dashboard?.global).toBeUndefined();
   });
 });

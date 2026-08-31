@@ -618,8 +618,9 @@ function NewViewForm({
   );
 }
 
-/** "Board", then "Board 2" — a suggested name that is not already a tab. */
-function uniqueName(base: string, taken: string[]): string {
+/** "Board", then "Board 2" — a suggested name that is not already a tab.
+ * Exported for `RecordTabs` (M44.5), which mints tab names the same way. */
+export function uniqueName(base: string, taken: string[]): string {
   const used = new Set(taken.map((t) => t.toLowerCase()));
   if (!used.has(base.toLowerCase())) return base;
   for (let n = 2; ; n += 1) {

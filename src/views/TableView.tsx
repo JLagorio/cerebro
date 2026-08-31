@@ -962,6 +962,10 @@ function ColumnResizer({
   };
 
   const begin = (clientX: number) => {
+    // A pointer grab supersedes a half-built keyboard nudge — without this,
+    // the blur after the drag would settle the stale pending as a second
+    // write on top of the drag's own.
+    pending.current = null;
     start.current = { x: clientX, w: width };
     setActive(true);
     const at = (x: number) => Math.max(min, Math.round(start.current.w + (x - start.current.x)));

@@ -69,6 +69,84 @@ describe('DocPage', () => {
     expect(screen.getByText('Pages')).toBeTruthy();
   });
 
+  // M44.5 — the record page swaps content by tab; the tab rides the selection.
+  describe('record tabs', () => {
+    const TYPE_DOC = 'types/work-item.md';
+    const DOC_UNTYPED = 'inbox/welcome.md';
+
+    it("a record page shows its type tabs, and Overview is today's layout (M44.5)", async () => {
+      const entries = useVaultStore.getState().entries;
+      const record = entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      render(<DocPage selection={{ kind: 'doc', path: record.path }} />);
+      expect(screen.getByTestId('record-tabs')).toBeTruthy();
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+    });
+
+    it('an untyped doc has no tab bar (M44.5)', async () => {
+      render(<DocPage selection={{ kind: 'doc', path: DOC_UNTYPED }} />);
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+    });
+
+    it('a sections tab swaps the canvas and the selection carries it (M44.5)', async () => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(
+          '\n---\n',
+          '\ntabs:\n  - { id: overview, name: Overview, content: overview }\n  - { id: spec, name: Spec, content: sections }\n---\n',
+        ),
+      );
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'spec' }} />);
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.queryByTestId('page-properties')).toBeNull();
+    });
+
+    it('switching between two Overview tabs keeps the live editor (M44.5)', async () => {
+      const typeDoc = fs().get(TYPE_DOC);
+      if (typeDoc === undefined) throw new Error('fixture vault has no Work item Type doc');
+      fs().set(
+        TYPE_DOC,
+        typeDoc.replace(
+          '\n---\n',
+          '\ntabs:\n  - { id: brief, name: Brief, content: overview }\n  - { id: build, name: Build, content: overview }\n---\n',
+        ),
+      );
+      await useVaultStore.getState().rescan();
+      const record = useVaultStore.getState().entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      const { rerender } = render(
+        <DocPage selection={{ kind: 'doc', path: record.path, tab: 'brief' }} />,
+      );
+      // The side panel's outline placeholder renders exactly while the live
+      // editor is null — wait for onReady to clear it.
+      await waitFor(() => expect(screen.queryByTestId('outline-loading')).toBeNull(), {
+        timeout: 5_000,
+      });
+      // Both tabs render the same MOUNTED editor (one key), so the switch
+      // re-fires no onReady — a reset keyed on the tab id would null the
+      // editor here and strand the outline on its placeholder for good.
+      rerender(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'build' }} />);
+      expect(screen.getByTestId('record-tab-build').getAttribute('aria-selected')).toBe('true');
+      expect(screen.queryByTestId('outline-loading')).toBeNull();
+    });
+
+    it('a stale selection.tab falls back to the first tab (M44.5)', async () => {
+      const entries = useVaultStore.getState().entries;
+      const record = entries.find((e) => e.type === 'Work item');
+      if (record === undefined) throw new Error('fixture vault has no Work item');
+      // No saved tabs: the synthesized set is [overview], and 'gone' is a tab
+      // a deleted-tab history entry might still carry.
+      render(<DocPage selection={{ kind: 'doc', path: record.path, tab: 'gone' }} />);
+      expect(screen.getByTestId('page-properties')).toBeTruthy();
+      expect(screen.queryByTestId('tab-sections')).toBeNull();
+    });
+  });
+
   it('the panel toggle hides and shows the side panel', async () => {
     render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
     expect(screen.getByTestId('doc-side-panel')).toBeTruthy();

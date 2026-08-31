@@ -6,13 +6,14 @@ import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation } from '@/engine/types';
 
 /**
- * The chart engine (M16.27).
+ * The chart engine (M16.27; the axis decoupled in M44.3).
  *
- * Two rules it exists to keep. Its X axis is the view's GROUPING CHAIN, not a
- * setting of its own — so a saved board re-opened as a chart charts what the
- * board was banded by, declared option order and all. And its arithmetic is
- * `aggregateNumbers`, the same function a rollup column runs, so the bar and
- * the number in the table beside it cannot disagree.
+ * Two rules it exists to keep. Its X axis is `chart.xField` when set, and the
+ * view's grouping chain's first band otherwise — so a saved board re-opened as
+ * a chart still charts what the board was banded by, declared option order and
+ * all. And its arithmetic is `aggregateNumbers`, the same function a rollup
+ * column runs, so the bar and the number in the table beside it cannot
+ * disagree.
  */
 
 const vault = (): Entry[] => [
@@ -23,9 +24,17 @@ const vault = (): Entry[] => [
     properties: {
       fields: {
         status: { kind: 'status' },
+        priority: {
+          kind: 'select',
+          options: [
+            { id: 'high', color: 'red' },
+            { id: 'low', color: 'gray' },
+          ],
+        },
         estimate: { kind: 'number' },
         cost: { kind: 'number', format: 'currency', precision: 0 },
         note: { kind: 'text' },
+        owner: { kind: 'text' },
       },
       statuses: [
         { id: 'todo', group: 'active', color: 'blue' },
@@ -38,19 +47,33 @@ const vault = (): Entry[] => [
     path: 'items/a.md',
     title: 'A',
     type: 'Work item',
-    properties: { status: 'todo', estimate: 3, cost: 1200, note: 'x' },
+    properties: {
+      status: 'todo',
+      priority: 'high',
+      estimate: 3,
+      cost: 1200,
+      note: 'x',
+      owner: 'ann',
+    },
   }),
   makeEntry({
     path: 'items/b.md',
     title: 'B',
     type: 'Work item',
-    properties: { status: 'todo', estimate: 5, cost: 800, note: 'y' },
+    properties: {
+      status: 'todo',
+      priority: 'low',
+      estimate: 5,
+      cost: 800,
+      note: 'y',
+      owner: 'ann',
+    },
   }),
   makeEntry({
     path: 'items/c.md',
     title: 'C',
     type: 'Work item',
-    properties: { status: 'doing', estimate: 2, cost: 300 },
+    properties: { status: 'doing', priority: 'high', estimate: 2, cost: 300, owner: 'bob' },
   }),
 ];
 
@@ -167,6 +190,608 @@ describe('computeChart', () => {
       buildSchema(entries),
     );
     expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+  });
+
+  it('xField overrides the view grouping as the axis (M44.3)', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [{ field: 'status' }], chart: { xField: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.axis).toBe('Priority');
+    expect(data.slices.map((s) => [s.label, s.value])).toEqual([
+      ['High', 2],
+      ['Low', 1],
+    ]);
+  });
+
+  it('absent xField keeps the grouping-derived axis — zero migration', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { kind: 'bar' } }),
+      buildSchema(entries),
+    );
+    expect(data.axis).toBe('Status');
+    expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+  });
+
+  it('xField with no grouping at all still draws', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { xField: 'status' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.axis).toBe('Status');
+    expect(data.slices.map((s) => s.value)).toEqual([2, 1, 0]);
+  });
+
+  it('a number chart totals every row and needs no grouping', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.total).toBe(3);
+    expect(data.totalDisplay).toBe('3');
+    expect(data.slices).toEqual([]);
+  });
+
+  it('a number chart still refuses when the measure has no property', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', agg: 'sum' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBe('no-value-field');
+  });
+
+  it('a number chart formats its total with the field def', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', agg: 'sum', value: 'cost' } }),
+      buildSchema(entries),
+    );
+    expect(data.totalDisplay).toMatch(/^\$/);
+  });
+
+  // The fixture's declared status order (todo, doing, done) already sums to
+  // [8, 2, 0] — descending by coincidence. Asserting exact labels here, next
+  // to the value-asc twin below that reverses them, gives a broken comparator
+  // somewhere to fail: value-desc alone would pass even with `sort` ignored.
+  it('sorts bands by value when asked, biggest first', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', sort: 'value-desc' } }),
+      buildSchema(entries),
+    );
+    expect(data.slices.map((s) => s.label)).toEqual(['Todo', 'Doing', 'Done']);
+    expect(data.slices.map((s) => s.value)).toEqual([8, 2, 0]);
+  });
+
+  it('sorts bands by value ascending when asked, reversing the coincidental order', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', sort: 'value-asc' } }),
+      buildSchema(entries),
+    );
+    expect(data.slices.map((s) => s.label)).toEqual(['Done', 'Doing', 'Todo']);
+    expect(data.slices.map((s) => s.value)).toEqual([0, 2, 8]);
+  });
+
+  it('sorts bands A→Z when asked', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { sort: 'label' } }),
+      buildSchema(entries),
+    );
+    const labels = data.slices.map((s) => s.label);
+    expect(labels).toEqual([...labels].sort((a, b) => a.localeCompare(b)));
+  });
+
+  it('cumulative bands carry a running total and max becomes the last band', () => {
+    const entries = vault();
+    const plain = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', cumulative: true } }),
+      buildSchema(entries),
+    );
+    expect(data.slices.at(-1)?.value).toBe(plain.total);
+    expect(data.max).toBe(plain.total);
+    expect(data.total).toBe(plain.total); // total stays the real sum, not a double-count
+  });
+
+  it('cumulative is ignored for donuts — a ring of running totals lies', () => {
+    const entries = vault();
+    const donut = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', agg: 'sum', value: 'estimate', cumulative: true } }),
+      buildSchema(entries),
+    );
+    const plain = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    expect(donut.slices.map((s) => s.value)).toEqual(plain.slices.map((s) => s.value));
+  });
+});
+
+/**
+ * The second dimension and the interactive legend (M44.3). `groupBy` splits
+ * each band into parts; `hidden`/`hiddenG` filter INSIDE the engine so totals,
+ * max, and the ring reflect the visible set, while `bands`/`series` carry the
+ * full roster — with hue indices stamped BEFORE filtering, because hiding a
+ * band must not repaint its neighbours.
+ */
+describe('computeChart stacks and hides (M44.3)', () => {
+  it('groupBy splits each band into parts that sum to the band value', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.label, p.value, p.count])).toEqual([
+      ['High', 1, 1],
+      ['Low', 1, 1],
+    ]);
+    expect(todo?.parts?.reduce((sum, p) => sum + p.value, 0)).toBe(todo?.value);
+    // Parts carry the sub-band's declared colour and its series hue.
+    expect(todo?.parts?.map((p) => [p.key, p.color, p.hue])).toEqual([
+      ['high', 'red', 0],
+      ['low', 'gray', 1],
+    ]);
+    // A band with rows in only one sub-band carries only that part.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([['high', 1]]);
+  });
+
+  it('groupBy parts run the same aggregation arithmetic as the bands', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', agg: 'sum', value: 'estimate' } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 3],
+      ['low', 5],
+    ]);
+    expect(todo?.value).toBe(8);
+  });
+
+  it('lists the series roster in declared order with stable hues', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.series.map((s) => [s.key, s.label, s.color, s.hue, s.hidden])).toEqual([
+      ['high', 'High', 'red', 0, false],
+      ['low', 'Low', 'gray', 1, false],
+    ]);
+  });
+
+  it('bands mirrors the slices and series stays empty without groupBy or hidden', () => {
+    const entries = vault();
+    const data = computeChart(records(entries), view(), buildSchema(entries));
+    expect(data.bands.map((b) => [b.key, b.hue, b.hidden])).toEqual([
+      ['todo', 0, false],
+      ['doing', 1, false],
+      ['done', 2, false],
+    ]);
+    expect(data.series).toEqual([]);
+    expect(data.slices.map((s) => s.hue)).toEqual([0, 1, 2]);
+    expect(data.slices.every((s) => s.parts === undefined)).toBe(true);
+  });
+
+  it('a donut ignores groupBy — a stacked ring reads as nothing', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { kind: 'donut', xField: 'status', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.slices.every((s) => s.parts === undefined)).toBe(true);
+    expect(data.series).toEqual([]);
+  });
+
+  it('a number chart ignores groupBy — it has no bands to split', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ group: [], chart: { kind: 'number', groupBy: 'priority' } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.series).toEqual([]);
+    expect(data.bands).toEqual([]);
+  });
+
+  it('a hidden band leaves the slices but stays in the roster, and the totals shrink', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBeNull();
+    expect(data.slices.map((s) => s.key)).toEqual(['doing', 'done']);
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', true],
+      ['doing', false],
+      ['done', false],
+    ]);
+    // Visible arithmetic: the two hidden rows are gone from total and max.
+    expect(data.total).toBe(1);
+    expect(data.max).toBe(1);
+    // Hue is the PRE-filter index — hiding Todo must not repaint Doing.
+    expect(data.slices.find((s) => s.key === 'doing')?.hue).toBe(1);
+    expect(data.bands.find((b) => b.key === 'doing')?.hue).toBe(1);
+  });
+
+  it('a hidden series filters the parts, and the band value follows the visible stack', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['low'] } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.hue])).toEqual([['high', 0]]);
+    // The stack and the total agree: the band draws only what is visible…
+    expect(todo?.value).toBe(1);
+    expect(data.total).toBe(2);
+    // …while count stays the band's true row count, the drilldown's number.
+    expect(todo?.count).toBe(2);
+    expect(data.series.map((s) => [s.key, s.hidden])).toEqual([
+      ['high', false],
+      ['low', true],
+    ]);
+  });
+
+  it('hiding a series keeps the survivor’s hue — the legend must not repaint', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['high'] } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.hue])).toEqual([['low', 1]]);
+  });
+
+  it('hiding every band is its own blocked state, and the roster survives it', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { hidden: ['todo', 'doing', 'done'] } }),
+      buildSchema(entries),
+    );
+    // "You hid it all" is not "no rows" — the empty state must name the
+    // legend, and the legend needs the roster to offer a way back.
+    expect(data.blocked).toBe('all-hidden');
+    expect(data.slices).toEqual([]);
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', true],
+      ['doing', true],
+      ['done', true],
+    ]);
+  });
+
+  it('cumulative runs over the visible bands only', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { agg: 'sum', value: 'estimate', cumulative: true, hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    // Todo (8) is hidden: the running total is Doing (2), then Done (2 + 0).
+    expect(data.slices.map((s) => [s.key, s.value])).toEqual([
+      ['doing', 2],
+      ['done', 2],
+    ]);
+    expect(data.total).toBe(2);
+    expect(data.max).toBe(2);
+  });
+
+  // Undeclared groupBy values (text, ghosts, __none__) exist only where a
+  // band's rows put them — so a roster built from the VISIBLE bands would
+  // erase a series when its sole holder is hidden, renumbering every later
+  // hue and orphaning its hiddenG key. The roster lists what EXISTS; hiding
+  // is state.
+  it('a hidden band does not erase its series from the roster or shift the hues', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/f.md',
+        title: 'F',
+        type: 'Work item',
+        properties: { status: 'done', owner: 'cara' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'owner', hidden: ['todo'] } }),
+      buildSchema(entries),
+    );
+    // ann's only rows sit in the hidden Todo band, and she is still listed.
+    expect(data.series.map((s) => [s.key, s.hue])).toEqual([
+      ['ann', 0],
+      ['bob', 1],
+      ['cara', 2],
+    ]);
+    const doing = data.slices.find((s) => s.key === 'doing');
+    const done = data.slices.find((s) => s.key === 'done');
+    expect(doing?.parts?.map((p) => [p.key, p.hue])).toEqual([['bob', 1]]);
+    expect(done?.parts?.map((p) => [p.key, p.hue])).toEqual([['cara', 2]]);
+  });
+
+  // A text-field groupBy alphabetizes sub-bands PER BAND, while hues are
+  // first-seen ACROSS bands — when a later-alphabet name arrives first, the
+  // two orders disagree and a series would change stack level between bands.
+  // Parts therefore order by hue always, not just under cumulative.
+  it('parts order by hue, so a series keeps one stack level in every band', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', owner: 'zoe' },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'doing', owner: 'amy' },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', owner: 'zoe' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'owner' } }),
+      buildSchema(entries),
+    );
+    expect(data.series.map((s) => [s.key, s.hue])).toEqual([
+      ['zoe', 0],
+      ['amy', 1],
+    ]);
+    // Doing's rows alphabetize to [amy, zoe]; the stack still draws zoe at
+    // the level hue 0 gave her in Todo.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.hue])).toEqual([
+      ['zoe', 0],
+      ['amy', 1],
+    ]);
+  });
+
+  it('hiding every series is all-hidden too — zero bars would claim a measured zero', () => {
+    const entries = vault();
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', hiddenG: ['high', 'low'] } }),
+      buildSchema(entries),
+    );
+    expect(data.blocked).toBe('all-hidden');
+    expect(data.slices).toEqual([]);
+    // Both rosters survive: the legend is the only way back, twice over.
+    expect(data.bands.map((b) => [b.key, b.hidden])).toEqual([
+      ['todo', false],
+      ['doing', false],
+      ['done', false],
+    ]);
+    expect(data.series.map((s) => [s.key, s.hidden])).toEqual([
+      ['high', true],
+      ['low', true],
+    ]);
+  });
+
+  it('stacked cumulative cumulates per series, and the stack is the sum of the runs', () => {
+    const entries = [
+      ...vault(),
+      makeEntry({
+        path: 'items/f.md',
+        title: 'F',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'low', estimate: 4 },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({
+        chart: {
+          xField: 'status',
+          groupBy: 'priority',
+          agg: 'sum',
+          value: 'estimate',
+          cumulative: true,
+          // Done holds no rows; omit it so every band carries both series.
+          omitZero: true,
+        },
+      }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    const doing = data.slices.find((s) => s.key === 'doing');
+    // Each segment is its own series' running total…
+    expect(todo?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 3],
+      ['low', 5],
+    ]);
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 5],
+      ['low', 9],
+    ]);
+    // …so every band's height is exactly its stack.
+    expect(todo?.value).toBe(8);
+    expect(doing?.value).toBe(14);
+    expect(data.max).toBe(14);
+    // And total stays the real (pre-cumulative) sum, as it always has.
+    expect(data.total).toBe(14);
+  });
+
+  // Decision A (M44.3): a cumulative stack never dips. A band that lacks a
+  // series carries that series' run forward as a synthesized plateau part —
+  // count 0, because no rows arrived there; the height is the run persisting —
+  // so every band's stack is the sum of all visible series' runs, monotonic
+  // non-decreasing.
+  it('cumulative synthesizes a plateau for a series a band lacks, so the stack never dips', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high' },
+      }),
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'low' },
+      }),
+      // Doing holds no rows at all; Done holds only the high series.
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'done', priority: 'high' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', cumulative: true } }),
+      buildSchema(entries),
+    );
+    // The empty middle band is all plateau: its stack equals the previous
+    // band's stack, and both series' segments are present with count 0.
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 1, 0],
+      ['low', 1, 0],
+    ]);
+    // Done adds a high row (count 1) while low plateaus at its run (count 0).
+    const done = data.slices.find((s) => s.key === 'done');
+    expect(done?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 2, 1],
+      ['low', 1, 0],
+    ]);
+    // Stacks: 2, 2 (plateau), 3 — monotonic, and band value = stack.
+    expect(data.slices.map((s) => s.value)).toEqual([2, 2, 3]);
+    // A plateau's display is formatted from the run, like any other segment.
+    expect(done?.parts?.find((p) => p.key === 'low')?.display).toBe('1');
+  });
+
+  // The plateau guard is PRESENCE in the run map, not the run's value: a
+  // series whose first band measured zero has begun — its zero is a value to
+  // carry, and dropping it would break the line's continuity.
+  it('a run that began at measured zero still plateaus', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high', estimate: 3 },
+      }),
+      // The low series begins in Todo at a measured zero.
+      makeEntry({
+        path: 'items/b.md',
+        title: 'B',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'low', estimate: 0 },
+      }),
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'high', estimate: 2 },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({
+        chart: {
+          xField: 'status',
+          groupBy: 'priority',
+          agg: 'sum',
+          value: 'estimate',
+          cumulative: true,
+        },
+      }),
+      buildSchema(entries),
+    );
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value, p.count])).toEqual([
+      ['high', 5, 1],
+      ['low', 0, 0],
+    ]);
+  });
+
+  it('no plateau before a series first appears — a zero run is absence, not zero', () => {
+    const entries = [
+      vault()[0],
+      makeEntry({
+        path: 'items/a.md',
+        title: 'A',
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high' },
+      }),
+      // The low series begins in Doing; Todo must not synthesize it.
+      makeEntry({
+        path: 'items/c.md',
+        title: 'C',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'high' },
+      }),
+      makeEntry({
+        path: 'items/d.md',
+        title: 'D',
+        type: 'Work item',
+        properties: { status: 'doing', priority: 'low' },
+      }),
+    ];
+    const data = computeChart(
+      records(entries),
+      view({ chart: { xField: 'status', groupBy: 'priority', cumulative: true } }),
+      buildSchema(entries),
+    );
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => p.key)).toEqual(['high']);
+    expect(todo?.value).toBe(1);
+    const doing = data.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.map((p) => [p.key, p.value])).toEqual([
+      ['high', 2],
+      ['low', 1],
+    ]);
   });
 });
 
@@ -320,5 +945,49 @@ describe('aggregateNumbers', () => {
     const noneNumeric = { ...def, property: 'label' };
     expect(computeRollup(owner, { ...noneNumeric, calculate: 'sum' }, entries)).toBe('0');
     expect(computeRollup(owner, { ...noneNumeric, calculate: 'max' }, entries)).toBe('');
+  });
+});
+
+/**
+ * What the drilldown reads (M44.3): the raw axis field beside the humanized
+ * `axis`, and each part carrying its sub-band's rows the way the band slice
+ * already carries its own.
+ */
+describe('computeChart drilldown carriers (M44.3)', () => {
+  it('axisField is the raw band field at every construction site', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    expect(computeChart(records(entries), view(), schema).axisField).toBe('status');
+    expect(
+      computeChart(records(entries), view({ group: [], chart: { xField: 'priority' } }), schema)
+        .axisField,
+    ).toBe('priority');
+    // The blocked empty() site still names the field it would have banded by.
+    expect(computeChart([], view(), schema).axisField).toBe('status');
+    // A number chart has no axis at all — '' both here and in `axis`.
+    expect(
+      computeChart(records(entries), view({ group: [], chart: { kind: 'number' } }), schema)
+        .axisField,
+    ).toBe('');
+  });
+
+  it('parts carry their sub-band rows, and a plateau part carries none', () => {
+    const entries = vault();
+    const schema = buildSchema(entries);
+    const data = computeChart(records(entries), view({ chart: { groupBy: 'priority' } }), schema);
+    const todo = data.slices.find((s) => s.key === 'todo');
+    expect(todo?.parts?.map((p) => [p.key, p.entries.map((e) => e.path)])).toEqual([
+      ['high', ['items/a.md']],
+      ['low', ['items/b.md']],
+    ]);
+    // Under cumulative, Doing lacks `low` and gets a synthesized plateau —
+    // the run persisting, not rows arriving — so its entries are [].
+    const cum = computeChart(
+      records(entries),
+      view({ chart: { groupBy: 'priority', cumulative: true } }),
+      schema,
+    );
+    const doing = cum.slices.find((s) => s.key === 'doing');
+    expect(doing?.parts?.find((p) => p.key === 'low')?.entries).toEqual([]);
   });
 });
