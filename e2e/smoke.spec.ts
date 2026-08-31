@@ -130,7 +130,10 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  // -- M12: a List is created in a Collection, from the sidebar ----------
+  // -- M47.6: a database is created from a Collection's + ----------------
+  // This used to create a LIST here. M47 retired that lane: a saved view
+  // belongs to the database it queries, so the `+` offers a page or a
+  // database and nothing authors a `*.list.yml` any more.
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
   const deliveryRow = page
     .getByTestId('collection-node-collection')
@@ -138,25 +141,26 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await expect(deliveryRow).toBeVisible();
   await deliveryRow.hover();
   await page.getByRole('button', { name: 'Add to Delivery' }).click();
-  await page.getByLabel('List name').fill('Smoke board');
-  await page.getByRole('button', { name: 'Save view' }).click();
+  await expect(page.getByRole('menuitem', { name: 'New list' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'New database' }).click();
 
-  // Lands on the new List; its file lives in the collection's folder.
-  const findViewPath = () =>
-    page.evaluate(() =>
-      [...window.__cerebroMockFs.keys()].find((k) => k.endsWith('/smoke-board.list.yml')),
-    );
-  await expect.poll(findViewPath, { timeout: 5_000 }).toBeDefined();
-  const viewPath = await findViewPath();
-  if (!viewPath) throw new Error('smoke-board list file missing from mock fs');
+  // Lands on the new database. Its Type doc is the file that holds the schema
+  // AND the saved views — the two things a List file used to hold separately.
+  const typeDocPath = 'types/untitled-database.md';
+  await expect
+    .poll(() => readMockFile(page, typeDocPath), { timeout: 5_000 })
+    .toContain('type: Type');
 
-  // -- The tab row owns layout; changing it persists to the List file -----
+  // -- The tab row owns layout; changing it persists to the Type doc ------
   await page.getByTestId('view-tabs').getByRole('tab').first().click();
   await page.getByText('Change layout…').click();
   await page.getByTestId('view-switch-board').click();
-  await expect(page.getByTestId('board-column').first()).toBeVisible();
+  // The ROOT, not a column: a database with no records yet groups into no
+  // buckets, so `board-column` would assert on the rows rather than on the
+  // layout the tab row just changed.
+  await expect(page.getByTestId('board-view')).toBeVisible();
   await expect
-    .poll(() => readMockFile(page, viewPath), { timeout: 5_000 })
+    .poll(() => readMockFile(page, typeDocPath), { timeout: 5_000 })
     .toContain('type: board');
 
   // -- Pages: new folder, new page inside it (the standing tree, M38.3) ----

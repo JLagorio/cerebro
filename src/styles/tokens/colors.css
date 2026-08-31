@@ -238,10 +238,17 @@
   --n-800: #e0e4ec;
   --n-900: #f4f6fa;
 
-  /* tint steps of the brand ramps become dark tints; the saturated mid and
-     high steps still read on a dark ground and are left as they are. */
+  /* tint steps of the brand ramps become dark tints; the saturated mid steps
+     still read on a dark ground and are left as they are. The 700 ink step
+     follows the semantic ramps below instead: components pair it with the
+     50 ground (`bg-cortex-50 text-cortex-700` — StructureTile, the layout
+     editor's block chips, the sidebar's selected row), and light-mode
+     #2439a0 on the dark #1b2547 ground is ~1.5:1. The light ramp's 200 tint
+     is the ink here — 9.2:1 on the dark 50, the same band as the semantic
+     700s on theirs. */
   --cortex-50: #1b2547;
   --cortex-100: #223059;
+  --cortex-700: #bcc9fb;
   --synapse-50: #241c3d;
   --synapse-100: #2f2450;
 

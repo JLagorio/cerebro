@@ -181,3 +181,202 @@
 .cerebro-editor-compact .bn-block-content[data-content-type='heading'] h3 {
   font-size: 14px;
 }
+
+/* Page columns (M48.1).
+ *
+ * The layout is these rules over the nesting BlockNote already does. A
+ * `columnList` block renders nothing; its CHILDREN, which BlockNote puts in a
+ * sibling `.bn-block-group`, become a flex row. A `column` renders nothing
+ * either, and its own children group goes on stacking the way every block
+ * group stacks. There is no second document model here, only CSS.
+ *
+ * The doubled `:has()` is not defensive vagueness. MEASURED: a custom React
+ * block is wrapped in an extra `.react-renderer` element in the browser and
+ * NOT in jsdom, so `> .bn-block-content` matches under test and nothing at
+ * all in the app — which is exactly the failure that passes every unit test
+ * and ships a page of stacked columns.
+ */
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList']
+  )
+  > .bn-block-group {
+  display: flex;
+  align-items: flex-start;
+  /* 72px, and every pixel of it is measured rather than chosen for looks.
+     BlockNote floats its side menu in the LEFT margin of whatever block the
+     pointer is beside — 48px wide, ending at the block's own edge — and inside
+     a column that margin IS the gutter. At 28px and again at 48px the menu
+     covered the resize handle completely: `elementFromPoint` over the handle
+     returned one of the menu's icons, and every press aimed at the handle went
+     to the menu instead. Raising the handle's `z-index` does not help; the
+     menu's container makes its own stacking context. 72px is the first width
+     that leaves a strip the menu does not reach. */
+  gap: 72px;
+}
+
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList']
+  )
+  > .bn-block-group
+  > .bn-block-outer {
+  /* `min-width: 0` or a long word in one column pushes every other column off
+     the page: the flex default is `min-width: auto`, which refuses to shrink
+     below the content's intrinsic size. */
+  flex-basis: 0;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* The default ratio, and it lives in a `:where()` on purpose.
+ *
+ * A column that wants a different ratio overrides this from a stylesheet of
+ * its own, rendered inside its node view — the only way a block can style the
+ * ancestor the browser actually lays out (see ColumnView in blocks.tsx). That
+ * rule is keyed on one `data-id`, so it is far less specific than the selector
+ * above; `:where()` drops this declaration's specificity to almost nothing so
+ * the more specific intent wins without anybody reaching for `!important`.
+ * Harmless on a block outer that is not a flex item, which ignores it. */
+.cerebro-editor :where(.bn-block-outer) {
+  flex-grow: 1;
+}
+
+/* The list draws nothing. It is structure, and a structural block that
+   reserved a line of height would put a blank gap above every column on the
+   page. The COLUMN is not hidden the same way — it hosts the gutter handle,
+   and is taken out of flow instead. See the M48.5 block below. */
+.cerebro-editor .bn-block-content[data-content-type='columnList'] {
+  display: none;
+}
+
+/* The block drag is ours now (M48.4).
+ *
+ * BlockNote's handle button is a menu trigger that also carries
+ * `draggable="true"`. We keep the button — it is the menu — and switch off the
+ * browser's native drag on it, so the pointer drag wrapped around it is the
+ * only drag there is. Two drags on one control would race for the same press,
+ * and only one of them can be tested.
+ */
+.cerebro-editor .bn-side-menu [draggable='true'] {
+  -webkit-user-drag: none;
+}
+
+.cerebro-editor .bn-side-menu [draggable='true']:active {
+  cursor: grabbing;
+}
+
+/* While a block is in flight, the text cursor would otherwise select prose
+   across every block the pointer crosses. */
+.cerebro-editor.cb-block-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* The gutter handle (M48.5).
+ *
+ * The column block renders nothing but this, so its content element stops
+ * being `display: none` and becomes the handle's host instead — taken out of
+ * flow so it still reserves no height, and stretched over the column so the
+ * handle can run the column's full depth the way Notion's does.
+ *
+ * `position: relative` is scoped to a COLUMN's block outer rather than put on
+ * every block outer: the side menu and the drop line are positioned against
+ * boxes further up, and a new containing block on every block in the document
+ * would move them.
+ */
+.cerebro-editor
+  .bn-block-outer:has(> .bn-block > * > .bn-block-content[data-content-type='column']),
+.cerebro-editor .bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type='column']) {
+  position: relative;
+}
+
+.cerebro-editor .bn-block-content[data-content-type='column'] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 0;
+  /* The column itself catches nothing; the handle inside it opts back in. */
+  pointer-events: none;
+}
+
+/* Sits in the gutter, on the far side of BlockNote's side menu — see the gap
+   above for why that side and not the middle. The first column of a row
+   renders no handle at all: ColumnView knows its index and does not draw one. */
+.cerebro-editor .cb-column-gutter {
+  position: absolute;
+  inset-block: 0;
+  /* At the FAR end of the gutter, clear of the 48px the side menu claims
+     against the column's own edge. */
+  inset-inline-start: -66px;
+  width: 12px;
+  /* Above BlockNote's side menu, which floats in this same margin and, being
+     later in the document, would otherwise take every press aimed at the
+     handle — MEASURED: the menu spans the whole gutter (x 522, 48 wide, over a
+     handle at 530) and `elementFromPoint` returned one of its icons. */
+  z-index: 3;
+  cursor: col-resize;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+/* Shows what it does on hover, and stays visible while it is being dragged.
+   The bar is drawn by a child pseudo-element so the hit area stays 12px wide
+   while the line itself is 2px — the same split every resize handle in the app
+   uses (M11). */
+.cerebro-editor .cb-column-gutter:hover,
+.cerebro-editor .cb-column-gutter:focus-visible,
+.cerebro-editor .cb-column-gutter[data-active='true'] {
+  opacity: 1;
+}
+
+.cerebro-editor .cb-column-gutter::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--cortex-500);
+}
+
+/* Columns are not an indent level (M48.5, after the author's screenshot).
+ *
+ * A columnList's children and a column's children are NESTED block groups, and
+ * BlockNote styles those for nested LISTS: `.bn-block-group .bn-block-group`
+ * gets `margin-left: 24px`, and every block outer inside one gets a `:before`
+ * guide at `left: -20px`. On a column layout that renders as a vertical rule
+ * beside every column and an indent nobody asked for.
+ *
+ * Both are switched off here rather than overridden per property, because
+ * neither is about columns at all — they belong to the nesting that indents a
+ * sub-list, and a column is a place, not a depth.
+ */
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList'],
+    > .bn-block-content[data-content-type='column'],
+    > * > .bn-block-content[data-content-type='column']
+  )
+  > .bn-block-group {
+  margin-left: 0;
+}
+
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList'],
+    > .bn-block-content[data-content-type='column'],
+    > * > .bn-block-content[data-content-type='column']
+  )
+  > .bn-block-group
+  > .bn-block-outer::before {
+  content: none;
+}

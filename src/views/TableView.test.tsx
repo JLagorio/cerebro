@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { buildSchema } from '@/engine/schema';
 import { columnUniverse } from '@/engine/columns';
 import { useNavStore } from '@/stores/navStore';
@@ -277,6 +278,115 @@ describe('TableView column resizing (M11)', () => {
     );
     expect(screen.queryByLabelText('Resize Status column')).toBeNull();
     expect(screen.queryByLabelText('Resize Name column')).toBeNull();
+  });
+
+  /**
+   * Abandoning a pointer resize (M46.2). The KEYBOARD path has taken Escape
+   * since M20.5 (the case above); the pointer path took none, so a drag begun
+   * by accident could only be ended by dropping it and dragging it back.
+   */
+  describe('Escape while the pointer resize is live', () => {
+    beforeEach(() => resetLayers());
+    afterEach(() => {
+      resetLayers();
+      document.body.classList.remove('cb-resizing');
+    });
+
+    /** Widths are painted onto the grid element as CSS custom properties. */
+    const painted = () => screen.getByRole('grid').firstElementChild as HTMLElement;
+    const escape = () => fireEvent.keyDown(document.body, { key: 'Escape' });
+
+    it('puts the column back, and the release persists nothing', () => {
+      const { onColumnsChange } = grid();
+      const handle = screen.getByLabelText('Resize Status column');
+      fireEvent(handle, at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('210px');
+
+      escape();
+
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('150px');
+      fireEvent(window, at('pointerup', 160));
+      // Without the cancel this release writes 210 — the measured defect.
+      expect(onColumnsChange).not.toHaveBeenCalled();
+    });
+
+    it('stops tracking the pointer, so a later move paints nothing', () => {
+      grid();
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      escape();
+      fireEvent(window, at('pointermove', 400));
+      expect(painted().style.getPropertyValue('--cb-cw-0')).toBe('150px');
+    });
+
+    it('leaves a later drag able to persist', () => {
+      const { onColumnsChange } = grid();
+      const handle = screen.getByLabelText('Resize Status column');
+      fireEvent(handle, at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      escape();
+      fireEvent(window, at('pointerup', 160));
+
+      // A DIFFERENT width, so the assertion can tell the two worlds apart:
+      // cancelling a drag to 210 and repeating it lands on the very width an
+      // uncancelled first drag would have produced.
+      drag(handle, 100, 130);
+      expect(onColumnsChange).toHaveBeenCalledTimes(1);
+      expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 180 });
+    });
+
+    it('keeps the keystroke away from the surface behind while a drag is live', () => {
+      grid();
+      const onWindow = vi.fn();
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      window.addEventListener('keydown', onWindow);
+      try {
+        escape();
+        expect(onWindow).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener('keydown', onWindow);
+      }
+    });
+
+    it('takes Escape off the surface underneath for the length of the drag', () => {
+      grid();
+      // What DetailPanel and Dialog both register; their handlers ask the
+      // stack who owns the keystroke.
+      pushLayer('panel');
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(ownsEscape('panel')).toBe(false);
+      escape();
+      expect(ownsEscape('panel')).toBe(true);
+    });
+
+    it('leaves no resizing cursor and no listeners when the table unmounts mid-drag', () => {
+      const onColumnsChange = vi.fn();
+      const entries = fixtureVault();
+      const schema = buildSchema(entries);
+      const { unmount } = render(
+        <TableView
+          entries={entries.filter((e) => e.type === 'Work item')}
+          presentation={presentation}
+          schema={schema}
+          fields={schema.types.get('Work item')?.fields ?? []}
+          onColumnsChange={onColumnsChange}
+        />,
+      );
+      pushLayer('panel');
+      fireEvent(screen.getByLabelText('Resize Status column'), at('pointerdown', 100));
+      fireEvent(window, at('pointermove', 160));
+      expect(document.body.classList.contains('cb-resizing')).toBe(true);
+
+      unmount();
+      fireEvent(window, at('pointerup', 160));
+
+      expect(document.body.classList.contains('cb-resizing')).toBe(false);
+      expect(onColumnsChange).not.toHaveBeenCalled();
+      expect(ownsEscape('panel')).toBe(true);
+    });
   });
 });
 
@@ -1550,5 +1660,216 @@ describe('TableView polish (M20.5)', () => {
     expect(screen.getByTestId('bulk-bar')).toBeTruthy();
     fireEvent.keyDown(screen.getByTestId('table-view'), { key: 'Escape' });
     expect(screen.queryByTestId('bulk-bar')).toBeNull();
+  });
+});
+
+/**
+ * Dragging a column header to reorder it (M12.8), and abandoning that drag
+ * (M46.2).
+ *
+ * The measured defect: the loop had no keydown listener at all, so `Escape`
+ * cancelled nothing and the RELEASE COMMITTED the reorder — the same class of
+ * bug Task 1 fixed in `useSortableList`, on the one drag system that also
+ * reaches for `document.body`. Two leaks came with it: an unmount mid-drag
+ * stranded the window listeners, and left `cb-col-dragging` on the body, which
+ * is `cursor: grabbing !important` on every element in the app, forever.
+ */
+describe('TableView column drag (M46.2)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    resetLayers();
+  });
+  afterEach(() => {
+    resetLayers();
+    // Hygiene only — every assertion about the class is made in the case
+    // itself. Without this, one leaking case would fail the next.
+    document.body.classList.remove('cb-col-dragging');
+  });
+
+  const at = (type: string, clientX: number) => new MouseEvent(type, { clientX, bubbles: true });
+
+  function grid(onPresentationChange = vi.fn()) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const view = render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onPresentationChange, unmount: view.unmount };
+  }
+
+  /**
+   * jsdom lays nothing out, and the drag decides its slot from the header
+   * cells' MIDPOINTS. Three 100px cells put those at 50 / 150 / 250, so an x
+   * of 10 is slot 0 and an x of 260 is slot 3.
+   */
+  const stubHeaders = () => {
+    const heads = screen.getAllByRole('columnheader');
+    heads.forEach((h, i) => {
+      h.getBoundingClientRect = () =>
+        ({ left: i * 100, width: 100, top: 0, height: 32 }) as DOMRect;
+    });
+    return heads;
+  };
+
+  const escape = () => fireEvent.keyDown(document.body, { key: 'Escape' });
+
+  it('commits a reorder on release', () => {
+    const { onPresentationChange } = grid();
+    const heads = stubHeaders();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    fireEvent(window, at('pointerup', 260));
+    expect(onPresentationChange).toHaveBeenCalledTimes(1);
+    expect(onPresentationChange.mock.calls[0][0].titlePosition).toBe(2);
+  });
+
+  it('cancels on Escape, so the release commits nothing', () => {
+    const { onPresentationChange } = grid();
+    const heads = stubHeaders();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    escape();
+    fireEvent(window, at('pointerup', 260));
+    // Without the cancel this release commits titlePosition 2 — the defect.
+    expect(onPresentationChange).not.toHaveBeenCalled();
+  });
+
+  it('strips the drag state and stops tracking the pointer', () => {
+    grid();
+    const heads = stubHeaders();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    expect(document.body.classList.contains('cb-col-dragging')).toBe(true);
+    expect(heads[2].style.boxShadow).not.toBe('');
+
+    escape();
+
+    expect(document.body.classList.contains('cb-col-dragging')).toBe(false);
+    expect(heads[2].style.boxShadow).toBe('');
+    // A move after the cancel must paint nothing.
+    fireEvent(window, at('pointermove', 10));
+    expect(heads[0].style.boxShadow).toBe('');
+  });
+
+  it('leaves a later drag able to commit', () => {
+    const { onPresentationChange } = grid();
+    const heads = stubHeaders();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    escape();
+    fireEvent(window, at('pointerup', 260));
+
+    // A DIFFERENT column, so the assertion can tell the two worlds apart:
+    // cancelling a move of the name column and then repeating it lands on the
+    // very order an uncancelled first drag would have produced.
+    stubHeaders();
+    fireEvent(heads[2], at('pointerdown', 260));
+    fireEvent(window, at('pointermove', 10));
+    fireEvent(window, at('pointerup', 10));
+
+    expect(onPresentationChange).toHaveBeenCalledTimes(1);
+    expect(onPresentationChange.mock.calls[0][0].titlePosition).toBe(1);
+  });
+
+  it('keeps the keystroke away from the surface behind while a drag is live', () => {
+    grid();
+    const heads = stubHeaders();
+    const onWindow = vi.fn();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    window.addEventListener('keydown', onWindow);
+    try {
+      escape();
+      // The leak measured on the record panel: one Escape cancelled nothing
+      // AND closed the surface behind the drag.
+      expect(onWindow).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', onWindow);
+    }
+  });
+
+  it('takes Escape off the surface underneath for the length of the drag', () => {
+    grid();
+    const heads = stubHeaders();
+    // What DetailPanel and Dialog both register; their handlers ask the stack
+    // who owns the keystroke.
+    pushLayer('panel');
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    expect(ownsEscape('panel')).toBe(false);
+    escape();
+    expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('hands the layer back on a normal release too', () => {
+    grid();
+    const heads = stubHeaders();
+    pushLayer('panel');
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    fireEvent(window, at('pointerup', 260));
+    expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('does not open the column menu on the release after an Escape, nor jam it shut', async () => {
+    const { onPresentationChange } = grid();
+    const heads = stubHeaders();
+    fireEvent(heads[1], at('pointerdown', 160));
+    fireEvent(window, at('pointermove', 10));
+    escape();
+    fireEvent(window, at('pointerup', 10));
+
+    // All three assertions, because each of the other two is green in a world
+    // this case is not about: without the cancel the drop commits and the
+    // click is swallowed by the completed-drag path, and a cancel that also
+    // took the release listener off swallows this click but never clears the
+    // suppression, so every later click on a header is eaten too.
+    expect(onPresentationChange).not.toHaveBeenCalled();
+    // The release still fires a click on the header label, which is also the
+    // menu's trigger. Escape must abandon the drag without opening a menu…
+    fireEvent.click(screen.getByLabelText('Status column menu'));
+    expect(screen.queryByRole('menu')).toBeNull();
+
+    // …and the release must still clear the suppression it set, on the
+    // timeout that outlives the click it exists to swallow.
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.click(screen.getByLabelText('Status column menu'));
+    expect(screen.queryByRole('menu')).not.toBeNull();
+  });
+
+  it('leaves no grabbing cursor on the body when the table unmounts mid-drag', () => {
+    const { unmount } = grid();
+    const heads = stubHeaders();
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+    expect(document.body.classList.contains('cb-col-dragging')).toBe(true);
+
+    unmount();
+
+    // `cb-col-dragging` is `cursor: grabbing !important` on EVERY element in
+    // the app. Stranded, it never comes off.
+    expect(document.body.classList.contains('cb-col-dragging')).toBe(false);
+  });
+
+  it('strands no listeners when the table unmounts mid-drag', () => {
+    const { onPresentationChange, unmount } = grid();
+    const heads = stubHeaders();
+    pushLayer('panel');
+    fireEvent(heads[0], at('pointerdown', 10));
+    fireEvent(window, at('pointermove', 260));
+
+    unmount();
+    fireEvent(window, at('pointerup', 260));
+
+    expect(onPresentationChange).not.toHaveBeenCalled();
+    // A leaked gesture layer sits on the stack forever, and every later Escape
+    // in the app finds it there instead of the surface it was aimed at.
+    expect(ownsEscape('panel')).toBe(true);
   });
 });

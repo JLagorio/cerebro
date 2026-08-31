@@ -4,17 +4,20 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
 import {
+  foldsWhenUnset,
   inferKindFromValue,
-  isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
+import { resolveLayout, revealableFields } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
-import type { Entry, FieldKind, Schema } from '@/engine/types';
+import { LAYOUT_DEFAULTS } from '@/engine/types';
+import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /** Readable text for a key the type does not declare. `properties` holds
@@ -41,6 +44,10 @@ function undeclaredKind(entry: Entry, name: string): FieldKind {
  * frontmatter read-only, plus the add-property flyout. Extracted from
  * DetailPanel (M3) so the overlay panel and the split view's right-hand pane
  * share one code path.
+ *
+ * It takes no tab and knows of none (M46.1). A section belongs to the RECORD:
+ * every host renders this whole stack ABOVE its tab strip, on every tab, so
+ * there is nothing here to narrow and no host that could ask for less.
  */
 export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const [addingProp, setAddingProp] = useState(false);
@@ -58,16 +65,30 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   const showEmpty = typeDef?.display.showEmpty === true;
 
   // M16.10. Revealing folds the hidden rows back into the same list, which
-  // also makes the reorder mapping below the identity case. M44.1: show_empty
-  // unfolds only what was hidden for BEING EMPTY — a field hidden on purpose
-  // (`visibility: hide`) stays behind the toggle either way, or the per-field
-  // eye-toggle would be lying about show-empty types.
+  // also makes the reorder mapping below the identity case.
   const [revealed, setRevealed] = useState(false);
-  const { shown, hidden } = splitByVisibility(
-    allDeclared,
-    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
-  );
+  const folds = foldsWhenUnset(entry, schema, showEmpty);
+  const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
+
+  // M45.1: `layout:` arranges the stack into named groups. M46.1: and that
+  // arrangement is the record's whole answer — no tab narrows it.
+  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
+  // Per container, the SAME fold the flat stack makes; revealing opens each
+  // container's folds in place.
+  const containerRows = (fields: FieldDef[]) =>
+    revealed ? fields : splitByVisibility(fields, folds).shown;
+  // The pooled hidden count is what THIS stack can reveal — every folded
+  // field in every container, because the expander promises rows and each one
+  // opens in its own section. `revealableFields` owns the union and the
+  // invariants that make it exact (engine/layout.ts), so the day a FOURTH
+  // container joins heading/groups/rest the count learns about it in one
+  // place instead of two hand-rolled ones.
+  const hidden = splitByVisibility(revealableFields(layout), folds).hidden;
+  // Heading fields the strip folded. The strip cannot reveal them, so on
+  // reveal they surface at the TOP of the stack — the heading is the topmost
+  // container — headerless. The strip's SHOWN fields stay out of the stack.
+  const headingFolds = splitByVisibility(layout.heading, folds).hidden;
   const undeclared = visibleProperties([
     ...Object.keys(entry.properties),
     ...Object.keys(entry.relationships),
@@ -100,43 +121,102 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
     },
   });
 
+  // A grouped row carries no grip: declaration order still owns column order,
+  // but ARRANGEMENT of a laid-out stack belongs to the layout editor (M45.3),
+  // and a drag that silently rewrote `fields:` under a `layout:` would move
+  // nothing on screen.
+  const groupedRow = (f: FieldDef) => (
+    <PropertyRow
+      key={f.name}
+      kind={f.kind}
+      name={f.name}
+      align={f.kind === 'checkbox' ? 'center' : 'start'}
+      menu={
+        entry.type === null
+          ? undefined
+          : ({ close }) => (
+              <PropertyMenu
+                def={f}
+                sourceType={entry.type ?? ''}
+                schema={schema}
+                recordCount={recordCount}
+                onClose={close}
+              />
+            )
+      }
+    >
+      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+    </PropertyRow>
+  );
+  const restRows = containerRows(layout.rest);
+
   return (
-    <div className="mb-4 flex flex-col gap-[7px]">
-      {/* Declared fields get their own container: the sortable measures its
-          children as the rows, and undeclared keys are not part of the type's
-          order — they are not in `fields:` at all. */}
-      <div
-        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-        className="flex flex-col gap-[7px]"
-      >
-        {declared.map((f, index) => (
-          <PropertyRow
-            key={f.name}
-            kind={f.kind}
-            name={f.name}
-            align={f.kind === 'checkbox' ? 'center' : 'start'}
-            grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
-            gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
-            dragging={sortable.dragging === f.name}
-            style={sortable.dropIndicator(index)}
-            menu={
-              entry.type === null
-                ? undefined
-                : ({ close }) => (
-                    <PropertyMenu
-                      def={f}
-                      sourceType={entry.type ?? ''}
-                      schema={schema}
-                      recordCount={recordCount}
-                      onClose={close}
-                    />
-                  )
-            }
-          >
-            <FieldEditor entry={entry} def={f} schema={schema} />
-          </PropertyRow>
-        ))}
-      </div>
+    <div className="mb-4 flex flex-col gap-1">
+      {layout.flat ? (
+        /* Declared fields get their own container: the sortable measures its
+           children as the rows, and undeclared keys are not part of the type's
+           order — they are not in `fields:` at all. */
+        <div
+          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+          className="flex flex-col gap-1"
+          style={sortable.containerStyle}
+        >
+          {declared.map((f, index) => (
+            <PropertyRow
+              key={f.name}
+              kind={f.kind}
+              name={f.name}
+              align={f.kind === 'checkbox' ? 'center' : 'start'}
+              grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
+              gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
+              style={sortable.rowStyle(index)}
+              menu={
+                entry.type === null
+                  ? undefined
+                  : ({ close }) => (
+                      <PropertyMenu
+                        def={f}
+                        sourceType={entry.type ?? ''}
+                        schema={schema}
+                        recordCount={recordCount}
+                        onClose={close}
+                      />
+                    )
+              }
+            >
+              <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+            </PropertyRow>
+          ))}
+        </div>
+      ) : (
+        <>
+          {revealed && headingFolds.length > 0 && (
+            <div className="flex flex-col gap-1">{headingFolds.map(groupedRow)}</div>
+          )}
+          {layout.groups.map((g) => {
+            const rows = containerRows(g.fields);
+            // Empty after folding renders nothing — a header over no rows
+            // would claim the group holds something it does not.
+            if (rows.length === 0) return null;
+            return (
+              <div
+                key={g.id}
+                data-testid="property-group"
+                data-group={g.id}
+                className="flex flex-col gap-1"
+              >
+                <GroupLabel name={g.name} />
+                {rows.map(groupedRow)}
+              </div>
+            );
+          })}
+          {/* Rest LAST and headerless: a freshly added field lands visibly at
+              the bottom of the arranged stack. */}
+          {restRows.length > 0 && (
+            <div className="flex flex-col gap-1">{restRows.map(groupedRow)}</div>
+          )}
+        </>
+      )}
       {hidden.length > 0 && (
         // Notion's expander. Hidden properties are still ON the record — they
         // are folded, not dropped — so the panel says how many and opens them
@@ -174,7 +254,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             </span>
           }
         >
-          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
             {undeclaredDisplay(entry, name)}
           </span>
         </PropertyRow>

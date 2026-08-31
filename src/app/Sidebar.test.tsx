@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useRootsStore } from '@/stores/rootsStore';
@@ -117,7 +117,7 @@ describe('Sidebar', () => {
     };
 
     it('carries exactly the destinations the shell has (M43)', () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const labels = surfaceLabels();
       // M43: Inbox leads (the design's hot queue), My work is new, Library
       // came up from the footer, and the footer holds Theme + Settings.
@@ -167,7 +167,7 @@ describe('Sidebar', () => {
       ];
       for (const selection of surfaces) {
         useNavStore.setState({ selection });
-        render(<Sidebar onNewView={vi.fn()} />);
+        render(<Sidebar />);
         expect(surfaceLabels()).toHaveLength(8);
         cleanup();
       }
@@ -178,7 +178,7 @@ describe('Sidebar', () => {
       // open page is marked in the tree itself, and every destination row
       // stays dark rather than one of them lying about where you are.
       useNavStore.setState({ selection: { kind: 'doc', path: 'inbox/welcome.md' } });
-      const { container } = render(<Sidebar onNewView={vi.fn()} />);
+      const { container } = render(<Sidebar />);
       expect(
         container.querySelectorAll('[data-testid="nav-surfaces"] [aria-current="page"]'),
       ).toHaveLength(0);
@@ -186,7 +186,7 @@ describe('Sidebar', () => {
 
       // M12.5: projects retired — a container selection is a Collection.
       useNavStore.setState({ selection: { kind: 'collection', folder: 'projects/x' } });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBe(
         'page',
       );
@@ -202,7 +202,7 @@ describe('Sidebar', () => {
         { kind: 'diagram', path: 'diagrams/pipeline.mmd' } as const,
       ]) {
         useNavStore.setState({ selection });
-        render(<Sidebar onNewView={vi.fn()} />);
+        render(<Sidebar />);
         expect(
           screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current'),
         ).toBeNull();
@@ -212,7 +212,7 @@ describe('Sidebar', () => {
 
     it('marks the current destination with aria-current and the assistant with aria-pressed', () => {
       useNavStore.setState({ selection: { kind: 'studio' } });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       // Scoped to the destination containers: only the destination row wears
       // aria-current (M43.10 — Studio is a standalone row, lit for the whole
       // surface now that no prototype rows nest under it).
@@ -242,12 +242,12 @@ describe('Sidebar', () => {
           modifiedAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(),
         });
       useVaultStore.setState({ entries: [capture('inbox/a.md', 1), capture('inbox/b.md', 40)] });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       expect(screen.getByRole('button', { name: 'Inbox (2)' })).toBeTruthy();
       cleanup();
 
       useUiStore.setState({ inboxPeriod: 'week' });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       expect(screen.getByRole('button', { name: 'Inbox (1)' })).toBeTruthy();
     });
 
@@ -257,7 +257,7 @@ describe('Sidebar', () => {
       // un-current nav elects no default row, because a highlight naming a
       // view that is not on screen is worse than none.
       useNavStore.setState({ selection: { kind: 'home' } });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const rows = screen.getAllByTestId('knowledge-nav-row');
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([]);
@@ -270,7 +270,7 @@ describe('Sidebar', () => {
           mkEntry({ path: 'records/agents/scout.md', title: 'Scout', type: 'Agent' }),
         ],
       });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       // The row is a destination for ONE agent — and it lives outside the
       // `nav-surfaces` containers, so an agent named after a destination can
       // never be caught by a spec scoped to them.
@@ -296,7 +296,7 @@ describe('Sidebar', () => {
     });
 
     it('the search row opens QuickOpen', () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'Search' }));
       expect(useUiStore.getState().quickOpenVisible).toBe(true);
     });
@@ -306,7 +306,7 @@ describe('Sidebar', () => {
   // no second grouping beside it, because a folder holding Lists is a
   // Collection so nothing can be orphaned. Projects are not a sidebar primitive.
   it('shows Collections as the only top-level grouping, and no project rows', () => {
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     expect(screen.getByText('Collections')).toBeTruthy();
     // The folder holding the List is an implied Collection named after itself.
     // Scoped to the tree: the Work DESTINATION row (M37.2's locked name)
@@ -321,7 +321,7 @@ describe('Sidebar', () => {
 
   it('clicking a List navigates to it, carrying its collection', () => {
     useUiStore.setState({ expandedFolders: { 'collection:work': true } });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     fireEvent.click(screen.getByText('Urgent work'));
     // The collection is part of the key: ids are unique per folder only.
     expect(useNavStore.getState().selection).toEqual({
@@ -334,7 +334,7 @@ describe('Sidebar', () => {
   // An implied Collection has no marker, so there is nothing to remove — and an
   // action that silently does nothing is worse than one that is absent.
   it('offers no Remove on an implied Collection, but does on a declared one', () => {
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     const workNode = screen
       .getAllByTestId('collection-node-collection')
       .find((n) => n.dataset.id === 'work');
@@ -345,14 +345,14 @@ describe('Sidebar', () => {
   });
 
   it('the + button opens the new-collection dialog', () => {
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     fireEvent.click(screen.getByTestId('new-collection'));
     expect(screen.getByRole('textbox', { name: 'Collection name' })).toBeTruthy();
   });
 
   it('shows an empty hint when the vault has no collections and no lists', () => {
     useVaultStore.setState({ entries: [], views: [], collections: [] });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     expect(screen.getByText(/No collections yet/)).toBeTruthy();
   });
 
@@ -397,7 +397,7 @@ describe('Sidebar', () => {
       ],
     });
     useUiStore.setState({ expandedFolders: {} });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     // Collapsed: the Collection shows, its contents do not.
     expect(screen.getByText('Product')).toBeTruthy();
     expect(screen.queryByText('Roadmap')).toBeNull();
@@ -405,8 +405,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Roadmap')).toBeTruthy();
   });
 
-  it('creates a List into the Collection whose + was clicked', () => {
-    const onNewView = vi.fn();
+  it("offers a page and a database, and no longer a list, from a Collection's +", () => {
     useVaultStore.setState({
       views: [],
       collections: [
@@ -417,16 +416,46 @@ describe('Sidebar', () => {
         },
       ],
     });
-    render(<Sidebar onNewView={onNewView} />);
+    render(<Sidebar />);
     fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));
-    expect(onNewView).toHaveBeenCalledWith('product');
+    // M47.5: the `+` opens a MENU now. It used to go straight to the New list
+    // dialog, which is why a collection could hold nothing but lists and its
+    // empty page could only tell you to come back here. A page comes first.
+    // M47.6 took the third door away: a saved view belongs to the database it
+    // queries, so there is nothing left that authors a `*.list.yml`.
+    const items = screen.getAllByRole('menuitem').map((i) => i.textContent);
+    expect(items).toEqual(['New page', 'New database']);
+  });
+
+  // The context menu had its OWN "New list…" — a fourth entrance to the same
+  // dialog. Asserted by absence because a menu that still offered it would
+  // still be able to author the retired format.
+  it("a Collection's context menu offers renaming and removal, not a new list", () => {
+    useVaultStore.setState({
+      views: [],
+      collections: [
+        {
+          folder: 'product',
+          declared: true,
+          definition: { name: 'Product', icon: null, color: null, order: null, description: null },
+        },
+      ],
+    });
+    render(<Sidebar />);
+    const row = screen
+      .getAllByTestId('collection-node-collection')
+      .find((el) => el.dataset.id === 'product');
+    if (row === undefined) throw new Error('the Product row is missing from the tree');
+    fireEvent.contextMenu(row, { clientX: 4, clientY: 4 });
+    const items = screen.getAllByRole('menuitem').map((i) => i.textContent);
+    expect(items).toEqual(['Rename…', 'Remove collection (keeps contents)']);
   });
 
   // M37.3 made the header answer "which vault"; M43 moved that answer onto
   // the tile (the slot the design gives an avatar) so the wordmark could take
   // the line — and no heading at all, so every page keeps its own h1 story.
   it('wears the vault as the header tile (M43)', () => {
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     const tile = screen.getByTestId('vault-tile');
     expect(tile.getAttribute('title')).toBe('demo-vault');
     expect(tile.textContent).toBe('D');
@@ -436,7 +465,7 @@ describe('Sidebar', () => {
   // M15: `flex-none` here was what made the canvas absorb every pixel of a
   // narrow window. The sidebar has to be the column that yields.
   it('is shrinkable down to its minimum rather than fixed', () => {
-    const { container } = render(<Sidebar onNewView={vi.fn()} />);
+    const { container } = render(<Sidebar />);
     const nav = container.querySelector('nav');
     expect(nav?.className).not.toContain('flex-none');
     expect(nav?.style.minWidth).toBe('180px');
@@ -444,13 +473,13 @@ describe('Sidebar', () => {
 
   it('draws at its minimum and withdraws the resize handle while narrow', () => {
     useUiStore.setState({ sidebarWidth: 420 });
-    const { container } = render(<Sidebar narrow onNewView={vi.fn()} />);
+    const { container } = render(<Sidebar narrow />);
     expect(container.querySelector('nav')?.style.width).toBe('180px');
     expect(screen.queryByRole('separator', { name: 'Resize sidebar' })).toBeNull();
     cleanup();
     // The STORED preference is untouched — widening the window restores it.
     expect(useUiStore.getState().sidebarWidth).toBe(420);
-    const wide = render(<Sidebar onNewView={vi.fn()} />);
+    const wide = render(<Sidebar />);
     expect(wide.container.querySelector('nav')?.style.width).toBe('420px');
   });
 
@@ -464,7 +493,7 @@ describe('Sidebar', () => {
       title: 'Welcome',
     });
     useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     const fileTree = screen.getByTestId('file-tree');
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     // Scoped into the tree: the Inbox DESTINATION row shares the accessible
@@ -478,7 +507,7 @@ describe('Sidebar', () => {
     // And it does NOT withdraw off the doc surfaces — that was the mode the
     // Docs destination gated, and both retired together.
     useNavStore.setState({ selection: { kind: 'settings' } });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     expect(screen.getByTestId('file-tree')).toBeTruthy();
   });
 
@@ -500,7 +529,7 @@ describe('Sidebar', () => {
           mkEntry({ path: 'recipes/soup.md', title: 'Soup', type: 'Recipe' }),
         ],
       });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const rows = screen.getAllByTestId('sidebar-type');
       const labels = rows.map((r) => r.textContent);
       // M12.2: no standing system rows — Project appears because a record
@@ -511,7 +540,7 @@ describe('Sidebar', () => {
 
     it('clicking a type navigates to the type screen', () => {
       useVaultStore.setState({ entries: [project, recipeType] });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByText('Recipe'));
       expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Recipe' });
     });
@@ -520,21 +549,21 @@ describe('Sidebar', () => {
     // internal vocabulary (`type:`, TypeListing, the `type` kind, this very
     // testid) deliberately keeps the old word: labels spend, kinds stay.
     it('collapses via the section header', () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'Databases' }));
       expect(screen.queryAllByTestId('sidebar-type')).toEqual([]);
       expect(useUiStore.getState().typesOpen).toBe(false);
     });
 
     it('the + button opens the New-database dialog', () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'New database' }));
       expect(screen.getByText('New database')).toBeTruthy();
     });
 
     it('right-click on a custom type offers rename and delete', () => {
       useVaultStore.setState({ entries: [project, recipeType] });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.contextMenu(screen.getByText('Recipe'));
       expect(screen.getByText('Change display name…')).toBeTruthy();
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
@@ -544,7 +573,7 @@ describe('Sidebar', () => {
     it('right-click on the metamodel only offers customize (locked)', () => {
       // M12.2: `Type` is the one remaining system type — the schema cannot
       // rename or delete itself. Every other type is fully editable.
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.contextMenu(screen.getByText('Type'));
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
       expect(screen.queryByText('Change display name…')).toBeNull();
@@ -566,7 +595,7 @@ describe('Sidebar', () => {
     };
     useVaultStore.setState({ views: [...useVaultStore.getState().views, scoped] });
     useUiStore.setState({ expandedFolders: { 'collection:work': true } });
-    render(<Sidebar onNewView={vi.fn()} />);
+    render(<Sidebar />);
     expect(screen.getByText('Urgent work')).toBeTruthy();
     expect(screen.queryByText('Delivery')).toBeNull();
     // No "Views"/"Foundations" container conjured from its folder either.
@@ -604,7 +633,7 @@ describe('Sidebar', () => {
           }),
         ],
       });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const row = screen.getByRole('button', { name: 'My work (1)' });
       fireEvent.click(row);
       expect(useNavStore.getState().selection).toEqual({ kind: 'mywork' });
@@ -612,7 +641,7 @@ describe('Sidebar', () => {
 
     it('says the empty Favorites in words — nobody pinned anything is a real zero', () => {
       useUiStore.setState({ favorites: {} });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       expect(screen.getByText('No favorites yet')).toBeTruthy();
     });
 
@@ -621,7 +650,7 @@ describe('Sidebar', () => {
         entries: [project, mkEntry({ path: 'notes/keep.md', title: 'Keep me' })],
       });
       useUiStore.setState({ favorites: { '/demo-vault': ['notes/keep.md', 'notes/gone.md'] } });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const rows = screen.getAllByTestId('nav-favorite');
       expect(rows.map((r) => r.textContent)).toEqual(['Keep me']);
       // The dead pointer left the STORE, not just the render — the list is
@@ -632,7 +661,7 @@ describe('Sidebar', () => {
     });
 
     it("creates pages from the Pages header through the tree's own dialog", () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'New page' }));
       // The FileTree's dialog — one creation flow, now opened from the header.
       expect(screen.getByRole('dialog', { name: 'New page' })).toBeTruthy();
@@ -651,7 +680,7 @@ describe('Sidebar', () => {
           },
         ],
       });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       // Each mounted folder is a row, like every other shelf's subjects.
       fireEvent.click(screen.getByTestId('nav-root'));
       expect(useNavStore.getState().selection).toEqual({ kind: 'workspace', root: 'cerebro' });
@@ -662,19 +691,19 @@ describe('Sidebar', () => {
 
     it('says the empty Work section in words — nothing mounted is a real zero', () => {
       useRootsStore.setState({ roots: [] });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       expect(screen.getByText('No repositories mounted')).toBeTruthy();
     });
 
     it('opens the Base home from the section’s ↗ (M43.10)', () => {
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'Open base' }));
       expect(useNavStore.getState().selection).toEqual({ kind: 'knowledge' });
     });
 
     it('cycles the theme from the footer', () => {
       useUiStore.setState({ themeMode: 'system' });
-      render(<Sidebar onNewView={vi.fn()} />);
+      render(<Sidebar />);
       const theme = screen.getByRole('button', { name: 'Theme' });
       fireEvent.click(theme);
       expect(useUiStore.getState().themeMode).toBe('light');

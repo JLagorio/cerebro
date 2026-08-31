@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COLLECTION_TYPE,
+  collectionsFromPages,
   collectionsTree,
   effectiveCollections,
   humanizeFolder,
@@ -354,5 +356,83 @@ describe('collectionsTree', () => {
     );
     // Roadmap + Risks + Q3 plan = 3; the Q3 folder itself is not a thing.
     expect(nodeCount(tree[0])).toBe(3);
+  });
+});
+
+/**
+ * A container declares itself with a PAGE now (M47.5).
+ *
+ * `collection.yml` was a marker file holding four keys that are ordinary
+ * frontmatter. Folding it into the folder note is what lets a container carry
+ * prose and `/database` blocks above the things it contains — the empty
+ * collection page told you to go and use the sidebar precisely because it had
+ * nothing of its own to hold.
+ */
+describe('collectionsFromPages', () => {
+  // This file's `makeEntry` does not derive `filename`/`folder` from `path`,
+  // and the folder-note rule reads both — so they are set here rather than
+  // left at the factory's defaults, which would make every case a false pass.
+  const page = (path: string, properties: Record<string, unknown> = {}, title?: string) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop() ?? path,
+      folder: path.slice(0, path.lastIndexOf('/')),
+      title: title ?? (path.split('/').pop() ?? '').replace(/\.md$/, ''),
+      type: COLLECTION_TYPE,
+      properties: properties as ReturnType<typeof makeEntry>['properties'],
+    });
+
+  it('reads a folder note that declares itself a Collection', () => {
+    const found = collectionsFromPages([
+      page('delivery/delivery.md', { icon: 'rocket', color: '#3D8BE8', order: 1 }, 'Delivery'),
+    ]);
+    expect(found).toHaveLength(1);
+    expect(found[0].folder).toBe('delivery');
+    expect(found[0].declared).toBe(true);
+    expect(found[0].definition).toMatchObject({
+      name: 'Delivery',
+      icon: 'rocket',
+      color: '#3D8BE8',
+      order: 1,
+    });
+  });
+
+  /**
+   * A page already has a title. Requiring `name:` as well would make the
+   * container a config file that happens to be markdown, which is the shape
+   * this milestone is getting rid of.
+   */
+  it('takes its name from the page title, and lets frontmatter override', () => {
+    expect(collectionsFromPages([page('work/work.md', {}, 'Work')])[0].definition.name).toBe(
+      'Work',
+    );
+    expect(
+      collectionsFromPages([page('work/work.md', { name: 'Delivery' }, 'Work')])[0].definition.name,
+    ).toBe('Delivery');
+  });
+
+  /**
+   * Only a FOLDER NOTE speaks for its folder. A page that merely carries the
+   * type from somewhere else describes nothing but itself, and adopting it
+   * would let a stray file rename a container it is not even in.
+   */
+  it('ignores a Collection page that is not its folder note', () => {
+    expect(collectionsFromPages([page('inbox/delivery.md', {}, 'Delivery')])).toEqual([]);
+  });
+
+  it('ignores pages that are not Collections', () => {
+    const plain = makeEntry({ path: 'delivery/delivery.md', title: 'Delivery' });
+    expect(collectionsFromPages([plain])).toEqual([]);
+  });
+
+  /** Tolerant on the same terms as the marker was: junk yields a container. */
+  it('survives frontmatter that says nothing usable', () => {
+    const junk = page('work/work.md', { icon: 42, color: '', order: 'first' }, 'Work');
+    expect(collectionsFromPages([junk])[0].definition).toMatchObject({
+      name: 'Work',
+      icon: null,
+      color: null,
+      order: null,
+    });
   });
 });

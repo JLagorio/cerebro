@@ -10,16 +10,20 @@
  *   - duplicate names are checked case-insensitively.
  */
 
+import { recordsFolder } from '@/engine/createRecord';
 import { kindMeta } from '@/engine/properties';
-import { humanize, serializeDisplayConfig } from '@/engine/schema';
+import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
-import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
+import { isLockedField, serializeFields, serializeOptions } from '@/engine/typeCatalog';
 import { serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
   Entry,
+  FieldDef,
   FieldKind,
   FieldOption,
+  FieldVisibility,
+  LayoutConfig,
   StatusDef,
   TabDef,
   ViewDefinition,
@@ -28,8 +32,11 @@ import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
-/** Frontmatter keys with schema meaning on a Type doc — never field names. */
-const RESERVED = new Set([
+/** Frontmatter keys with schema meaning on a Type doc — never field names.
+ * Exported for the layout editor's staging guard (M45.3), which must refuse
+ * with `applyTypeLayout`'s reasons BEFORE staging — inline, form-style —
+ * instead of letting Apply toast the same refusal later. */
+export const RESERVED = new Set([
   'type',
   'icon',
   'color',
@@ -39,6 +46,7 @@ const RESERVED = new Set([
   'views',
   'display',
   'tabs',
+  'layout',
 ]);
 
 /** Leading underscores are stripped: `_`-prefixed keys are the app-managed
@@ -575,34 +583,6 @@ export async function setTypeViews(
 }
 
 /**
- * Persist the record panel's per-type display config onto its Type doc
- * (M44.1). Deviations only — a type left at the defaults carries no
- * `display:` key at all.
- */
-export async function setTypeDisplay(
-  listing: { name: string; docPath: string | null },
-  display: DisplayConfig,
-): Promise<boolean> {
-  const { entries, patchFrontmatter } = useVaultStore.getState();
-  const toast = useUiStore.getState().toast;
-  const doc = findTypeDoc(entries, listing.name);
-  if (!guardEditable(doc, listing.name)) return false;
-  const serialized = serializeDisplayConfig(display);
-  try {
-    if (doc === null) {
-      if (serialized === null) return true; // nothing to write and nowhere to write it
-      await ensureTypeDoc({ name: listing.name, docPath: null }, { display: serialized });
-    } else {
-      if (!(await patchFrontmatter(doc.path, { display: serialized }))) return false;
-    }
-  } catch {
-    toast(`Couldn't update ${listing.name} display`);
-    return false;
-  }
-  return true;
-}
-
-/**
  * Persist a type's record-page tabs onto its Type doc (M44.5). The whole
  * array is written each time, same contract as `setTypeViews`; an empty
  * list deletes the key so the synthesized Overview default returns.
@@ -626,6 +606,149 @@ export async function setTypeTabs(
     }
   } catch {
     toast(`Couldn't update ${listing.name} tabs`);
+    return false;
+  }
+  return true;
+}
+
+/** One staged edit of a type's whole record-page presentation (M45.1) — the
+ * layout editor's Apply. `display`/`layout`/`tabs` are written whole;
+ * `visibility` and `added` are DELTAS merged onto the raw `fields:` mapping,
+ * so declaration order and keys we don't model survive untouched. */
+export interface TypeLayoutDraft {
+  display: DisplayConfig;
+  layout: LayoutConfig;
+  tabs: TabDef[];
+  /** Staged per-field visibility; null clears back to show (key deleted). */
+  visibility: Record<string, FieldVisibility | null>;
+  /** Staged new fields, appended in order.
+   *
+   * `config` here is FieldDef-SHAPED extras: it is spread into a FieldDef and
+   * serialized through `serializeFields`/`fieldToSpec`, which emits only the
+   * keys it models (unmodeled keys are DROPPED) and expects `options` to be
+   * FieldOption[] (`{id, label, color, hollow}`), not raw spec values. That
+   * is the OPPOSITE contract from `addFieldToType`'s `config`, which writes
+   * raw spec keys into the mapping verbatim — two contracts, one name, so
+   * M45.3's AddPropertyPanel wiring must build FieldDef shapes for this door. */
+  added: { name: string; kind: FieldKind; config?: Record<string, unknown> }[];
+}
+
+/**
+ * Persist a layout editor draft onto the Type doc in ONE write (M45.1). A
+ * partially applied layout is worse than none, so apply is atomic: every
+ * refusal happens BEFORE anything — the Type doc included — is written, and
+ * a landed patch carries the whole draft: `display`, `layout`, `tabs`
+ * (deviations only; null at defaults, because reset IS the write) plus,
+ * only when the draft stages field deltas, the merged `fields:` mapping.
+ */
+export async function applyTypeLayout(
+  listing: { name: string; docPath: string | null },
+  draft: TypeLayoutDraft,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+
+  const fields = doc !== null ? rawFieldsOf(doc) : {};
+
+  // Vet every added name first — atomic means no partial, so a refusal must
+  // land before any write. Same guards as addFieldToType, plus staged-vs-
+  // staged collisions the one-at-a-time door never sees.
+  const staged: [string, unknown][] = [];
+  for (const add of draft.added) {
+    const name = normalizeFieldName(add.name);
+    if (name === '') {
+      toast('A property needs a name');
+      return false;
+    }
+    if (RESERVED.has(name)) {
+      toast(`"${name}" is a reserved key and can't be a property`);
+      return false;
+    }
+    if (
+      Object.keys(fields).some((k) => k.toLowerCase() === name) ||
+      staged.some(([k]) => k === name)
+    ) {
+      toast('Property already exists');
+      return false;
+    }
+    const def = { ...add.config, name, kind: add.kind } as FieldDef;
+    staged.push([name, serializeFields([def])[name]]);
+  }
+
+  // The staged additions merge in BEFORE the visibility walk (M45.3): the
+  // walk only sees fields the mapping declares, so merging after it silently
+  // dropped a staged eye on a staged-added field — the canvas previewed it
+  // folded while the vault wrote it visible. Appends land last, so the
+  // declaration-order pin below survives the reorder.
+  let touched = false;
+  for (const [name, spec] of staged) {
+    fields[name] = spec;
+    touched = true;
+  }
+
+  // Merge visibility deltas onto the RAW mapping (the setFieldConfig idiom):
+  // never rebuilt from FieldDef, so a hand-edited vault's unmodeled keys
+  // survive byte-for-byte. A delta for a field neither the doc nor the draft
+  // declares is dropped — placing a visibility must never DECLARE a field.
+  for (const [rawName, vis] of Object.entries(draft.visibility)) {
+    const actual = Object.keys(fields).find((k) => k.toLowerCase() === rawName.toLowerCase());
+    if (actual === undefined) continue;
+    const raw = fields[actual];
+    const isMapping = typeof raw === 'object' && raw !== null && !Array.isArray(raw);
+    if (vis === null) {
+      // Clearing back to show deletes the key — a Type doc should not carry
+      // the absence of an opinion. A shorthand has no key to delete.
+      if (!isMapping || (raw as Record<string, unknown>).visibility === undefined) continue;
+      const spec = { ...(raw as Record<string, unknown>) };
+      delete spec.visibility;
+      fields[actual] = spec;
+    } else {
+      // A bare `field: text` shorthand has to grow into a mapping to hold it.
+      const spec: Record<string, unknown> = isMapping
+        ? { ...(raw as Record<string, unknown>) }
+        : { kind: typeof raw === 'string' ? raw : 'text' };
+      spec.visibility = vis;
+      fields[actual] = spec;
+    }
+    touched = true;
+  }
+
+  const display = serializeDisplayConfig(draft.display);
+  const layout = serializeLayoutConfig(draft.layout);
+  const tabs = draft.tabs.length === 0 ? null : serializeTabList(draft.tabs);
+  const allDefault = display === null && layout === null && tabs === null && !touched;
+
+  try {
+    if (doc === null) {
+      if (allDefault) return true; // nothing to write and nowhere to write it
+      await ensureTypeDoc(
+        { name: listing.name, docPath: null },
+        {
+          ...(touched ? { fields } : {}),
+          ...(display !== null ? { display } : {}),
+          ...(layout !== null ? { layout } : {}),
+          ...(tabs !== null ? { tabs } : {}),
+        },
+      );
+      return true;
+    }
+    // An all-defaults draft against a doc that never carried the keys would
+    // patch three deletions of nothing — a whole-file disk round-trip that
+    // changes no byte — so the cheaper honest behavior is to skip the write.
+    // The moment any of the three IS on disk, reset is a real write.
+    const props = doc.properties as Record<string, unknown>;
+    const carries = ['display', 'layout', 'tabs'].some((k) => props[k] !== undefined);
+    if (allDefault && !carries) return true;
+    const patch: Record<string, unknown> = { display, layout, tabs };
+    if (touched) patch.fields = fields;
+    if (!(await patchFrontmatter(doc.path, patch))) {
+      // patchFrontmatter toasts and reverts itself — read its answer, add nothing.
+      return false;
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} layout`);
     return false;
   }
   return true;
@@ -708,4 +831,71 @@ export async function moveFieldOnType(
 
   if (!(await patchFrontmatter(doc.path, { fields: next }))) return false;
   return true;
+}
+
+/**
+ * The status vocabulary a database is born with (M47.4).
+ *
+ * Three states, not the Work item's six: a brand-new database should be
+ * immediately usable and immediately editable, and six rows of someone else's
+ * process is more to delete than to keep. The ids and colours are the vault's
+ * own — the same `todo` / `progress` / `done` spelling and the same swatches
+ * `types/work-item.md` uses — so a database created here and one written by
+ * hand agree, rather than growing a second vocabulary for one idea.
+ */
+const STARTER_STATUSES = [
+  { id: 'todo', group: 'active', color: '#7E8699' },
+  { id: 'progress', group: 'active', color: '#DE8F0A' },
+  { id: 'done', group: 'done', color: '#1F9D61' },
+];
+
+/**
+ * Create a database from wherever you are (M47.4) — Door 2 of the M47 spec.
+ *
+ * The first writer of `folder:`. It has been RESERVED since M12.2 and parsed
+ * into `TypeDef.folder` ever since, but no action has ever set it: it was
+ * hand-edit-only, which is exactly why "where do my new records go" had no
+ * answer you could give from inside the app. A database created here declares
+ * its own home, so `createTarget` puts its rows there and logging a thing
+ * stops being a question about folders.
+ *
+ * Returns the name on success and null on failure — a human-UI action, so it
+ * toasts rather than throwing (the store-layer error invariant). It
+ * deliberately does NOT navigate: the whole point of Door 2 is that you never
+ * leave the page you are writing.
+ */
+export async function createDatabase(rawName: string): Promise<string | null> {
+  const name = rawName.trim();
+  const toast = useUiStore.getState().toast;
+  if (name === '') return null;
+
+  const { entries, createItem } = useVaultStore.getState();
+  if (findTypeDoc(entries, name) !== null) {
+    toast(`A database named "${name}" already exists`);
+    return null;
+  }
+
+  try {
+    await createItem({
+      folder: 'types',
+      slug: slugify(name) || 'database',
+      frontmatter: {
+        type: 'Type',
+        icon: 'table-2',
+        // `records/<plural>` is what `recordsFolder` would have picked anyway
+        // (M3.3's convention). Writing it DOWN rather than leaving it implied
+        // is the difference between a home you can see in the file and one
+        // only the code knows — and it is the line a user edits when they want
+        // their reading list to live in `reading/` instead.
+        folder: recordsFolder(name),
+        statuses: STARTER_STATUSES,
+        fields: { status: { kind: 'status' } },
+      },
+      body: `# ${name}\n`,
+    });
+  } catch {
+    toast(`Couldn't create the database "${name}"`);
+    return null;
+  }
+  return name;
 }

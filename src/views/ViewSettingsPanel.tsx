@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -789,21 +790,20 @@ function PropertiesPage({
   const row = (f: ColumnDef, on: boolean, index?: number) => (
     <div
       key={f.name}
-      className={[
-        'group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50',
-        sortable.dragging === f.name ? 'opacity-60' : '',
-      ].join(' ')}
-      style={index !== undefined ? sortable.dropIndicator(index) : undefined}
+      className="group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50"
+      // Only the shown rows are in the sortable's container; the hidden ones
+      // below it are the same component with no index and no slot.
+      style={index !== undefined ? sortable.rowStyle(index) : undefined}
     >
       {on && !searching && index !== undefined ? (
-        <span
+        <Grip
           {...sortable.gripProps(f.name, index)}
-          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
-        >
-          <Icon name="grip-vertical" size={12} />
-        </span>
+          className="focus-visible:text-cortex-600 focus-visible:outline-none"
+        />
       ) : (
-        <span className="h-5 w-4 flex-none" />
+        // The cell is the layout; the grip is only its occupant, so the empty
+        // case holds the same 18 x 24 slot (M46.2 Task 6).
+        <span className="h-6 w-[18px] flex-none" />
       )}
       <Icon name={kindMeta(f.kind).icon} size={12} color="var(--n-400)" />
       {canEdit ? (
@@ -860,6 +860,7 @@ function PropertiesPage({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-0.5"
+        style={sortable.containerStyle}
       >
         {visible.map((f, i) => (matches(f) ? row(f, true, i) : null))}
       </div>
@@ -1670,23 +1671,16 @@ function SortPage({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-1.5"
+        style={sortable.containerStyle}
       >
         {sort.map((s, i) => (
           <div
             key={`${i}:${s.field}`}
-            className={[
-              'group flex items-center gap-1.5',
-              sortable.dragging === s.field ? 'opacity-40' : '',
-            ].join(' ')}
-            style={sortable.dropIndicator(i)}
+            className="group flex items-center gap-1.5"
+            style={sortable.rowStyle(i)}
           >
             <Tooltip label="Drag to reorder — the first key breaks ties first">
-              <span
-                {...sortable.gripProps(s.field, i)}
-                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-xs text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
-              >
-                <Icon name="grip-vertical" size={13} />
-              </span>
+              <Grip {...sortable.gripProps(s.field, i)} className="focus-visible:text-n-600" />
             </Tooltip>
             <Select
               size="sm"

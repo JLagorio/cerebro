@@ -3,17 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addFieldToType,
   addPropertyToEntry,
+  applyTypeLayout,
   changeFieldKind,
+  createDatabase,
   findTypeDoc,
   normalizeFieldName,
   removeFieldFromType,
   renameFieldOnType,
   setFieldOptions,
-  setTypeDisplay,
   setTypeStatuses,
   setTypeTabs,
   setTypeViews,
+  type TypeLayoutDraft,
 } from '@/app/typeActions';
+import { recordsFolder } from '@/engine/createRecord';
 import { makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -107,6 +110,8 @@ describe('addFieldToType', () => {
 
   it('rejects reserved schema keys', async () => {
     expect(await addFieldToType('Recipe', 'statuses', 'text')).toBe(false);
+    // M45.1: `layout` joined the roster.
+    expect(await addFieldToType('Recipe', 'layout', 'text')).toBe(false);
     expect(patches).toEqual([]);
     expect(toasts[0]).toMatch(/reserved/);
   });
@@ -240,94 +245,6 @@ describe('setTypeViews (M44.1 follow-up)', () => {
   });
 });
 
-describe('setTypeDisplay (M44.1)', () => {
-  const workItemTypeDoc = {
-    ...typeDoc,
-    path: 'types/work-item.md',
-    title: 'Work item',
-    properties: { fields: {} } as unknown as typeof typeDoc.properties,
-  };
-
-  beforeEach(() => {
-    useVaultStore.setState({ entries: [workItemTypeDoc] });
-  });
-
-  it('writes only the deviations, snake_case, under display', async () => {
-    const ok = await setTypeDisplay(
-      { name: 'Work item', docPath: 'types/work-item.md' },
-      { showEmpty: true, showFile: false, showBody: false },
-    );
-    expect(ok).toBe(true);
-    expect(patches).toEqual([
-      {
-        path: 'types/work-item.md',
-        patch: { display: { show_empty: true, show_body: false } },
-      },
-    ]);
-  });
-
-  it('all-defaults deletes the key — reset IS the write', async () => {
-    await setTypeDisplay(
-      { name: 'Work item', docPath: 'types/work-item.md' },
-      { showEmpty: false, showFile: false, showBody: true },
-    );
-    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { display: null } }]);
-  });
-
-  it('toasts and returns false when the write fails', async () => {
-    useVaultStore.setState({
-      patchFrontmatter: vi.fn().mockRejectedValue(new Error('disk')),
-    });
-    const ok = await setTypeDisplay(
-      { name: 'Work item', docPath: 'types/work-item.md' },
-      { showEmpty: true, showFile: false, showBody: true },
-    );
-    expect(ok).toBe(false);
-    expect(toasts[0]).toMatch(/display/i);
-  });
-
-  // M44.1 follow-up: patchFrontmatter never rejects on a real disk failure —
-  // it catches internally, toasts, and returns false. The action has to READ
-  // that boolean instead of assuming the write landed whenever nothing threw.
-  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
-    useVaultStore.setState({
-      patchFrontmatter: vi.fn().mockResolvedValue(false),
-    });
-    const ok = await setTypeDisplay(
-      { name: 'Work item', docPath: 'types/work-item.md' },
-      { showEmpty: true, showFile: false, showBody: true },
-    );
-    expect(ok).toBe(false);
-    expect(toasts).toEqual([]);
-  });
-
-  it('doc-null and deviating from defaults creates the Type doc via ensureTypeDoc', async () => {
-    const ok = await setTypeDisplay(
-      { name: 'Ghost Type', docPath: null },
-      { showEmpty: true, showFile: false, showBody: true },
-    );
-    expect(ok).toBe(true);
-    expect(created).toEqual([
-      {
-        folder: 'types',
-        slug: 'ghost-type',
-        frontmatter: { type: 'Type', display: { show_empty: true } },
-        body: '# Ghost Type\n',
-      },
-    ]);
-  });
-
-  it('doc-null and all-defaults returns true and writes nothing', async () => {
-    const ok = await setTypeDisplay(
-      { name: 'Ghost Type', docPath: null },
-      { showEmpty: false, showFile: false, showBody: true },
-    );
-    expect(ok).toBe(true);
-    expect(created).toEqual([]);
-    expect(patches).toEqual([]);
-  });
-});
-
 describe('setTypeTabs (M44.5)', () => {
   const workItemTypeDoc = {
     ...typeDoc,
@@ -403,6 +320,258 @@ describe('setTypeTabs (M44.5)', () => {
     expect(ok).toBe(true);
     expect(created).toEqual([]);
     expect(patches).toEqual([]);
+  });
+});
+
+describe('applyTypeLayout (M45.1)', () => {
+  // A raw mapping deliberately wider than the model: `foo: bar` is a key we
+  // don't parse, `notes: 'text'` is the bare-string shorthand, and `due`
+  // carries a visibility the draft will clear.
+  const workItemTypeDoc = {
+    ...typeDoc,
+    path: 'types/work-item.md',
+    title: 'Work item',
+    properties: {
+      fields: {
+        status: { kind: 'status' },
+        due: { kind: 'date', visibility: 'hide', foo: 'bar' },
+        notes: 'text',
+      },
+    } as unknown as typeof typeDoc.properties,
+  };
+  const listing = { name: 'Work item', docPath: 'types/work-item.md' };
+  const blank = (): TypeLayoutDraft => ({
+    display: { showEmpty: false, showFile: false, showBody: true },
+    layout: { heading: [], groups: [] },
+    tabs: [],
+    visibility: {},
+    added: [],
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [workItemTypeDoc] });
+  });
+
+  it('writes the whole draft — display, layout, tabs, merged fields — in ONE patch', async () => {
+    const ok = await applyTypeLayout(listing, {
+      display: { showEmpty: true, showFile: false, showBody: true },
+      layout: {
+        heading: ['status'],
+        groups: [{ id: 'group-1', name: 'Details', fields: ['due'] }],
+      },
+      tabs: [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }],
+      visibility: { notes: 'hide', due: null },
+      added: [{ name: ' Estimate ', kind: 'number' }],
+    });
+    expect(ok).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: {
+          display: { show_empty: true },
+          layout: {
+            heading: ['status'],
+            groups: [{ id: 'group-1', name: 'Details', fields: ['due'] }],
+          },
+          tabs: [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }],
+          fields: {
+            status: { kind: 'status' },
+            // visibility: null deleted the key; the unmodeled `foo` survived.
+            due: { kind: 'date', foo: 'bar' },
+            // The bare shorthand grew into a mapping to hold the visibility.
+            notes: { kind: 'text', visibility: 'hide' },
+            // Appended last, name normalized.
+            estimate: { kind: 'number' },
+          },
+        },
+      },
+    ]);
+    // Declaration order is a locked Decision, and toEqual is key-order-blind:
+    // a clone that reordered the mapping would pass it. Pin the order itself —
+    // untouched and grown slots keep their place, appends land last.
+    expect(Object.keys(patches[0].patch.fields as Record<string, unknown>)).toEqual([
+      'status',
+      'due',
+      'notes',
+      'estimate',
+    ]);
+  });
+
+  it('omits fields when the draft stages no field deltas; defaults spell null', async () => {
+    const draft = blank();
+    draft.layout = { heading: ['status'], groups: [] };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: null, layout: { heading: ['status'] }, tabs: null },
+      },
+    ]);
+  });
+
+  it('refuses a reserved added name BEFORE any write — atomic means no partial', async () => {
+    const draft = blank();
+    draft.display = { showEmpty: true, showFile: false, showBody: true };
+    draft.added = [{ name: 'Layout', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([]);
+    expect(toasts[0]).toMatch(/reserved/);
+  });
+
+  it('refuses an added name that normalizes to nothing, before any write', async () => {
+    const draft = blank();
+    draft.display = { showEmpty: true, showFile: false, showBody: true };
+    draft.added = [{ name: '   ', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([]);
+    expect(toasts[0]).toMatch(/name/i);
+  });
+
+  it('refuses duplicate added names case-insensitively — existing and staged alike', async () => {
+    const draft = blank();
+    draft.added = [{ name: 'Status', kind: 'text' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    const twice = blank();
+    twice.added = [
+      { name: 'points', kind: 'number' },
+      { name: ' Points ', kind: 'text' },
+    ];
+    expect(await applyTypeLayout(listing, twice)).toBe(false);
+    expect(patches).toEqual([]);
+    expect(toasts).toEqual(['Property already exists', 'Property already exists']);
+  });
+
+  // The additions merge in BEFORE the visibility walk (M45.3): a staged eye
+  // on a staged-added field must land, not silently drop — the canvas
+  // previewed it folded, so the vault has to write what the preview showed.
+  it('a staged eye on a staged-added field survives Apply', async () => {
+    const draft = blank();
+    draft.added = [{ name: 'estimate', kind: 'number' }];
+    draft.visibility = { estimate: 'hide' };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches[0].patch.fields).toMatchObject({
+      estimate: { kind: 'number', visibility: 'hide' },
+    });
+  });
+
+  it('drops a staged visibility for a field the doc no longer declares — never declares it', async () => {
+    const draft = blank();
+    draft.visibility = { ghost: 'hide' };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([]);
+  });
+
+  // visibility: null means "back to show", which absence already spells — so
+  // aimed at a bare shorthand (`notes: 'text'`) or at a mapping that never
+  // carried the key (`status`), it is a true no-op: no growth into a mapping,
+  // and no write at all when nothing else changed.
+  it('visibility null on a shorthand or an unset mapping is a no-op — no growth, no write', async () => {
+    const draft = blank();
+    draft.visibility = { notes: null, status: null };
+    expect(await applyTypeLayout(listing, draft)).toBe(true);
+    expect(patches).toEqual([]);
+    // ...and staged beside a real change, it still counts as no field delta:
+    // the landed patch carries no `fields` key, so the shorthand stays bare.
+    const withDisplay = blank();
+    withDisplay.display = { showEmpty: true, showFile: false, showBody: true };
+    withDisplay.visibility = { notes: null };
+    expect(await applyTypeLayout(listing, withDisplay)).toBe(true);
+    expect(patches).toEqual([
+      {
+        path: 'types/work-item.md',
+        patch: { display: { show_empty: true }, layout: null, tabs: null },
+      },
+    ]);
+  });
+
+  // M44.1-family contract: patchFrontmatter toasts and reverts itself — the
+  // action reads its answer and adds nothing.
+  it('returns false when patchFrontmatter reports the write did not land, with no second toast', async () => {
+    useVaultStore.setState({ patchFrontmatter: vi.fn().mockResolvedValue(false) });
+    const draft = blank();
+    draft.tabs = [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(toasts).toEqual([]);
+  });
+
+  it('toasts and returns false when the write throws', async () => {
+    useVaultStore.setState({ patchFrontmatter: vi.fn().mockRejectedValue(new Error('disk')) });
+    const draft = blank();
+    draft.tabs = [{ id: 'overview', name: 'Overview', icon: null, content: 'overview' }];
+    expect(await applyTypeLayout(listing, draft)).toBe(false);
+    expect(toasts[0]).toMatch(/layout/i);
+  });
+
+  it('doc-null and a non-default draft creates the Type doc via ensureTypeDoc', async () => {
+    const draft = blank();
+    draft.tabs = [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }];
+    draft.added = [{ name: 'severity', kind: 'select' }];
+    expect(await applyTypeLayout({ name: 'Ghost Type', docPath: null }, draft)).toBe(true);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: {
+          type: 'Type',
+          fields: { severity: { kind: 'select' } },
+          tabs: [{ id: 'spec', name: 'Spec', icon: null, content: 'sections' }],
+        },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  // Ported from setTypeDisplay's suite (retired M45.2): a display-only
+  // deviation must reach ensureTypeDoc's frontmatter — the doc-null test
+  // above deviates via tabs+added, so the display spread was unpinned.
+  it('doc-null and a display-only deviation creates the Type doc carrying display', async () => {
+    const draft = blank();
+    draft.display = { showEmpty: true, showFile: false, showBody: true };
+    expect(await applyTypeLayout({ name: 'Ghost Type', docPath: null }, draft)).toBe(true);
+    expect(patches).toEqual([]);
+    expect(created).toEqual([
+      {
+        folder: 'types',
+        slug: 'ghost-type',
+        frontmatter: { type: 'Type', display: { show_empty: true } },
+        body: '# Ghost Type\n',
+      },
+    ]);
+  });
+
+  it('doc-null and an all-defaults draft returns true and writes nothing', async () => {
+    expect(await applyTypeLayout({ name: 'Ghost Type', docPath: null }, blank())).toBe(true);
+    expect(created).toEqual([]);
+    expect(patches).toEqual([]);
+  });
+
+  // The cheaper honest behavior: deleting three keys the doc never carried is
+  // a whole-file disk round-trip that changes nothing, so it is skipped.
+  it('an all-defaults draft against a doc that never carried the keys writes nothing', async () => {
+    expect(await applyTypeLayout(listing, blank())).toBe(true);
+    expect(patches).toEqual([]);
+  });
+
+  // ...but the moment any of the three IS on disk, reset is a real write.
+  it('an all-defaults draft still resets a doc that carries one of the keys', async () => {
+    useVaultStore.setState({
+      entries: [
+        {
+          ...workItemTypeDoc,
+          properties: {
+            fields: {},
+            display: { show_empty: true },
+          } as unknown as typeof typeDoc.properties,
+        },
+      ],
+    });
+    expect(await applyTypeLayout(listing, blank())).toBe(true);
+    expect(patches).toEqual([
+      { path: 'types/work-item.md', patch: { display: null, layout: null, tabs: null } },
+    ]);
   });
 });
 
@@ -495,5 +664,88 @@ describe('changeFieldKind keeps the wiring the new kind understands', () => {
     expect(await specAfter({ kind: 'relation', target: 'Person', limit: 1 }, 'text')).toEqual({
       kind: 'text',
     });
+  });
+});
+
+/**
+ * Door 2 of the M47 spec (M47.4): create a database without leaving the page.
+ *
+ * The first writer of `folder:` in the app's history. The key has been
+ * RESERVED since M12.2 and parsed into `TypeDef.folder` ever since, but no
+ * action ever set it — it was hand-edit-only, which is why "where do my new
+ * records go" had no answer you could give from inside the app.
+ */
+describe('createDatabase (M47.4)', () => {
+  it('writes a Type doc that declares its own home folder', async () => {
+    expect(await createDatabase('Reading list')).toBe('Reading list');
+    expect(created).toHaveLength(1);
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(created[0].folder).toBe('types');
+    expect(created[0].slug).toBe('reading-list');
+    expect(fm.type).toBe('Type');
+    expect(fm.folder).toBe('records/reading-lists');
+  });
+
+  /**
+   * `records/<plural>` is exactly what `createTarget` would have fallen back
+   * to anyway. Writing it DOWN is the point: a home you can see in the file is
+   * one a user can edit to `reading/`, and a home only the code knows is one
+   * they cannot.
+   */
+  it('declares the same folder the convention would have chosen implicitly', async () => {
+    await createDatabase('Recipe box');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(fm.folder).toBe(recordsFolder('Recipe box'));
+  });
+
+  it('is born usable: a status field and a vocabulary for it', async () => {
+    await createDatabase('Habit');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(fm.fields).toEqual({ status: { kind: 'status' } });
+    expect((fm.statuses as { id: string }[]).map((s) => s.id)).toEqual([
+      'todo',
+      'progress',
+      'done',
+    ]);
+  });
+
+  /**
+   * The ids and groups are the vault's OWN, taken from `types/work-item.md`,
+   * so a database created here and one written by hand agree instead of
+   * growing two vocabularies for one idea.
+   */
+  it('borrows the vault status groups rather than inventing new ones', async () => {
+    await createDatabase('Habit');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    for (const s of fm.statuses as { id: string; group: string }[]) {
+      expect(['active', 'done', 'closed']).toContain(s.group);
+    }
+  });
+
+  it('refuses a name already taken, toasting rather than throwing', async () => {
+    expect(await createDatabase('Recipe')).toBeNull();
+    expect(created).toHaveLength(0);
+    expect(toasts.join(' ')).toContain('already exists');
+  });
+
+  it('refuses a blank name silently — nothing was asked for', async () => {
+    expect(await createDatabase('   ')).toBeNull();
+    expect(created).toHaveLength(0);
+    expect(toasts).toEqual([]);
+  });
+
+  /**
+   * A human-UI action, so a failed write toasts and answers null rather than
+   * throwing (the store-layer error invariant). The caller keeps the name the
+   * user typed on screen to fix.
+   */
+  it('answers null and toasts when the write fails', async () => {
+    useVaultStore.setState({
+      createItem: vi.fn(async () => {
+        throw new Error('disk full');
+      }),
+    });
+    expect(await createDatabase('Reading list')).toBeNull();
+    expect(toasts.join(' ')).toContain("Couldn't create");
   });
 });

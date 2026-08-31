@@ -6,8 +6,11 @@ import {
   createCodeBlockSpec,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
+  type PartialBlock,
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
+import { BlockGrip } from './BlockDragLayer';
+import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
@@ -33,20 +36,31 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { AiBlock, CalloutBlock, MermaidBlock } from './blocks';
+import {
+  AiBlock,
+  CalloutBlock,
+  ColumnBlock,
+  ColumnListBlock,
+  DatabaseBlock,
+  MermaidBlock,
+} from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
 
 // Default schema with the fully-featured code block (shiki highlighting,
 // full language list) swapped in, plus the Cerebro custom blocks (callout,
-// mermaid) and inline chips: wikilinks, assignees, and dates (M2.x).
+// mermaid, database) and inline chips: wikilinks, assignees, and dates
+// (M2.x, M47.2).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
     ai: AiBlock(),
     callout: CalloutBlock(),
+    column: ColumnBlock(),
+    columnList: ColumnListBlock(),
+    database: DatabaseBlock(),
     mermaid: MermaidBlock(),
   },
   inlineContentSpecs: {
@@ -125,6 +139,51 @@ function AssignTaskButton({ onOpen }: { onOpen: (blockId: string) => void }) {
   );
 }
 
+/**
+ * The drag grip on the hovered block (M48.4).
+ *
+ * Replaces BlockNote's `DragHandleButton`. That one uses the browser's HTML5
+ * drag-and-drop, which MEASURED cannot be driven from our test harness at all
+ * — so every behaviour built on it shipped unverified, and it could not drop a
+ * block into a column. This one is a pointer drag on `useDragGesture`, the
+ * same loop the canvas, board, table and dashboard already run.
+ *
+ * Reads the hovered block from the side-menu extension, as `AssignTaskButton`
+ * does: `SideMenuProps` stopped carrying it in 0.46.
+ */
+function BlockGripButton({
+  hostRef,
+  sideMenu,
+}: {
+  hostRef: { current: HTMLElement | null };
+  sideMenu: React.ReactNode;
+}) {
+  const editor = useBlockNoteEditor();
+  const block = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block,
+  });
+  if (block === undefined) return null;
+  return (
+    <BlockGrip
+      blockId={block.id}
+      hostRef={hostRef}
+      onDrop={(spot) => {
+        const moving = editor.getBlock(block.id);
+        const target = editor.getBlock(spot.blockId);
+        if (moving === undefined || target === undefined) return;
+        // Remove FIRST, then insert. The other order leaves the document
+        // briefly holding two blocks with the same id, and BlockNote resolves
+        // `getBlock` by id.
+        editor.removeBlocks([moving]);
+        editor.insertBlocks([moving as never], target, spot.placement);
+      }}
+    >
+      {sideMenu}
+    </BlockGrip>
+  );
+}
+
 function isoAfterDays(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -184,6 +243,10 @@ export function MarkdownEditor({
   onDirty,
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
+  // M48.4 — what the block drag measures against. The editor's own host
+  // element, so a drop can be resolved against every rendered block including
+  // the ones inside columns.
+  const host = useRef<HTMLDivElement | null>(null);
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -437,7 +500,80 @@ export function MarkdownEditor({
       icon: <Icon name="waypoints" size={14} />,
       onItemClick: () => insertBlockAtCursor({ type: 'mermaid', props: { code: '' } }),
     },
+    {
+      // M47.3, Door 1 of the spec's two: show a database that already exists.
+      // Inserted UNSET and asks in place, the way Notion does — a modal that
+      // demanded the answer before the block existed would be the New-list
+      // dialog again, which is the ceremony this milestone is deleting.
+      title: 'Database',
+      subtext: 'Show a database here — open it full page from the block',
+      group: 'Advanced blocks',
+      aliases: ['database', 'table', 'list', 'records', 'view', 'embed', 'inline'],
+      icon: <Icon name="table-2" size={14} />,
+      onItemClick: () =>
+        insertBlockAtCursor({ type: 'database', props: { database: '', view: '' } }),
+    },
   ];
+
+  /**
+   * Columns in the `/` menu (M48.3), the way Notion spells them: N columns to
+   * make an empty layout, and "Turn into" to move the block you are standing
+   * in INTO one.
+   *
+   * The pair matters. Making an empty layout and then dragging a paragraph
+   * into it is two operations for the thing people actually want, which is
+   * "put this beside that". Turn-into is the one-step version, and it is the
+   * one the screenshot that started this milestone was open on.
+   *
+   * Nothing is offered at all inside a column (spec D6). A menu entry that
+   * does nothing is worse than one that is not there.
+   */
+  const columnSlashItems = (): DefaultReactSuggestionItem[] => {
+    const cursor = editor.getTextCursorPosition().block;
+    if (!canInsertColumnsAt(editor.document as PartialBlock[], cursor.id)) return [];
+    const insert = (count: number, turnInto: boolean) => () => {
+      const at = editor.getTextCursorPosition().block;
+      const moved = turnInto ? (JSON.parse(JSON.stringify(at)) as PartialBlock) : undefined;
+      const list = newColumnList(count, moved);
+      const inserted = editor.insertBlocks([list as never], at, 'after');
+      // The block moved INTO the layout is still sitting above it — remove the
+      // original, or turn-into silently duplicates what it moved.
+      if (turnInto) editor.removeBlocks([at]);
+      // The suggestion menu deletes its trigger text AFTER this callback and
+      // restores the selection while doing so, so the cursor is placed on the
+      // next tick or typing continues in the block we just left.
+      window.setTimeout(() => {
+        const firstColumn = (inserted[0] as { children?: { children?: unknown[] }[] })
+          ?.children?.[0];
+        const landing = firstColumn?.children?.[0];
+        if (landing !== undefined) {
+          editor.setTextCursorPosition(landing as never, turnInto ? 'end' : 'start');
+        }
+        editor.focus();
+      }, 0);
+    };
+    return COLUMN_COUNTS.flatMap((count) => [
+      {
+        title: `${count} columns`,
+        subtext: 'An empty side-by-side layout',
+        group: 'Layout',
+        aliases: ['columns', 'column', 'col', `${count}col`, `${count}columns`, 'side by side'],
+        // lucide has a shape per count up to 4; 5 borrows the 4-column glyph
+        // rather than showing a generic one, because the icons in this menu
+        // are how you pick without reading.
+        icon: <Icon name={`columns-${Math.min(count, 4)}`} size={14} />,
+        onItemClick: insert(count, false),
+      },
+      {
+        title: `${count} columns · Turn into`,
+        subtext: 'Move this block into the first column',
+        group: 'Layout',
+        aliases: ['columns', 'column', 'col', 'turn into', 'wrap'],
+        icon: <Icon name={`columns-${Math.min(count, 4)}`} size={14} />,
+        onItemClick: insert(count, true),
+      },
+    ]);
+  };
 
   // --- Templates in the slash menu (M2.x feedback) ------------------------
 
@@ -673,6 +809,7 @@ export function MarkdownEditor({
 
   return (
     <div
+      ref={host}
       data-testid="markdown-editor"
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
@@ -723,6 +860,7 @@ export function MarkdownEditor({
                 [
                   ...(getDefaultReactSlashMenuItems(editor) as DefaultReactSuggestionItem[]),
                   dateSlashItem(),
+                  ...columnSlashItems(),
                   ...blockSlashItems(),
                   ...templateSlashItems(),
                 ],
@@ -739,7 +877,10 @@ export function MarkdownEditor({
               <SideMenu {...props}>
                 <AssignTaskButton onOpen={openAssignDialog} />
                 <AddBlockButton />
-                <DragHandleButton {...props} />
+                {/* M48.4: ours, not BlockNote's `DragHandleButton`. Same
+                    position, same click-opens-the-menu behaviour; a drag that
+                    a test can drive and a drop that can land in a column. */}
+                <BlockGripButton hostRef={host} sideMenu={<DragHandleButton {...props} />} />
               </SideMenu>
             )}
           />

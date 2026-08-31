@@ -6,6 +6,9 @@
 @import './tokens/spacing.css';
 @import './tokens/base.css';
 
+/* Two `@utility` rules over the motion tokens — see the file's own header. */
+@import './motion.css';
+
 /* Unlayered on purpose — see the file's own header. */
 @import './table-chrome.css';
 
@@ -174,6 +177,18 @@
 }
 .cb-menu-in {
   animation: cb-menu-in 140ms cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
+/* Both entrances slide, so both stop sliding when a reader asks for that
+   (M46.2 Task 3). They are `animation`, not `transition`, so `--dur-move`
+   cannot reach them and they need naming here — which is the argument for
+   spending the token wherever a transition CAN do the job. The surface still
+   appears; it just appears where it belongs instead of travelling there. */
+@media (prefers-reduced-motion: reduce) {
+  .cb-panel-in,
+  .cb-menu-in {
+    animation: none;
+  }
 }
 
 /* Column / panel drag (M11). Set on <body> for the duration of a drag: the

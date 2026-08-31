@@ -31,14 +31,23 @@ import { useId, useLayoutEffect, useRef } from 'react';
  *   panel behind it — without passing for the innermost SURFACE, which would
  *   hand a focus-trapped popover's `Tab` to a bubble floating over it. And Tab
  *   inside a trapped popover is precisely what makes a tooltip appear.
+ *
+ * A drag in flight is the same shape as a tooltip and pushed for the same
+ * reason (`'gesture'`, M46.2): Escape belongs to the gesture until it ends, and
+ * the surfaces that would otherwise take it — the record panel, a dialog, the
+ * popover the list is drawn inside — all ask this stack who owns the keystroke.
+ * It must NOT pass for a surface: nothing opened, so a focus trap that thought
+ * it had been superseded would hand the dialog's `Tab` to a drag, and a global
+ * handler standing down for `hasLayers()` would go quiet for the length of a
+ * drag it has nothing to do with.
  */
 
-export type LayerKind = 'surface' | 'tooltip';
+export type LayerKind = 'surface' | 'tooltip' | 'gesture';
 
 export interface LayerOptions {
   /**
-   * `'tooltip'` registers for Escape only: it is skipped by every question
-   * about the innermost surface. Default `'surface'`.
+   * `'tooltip'` and `'gesture'` register for Escape only: both are skipped by
+   * every question about the innermost surface. Default `'surface'`.
    */
   kind?: LayerKind;
   /**
@@ -76,15 +85,16 @@ export function popLayer(id: string): void {
   if (at !== -1) stack.splice(at, 1);
 }
 
-/** Everything that blocks. A tooltip floats over a surface without owning it. */
+/** Everything that blocks. A tooltip floats over a surface without owning it,
+ * and a gesture opens no surface at all. */
 function surfaces(): Layer[] {
-  return stack.filter((l) => l.kind !== 'tooltip');
+  return stack.filter((l) => l.kind === 'surface');
 }
 
 /**
  * True when `id` is the innermost open SURFACE — the layer a focus trap or an
- * outside press belongs to. Tooltips are skipped: one appearing over a menu
- * must not take the menu's Tab away from it.
+ * outside press belongs to. Tooltips and gestures are skipped: neither one
+ * appearing over a menu may take the menu's Tab away from it.
  */
 export function isTopLayer(id: string): boolean {
   return surfaces().at(-1)?.id === id;
@@ -92,21 +102,23 @@ export function isTopLayer(id: string): boolean {
 
 /**
  * True when `id` is the layer a keystroke belongs to — the innermost of
- * everything, tooltips included, since a visible tooltip is the thing an
- * Escape is aimed at.
+ * everything, tooltips and gestures included, since a visible tooltip is the
+ * thing an Escape is aimed at and a drag in flight is what it means to abandon.
  *
- * Asked instead of relying on listener order: every Escape handler in the app
- * sits on `window` in the capture phase, so which one runs first is only
- * whichever surface mounted first — the exact opposite of what precedence
- * needs.
+ * Asked instead of relying on listener order, which cannot answer it. The
+ * app's Escape handlers sit on three different nodes and phases — `Popover`,
+ * `FieldPopover` and a live drag gesture on `window` capture, `DetailPanel` on
+ * `window` bubble, `Dialog` and dnd-kit's own drag cancel on `document`
+ * bubble — so which runs first is settled by node, then phase, then whichever
+ * mounted first, and none of those tracks the surface a keystroke is aimed at.
  */
 export function ownsEscape(id: string): boolean {
   return stack.at(-1)?.id === id;
 }
 
 /** True when anything dismissable is open. Global handlers use this to stand
- * down. A tooltip is not "open" in that sense — nothing should stand down for
- * one. */
+ * down. Neither a tooltip nor a drag gesture is "open" in that sense — nothing
+ * should stand down for either. */
 export function hasLayers(): boolean {
   return surfaces().length > 0;
 }

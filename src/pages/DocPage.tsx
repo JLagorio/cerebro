@@ -15,13 +15,17 @@ import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
+import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
-import { RecordTabs } from '@/detail/RecordTabs';
+import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
-import { isRecordEntry, typeTabs } from '@/engine/typeCatalog';
+import { resolveLayout } from '@/engine/layout';
+import { isRecordEntry } from '@/engine/typeCatalog';
+import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
+import { ViewTabEmbed } from '@/views/ViewTabEmbed';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
@@ -172,6 +176,7 @@ const SAVE_LABEL: Record<SaveState, string | null> = {
 export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
   const entries = useVaultStore((s) => s.entries);
+  const views = useVaultStore((s) => s.views);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const createItem = useVaultStore((s) => s.createItem);
@@ -183,6 +188,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const panelOpen = useUiStore((s) => s.docPanelOpen);
   const setPanelOpen = useUiStore((s) => s.setDocPanelOpen);
   const pagesOpen = useUiStore((s) => s.docPagesOpen);
+  const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
@@ -204,7 +210,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // "the Spec tab of DOC-14" is a place the back button returns to. A stale
   // `selection.tab` — a tab deleted while history still names it — falls back
   // to the first tab rather than rendering nothing.
-  const tabs = record && entry !== null && entry.type !== null ? typeTabs(entry.type, schema) : [];
+  //
+  // M45.2 (spec §3.5): Simple means NO strip — the strip mounts only on SAVED
+  // tabs, while the content swap keeps consuming `typeTabs` so the synthesized
+  // Overview still drives the canvas. M45.6 hoisted both halves to
+  // `recordTabSet` beside the strip, because the PEEK grew the same strip and
+  // two hand-rolled gates are how the two surfaces would come to disagree.
+  const { tabs, saved: savedTabs } = recordTabSet(entry, schema);
   const activeTab = tabs.find((t) => t.id === selection.tab) ?? tabs[0] ?? null;
 
   // Whether the canvas is rendering the body editor at all. The reset below
@@ -215,7 +227,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   useEffect(() => {
     // The keyed editor remounts per doc; wait for onReady. `showsEditor` is a
-    // dependency because a sections/properties tab unmounts the editor
+    // dependency because a sections or view tab unmounts the editor
     // entirely — holding the stale instance would keep feeding the outline
     // (and the blank-page bar) a body the canvas no longer shows.
     setEditor(null);
@@ -240,6 +252,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     const unsubscribe = editor.onChange?.(sync);
     return () => unsubscribe?.();
   }, [editor]);
+
+  // M45.1 — whether the record's full property stack is open under the
+  // heading strip. Sticky per record PATH (a new record resets it), and the
+  // untouched default is derived per render below rather than stored: it must
+  // track whether the strip actually SHOWS, which can change without the path
+  // changing (clearing the strip's last hide_when_empty field folds it away).
+  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [moving, setMoving] = useState(false);
@@ -269,6 +288,31 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   const docPages = docPagesFor(entry, entries);
   const fullWidth = entry.properties.full_width === true;
+
+  // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
+  // property strip on EVERY tab of the record page. `stripShows` is derived
+  // per render with the strip's own fold predicate (amended Task 7 ruling):
+  // the strip renders null when every cell folds, and the stack must never
+  // stay hidden behind a strip that is not on screen — so the stack renders
+  // whenever `!stripShows || detailsShown`, and the untouched default for
+  // `detailsShown` is `!stripShows` (per path) rather than a stored false.
+  const typeDef = record && entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  // M46.1 — one resolution for the whole record, rendered above the tab strip
+  // on every tab. No tab narrows it, so this page, the peek and the
+  // customizer's canvas cannot disagree about what a record shows — and the
+  // canvas, which is a PREVIEW of this page, has nothing left to preview
+  // wrongly.
+  const headingFields =
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+  const stripShows =
+    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
+  // Render-time derived-state reset (the React-sanctioned pattern): the lens
+  // FORGETS a record it left. A one-slot {path, shown} cache gave a one-deep
+  // memory — A(toggled) → B → A resurrected A's choice while A → B(toggled)
+  // → A reset it — and RecordProperties' keyed `revealed` resets on every
+  // switch, so remembering here was an accident, not a feature.
+  if (details !== null && details.path !== entry.path) setDetails(null);
+  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
 
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
@@ -465,12 +509,25 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     }
   };
 
+  // M45.2 — records only: an untyped page has no type whose layout could be
+  // customized. A const, so the guard's narrowing survives into the closure.
+  const layoutType = record && entry.type !== null ? entry.type : null;
+
   const menuItems: ContextMenuItem[] = [
     {
       icon: fullWidth ? 'minimize-2' : 'maximize-2',
       label: fullWidth ? 'Center content' : 'Full width',
       onSelect: () => void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
     },
+    ...(layoutType !== null
+      ? [
+          {
+            icon: 'layout',
+            label: 'Customize layout…',
+            onSelect: () => openLayoutEditor(layoutType),
+          },
+        ]
+      : []),
     { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
     { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
     {
@@ -630,20 +687,6 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         )}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
-          {/* M44.5 — the tab strip is a flex-none sibling ABOVE the scroll
-              container: it survives the diffOpen canvas swap and stays out of
-              the 820px content measure. */}
-          {tabs.length > 0 && (
-            <RecordTabs
-              tabs={tabs}
-              activeId={activeTab?.id ?? tabs[0].id}
-              onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
-              onChange={(next) => {
-                if (entry.type !== null)
-                  void setTypeTabs({ name: entry.type, docPath: null }, next);
-              }}
-            />
-          )}
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div
               data-testid="doc-content"
@@ -666,22 +709,83 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       onCommit={(next) => void adoptTitle(next)}
                     />
                   )}
-                  {/* M44.5 — the record canvas swaps by the open tab: Overview
-                      is today's layout verbatim, Properties is the surface
-                      alone, Sections is the tab's free text. An untyped doc
-                      knows nothing of tabs and keeps its document form. */}
+                  {/* M45.1 — the key-property strip, on every tab. M46.1: so
+                      is its expander, because the stack it opens is the same
+                      stack on every tab — gating the toggle by tab kind would
+                      strand the record's sections behind a strip that has no
+                      way to open. */}
+                  {headingFields.length > 0 && (
+                    <HeadingProperties
+                      key={`strip:${entry.path}`}
+                      entry={entry}
+                      schema={schema}
+                      fields={headingFields}
+                      detailsShown={detailsShown}
+                      onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
+                    />
+                  )}
+                  {/* M44.5 — the record canvas swaps by the open tab: the
+                      body, the tab's free text, or its database. An untyped
+                      doc knows nothing of tabs and keeps its document form. */}
                   {record && activeTab !== null ? (
                     <>
                       {/* M38.2 — the property surface the peek shows, on the
                           page. The SAME component: one property editor, two
                           geometries, so a field added here is a field added
-                          there. */}
-                      {activeTab.content !== 'sections' && (
+                          there. M45.6 widened that from the surface to the
+                          whole anatomy — the peek grew this strip and these
+                          arms too, so the geometry is the only thing that
+                          differs now; the gate below has a twin in
+                          `DetailPanel`, and a change to one is a change owed
+                          to the other.
+
+                          M46.1 — the stack stands here, ABOVE the tab strip,
+                          on every tab: a section belongs to the record, and
+                          the tabs are for the body and for related data
+                          sources (the user's ruling, 2026-08-29). The strip's
+                          own fold is all that is left of the old gate.
+
+                          Keyed by PATH alone, not by tab: the state this
+                          component owns — the reveal expander, the
+                          add-property flyout, a drag in flight — is about the
+                          record's stack, and it is the same stack on every
+                          tab. A tab-keyed remount would discard a flyout the
+                          user opened and a reveal they asked for on every
+                          press, and discard no stale state, because there is
+                          none. */}
+                      {(!stripShows || detailsShown) && (
                         <div data-testid="page-properties" className="mb-4">
                           <RecordProperties
                             key={`props:${entry.path}`}
                             entry={entry}
                             schema={schema}
+                          />
+                        </div>
+                      )}
+                      {/* M44.5, re-placed by M46.1 — the tab strip divides
+                          the record's own blocks from the ONE tab's content,
+                          so it lives inside the content column now rather
+                          than pinned above the scroll container. It scrolls
+                          with the record it describes (Notion's order, the
+                          peek's order, and the customizer canvas's), and it
+                          costs what that placement costs: reading an inline
+                          diff swaps it out with the rest of the canvas, so
+                          tabs are unavailable until the diff is closed.
+                          `-mx-6` lets the underline reach both edges of the
+                          820px measure while the tabs keep its inset. M45.2
+                          gates it on SAVED tabs: the synthesized Overview
+                          renders content, never a one-tab strip. */}
+                      {savedTabs.length > 0 && (
+                        <div className="-mx-6 mb-4">
+                          <RecordTabs
+                            tabs={tabs}
+                            activeId={activeTab.id}
+                            hostType={entry.type}
+                            onSelect={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+                            onChange={(next) => {
+                              if (entry.type !== null)
+                                void setTypeTabs({ name: entry.type, docPath: null }, next);
+                            }}
                           />
                         </div>
                       )}
@@ -691,6 +795,18 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                           key={`${entry.path}#${activeTab.id}`}
                           entry={entry}
                           tabId={activeTab.id}
+                        />
+                      )}
+                      {/* M45.4 — the view arm: resolve the tab's pointer
+                          (the dashboard ViewBlock path, per render like the
+                          dashboard's) and render the embed, or the broken
+                          card — never an empty view for a dead pointer. */}
+                      {activeTab.content === 'view' && (
+                        <ViewTabEmbed
+                          resolution={resolveViewTab(activeTab, entry, entries, schema, views)}
+                          entries={entries}
+                          schema={schema}
+                          scope={`viewtab:${activeTab.id}`}
                         />
                       )}
                     </>

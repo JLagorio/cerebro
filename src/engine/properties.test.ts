@@ -11,6 +11,7 @@ import {
   peopleTypes,
   personCandidates,
   relationTargetFor,
+  foldsWhenUnset,
   isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
@@ -314,6 +315,36 @@ describe('isEmptyForVisibility', () => {
   // the state unreachable from the panel.
   it('never calls a checkbox empty', () => {
     expect(isEmptyForVisibility({ name: 'done', kind: 'checkbox' }, '')).toBe(false);
+  });
+});
+
+describe('foldsWhenUnset', () => {
+  const typeNote = makeEntry({
+    path: 'types/task.md',
+    title: 'Task',
+    type: 'Type',
+    properties: { fields: { notes: 'text', done: 'checkbox' } },
+  });
+  const record = makeEntry({ path: 'a.md', type: 'Task', properties: { notes: 'written' } });
+  const blank = makeEntry({ path: 'b.md', type: 'Task' });
+  const schema = buildSchema([typeNote, record, blank]);
+  const notes: FieldDef = { name: 'notes', kind: 'text' };
+  const done: FieldDef = { name: 'done', kind: 'checkbox' };
+
+  it('folds a field whose display is blank', () => {
+    expect(foldsWhenUnset(blank, schema, false)(notes)).toBe(true);
+  });
+
+  it('keeps a field with a value', () => {
+    expect(foldsWhenUnset(record, schema, false)(notes)).toBe(false);
+  });
+
+  it('never folds a checkbox — false is an answer, not a blank', () => {
+    expect(foldsWhenUnset(blank, schema, false)(done)).toBe(false);
+  });
+
+  it('showEmpty disables folding-for-emptiness entirely', () => {
+    expect(foldsWhenUnset(blank, schema, true)(notes)).toBe(false);
   });
 });
 

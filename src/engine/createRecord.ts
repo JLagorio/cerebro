@@ -63,20 +63,21 @@ export function createTarget(
     if (value !== undefined && value !== null) frontmatter[groupBy] = value;
   }
 
+  // `folder:` on the Type doc pins where its records land (M12.2), and it is
+  // read STRAIGHT OFF THE SCHEMA (M47.1). This used to re-find the Type doc in
+  // `entries` and re-normalise the key itself, so the same `folder:` had two
+  // readers with two copies of the trim-and-strip rule — and `TypeDef.folder`,
+  // which `buildSchema` has always parsed, had no consumer at all. Safe
+  // because every call site passes a schema built from the `entries` it also
+  // passes (`useSchema` caches on that identity), so the two could never have
+  // disagreed. M47 makes this key load-bearing, which is the wrong time to
+  // keep a twin of it.
   const folder =
     project !== null
       ? `${project.path.replace(/\/project\.md$/, '')}/items`
-      : (declaredFolder(typeName, entries) ?? recordsFolder(typeName));
+      : (schema.types.get(typeName)?.folder ?? recordsFolder(typeName));
 
   return { folder, frontmatter };
-}
-
-/** `folder:` on the Type doc pins where its records land (M12.2). */
-function declaredFolder(typeName: string, entries: Entry[]): string | null {
-  const doc = entries.find((e) => e.type === 'Type' && e.title === typeName);
-  const folder = doc?.properties.folder;
-  if (typeof folder !== 'string' || folder.trim() === '') return null;
-  return folder.trim().replace(/^\/+|\/+$/g, '');
 }
 
 /**
@@ -94,6 +95,15 @@ export function recordsFolder(typeName: string): string {
 
 function pluralize(slug: string): string {
   if (slug === '') return 'records';
+  // A name that is ALREADY plural is left alone (M47.4). People name
+  // databases in the plural — Tasks, Notes, Books, Groceries — and the
+  // sibilant rule below read every one of them as needing `es`, so they
+  // became `taskses` and `grocerieses`. That was invisible while
+  // `recordsFolder` was only an implicit fallback; `createDatabase` writes
+  // the folder DOWN, which would have put the misspelling in the user's own
+  // file. `ss` is exempt because it is not a plural ending: Process still
+  // pluralizes to processes.
+  if (/[^s]s$/.test(slug)) return slug;
   if (/(s|x|z|ch|sh)$/.test(slug)) return `${slug}es`;
   if (/[^aeiou]y$/.test(slug)) return `${slug.slice(0, -1)}ies`;
   return `${slug}s`;

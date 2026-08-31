@@ -1,5 +1,17 @@
 import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
+import { DATABASE_FENCE, parseDatabaseRef, serializeDatabaseRef } from '@/engine/databaseBlock';
 import { DATE_TOKEN_SOURCE, dateValueToChipProps, parseDateToken } from '@/engine/dates';
+import {
+  BASE_MARKER_DEPTH,
+  closeMarker,
+  DEFAULT_COLUMN_WIDTH,
+  loosenColumnMarkers,
+  openColumnMarker,
+  openListMarker,
+  parseColumnMarker,
+  tightenColumnMarkers,
+  type ColumnMarker,
+} from '@/engine/pageColumns';
 
 /** Schema-agnostic editor view: custom inline specs (chips) change the
  * concrete BlockNoteEditor generics, but these helpers only need the
@@ -159,9 +171,10 @@ export function unescapeChipMarkdown(markdown: string): string {
     .join('\n');
 }
 
-// --- Callout / mermaid round-trip (M2.x custom blocks) ---------------------
-// On disk a callout is an Obsidian-style `> [!info] …` quote and a diagram is
-// a ```mermaid fence. promoteRichBlocks upgrades those plain forms into the
+// --- Callout / mermaid / database round-trip (M2.x, M47.2) -----------------
+// On disk a callout is an Obsidian-style `> [!info] …` quote, a diagram is a
+// ```mermaid fence, and an embedded database is a ```cerebro-database fence
+// holding a pointer. promoteRichBlocks upgrades those plain forms into the
 // custom blocks after parse; demoteRichBlocks reverses it before
 // serialization, on a deep copy so the live editor state is never mutated.
 
@@ -182,6 +195,21 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
     const b = block as PartialBlock & { content?: unknown; children?: PartialBlock[] };
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === 'mermaid') {
       return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
+    }
+    if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === DATABASE_FENCE) {
+      // A fence that names no database stays the code block it already is —
+      // `parseDatabaseRef` returns null rather than an empty pointer, so a
+      // half-typed fence keeps showing what the user typed instead of being
+      // replaced by a database block complaining about it.
+      const ref = parseDatabaseRef(blockText(b.content));
+      if (ref !== null) {
+        // `view: ''` is the prop-schema spelling of "named none" — BlockNote
+        // prop defaults are primitives, so null does not survive the trip.
+        return {
+          type: 'database',
+          props: { database: ref.database, view: ref.view ?? '' },
+        } as unknown as T;
+      }
     }
     if (b.type === 'quote' && Array.isArray(b.content)) {
       const first = b.content[0] as { type?: string; text?: string } | undefined;
@@ -220,6 +248,15 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
         content: [{ type: 'text', text: code, styles: {} }],
       } as unknown as T;
     }
+    if (b.type === 'database') {
+      const database = typeof b.props?.database === 'string' ? b.props.database : '';
+      const view = typeof b.props?.view === 'string' && b.props.view !== '' ? b.props.view : null;
+      return {
+        type: 'codeBlock',
+        props: { language: DATABASE_FENCE },
+        content: [{ type: 'text', text: serializeDatabaseRef({ database, view }), styles: {} }],
+      } as unknown as T;
+    }
     if (b.type === 'callout') {
       const kind = typeof b.props?.kind === 'string' ? b.props.kind : 'info';
       const content = Array.isArray(b.content) ? b.content : [];
@@ -237,10 +274,144 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
   });
 }
 
+// --- Column round-trip (M48.2) ---------------------------------------------
+// On disk a column layout is a `:::columns` / `::::column` directive
+// container, so a column's CONTENTS stay ordinary markdown blocks — a
+// wikilink inside a column still resolves and a database fence inside one
+// still renders. The markers arrive from the parser as ordinary paragraphs
+// (that is what `loosenColumnMarkers` is for); `promoteColumns` folds that
+// flat run back into the nest BlockNote lays out, and `demoteColumns`
+// flattens it again on the way to disk.
+
+/** The marker a paragraph IS, or null if the block is anything else. */
+function markerOfBlock(block: PartialBlock): ColumnMarker | null {
+  const b = block as { type?: string; content?: unknown; children?: PartialBlock[] };
+  if (b.type !== 'paragraph') return null;
+  if (Array.isArray(b.children) && b.children.length > 0) return null;
+  return parseColumnMarker(blockText(b.content));
+}
+
+/**
+ * Fold a flat run of marker paragraphs into `columnList` / `column` blocks.
+ *
+ * Tolerance is the whole design here, and it is asymmetric on purpose:
+ *
+ * - A stray close, or a `::::column` outside any list, stays the PARAGRAPH it
+ *   already is. The reader sees the marker text and can fix the file.
+ * - An UNCLOSED container abandons the fold entirely and returns the document
+ *   exactly as it arrived. A half-built nest could silently swallow every
+ *   block after the opening marker into a column nobody can see the end of,
+ *   and losing sight of somebody's writing is worse than showing them a `:::`.
+ */
+export function promoteColumns<T extends PartialBlock>(blocks: T[]): T[] {
+  type Frame = { depth: number; kind: 'list' | 'column'; children: PartialBlock[] };
+  const out: PartialBlock[] = [];
+  const stack: Frame[] = [];
+  const top = (): Frame | undefined => stack[stack.length - 1];
+  const target = (): PartialBlock[] => top()?.children ?? out;
+  let folded = false;
+
+  for (const block of blocks) {
+    const marker = markerOfBlock(block);
+    if (marker === null) {
+      target().push(block);
+      continue;
+    }
+    if (marker.kind === 'open-list') {
+      const node: PartialBlock = { type: 'columnList', children: [] } as unknown as PartialBlock;
+      target().push(node);
+      stack.push({ depth: marker.depth, kind: 'list', children: node.children as PartialBlock[] });
+      folded = true;
+      continue;
+    }
+    if (marker.kind === 'open-column') {
+      // A column outside a list has no row to sit in. Left as text rather than
+      // invented a container for: the file says something we do not understand,
+      // and guessing at it is how an editor eats a document.
+      if (top()?.kind !== 'list') {
+        target().push(block);
+        continue;
+      }
+      const node: PartialBlock = {
+        type: 'column',
+        props: { width: marker.width },
+        children: [],
+      } as unknown as PartialBlock;
+      target().push(node);
+      stack.push({
+        depth: marker.depth,
+        kind: 'column',
+        children: node.children as PartialBlock[],
+      });
+      continue;
+    }
+    if (top()?.depth === marker.depth) {
+      stack.pop();
+      continue;
+    }
+    target().push(block);
+  }
+
+  if (stack.length > 0) return blocks;
+  return (folded ? out : blocks) as T[];
+}
+
+/**
+ * Flatten the nest back into marker paragraphs.
+ *
+ * Marker depth grows with nesting depth so an inner container's close can
+ * never be read as the outer one's — the property `parseColumnMarker` keeps
+ * and `promoteColumns` relies on.
+ */
+export function demoteColumns<T extends PartialBlock>(blocks: T[], depth = BASE_MARKER_DEPTH): T[] {
+  const paragraph = (text: string): PartialBlock =>
+    ({
+      type: 'paragraph',
+      content: [{ type: 'text', text, styles: {} }],
+    }) as unknown as PartialBlock;
+  const out: PartialBlock[] = [];
+  for (const block of blocks) {
+    const b = block as {
+      type?: string;
+      props?: Record<string, unknown>;
+      children?: PartialBlock[];
+    };
+    if (b.type === 'columnList') {
+      out.push(paragraph(openListMarker(depth)));
+      for (const child of b.children ?? []) {
+        const column = child as PartialBlock & {
+          props?: Record<string, unknown>;
+          children?: PartialBlock[];
+        };
+        const width =
+          typeof column.props?.width === 'number' ? column.props.width : DEFAULT_COLUMN_WIDTH;
+        out.push(paragraph(openColumnMarker(depth + 1, width)));
+        out.push(...demoteColumns((column.children ?? []) as PartialBlock[], depth + 2));
+        out.push(paragraph(closeMarker(depth + 1)));
+      }
+      out.push(paragraph(closeMarker(depth)));
+      continue;
+    }
+    if (Array.isArray(b.children) && b.children.length > 0) {
+      out.push({ ...b, children: demoteColumns(b.children, depth) } as unknown as PartialBlock);
+      continue;
+    }
+    out.push(block);
+  }
+  return out as T[];
+}
+
 export async function markdownToBlocks(editor: AnyEditor, markdown: string): Promise<AnyBlocks> {
-  return promoteRichBlocks(
-    enrichChips(
-      normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(markdown)) as PartialBlock[]),
+  // Loosen FIRST: the parser only gives each `:::` marker its own paragraph
+  // when the markers are blank-line separated, and collapses a tight run of
+  // them into one paragraph with soft breaks. The file on disk is the tight
+  // form, because nobody wants to read a page that is half blank lines.
+  const source = loosenColumnMarkers(markdown);
+  return promoteColumns(
+    promoteRichBlocks(
+      enrichChips(
+        normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(source)) as PartialBlock[]),
+      ),
     ),
   ) as AnyBlocks;
 }
@@ -251,8 +422,10 @@ export async function blocksToMarkdown(
 ): Promise<string> {
   const source = (blocks ?? editor.document) as PartialBlock[];
   // Deep copy: demotion must never touch live editor state.
-  const demoted = demoteRichBlocks(JSON.parse(JSON.stringify(source)) as PartialBlock[]);
-  return unescapeChipMarkdown(await editor.blocksToMarkdownLossy(demoted));
+  const demoted = demoteRichBlocks(
+    demoteColumns(JSON.parse(JSON.stringify(source)) as PartialBlock[]),
+  );
+  return tightenColumnMarkers(unescapeChipMarkdown(await editor.blocksToMarkdownLossy(demoted)));
 }
 
 /**

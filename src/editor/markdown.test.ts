@@ -129,6 +129,164 @@ describe('markdown round trip', () => {
   });
 });
 
+/**
+ * The database fence (M47.2).
+ *
+ * A page holds a POINTER to a database, never the database — so what has to
+ * be right is that the pointer survives a trip to disk and back unchanged,
+ * through the real editor rather than through the promote/demote helpers in
+ * isolation. A block whose fence is not a usable pointer must come back as
+ * the ordinary code block it was, because that is the only behaviour that
+ * cannot destroy what somebody typed.
+ */
+describe('the cerebro-database fence', () => {
+  const fence = (body: string) => `\`\`\`cerebro-database\n${body}\n\`\`\`\n`;
+
+  it('promotes a fence naming a database into a database block', async () => {
+    const blocks = await markdownToBlocks(editor, fence('database: Reading list\nview: shelf'));
+    expect(blocks.map((b) => b.type)).toEqual(['database']);
+    expect(blocks[0].props).toMatchObject({ database: 'Reading list', view: 'shelf' });
+  });
+
+  it('carries an unnamed view as the empty string, not as a missing prop', async () => {
+    const blocks = await markdownToBlocks(editor, fence('database: Reading list'));
+    expect(blocks[0].props).toMatchObject({ database: 'Reading list', view: '' });
+  });
+
+  it('round-trips back to the same fence', async () => {
+    for (const body of ['database: Reading list\nview: shelf', 'database: Reading list']) {
+      expect(await roundTrip(fence(body))).toBe(fence(body));
+    }
+  });
+
+  /**
+   * The failure that would be silent and unrecoverable: a half-typed fence
+   * becoming a database block means the user's text is replaced by a message
+   * about their text, and saving then writes the replacement to disk. It stays
+   * a code block, holding exactly what they wrote.
+   */
+  it('leaves a fence that names no database as an ordinary code block', async () => {
+    for (const body of ['', 'view: shelf', 'database:', 'not yaml: [', '- a list']) {
+      const blocks = await markdownToBlocks(editor, fence(body));
+      expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    }
+  });
+
+  it('does not claim a fence in another language', async () => {
+    const blocks = await markdownToBlocks(editor, '```yaml\ndatabase: Reading list\n```\n');
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+  });
+});
+
+describe('the ::: column containers', () => {
+  const TWO = [
+    'Before.',
+    '',
+    ':::columns',
+    '::::column',
+    'Left.',
+    '::::',
+    '::::column',
+    'Right.',
+    '::::',
+    ':::',
+    '',
+    'After.',
+    '',
+  ].join('\n');
+
+  it('folds a flat run of markers into a nest of columnList and column', async () => {
+    const blocks = await markdownToBlocks(editor, TWO);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'columnList', 'paragraph']);
+    const list = blocks[1];
+    expect(list.children.map((c: { type: string }) => c.type)).toEqual(['column', 'column']);
+    expect(
+      list.children.map((c: { children: { content: { text: string }[] }[] }) =>
+        c.children[0].content[0].text.trim(),
+      ),
+    ).toEqual(['Left.', 'Right.']);
+  });
+
+  it('round-trips back to the same markdown, tight form and all', async () => {
+    expect(await roundTrip(TWO)).toBe(TWO);
+  });
+
+  /* The fidelity policy this module has held since M2, applied to the one
+     construct whose serialization is entirely ours. A round trip that is
+     stable ONCE but not twice grows the file on every open/save cycle. */
+  it('is stable across a second trip', async () => {
+    const once = await roundTrip(TWO);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('carries a declared width and writes it back only when it deviates', async () => {
+    const wide = TWO.replace('::::column\nRight.', '::::column width=3\nRight.');
+    const blocks = await markdownToBlocks(editor, wide);
+    expect(blocks[1].children.map((c: { props: { width: number } }) => c.props.width)).toEqual([
+      1, 3,
+    ]);
+    expect(await roundTrip(wide)).toBe(wide);
+  });
+
+  /* A column is only worth having if you can put things in it. The database
+     fence is the sharpest case: it proves a column's contents stay real
+     markdown blocks rather than becoming inert text, which is the whole
+     reason the on-disk form is a directive and not a fence of our own. */
+  it('keeps a database fence inside a column a database block', async () => {
+    const withFence = [
+      ':::columns',
+      '::::column',
+      '```cerebro-database',
+      'database: Reading list',
+      'view: shelf',
+      '```',
+      '::::',
+      '::::column',
+      'Notes.',
+      '::::',
+      ':::',
+      '',
+    ].join('\n');
+    const blocks = await markdownToBlocks(editor, withFence);
+    const first = blocks[0].children[0].children[0];
+    expect(first.type).toBe('database');
+    expect(first.props).toMatchObject({ database: 'Reading list', view: 'shelf' });
+    expect(await roundTrip(withFence)).toBe(withFence);
+  });
+
+  /* Tolerance, and it is asymmetric on purpose. A stray marker is TEXT — the
+     reader sees it and can fix the file. An unclosed container abandons the
+     fold entirely, because a half-built nest would swallow every block after
+     the opening marker into a column with no visible end. */
+  it('leaves a stray close as the paragraph it is', async () => {
+    const blocks = await markdownToBlocks(editor, 'One.\n\n:::\n\nTwo.\n');
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
+  });
+
+  it('leaves a column outside any list as the paragraph it is', async () => {
+    const blocks = await markdownToBlocks(editor, '::::column\n\nOne.\n');
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'paragraph']);
+  });
+
+  it('abandons the fold entirely when a container is never closed', async () => {
+    const blocks = await markdownToBlocks(
+      editor,
+      ':::columns\n::::column\nLeft.\n::::\n\nAnd then nothing closes the list.\n',
+    );
+    expect(blocks.every((b) => b.type === 'paragraph')).toBe(true);
+    expect(blocks.map((b) => (b.content as { text: string }[])[0]?.text)).toContain('Left.');
+  });
+
+  /* `:::` inside a fence is somebody's example of this very syntax. Promoting
+     it would silently delete lines from a code sample. */
+  it('does not read markers inside a code fence', async () => {
+    const sample = '```markdown\n:::columns\n::::column\n::::\n:::\n```\n';
+    const blocks = await markdownToBlocks(editor, sample);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(await roundTrip(sample)).toBe(sample);
+  });
+});
+
 describe('normalizeParsedBlocks', () => {
   it('halves doubled break runs in text nodes, including nested content', () => {
     const blocks = [

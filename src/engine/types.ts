@@ -144,10 +144,53 @@ export const DISPLAY_DEFAULTS: DisplayConfig = {
   showBody: true,
 };
 
+/** One named panel of properties on the record page (M45.1). Ids mint like
+ * tab ids and matter to the layout editor's drag model, not to any
+ * per-record data. */
+export interface LayoutGroup {
+  id: string;
+  name: string;
+  fields: string[];
+}
+
+/** Where the record page PLACES properties (M45.1). `fields:` declares and
+ * orders; `visibility` discloses; `layout` arranges. Absent = the flat stack
+ * every type rendered before M45. Placement is the WHOLE of it: a layout has
+ * no tab dimension (M46.1 — the heading strip, the groups and the loose
+ * remainder all render above the tab strip, on every tab, the way Notion's
+ * property strip does). A field name appears at most once across `heading` +
+ * all `groups` — parse drops later claims, so downstream code never
+ * dedups. */
+export interface LayoutConfig {
+  heading: string[];
+  groups: LayoutGroup[];
+}
+
+export const LAYOUT_DEFAULTS: LayoutConfig = { heading: [], groups: [] };
+
 /** What a record tab renders (M44.5). A closed vocabulary on purpose: an
- * unrecognised kind from hand-edited YAML must not reach the renderer. */
-export const TAB_CONTENTS = ['overview', 'properties', 'sections'] as const;
+ * unrecognised kind from hand-edited YAML must not reach the renderer.
+ * `'view'` (M45.4) embeds a database view by reference.
+ *
+ * A tab holds the page BODY or a data source, never the property stack —
+ * `'properties'` was a fourth kind between M44.5 and M46.1 and retired with
+ * the per-tab sections model: a tab that IS the stack is the shape the
+ * ruling forbids, because the stack now stands above the strip on every
+ * tab. A stored `properties` needs no special arm at the parse door: it
+ * takes the unrecognised-kind fallback to `'sections'` and lands as an
+ * empty free-text tab, which is the safe outcome — mapping it to
+ * `'overview'` would give a type that had both an Overview and a Properties
+ * tab two body tabs. */
+export const TAB_CONTENTS = ['overview', 'sections', 'view'] as const;
 export type TabContent = (typeof TAB_CONTENTS)[number];
+
+/** Where a `content: 'view'` tab's rows come from (M45.4) — a reference,
+ * never a copy, the same doctrine the dashboard `view` widget's comment
+ * states on DashboardWidget below: the tab carries the pointer and editing
+ * the source updates every record page showing it. A type IS a database
+ * (M39); a list id is unique per FOLDER, so `collection` rides along
+ * (the surface.ts location doctrine). */
+export type ViewTabSource = { type: string } | { list: string; collection?: string | null };
 
 /** One tab of a type's record page (M44.5) — the same contract a view tab
  * has: a stable id the selection addresses, a name, an optional icon. */
@@ -156,6 +199,18 @@ export interface TabDef {
   name: string;
   icon: string | null;
   content: TabContent;
+  /** `content: 'view'` only. Always present on a parsed view tab; `null`
+   * means the tab declared no readable source — the tab is KEPT (its id may
+   * key per-record `_sections` content) and the renderer shows the broken
+   * state, because unavailable is never empty. */
+  source?: ViewTabSource | null;
+  /** `content: 'view'` only: a saved view id on the source. Absent = the
+   * source's first view. */
+  view?: string;
+  /** `content: 'view'` only: scope rows to those related to THIS record via
+   * a relation field on the source type targeting the host's type (M45.4).
+   * Absent = all rows. */
+  scope?: 'related';
 }
 
 export interface TypeDef {
@@ -175,8 +230,13 @@ export interface TypeDef {
    * type. Always resolved: absent frontmatter yields the defaults, so no
    * consumer null-checks. */
   display: DisplayConfig;
-  /** `tabs:` on the Type doc (M44.5) — the record page's tab set. [] means
-   * none saved yet; `typeTabs` synthesizes the Overview default. */
+  /** `layout:` on the Type doc (M45.1) — where the record page places this
+   * type's properties. Always resolved: absent frontmatter yields the
+   * defaults (the flat stack), so no consumer null-checks. */
+  layout: LayoutConfig;
+  /** `tabs:` on the Type doc (M44.5) — the tab set every surface that shows
+   * a record of this type renders (the page and the peek since M45.6). []
+   * means none saved yet; `typeTabs` synthesizes the Overview default. */
   tabs: TabDef[];
 }
 

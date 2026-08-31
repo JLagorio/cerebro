@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CollectionDialog } from '@/app/CollectionDialog';
-import { deleteCollection, updateCollection } from '@/app/listActions';
+import { createPageIn, deleteCollection, updateCollection } from '@/app/listActions';
+import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { useOpenPath } from '@/app/useOpenPath';
 import { collectionsTree, effectiveCollections, nodeCount } from '@/engine/collections';
+import { folderNote } from '@/engine/docPages';
 import { selectSource, sortEntries } from '@/engine/surface';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode, Entry, Selection } from '@/engine/types';
 import { evaluateFilters } from '@/engine/viewFilters';
 import { resolveView } from '@/engine/views';
+import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { EntityDossier } from '@/knowledge/EntityDossier';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -56,6 +59,9 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
       ) ?? null,
     [collections, views, entries, selection.folder],
   );
+
+  // The folder note, when the container has one — its body is the page.
+  const page = useMemo(() => folderNote(selection.folder, entries), [selection.folder, entries]);
 
   // M12.5: a legacy project folder reads as a Collection, and the entity
   // dossier that lived on the deleted project page follows it here — what
@@ -182,6 +188,19 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
       </header>
 
       <div className="min-h-0 flex-1 px-8 pb-10">
+        {/* The container's own page (M47.5).
+ 
+            A Collection used to be a `collection.yml` and a listing, which is
+            why its empty state told you to go and use the sidebar: it had
+            nothing of its own to hold. Its folder note is an ordinary markdown
+            page, so it can carry prose and `/database` blocks ABOVE what it
+            contains — which is the whole "everything is a page" claim, made
+            concrete on the one surface that most obviously lacked it. */}
+        {page !== null && (
+          <div className="mb-7 -mx-2">
+            <NoteBodyEditor path={page.path} />
+          </div>
+        )}
         {/* M12.5: the entity dossier that lived on the deleted project page —
             rendered whenever the folder carries a project.md, INCLUDING when
             the collection lists nothing else: a legacy project whose records
@@ -194,10 +213,32 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           </div>
         )}
         {empty ? (
+          /* The sentence this milestone started from was here: "Add a list
+             from the sidebar's + to start" — a page telling you to go and use
+             a different surface, because it had no create affordance of its
+             own and only one kind of thing you could make (M47.5). */
           <EmptyState
             icon="folder-open"
             title="Nothing in here yet"
-            description="A collection holds lists, folders, and docs. Add a list from the sidebar’s + to start."
+            /* Not "and lists" any more (M47.6): nothing creates one, and an
+               empty state that names a thing you cannot make sends you looking
+               for a door that was removed. A `*.list.yml` already on disk
+               still shows up in the tree above — it is unmakeable, not
+               unreadable. */
+            description="A collection holds pages, databases and folders."
+            action={
+              <Button
+                variant="primary"
+                onClick={() =>
+                  void (async () => {
+                    const path = await createPageIn(selection.folder);
+                    if (path !== null) openPath(path);
+                  })()
+                }
+              >
+                New page
+              </Button>
+            }
           />
         ) : (
           <div className="flex flex-col gap-7">

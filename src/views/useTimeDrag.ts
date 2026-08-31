@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { useDragGesture } from '@/hooks/useDragGesture';
 
 /**
  * Dragging a record along a date axis (M16.23, M16.24).
@@ -14,7 +15,9 @@ import React, { useCallback, useRef, useState } from 'react';
  * is "position 3 of 7". What the two share — the window listeners, the
  * `(e.button ?? 0)` guard jsdom forces, commit-on-release, and a keyboard path
  * so the gesture is not pointer-only — is copied deliberately and noted here so
- * a later phase can lift the common half out of both.
+ * a later phase can lift the common half out of both. M46.2 lifted the first
+ * piece of it: the claim on Escape and the teardown an unmount runs are
+ * `useDragGesture` now, shared with every other pointer loop in the app.
  *
  * Everything is measured in WHOLE DAYS. A drag never produces a fraction of a
  * day, because a date property cannot store one.
@@ -82,6 +85,8 @@ export function useTimeDrag({
   const elements = useRef(new Map<string, HTMLElement>());
   const live = useRef<TimeDragState | null>(null);
   const moved = useRef(false);
+  /** The gesture's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
 
   // Latest-ref: the window listeners below are attached once per gesture and
   // must not commit through a stale callback if a render lands mid-drag.
@@ -129,7 +134,6 @@ export function useTimeDrag({
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', up);
         window.removeEventListener('pointercancel', cancel);
-        window.removeEventListener('keydown', onKey);
         live.current = null;
         setDrag(null);
       };
@@ -140,21 +144,32 @@ export function useTimeDrag({
       };
       const up = () => {
         const state = live.current;
-        stop();
+        gesture.end();
         if (state !== null) commit(state, key, true);
       };
-      // Escape abandons the gesture. Without it the only way out of a drag
-      // begun by accident is to drop it somewhere and drag it back.
-      const cancel = () => stop();
-      const onKey = (ev: KeyboardEvent) => {
-        if (ev.key === 'Escape') stop();
-      };
+      const cancel = () => gesture.end();
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', cancel);
-      window.addEventListener('keydown', onKey);
+      /**
+       * Escape abandons the gesture. Without it the only way out of a drag
+       * begun by accident is to drop it somewhere and drag it back.
+       *
+       * The key used to be taken here, on `window` in the BUBBLE phase with no
+       * `stopPropagation` and no layer — so it abandoned the bar AND closed the
+       * record panel or dialog behind it, one press for two dismissals (M46.2).
+       * `useDragGesture` claims it in the capture phase and pushes a `'gesture'`
+       * layer for the drag's life instead, which is also what makes the
+       * teardown survive an unmount: a gesture the view outlived kept its window
+       * listeners, and the release still reached `onCommit` — a write from a
+       * view no longer on screen.
+       *
+       * Nothing is committed until the release, so stripping the preview IS the
+       * restore, and the release then finds nothing live to write.
+       */
+      gesture.begin(stop);
     },
-    [disabled, commit],
+    [disabled, commit, gesture],
   );
 
   const onKeyDown = useCallback(

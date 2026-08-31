@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
+import { HeadingProperties, stripCells } from '@/detail/HeadingProperties';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import {
@@ -14,6 +15,7 @@ import {
   type InboxPeriod,
   type OrganizeCheck,
 } from '@/engine/inbox';
+import { resolveLayout } from '@/engine/layout';
 import { conceptsFrom, isAgentWritten, listConcepts } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ProposalCard } from '@/agent/ProposalCard';
@@ -190,6 +192,22 @@ function OrganizePanel({
       .map((t) => ({ value: t, label: t })),
   ];
 
+  // M45.1 (spec §3.4) — this aside is a RecordProperties HOST, so a laid-out
+  // type's heading fields must render in a strip here too: the strip-owning
+  // hosts exclude them from the stack, and a host that mounts only the stack
+  // renders them NOWHERE (the whole-slice review's finding). Same gate as
+  // DocPage/DetailPanel: `stripShows` derived per render with the strip's own
+  // fold predicate, stack whenever `!stripShows || detailsShown`, untouched
+  // default `!stripShows`, and the lens forgets a capture it left.
+  const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
+  const headingFields =
+    typeDef === null ? [] : resolveLayout(typeDef.layout, typeDef.fields).heading;
+  const stripShows =
+    headingFields.length > 0 && stripCells(entry, schema, headingFields).length > 0;
+  const [details, setDetails] = useState<{ path: string; shown: boolean } | null>(null);
+  if (details !== null && details.path !== entry.path) setDetails(null);
+  const detailsShown = details?.path === entry.path ? details.shown : !stripShows;
+
   // The checklist sits at the far end of the panel from the controls it talks
   // about — "Has a type" was ~800px from the TYPE select. These let an
   // outstanding item carry you to its own control instead of describing it.
@@ -235,10 +253,25 @@ function OrganizePanel({
       </label>
 
       {/* Once typed, the type's declared fields are the rest of the form —
-          the same property stack the record surfaces use, not a second one. */}
+          the same strip-and-stack the record surfaces mount, not a second
+          form. A laid-out type leads with its heading strip (the triage
+          fields), and the full stack rides the same View details expander
+          the record page uses (M45.1). */}
       {entry.type !== null && (
         <div ref={typeFields} className="mt-3 border-t border-n-100 pt-3">
-          <RecordProperties key={entry.path} entry={entry} schema={schema} />
+          {headingFields.length > 0 && (
+            <HeadingProperties
+              key={`strip:${entry.path}`}
+              entry={entry}
+              schema={schema}
+              fields={headingFields}
+              detailsShown={detailsShown}
+              onToggleDetails={() => setDetails({ path: entry.path, shown: !detailsShown })}
+            />
+          )}
+          {(!stripShows || detailsShown) && (
+            <RecordProperties key={entry.path} entry={entry} schema={schema} />
+          )}
         </div>
       )}
 

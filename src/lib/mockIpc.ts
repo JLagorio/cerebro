@@ -421,7 +421,28 @@ const dirOf = (path: string) => {
   return cut === -1 ? '' : path.slice(0, cut);
 };
 
-/** Nearest ancestor folder holding a collection.yml — parity with write.rs. */
+/**
+ * True when this folder's own note declares it a Collection (M47.5) — parity
+ * with write.rs `declared_by_page`.
+ *
+ * `delivery/delivery.md` carrying `type: Collection` is what a
+ * `collection.yml` used to be. Only the FOLDER NOTE speaks for its folder.
+ */
+function declaredByPage(dir: string): boolean {
+  if (dir === '') return false;
+  const base = dir.split('/').pop() ?? dir;
+  const text = files.get(`${dir}/${base}.md`);
+  if (text === undefined || !text.startsWith('---\n')) return false;
+  const end = text.indexOf('\n---', 4);
+  if (end === -1) return false;
+  // Frontmatter only: a `type: Collection` mentioned in prose is prose.
+  return text
+    .slice(4, end)
+    .split('\n')
+    .some((l) => l.trimStart().startsWith('type:') && l.split(':')[1]?.trim() === 'Collection');
+}
+
+/** Nearest ancestor folder declaring itself a Collection — parity with write.rs. */
 function collectionOf(path: string): string | null {
   const markers = new Set(
     [...files.keys()]
@@ -430,7 +451,12 @@ function collectionOf(path: string): string | null {
   );
   let dir = dirOf(path);
   for (;;) {
-    if (markers.has(dir)) return dir;
+    // Either marker counts. A vault mid-conversion carries both shapes, and a
+    // List whose container declared itself with a PAGE must not be reported as
+    // living at the vault root — the app would then look for it under a
+    // collection it does not have and find nothing, which is exactly what
+    // "This list no longer exists" was on a freshly created list.
+    if (markers.has(dir) || declaredByPage(dir)) return dir;
     if (dir === '') return null;
     dir = dirOf(dir);
   }

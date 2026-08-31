@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { EditorGroups } from './EditorGroups';
@@ -261,5 +262,103 @@ describe('EditorGroups', () => {
     render(<EditorGroups />);
     expect(screen.getByText('Nothing open')).toBeTruthy();
     expect(selectActiveTab(useRootsStore.getState())).toBeNull();
+  });
+});
+
+/**
+ * Abandoning a splitter drag (M46.2).
+ *
+ * The splitter had no keydown listener, so Escape went straight to whatever
+ * surface the workspace was drawn inside while the drag kept tracking, and an
+ * unmount mid-drag stranded both the window listeners and `cb-resizing` on the
+ * body. This drag paints THROUGH state with no separate commit, so the cancel
+ * is a `setGrow` back to the grow the divider was grabbed at.
+ */
+describe('EditorGroups splitter Escape (M46.2)', () => {
+  afterEach(() => {
+    resetLayers();
+    document.body.classList.remove('cb-resizing');
+  });
+
+  const at = (type: string, clientX: number) => new MouseEvent(type, { clientX, bubbles: true });
+  const escape = () => fireEvent.keyDown(document.body, { key: 'Escape' });
+
+  /** Two panes with a real rectangle each, and the divider between them. */
+  async function split() {
+    seed('a.md', 'b.md');
+    const view = render(<EditorGroups />);
+    fireEvent.click(screen.getAllByTestId('split-editor')[0] as HTMLElement);
+    await waitFor(() => expect(screen.getAllByTestId('editor-pane')).toHaveLength(2));
+    const panes = screen.getAllByTestId('editor-pane');
+    panes[0].getBoundingClientRect = () =>
+      ({ left: 0, width: 400, top: 0, height: 400 }) as DOMRect;
+    panes[1].getBoundingClientRect = () =>
+      ({ left: 400, width: 400, top: 0, height: 400 }) as DOMRect;
+    return { panes, splitter: screen.getByTestId('pane-splitter'), unmount: view.unmount };
+  }
+
+  it('puts the panes back where the grab found them, and stops tracking', async () => {
+    const { panes, splitter } = await split();
+    fireEvent(splitter, at('pointerdown', 400));
+    fireEvent(window, at('pointermove', 300));
+    expect(panes[0].style.flexGrow).toBe('0.75');
+
+    escape();
+
+    expect(panes[0].style.flexGrow).toBe('1');
+    expect(panes[1].style.flexGrow).toBe('1');
+    expect(document.body.classList.contains('cb-resizing')).toBe(false);
+    // A move after the cancel must paint nothing.
+    fireEvent(window, at('pointermove', 250));
+    expect(panes[0].style.flexGrow).toBe('1');
+  });
+
+  it('leaves a later drag able to move the divider', async () => {
+    const { panes, splitter } = await split();
+    fireEvent(splitter, at('pointerdown', 400));
+    fireEvent(window, at('pointermove', 300));
+    escape();
+    fireEvent(window, at('pointerup', 300));
+
+    // A guard, and honestly labelled as one: this fixture cannot tell a
+    // cancelled first drag from an uncancelled one, because the panes' rects
+    // are stubbed and the pair's summed grow is 2 either way. What it does
+    // catch is a cancel that left the divider unable to be dragged at all.
+    fireEvent(splitter, at('pointerdown', 400));
+    fireEvent(window, at('pointermove', 500));
+    fireEvent(window, at('pointerup', 500));
+    expect(panes[0].style.flexGrow).toBe('1.25');
+  });
+
+  it('takes Escape off the surface underneath, and keeps it from anything behind', async () => {
+    const { splitter } = await split();
+    const onWindow = vi.fn();
+    // What DetailPanel and Dialog both register; their handlers ask the stack
+    // who owns the keystroke.
+    pushLayer('panel');
+    fireEvent(splitter, at('pointerdown', 400));
+    fireEvent(window, at('pointermove', 300));
+    expect(ownsEscape('panel')).toBe(false);
+    window.addEventListener('keydown', onWindow);
+    try {
+      escape();
+      expect(onWindow).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('keydown', onWindow);
+    }
+    expect(ownsEscape('panel')).toBe(true);
+  });
+
+  it('leaves no resizing cursor and no layer when the workspace unmounts mid-drag', async () => {
+    const { splitter, unmount } = await split();
+    pushLayer('panel');
+    fireEvent(splitter, at('pointerdown', 400));
+    fireEvent(window, at('pointermove', 300));
+    expect(document.body.classList.contains('cb-resizing')).toBe(true);
+
+    unmount();
+
+    expect(document.body.classList.contains('cb-resizing')).toBe(false);
+    expect(ownsEscape('panel')).toBe(true);
   });
 });

@@ -258,3 +258,25 @@ describe('favorites', () => {
     });
   });
 });
+
+// M45.2 — one mount, one signal: three menus open the layout editor by
+// setting this, and the single App-level dialog is the only reader. Nothing
+// threads callbacks through PropertyRow.
+describe('layout editor signal', () => {
+  beforeEach(() => {
+    useUiStore.setState({ layoutEditor: null });
+  });
+
+  it('openLayoutEditor carries the type, and closeLayoutEditor nulls it', () => {
+    useUiStore.getState().openLayoutEditor('Work item');
+    expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Work item' });
+    useUiStore.getState().closeLayoutEditor();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+  });
+
+  it('a second open replaces the first — one editor, latest door wins', () => {
+    useUiStore.getState().openLayoutEditor('Work item');
+    useUiStore.getState().openLayoutEditor('Meeting');
+    expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Meeting' });
+  });
+});

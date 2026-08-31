@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
@@ -10,6 +10,7 @@ import { FieldEditor } from '@/detail/FieldEditor';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
@@ -24,6 +25,13 @@ vi.mock('@/lib/ipc', () => ({
   updateFrontmatter: vi.fn().mockResolvedValue(undefined),
   createNote: vi.fn(),
   listViews: vi.fn().mockResolvedValue([]),
+  // Missing until M45.6, and its absence was invisible: `rescan` calls it
+  // through `loadCollections`, so every rescan in this file threw on
+  // `undefined is not a function`, was swallowed by the store-layer catch,
+  // and left `entries` untouched. Nothing failed — a rename simply never
+  // reached the store, which is exactly what a case about post-rename state
+  // needs to be able to see.
+  listCollections: vi.fn().mockResolvedValue([]),
   saveView: vi.fn(),
   startWatcher: vi.fn().mockResolvedValue(undefined),
   listFolders: vi.fn().mockResolvedValue([]),
@@ -76,6 +84,9 @@ function SurfaceOpenedOverThePanel() {
     </span>
   );
 }
+
+/** The record the panel opens on in every case below. */
+const FLD_1 = 'projects/onboarding/items/fld-1.md';
 
 describe('DetailPanel', () => {
   beforeEach(() => {
@@ -375,6 +386,64 @@ describe('DetailPanel', () => {
     );
   });
 
+  /**
+   * The SECOND rename must splice too (M45.6 review).
+   *
+   * `entry.title` sat in the editor-handle effect's dependency list, and a
+   * rename changes exactly that and nothing else the panel keys on — the
+   * path does not move (the case above states it: the file is rewritten in
+   * place). So the effect fired, nulled `editorRef.current`, and the
+   * NoteBodyEditor it was pointing at stayed mounted the whole time: nothing
+   * ever handed the handle back. The next rename found null, skipped the
+   * splice, and M1.x came back — the editor's next debounced save writing
+   * the previous H1 over the newly renamed file.
+   *
+   * The fixture has to be able to SEE that: `scanVault` replays whatever
+   * `setNoteTitle` was last given, so the rescan really does change
+   * `entry.title` the way the app does. With a fixture that returns the
+   * original titles forever, the effect never re-fires and this passes
+   * whether or not the bug is present.
+   */
+  it('splices the second rename too — the handle survives the first', async () => {
+    let renamed: string | null = null;
+    vi.mocked(ipc.setNoteTitle).mockImplementation(async (_vault, _path, title) => {
+      renamed = title;
+    });
+    vi.mocked(ipc.scanVault).mockImplementation(async () =>
+      fixtureVault().map((e) =>
+        e.path === 'projects/onboarding/items/fld-1.md' && renamed !== null
+          ? { ...e, title: renamed }
+          : e,
+      ),
+    );
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
+    render(<DetailPanel />);
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
+    const input = screen.getByLabelText('Title') as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'Renamed once' } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed once'),
+    );
+    // The precondition, asserted rather than assumed: the rescan really did
+    // change `entry.title`, which is the ONLY input the buggy dependency list
+    // reacted to. Without this the case passes vacuously — a fixture whose
+    // rescan replays the original titles never re-fires the effect, so it
+    // cannot tell a fixed panel from a broken one.
+    await waitFor(() =>
+      expect(useVaultStore.getState().entries.find((e) => e.path === FLD_1)?.title).toBe(
+        'Renamed once',
+      ),
+    );
+
+    fireEvent.change(input, { target: { value: 'Renamed twice' } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed twice'),
+    );
+  });
+
   // M14.2: which knowledge surface answers is capability-gated — a record the
   // base holds concepts ABOUT gets its dossier (projects became ordinary
   // records in the M12.5 aftermath, so the dossier rides the panel now); any
@@ -435,6 +504,448 @@ describe('DetailPanel', () => {
     expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
     // Still distinct from the write-side act it used to sit alone beside.
     expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
+  });
+
+  // M45.1 — the type's `layout.heading` renders as the key-property strip
+  // between the title and the property stack; the stack starts collapsed
+  // behind the strip and the expander reveals it.
+  describe('heading strip (M45.1)', () => {
+    const withLayout = (
+      layout: Record<string, unknown>,
+      mutateFields?: (fields: Record<string, unknown>) => void,
+    ) => {
+      const entries = fixtureVault();
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+      mutateFields?.(typeProps.fields as Record<string, unknown>);
+      typeProps.layout = layout;
+      useVaultStore.setState({ entries, vaultPath: '/vault' });
+      useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
+    };
+
+    it('mounts the strip after the title; the toggle expands and collapses the stack', () => {
+      withLayout({ heading: ['status', 'priority'] });
+      render(<DetailPanel />);
+      const strip = screen.getByTestId('heading-strip');
+      // Between title and properties: the strip FOLLOWS the title input.
+      const title = screen.getByTestId('detail-title');
+      expect(title.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The stack starts collapsed behind the strip…
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      // …while the body section is untouched by the collapse (M44.1 display
+      // config still owns it).
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+    });
+
+    it('resets to the collapsed strip when the panel switches records', () => {
+      withLayout({ heading: ['status'] });
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // act: a store write outside any event needs its re-render flushed
+      // before the DOM assertion sees it.
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      // …and COMING BACK resets too: the lens forgets a record it left, like
+      // RecordProperties' keyed `revealed`. A one-slot {path, shown} cache
+      // resurrected A's toggle on A→B→A while A→B(toggled)→A reset —
+      // remembering was an accident of whose write survived, not a feature.
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' }));
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+    });
+
+    it('no layout → no strip, and the stack renders exactly as today', () => {
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+
+    // The Task 5 ruling's trap: a heading whose one field is empty under
+    // hide_when_empty folds the strip to NOTHING — the stack must render
+    // despite `detailsShown` never being touched, or the record's properties
+    // are stranded behind a strip that is not on screen.
+    it('a strip that folds to nothing shows the stack untoggled', () => {
+      withLayout({ heading: ['due'] }, (fields) => {
+        fields.due = { kind: 'date', visibility: 'hide_when_empty' };
+      });
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+  });
+
+  /**
+   * M45.6 — the peek shows the record's tabs.
+   *
+   * The defect (user, 2026-08-29: "the tabs dont render in the UI"): the strip
+   * mounted on the record PAGE and in the layout editor only, so a type whose
+   * tabs were saved showed none on the surface a table row actually opens
+   * into. Same gate as the page (SAVED tabs, never the synthesized Overview),
+   * the same content arms, panel geometry — and the selection is LOCAL,
+   * because a peek is not a place the back button returns to.
+   */
+  describe('record tabs (M45.6)', () => {
+    const OVERVIEW = { id: 'overview', name: 'Overview', content: 'overview' };
+    const SPEC = { id: 'spec', name: 'Spec', content: 'sections' };
+
+    const withTabs = (tabs: Record<string, unknown>[], layout?: Record<string, unknown>) => {
+      const entries = fixtureVault();
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      const typeProps = typeDoc.properties as unknown as Record<string, unknown>;
+      typeProps.tabs = tabs;
+      if (layout !== undefined) typeProps.layout = layout;
+      useVaultStore.setState({ entries, vaultPath: '/vault' });
+      useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
+      return entries;
+    };
+
+    it('a type with no saved tabs raises no strip, and the peek is what it was', () => {
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+      // The synthesized Overview drives the content, never a one-tab strip.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('an untyped note has no tabs at all', () => {
+      useVaultStore.setState({
+        entries: [...fixtureVault(), makeEntry({ path: 'notes/plain.md', title: 'Plain note' })],
+      });
+      useUiStore.setState({ detailPath: 'notes/plain.md' });
+      render(<DetailPanel />);
+      expect(screen.queryByTestId('record-tabs')).toBeNull();
+      // …and its properties still render: no tabs is not no record surface.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+
+    it('saved tabs raise the strip, under the heading strip and over the content', () => {
+      withTabs([OVERVIEW, SPEC], { heading: ['status', 'priority'] });
+      render(<DetailPanel />);
+      const strip = screen.getByTestId('record-tabs');
+      const heading = screen.getByTestId('heading-strip');
+      const body = screen.getByTestId('detail-body-heading');
+      expect(
+        heading.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(strip.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The first tab opens by default — no selection to read.
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('the overview arm is the peek as it was: properties and the body', () => {
+      withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('a sections tab is its own free text — the stack stays, the body goes', () => {
+      withTabs([SPEC, OVERVIEW]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      // M46.1: the stack is the RECORD's, so it stands on this tab too.
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('a view tab embeds its database in the peek', () => {
+      withTabs([
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+        OVERVIEW,
+      ]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      expect(screen.getByText('Wire field sync banner')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+    });
+
+    it('a dead source renders the sentence, never an empty database', () => {
+      withTabs([{ id: 'ghost', name: 'Ghost', content: 'view', source: { type: 'Ghost' } }]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('view-tab-broken').textContent).toContain(
+        'This tab points at a type called “Ghost” that is no longer in the vault.',
+      );
+      expect(screen.queryByTestId('view-tab-embed')).toBeNull();
+    });
+
+    /**
+     * The load-bearing half of the decision to embed a real database in a
+     * 360px column: the embed does NOT renumber the peek.
+     *
+     * `detailSiblings` is "the records the canvas behind you is showing", and
+     * it drives the header's `3 of 45` and its next/prev arrows. A view tab
+     * mounts a whole second canvas INSIDE the panel; if that canvas registered
+     * its own rows, stepping "next" from a record would walk the rows of a
+     * table embedded in that record's own peek. `ViewCanvas` takes an
+     * `embedded` early return before the registration effect, so it neither
+     * writes the list nor clears it — asserted here, because the comment in
+     * `DetailPanel` argues from it and a silent change upstream would make
+     * that argument false without failing anything.
+     */
+    it('an embedded view leaves the peek’s own record list alone', async () => {
+      // Deliberately NOT the rows the embed shows: seeded with the two Work
+      // items, an embed that DID register its rows would write back the same
+      // array and this case would pass on a coincidence.
+      const siblings = ['docs/one.md', 'docs/two.md', 'docs/three.md'];
+      withTabs([
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+        OVERVIEW,
+      ]);
+      useUiStore.setState({ detailSiblings: siblings });
+      render(<DetailPanel />);
+      // The embed really did render — otherwise this passes for the boring
+      // reason that no second canvas ever mounted.
+      expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+      expect(screen.getByText('Wire field sync banner')).toBeTruthy();
+      // Effects have run by now; the list is neither replaced nor emptied.
+      await waitFor(() => expect(useUiStore.getState().detailSiblings).toEqual(siblings));
+    });
+
+    it('pressing a tab swaps the content, and the selection is the peek’s own', () => {
+      withTabs([OVERVIEW, SPEC]);
+      const where = useNavStore.getState().selection;
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      // A peek is not a place: the tab is local state, so nothing moved the
+      // navigation selection the back button reads.
+      expect(useNavStore.getState().selection).toEqual(where);
+      fireEvent.click(screen.getByTestId('record-tab-overview'));
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+    });
+
+    it('switching records reopens on the first tab', () => {
+      withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+      act(() => useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-2.md' }));
+      expect(screen.queryByTestId('tab-sections')).toBeNull();
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    /**
+     * A tab the type no longer has is a dead pointer, and a dead pointer
+     * falls back — it never renders nothing.
+     *
+     * The peek holds its tab in local state, so the store can drop the open
+     * tab underneath it: another window, the layout editor's Apply, or a hand
+     * edit of the Type doc. The panel then holds an id nothing answers to,
+     * and the fallback is the first tab (`tabs[0]`), the same idiom the
+     * layout canvas uses. Without it the arms all miss and the peek renders a
+     * title over a blank column.
+     */
+    it('a tab deleted under the peek falls back to the first, not to nothing', () => {
+      const entries = withTabs([OVERVIEW, SPEC]);
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-spec'));
+      expect(screen.getByTestId('tab-sections')).toBeTruthy();
+
+      // The type loses the open tab while the peek is standing on it.
+      const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+      (typeDoc.properties as unknown as Record<string, unknown>).tabs = [OVERVIEW];
+      act(() => useVaultStore.setState({ entries: [...entries] }));
+
+      expect(screen.queryByTestId('tab-sections')).toBeNull();
+      // Overview's content, not an empty panel: the body and the stack.
+      expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // And the strip says so. This is the assertion that discriminates: a
+      // panel that let `activeTab` go null would render no strip at all (the
+      // mount is gated on it) while still showing a body, so the two
+      // assertions above would pass on a peek that had lost its tabs.
+      expect(screen.getByTestId('record-tab-overview').getAttribute('aria-selected')).toBe('true');
+    });
+
+    /**
+     * A tab press must not discard a rename in progress (M45.6 review).
+     *
+     * The panel's title input is state, seeded from `entry.title` by an
+     * effect. That effect used to share a dependency list with the one that
+     * drops the editor handle — and pressing a tab changes `showsBody`, which
+     * the handle effect has to watch. Merged, the two would re-seed the input
+     * from disk truth on every tab press, silently throwing away whatever the
+     * user had typed and not yet committed. Split, only the handle reacts.
+     */
+    it('keeps an uncommitted rename when you press another tab', () => {
+      withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'sections' }]);
+      render(<DetailPanel />);
+      const input = screen.getByTestId('detail-title') as HTMLInputElement;
+      fireEvent.change(input, { target: { value: 'Half typed' } });
+      fireEvent.click(screen.getByTestId('record-tab-props'));
+      // The tab really did change (the body is gone), and the draft survived.
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect((screen.getByTestId('detail-title') as HTMLInputElement).value).toBe('Half typed');
+    });
+
+    /**
+     * The peek's chrome holds ONE position, whichever tab is open.
+     *
+     * Two things are pinned here, and they are the same fact. The Overview
+     * tab is the pre-M45.6 panel line for line — the knowledge loop sits
+     * above the Description, where it sat before tabs existed, so growing
+     * tabs moved nothing for the vaults that have none. And on a view tab
+     * the same block sits above the embedded table rather than however many
+     * rows below it, which is what the alternative — hoisting the chrome on
+     * view tabs only — was trying to buy, at the price of chrome that moves
+     * when you press a tab.
+     */
+    it('puts the knowledge block in one place: above the tab’s content, always', () => {
+      withTabs([
+        OVERVIEW,
+        { id: 'items', name: 'Items', content: 'view', source: { type: 'Work item' } },
+      ]);
+      render(<DetailPanel />);
+      const above = (first: HTMLElement, second: HTMLElement) =>
+        Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+      // Overview: exactly where it was before tabs.
+      expect(
+        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('detail-body-heading')),
+      ).toBe(true);
+      // View: above the table, not buried under its rows.
+      fireEvent.click(screen.getByTestId('record-tab-items'));
+      expect(
+        above(screen.getByTestId('detail-knowledge'), screen.getByTestId('view-tab-embed')),
+      ).toBe(true);
+    });
+
+    /**
+     * `RecordProperties` is keyed by PATH, never by tab — pinned here because
+     * adding the tab id to that key breaks nothing else in the suite.
+     *
+     * The state the stack owns is about the RECORD (a reveal the user asked
+     * for, an open add-property flyout), never about a tab: the fields it
+     * shows are derived from props on every render. Keying by tab would
+     * discard that state on every press and buy nothing back, so a press
+     * must leave it standing.
+     */
+    it('keeps a reveal the user asked for across a tab press', () => {
+      // No layout: the stack is flat, so this case turns on the keying alone
+      // and not on which sections a tab holds. `due` is empty on fld-1, so
+      // hide_when_empty folds it and the expander appears.
+      const entries = withTabs([OVERVIEW, { id: 'props', name: 'Fields', content: 'sections' }]);
+      const typeProps = entries.find((e) => e.path === 'types/work-item.md')!.properties as unknown;
+      (typeProps as { fields: Record<string, unknown> }).fields.due = {
+        kind: 'date',
+        visibility: 'hide_when_empty',
+      };
+      useVaultStore.setState({ entries: [...entries] });
+      render(<DetailPanel />);
+      const toggle = () => screen.getByTestId('hidden-properties-toggle');
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      fireEvent.click(toggle());
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      // A different tab, the same stack: the reveal is still open.
+      fireEvent.click(screen.getByTestId('record-tab-props'));
+      expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    });
+
+    // The peek's own chrome is about the RECORD, not about a tab: it stays
+    // reachable whichever lens is open.
+    it('keeps the knowledge block on a tab that is not Overview', () => {
+      withTabs([SPEC, OVERVIEW]);
+      render(<DetailPanel />);
+      expect(screen.getByTestId('detail-knowledge')).toBeTruthy();
+    });
+
+    it('a tab edit in the peek writes the type doc', async () => {
+      const patchFrontmatter = vi.fn().mockResolvedValue(true);
+      withTabs([OVERVIEW, SPEC]);
+      useVaultStore.setState({ patchFrontmatter });
+      render(<DetailPanel />);
+      fireEvent.click(screen.getByTestId('record-tab-overview'));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+      const input = screen.getByLabelText('Tab name');
+      fireEvent.change(input, { target: { value: 'Summary' } });
+      fireEvent.blur(input);
+      await waitFor(() =>
+        expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', {
+          tabs: [
+            { id: 'overview', name: 'Summary', icon: null, content: 'overview' },
+            { id: 'spec', name: 'Spec', icon: null, content: 'sections' },
+          ],
+        }),
+      );
+    });
+
+    /**
+     * M46.1 — the reversal: a section belongs to the RECORD, so the whole
+     * stack stands above the strip on every tab and the tab below carries
+     * only its own content. M45.6's per-tab cases are deleted, not weakened.
+     */
+    describe('properties stand above the tabs (M46.1)', () => {
+      const SPEC_TAB = { id: 'spec', name: 'Spec', content: 'sections' };
+      const ITEMS_TAB = {
+        id: 'items',
+        name: 'Items',
+        content: 'view',
+        source: { type: 'Work item' },
+      };
+      // No heading here: the strip would fold the stack behind its toggle,
+      // which is its own case below.
+      const SECTIONED = {
+        groups: [
+          { id: 'g-alpha', name: 'Alpha', fields: ['priority'] },
+          { id: 'g-beta', name: 'Beta', fields: ['assignee'] },
+        ],
+      };
+      const groupIds = () =>
+        screen.queryAllByTestId('property-group').map((g) => g.getAttribute('data-group'));
+      const above = (first: HTMLElement, second: HTMLElement) =>
+        Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+      it('a sections tab carries every section, above the strip', () => {
+        withTabs([SPEC_TAB, OVERVIEW], SECTIONED);
+        render(<DetailPanel />);
+        expect(screen.getByTestId('tab-sections')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(
+          above(screen.getAllByTestId('property-group')[0], screen.getByTestId('record-tabs')),
+        ).toBe(true);
+      });
+
+      it('and so does a view tab — the embed is the tab, not the record', () => {
+        withTabs([ITEMS_TAB, OVERVIEW], SECTIONED);
+        render(<DetailPanel />);
+        expect(screen.getByTestId('view-tab-embed')).toBeTruthy();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(
+          above(screen.getAllByTestId('property-group')[0], screen.getByTestId('record-tabs')),
+        ).toBe(true);
+      });
+
+      it('a press swaps the tab’s content and leaves the stack standing', () => {
+        withTabs([OVERVIEW, SPEC_TAB], SECTIONED);
+        render(<DetailPanel />);
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+        expect(screen.getByTestId('detail-body-heading')).toBeTruthy();
+        fireEvent.click(screen.getByTestId('record-tab-spec'));
+        // The body is the Overview tab's alone; the sections are the
+        // record's, so they did not move.
+        expect(screen.queryByTestId('detail-body-heading')).toBeNull();
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+      });
+
+      // The heading strip stands on every tab, and so does the expander that
+      // opens the stack behind it — the stack it opens is the same one on
+      // every tab, so a tab without the toggle would strand it.
+      it('the strip and its expander stand on a view tab', () => {
+        withTabs([ITEMS_TAB, OVERVIEW], { heading: ['status'], groups: SECTIONED.groups });
+        render(<DetailPanel />);
+        expect(screen.getByTestId('heading-strip')).toBeTruthy();
+        expect(groupIds()).toEqual([]);
+        fireEvent.click(screen.getByTestId('view-details-toggle'));
+        expect(groupIds()).toEqual(['g-alpha', 'g-beta']);
+      });
+    });
   });
 
   describe('display config (M44.1)', () => {

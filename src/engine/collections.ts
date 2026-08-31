@@ -86,6 +86,67 @@ export function parseCollectionYaml(folder: string, yamlText: string): Collectio
   };
 }
 
+/**
+ * The type that marks a page as its folder's container (M47.5).
+ *
+ * `collection.yml` said this with a marker FILE. A page says it the way every
+ * other page in the vault says what it is — with `type:` — so a container
+ * becomes an ordinary markdown page that can carry prose and database blocks
+ * above the things it contains. That is the point of the milestone: the empty
+ * collection page used to tell you to go somewhere else precisely because it
+ * had nothing of its own to hold.
+ *
+ * Routing on this name is metamodel, not domain. The "no type special-casing"
+ * rule governs behaviour keyed to a DOMAIN type — a record with a status field
+ * is task-like, and nothing may ask whether it is called Task. `Type` has
+ * always been exempt for the same reason this is: it describes structure
+ * rather than participating in it.
+ */
+export const COLLECTION_TYPE = 'Collection';
+
+/**
+ * Collections declared by a page rather than by a marker file.
+ *
+ * A folder note (`delivery/delivery.md`) carrying `type: Collection` IS its
+ * folder's container, and its frontmatter holds what `collection.yml` did.
+ * Tolerant on the same terms as the marker: a page declaring nothing but the
+ * type still yields a usable container named after its folder.
+ */
+export function collectionsFromPages(entries: Entry[]): CollectionFile[] {
+  const out: CollectionFile[] = [];
+  for (const e of entries) {
+    if (e.type !== COLLECTION_TYPE) continue;
+    // Only a FOLDER NOTE speaks for its folder. A page called `delivery.md`
+    // sitting somewhere else describes nothing but itself, and adopting it
+    // would let a stray file rename a container it is not even in.
+    if (e.filename !== `${e.folder.split('/').pop() ?? ''}.md`) continue;
+    const obj = e.properties as Record<string, unknown>;
+    out.push({
+      folder: e.folder,
+      declared: true,
+      definition: {
+        // A page already has a title, so the frontmatter only has to carry a
+        // name when it differs. Making the user write it twice is what a
+        // config file does, not what a page does.
+        name:
+          typeof obj.name === 'string' && obj.name.trim() !== ''
+            ? obj.name.trim()
+            : e.title !== ''
+              ? e.title
+              : humanizeFolder(e.folder),
+        icon: typeof obj.icon === 'string' && obj.icon !== '' ? obj.icon : null,
+        color: typeof obj.color === 'string' && obj.color !== '' ? obj.color : null,
+        order: typeof obj.order === 'number' ? obj.order : null,
+        description:
+          typeof obj.description === 'string' && obj.description.trim() !== ''
+            ? obj.description
+            : null,
+      },
+    });
+  }
+  return out;
+}
+
 export function serializeCollection(def: CollectionDefinition): string {
   return stringify({
     name: def.name,

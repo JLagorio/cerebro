@@ -158,6 +158,33 @@ describe('mockIpc', () => {
     expect(after).toHaveLength(before.length + 1);
   });
 
+  /**
+   * M47.5 parity with `write.rs::declared_by_page`.
+   *
+   * A container used to be a folder holding `collection.yml`; it is a folder
+   * whose own PAGE says `type: Collection` now. A List inside one must report
+   * that folder as its collection — reported as root-level, the app looks for
+   * it under a collection it does not have and renders "This list no longer
+   * exists" on a list it just created. That is exactly how this was found, on
+   * a freshly converted vault.
+   */
+  it('listViews reads a collection declared by its folder note', async () => {
+    await mock.saveList('/demo-vault', 'delivery', 'smoke', 'name: Smoke\n');
+    const views = await mock.listViews('/demo-vault');
+    const smoke = views.find((v) => v.id === 'smoke');
+    // `delivery/` declares itself with `delivery/delivery.md` in the corpus.
+    expect(smoke?.collection).toBe('delivery');
+  });
+
+  // Only the FOLDER NOTE speaks for its folder — a page merely carrying the
+  // type would otherwise let any file rename a container it is not even in.
+  it('listViews ignores a Collection page that is not its folder note', async () => {
+    await mock.createNote('/demo-vault', 'inbox', 'delivery', { type: 'Collection' }, '# D\n');
+    await mock.saveList('/demo-vault', 'inbox', 'stray', 'name: Stray\n');
+    const views = await mock.listViews('/demo-vault');
+    expect(views.find((v) => v.id === 'stray')?.collection).toBeNull();
+  });
+
   // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
   it('listViews scopes project views and sorts globals first', async () => {
     // The demo vault has no legacy project folders left, so seed one here.

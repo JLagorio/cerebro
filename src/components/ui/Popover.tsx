@@ -191,6 +191,18 @@ export interface PopoverProps {
   className?: string;
   role?: 'menu' | 'listbox' | 'dialog' | 'group';
   ariaLabel?: string;
+  /**
+   * The panel's DOM id, for a trigger that has to name it — `aria-controls`
+   * on a listbox button. Portalling put the panel outside the trigger's
+   * subtree, so the relationship can only be stated by id.
+   */
+  id?: string;
+  /**
+   * The option this panel considers current, for a listbox whose DOM focus
+   * stays on the trigger. Without it a keyboard-driven listbox reads to
+   * assistive tech as if nothing in it were selected.
+   */
+  activeDescendant?: string;
 }
 
 interface Placement {
@@ -210,6 +222,8 @@ export function Popover({
   className,
   role = 'group',
   ariaLabel,
+  id,
+  activeDescendant,
 }: PopoverProps) {
   useFocusRestore();
 
@@ -402,8 +416,10 @@ export function Popover({
           the measurement above (M12.8). */}
       <div
         ref={panelRef}
+        id={id}
         role={role}
         aria-label={ariaLabel}
+        aria-activedescendant={activeDescendant}
         tabIndex={-1}
         className={`cb-menu-in ${className ?? ''}`}
         style={place?.width !== undefined ? { width: place.width } : undefined}

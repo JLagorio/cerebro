@@ -9,18 +9,21 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { EscapeToClose } from '@/detail/FieldPopover';
+import { GroupLabel } from '@/detail/GroupLabel';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
 import {
+  foldsWhenUnset,
   inferKindFromValue,
-  isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
   visibleProperties,
 } from '@/engine/properties';
+import { resolveLayout, revealableFields } from '@/engine/layout';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { Entry, FieldKind, Schema } from '@/engine/types';
+import { LAYOUT_DEFAULTS } from '@/engine/types';
+import type { Entry, FieldDef, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -65,7 +68,7 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
     return (
       <PropertyRow kind={kind} name={name} trailing={remove}>
         <Tooltip label="A list or map — edit it in the file, or declare it on a type">
-          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+          <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
             {Array.isArray(value) ? value.map(String).join(', ') : JSON.stringify(value)}
           </span>
         </Tooltip>
@@ -94,6 +97,11 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
  * M2.x: embedded in the tabbed panel): assign a type, edit its declared
  * fields, manage loose frontmatter keys. Everything writes through
  * patchFrontmatter (optimistic, disk-first on rescan).
+ *
+ * Like `RecordProperties`, it takes no tab (M46.1): a section belongs to the
+ * record, so this panel and the page's own stack show the same containers and
+ * cannot disagree. The page's strip carries the HEADING on every tab; this
+ * panel does not — see `headingFolds` below for the exclusion and its cost.
  */
 export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
@@ -112,17 +120,29 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
 
   const showEmpty = typeDef?.display.showEmpty === true;
 
-  // M16.10, the same split the record panel makes — M44.1 follow-up: including
-  // show_empty. A show-empty type only unfolds rows hidden for BEING EMPTY;
-  // a field hidden on purpose (`visibility: hide`) stays behind the toggle
-  // either way, or the per-field eye-toggle would be lying about show-empty
-  // types.
+  // M16.10, the same split the record panel makes.
   const [revealed, setRevealed] = useState(false);
-  const { shown, hidden } = splitByVisibility(
-    allDeclared,
-    (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
-  );
+  const folds = foldsWhenUnset(entry, schema, showEmpty);
+  const { shown } = splitByVisibility(allDeclared, folds);
   const declared = revealed ? allDeclared : shown;
+
+  // M45.1, the record panel's math verbatim. Only the declared stack is
+  // arranged: the Type row, Convert flow, and undeclared keys render exactly
+  // as the flat panel does.
+  const layout = resolveLayout(typeDef?.layout ?? LAYOUT_DEFAULTS, allDeclared);
+  const containerRows = (fields: FieldDef[]) =>
+    revealed ? fields : splitByVisibility(fields, folds).shown;
+  // The one expander counts what THIS stack can reveal — the record panel's
+  // rule, through the record panel's helper, so one derivation answers for
+  // both stacks.
+  const hidden = splitByVisibility(revealableFields(layout), folds).hidden;
+  // The strip cannot reveal its own folds; revealed, they surface headerless
+  // at the top of the stack. Its SHOWN fields stay out of the stack — an
+  // exclusion that is only sound because the host page (DocPage) co-mounts
+  // the HeadingProperties strip that renders them. A strip-less host must
+  // not reuse this exclusion, or the heading fields render NOWHERE — the
+  // M45.1 whole-slice review caught InboxPage shipping exactly that hole.
+  const headingFolds = splitByVisibility(layout.heading, folds).hidden;
   const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
   );
@@ -196,14 +216,42 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
     })();
   };
 
+  // A grouped row carries no grip: arrangement of a laid-out stack belongs
+  // to the layout editor (M45.3), and a drag that silently rewrote `fields:`
+  // under a `layout:` would move nothing on screen.
+  const groupedRow = (f: FieldDef) => (
+    <PropertyRow
+      key={f.name}
+      kind={f.kind}
+      name={f.name}
+      align={f.kind === 'checkbox' ? 'center' : 'start'}
+      menu={
+        entry.type === null
+          ? undefined
+          : ({ close }) => (
+              <PropertyMenu
+                def={f}
+                sourceType={entry.type ?? ''}
+                schema={schema}
+                recordCount={recordCount}
+                onClose={close}
+              />
+            )
+      }
+    >
+      <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+    </PropertyRow>
+  );
+  const restRows = containerRows(layout.rest);
+
   return (
     <div data-testid="doc-properties" aria-label="Document properties" className="pt-1">
-      <div className="flex flex-col gap-[7px]">
+      <div className="flex flex-col gap-1">
         {/* Not a property — a doc's type is the one thing on this list that
             is not in `fields:` — so it takes an explicit icon rather than a
             kind glyph that would claim otherwise. */}
         <PropertyRow kind="text" icon="shapes" name="Type" align="center">
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-n-700">
+          <span className="inline-flex min-w-0 items-center gap-1.5 p-1.5 text-sm text-n-700">
             <Icon
               name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
               size={13}
@@ -228,44 +276,72 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             onClick={() => setConverting(true)}
             // Indented to the value column: it acts on the Type row above it,
             // and hanging it under the label read as a third, unrelated row.
-            style={{ marginLeft: PROPERTY_LABEL_W + 6 }}
+            style={{ marginLeft: PROPERTY_LABEL_W + 4 }}
             className="self-start whitespace-nowrap rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
           >
             Convert to record…
           </button>
         )}
-        <div
-          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
-          className="flex flex-col gap-[7px]"
-        >
-          {declared.map((f, index) => (
-            <PropertyRow
-              key={f.name}
-              kind={f.kind}
-              name={f.name}
-              align={f.kind === 'checkbox' ? 'center' : 'start'}
-              grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
-              gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
-              dragging={sortable.dragging === f.name}
-              style={sortable.dropIndicator(index)}
-              menu={
-                entry.type === null
-                  ? undefined
-                  : ({ close }) => (
-                      <PropertyMenu
-                        def={f}
-                        sourceType={entry.type ?? ''}
-                        schema={schema}
-                        recordCount={recordCount}
-                        onClose={close}
-                      />
-                    )
-              }
-            >
-              <FieldEditor entry={entry} def={f} schema={schema} />
-            </PropertyRow>
-          ))}
-        </div>
+        {layout.flat ? (
+          <div
+            ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+            className="flex flex-col gap-1"
+            style={sortable.containerStyle}
+          >
+            {declared.map((f, index) => (
+              <PropertyRow
+                key={f.name}
+                kind={f.kind}
+                name={f.name}
+                align={f.kind === 'checkbox' ? 'center' : 'start'}
+                grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
+                gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
+                style={sortable.rowStyle(index)}
+                menu={
+                  entry.type === null
+                    ? undefined
+                    : ({ close }) => (
+                        <PropertyMenu
+                          def={f}
+                          sourceType={entry.type ?? ''}
+                          schema={schema}
+                          recordCount={recordCount}
+                          onClose={close}
+                        />
+                      )
+                }
+              >
+                <FieldEditor entry={entry} def={f} schema={schema} chrome="panel" />
+              </PropertyRow>
+            ))}
+          </div>
+        ) : (
+          <>
+            {revealed && headingFolds.length > 0 && (
+              <div className="flex flex-col gap-1">{headingFolds.map(groupedRow)}</div>
+            )}
+            {layout.groups.map((g) => {
+              const rows = containerRows(g.fields);
+              // Empty after folding renders nothing — header included.
+              if (rows.length === 0) return null;
+              return (
+                <div
+                  key={g.id}
+                  data-testid="property-group"
+                  data-group={g.id}
+                  className="flex flex-col gap-1"
+                >
+                  <GroupLabel name={g.name} />
+                  {rows.map(groupedRow)}
+                </div>
+              );
+            })}
+            {/* Rest LAST and headerless: a freshly added field lands visibly. */}
+            {restRows.length > 0 && (
+              <div className="flex flex-col gap-1">{restRows.map(groupedRow)}</div>
+            )}
+          </>
+        )}
         {hidden.length > 0 && (
           <button
             type="button"
@@ -285,7 +361,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         ))}
         {undeclaredRelations.map((name) => (
           <PropertyRow key={name} kind="relation" name={name}>
-            <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
+            <span className="block p-1.5 text-sm text-n-700 [overflow-wrap:anywhere]">
               {entry.relationships[name].join(', ')}
             </span>
           </PropertyRow>

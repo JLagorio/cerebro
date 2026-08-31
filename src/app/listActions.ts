@@ -9,6 +9,12 @@
  * only ProjectPage could write a view at all, and the M10 rename would
  * otherwise have needed the same fix in four places.
  *
+ * M47.6 removed the CREATE half. A saved view belongs to the database it
+ * queries (`views:` on its Type doc, written by saveTypeViews), so nothing
+ * authors a new `*.list.yml` any more. What survives here is the read-write
+ * half: a List already on disk still opens, still gains and loses view tabs,
+ * and is still updated where it lives.
+ *
  * The load-bearing rule: a List is UPDATED WHERE IT LIVES. Editing a legacy
  * `views/*.yml` rewrites that file rather than migrating it to a `.list.yml`,
  * because silently relocating someone's file on a toolbar click is not a
@@ -25,23 +31,13 @@ import type {
   ViewDefinition,
 } from '@/engine/types';
 import { deleteNote, saveCollection, saveList, saveView } from '@/lib/ipc';
+import { slugify } from '@/lib/slug';
 import { slugifyListId } from '@/views/ViewToolbar';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /** `projects/x/project.md` → `projects/x` (a legacy view's scope folder). */
 export const projectDirOf = (projectPath: string) => projectPath.replace(/\/project\.md$/, '');
-
-/** Unique id within the folder: "sprint", then "sprint-2". */
-export function nextListId(name: string, taken: Iterable<string>): string {
-  const base = slugifyListId(name) || 'list';
-  const used = new Set(taken);
-  if (!used.has(base)) return base;
-  for (let n = 2; ; n += 1) {
-    const candidate = `${base}-${n}`;
-    if (!used.has(candidate)) return candidate;
-  }
-}
 
 /** Unique folder for a new Collection, alongside the ones that exist. */
 export function nextCollectionFolder(name: string, taken: Iterable<string>): string {
@@ -85,25 +81,6 @@ async function writeList(
   }
   await refresh();
   return true;
-}
-
-/**
- * Create a List inside a Collection. Returns its id so the caller can navigate
- * to it.
- *
- * `collection` is REQUIRED — this is the write-side half of "a Collection-less
- * List is forbidden". The read side cannot represent one (see
- * effectiveCollections); this makes sure nothing tries to author one either.
- */
-export async function createList(
-  definition: ListDefinition,
-  collection: string,
-): Promise<string | null> {
-  const { views } = useVaultStore.getState();
-  // Ids are unique per FOLDER, so only the siblings in this collection are taken.
-  const taken = views.filter((v) => v.collection === collection).map((v) => v.id);
-  const id = nextListId(definition.name, taken);
-  return (await writeList(id, definition, { collection })) ? id : null;
 }
 
 /** Persist edits to an existing List — in place, whatever shape it is on disk.
@@ -259,4 +236,32 @@ export async function deleteCollection(collection: CollectionFile): Promise<bool
   }
   await refresh();
   return true;
+}
+
+/**
+ * A new page inside a container (M47.5).
+ *
+ * The gap this milestone opened with: a Collection's `+` offered exactly one
+ * thing, "New list", and its empty state told you to go and use it. There was
+ * no way to put a DOC in a collection at all — a container documented as
+ * holding "Lists, Folders, and Docs" could only be given one of the three.
+ *
+ * Untitled and opened immediately rather than behind a name dialog. A page you
+ * are already typing into is the shortest path to having written something,
+ * and the H1 IS the name — asking for one up front is the ceremony this
+ * milestone exists to remove.
+ */
+export async function createPageIn(folder: string, title = 'Untitled'): Promise<string | null> {
+  const { entries, createItem } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const taken = new Set(entries.filter((e) => e.folder === folder).map((e) => e.filename));
+  const base = slugify(title) || 'page';
+  let slug = base;
+  for (let n = 2; taken.has(`${slug}.md`); n += 1) slug = `${base}-${n}`;
+  try {
+    return await createItem({ folder, slug, frontmatter: {}, body: `# ${title}\n` });
+  } catch {
+    toast("Couldn't create the page");
+    return null;
+  }
 }

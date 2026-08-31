@@ -1,13 +1,25 @@
 import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
+import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
+import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
+import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
+import {
+  BASE_MARKER_DEPTH,
+  DEFAULT_COLUMN_WIDTH,
+  openColumnMarker,
+  openListMarker,
+} from '@/engine/pageColumns';
 
 /**
- * Custom blocks (M2.x docs polish). Both stay plain markdown on disk:
+ * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:
  *
- *   callout  Obsidian-style `> [!info] …` blockquote
- *   mermaid  ```mermaid fenced code block
+ *   callout     Obsidian-style `> [!info] …` blockquote
+ *   mermaid     ```mermaid fenced code block
+ *   database    ```cerebro-database fence holding a POINTER (M47.2)
+ *   columnList  `:::columns` directive container (M48.1)
+ *   column      `::::column` directive container (M48.1)
  *
  * markdown.ts promotes the plain forms into these blocks after parse and
  * demotes them back before serialization, so files never stop being
@@ -294,3 +306,187 @@ export const AiBlock = createReactBlockSpec(
     ),
   },
 );
+
+/**
+ * An embedded database (M47.2).
+ *
+ * `content: 'none'` — the block draws a database, it does not hold text. What
+ * it holds is a pointer: the name of a database and which of its views to
+ * show. The rows are files and stay files (spec D7), so nothing here is a
+ * second copy of the vault that could disagree with the vault.
+ */
+export const DatabaseBlock = createReactBlockSpec(
+  {
+    type: 'database',
+    // '' rather than null on both: BlockNote prop defaults are primitives, so
+    // an empty view id is how "this block named no view" survives the round
+    // trip. markdown.ts converts at the boundary.
+    propSchema: { database: { default: '' }, view: { default: '' } },
+    content: 'none',
+  },
+  {
+    render: (props) => (
+      <ConnectedDatabaseBlock
+        database={String(props.block.props.database ?? '')}
+        view={String(props.block.props.view ?? '')}
+        // The block rewrites its own pointer. Passed rather than assumed so
+        // the view keeps a real read-only mood: rendered outside an editor
+        // there is no document to write back to, and a picker that silently
+        // did nothing would be worse than no picker.
+        onChange={(next) => props.editor.updateBlock(props.block, { props: next } as never)}
+      />
+    ),
+    /**
+     * What leaves the app when a selection crosses this block. Without it
+     * BlockNote falls back to the block's RENDERED text, so copying a page
+     * would put "Reading list · Shelf" on the clipboard and the pointer
+     * nowhere in it — the same defect `MermaidBlock` documents above. The
+     * fence is what markdown.ts already demotes this block to for the disk.
+     */
+    toExternalHTML: (props) => {
+      const view = String(props.block.props.view ?? '');
+      const body = serializeDatabaseRef({
+        database: String(props.block.props.database ?? ''),
+        view: view === '' ? null : view,
+      });
+      return (
+        <pre>
+          <code>{`\`\`\`${DATABASE_FENCE}\n${body}\n\`\`\``}</code>
+        </pre>
+      );
+    },
+  },
+);
+
+/**
+ * A row of columns, and one column in it (M48.1).
+ *
+ * Both are `content: 'none'` and both render NOTHING of their own. That is
+ * not an oversight, it is the design: BlockNote already renders a block's
+ * children as a nested block group underneath it, so a column list is that
+ * group turned into a flex row by CSS and a column is that group left
+ * stacking the way it already stacks. The layout is CSS over the nesting the
+ * editor has always had — not a second document model that could disagree
+ * with the first.
+ *
+ * MEASURED before this was written (`@blocknote/core@0.46.2`): a
+ * `content: 'none'` custom block DOES accept children, two levels deep, and
+ * `editor.document` round-trips the nest with ids, props and content intact.
+ * That observation is what makes this possible without
+ * `@blocknote/xl-multi-column`, which is GPL-3.0-or-commercial against this
+ * project's Apache-2.0 licence. `blocks.test.tsx` pins the observation so a
+ * BlockNote upgrade that withdraws it fails loudly rather than silently
+ * flattening somebody's page.
+ */
+export const ColumnListBlock = createReactBlockSpec(
+  { type: 'columnList', propSchema: {}, content: 'none' },
+  {
+    // The children BlockNote renders below this ARE the block. An empty
+    // element rather than nothing at all because the block needs a node to
+    // hang its data attributes and, in M48.4, its drop targets on.
+    render: () => <div className="cb-column-list" aria-hidden />,
+    toExternalHTML: () => <p>{openListMarker(BASE_MARKER_DEPTH)}</p>,
+  },
+);
+
+export const ColumnBlock = createReactBlockSpec(
+  {
+    type: 'column',
+    // A flex RATIO, not pixels and not a percentage: a page that reflows keeps
+    // its proportions, and a column dragged narrower on a desktop does not
+    // become an unreadable ribbon on a laptop.
+    propSchema: { width: { default: DEFAULT_COLUMN_WIDTH } },
+    content: 'none',
+  },
+  {
+    render: (props) => {
+      const siblings = (props.editor.getParentBlock?.(props.block)?.children ?? []) as {
+        id: string;
+      }[];
+      const at = siblings.findIndex((c) => c.id === props.block.id);
+      return (
+        <ColumnView
+          id={props.block.id}
+          width={Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH)}
+          // The handle belongs to the column on the RIGHT of a gutter, because
+          // that is the only column sure there IS one. The first column of a
+          // row has nothing to its left, so it renders no handle — a row of N
+          // columns gets N-1 gutters, which is how many a row of N columns
+          // has. Not rendered rather than hidden: a hidden handle is still in
+          // the document, still counted, and still something to explain.
+          gutter={at > 0}
+          onResize={(left, right) => {
+            const before = siblings[at - 1];
+            if (before === undefined) return;
+            props.editor.updateBlock(before.id as never, { props: { width: left } } as never);
+            props.editor.updateBlock(props.block, { props: { width: right } } as never);
+          }}
+        />
+      );
+    },
+    /**
+     * What leaves the app when a selection crosses a column.
+     *
+     * Without this BlockNote falls back to the block's RENDERED text — and
+     * this block renders a stylesheet, so copying a column would put a CSS
+     * rule on the clipboard. Same defect the mermaid block documents above,
+     * with a sharper edge: there the leak was chrome labels, here it is a
+     * selector. The marker line is what markdown.ts already demotes this
+     * block to for the disk, so a paste into a text editor is the file.
+     */
+    toExternalHTML: (props) => (
+      <p>
+        {openColumnMarker(
+          BASE_MARKER_DEPTH + 1,
+          Number(props.block.props.width ?? DEFAULT_COLUMN_WIDTH),
+        )}
+      </p>
+    ),
+  },
+);
+
+/**
+ * A column, and the one rule that sizes it.
+ *
+ * The element the browser lays out is this column's `.bn-block-outer`, two
+ * levels ABOVE anything a block can render — and it belongs to ProseMirror,
+ * which resets its attributes whenever it re-renders the node view. MEASURED
+ * in a browser, not assumed: a pass that wrote `--cb-column-width` onto that
+ * element reported moving two columns and left nothing behind, because
+ * ProseMirror had already wiped both the inline style and the marker
+ * attribute the probe went looking for. A `useLayoutEffect` inside the render
+ * fared worse still — it runs before ProseMirror attaches the node view, so
+ * it never found the ancestor at all.
+ *
+ * A stylesheet is how a descendant styles an ancestor. This one is rendered
+ * INSIDE the node view, so it lives and dies with the block and ProseMirror
+ * never touches it, and it is keyed on the `data-id` BlockNote already stamps
+ * on the block outer. Nothing is emitted for a column at the default ratio:
+ * the base rule in editor.css already says `flex: 1 1 0`, and a stylesheet
+ * per column on a page of ordinary columns is noise.
+ */
+function ColumnView({
+  id,
+  width,
+  gutter,
+  onResize,
+}: {
+  id: string;
+  width: number;
+  gutter: boolean;
+  onResize: (left: number, right: number) => void;
+}) {
+  // BlockNote ids are uuids, but this string is interpolated into a
+  // stylesheet: anything that is not one does not get a rule.
+  const usable = /^[A-Za-z0-9_-]+$/.test(id) && Number.isFinite(width) && width > 0;
+  return (
+    <>
+      {width !== DEFAULT_COLUMN_WIDTH && usable && (
+        <style>{`.cerebro-editor .bn-block-outer[data-id="${id}"]{flex-grow:${width};}`}</style>
+      )}
+      <div className="cb-column" aria-hidden>
+        {gutter && <ColumnGutter id={id} onResize={onResize} />}
+      </div>
+    </>
+  );
+}

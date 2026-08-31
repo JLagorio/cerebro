@@ -281,6 +281,92 @@ describe('InboxPage', () => {
     }
   });
 
+  // M45.1 — the organize aside is a RecordProperties HOST, so a laid-out
+  // type's heading fields must render in a strip here too. The whole-slice
+  // review found them rendering NOWHERE on Inbox: the strip-owning hosts
+  // excluded them from the stack, and this host mounted only the stack.
+  describe('heading strip (M45.1)', () => {
+    const LAID_OUT_TYPE = makeEntry({
+      path: 'types/work-item.md',
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: {
+          status: { kind: 'status' },
+          priority: { kind: 'select', options: [{ id: 'high' }, { id: 'low' }] },
+        },
+        statuses: [
+          { id: 'todo', group: 'active' },
+          { id: 'done', group: 'done' },
+        ],
+        layout: { heading: ['status'] },
+      } as unknown as Entry['properties'],
+    });
+    // Typed, but pinned in the queue the way the real flow pins it: an
+    // explicit `_organized: false` (the undo write) outranks having a type.
+    const typedCapture = makeEntry({
+      path: 'inbox/capture-a.md',
+      title: 'Capture a',
+      type: 'Work item',
+      properties: { [ORGANIZED_KEY]: false, status: 'todo' },
+      createdAt: '2026-07-27T09:00:00Z',
+    });
+
+    it('renders the heading strip; the stack rides the expander and omits heading fields', async () => {
+      const user = userEvent.setup();
+      useVaultStore.setState({ entries: [LAID_OUT_TYPE, typedCapture, older] });
+      render(<InboxPage />);
+      const strip = screen.getByTestId('heading-strip');
+      expect(strip.querySelector('[data-field="status"]')).toBeTruthy();
+      // The stack starts collapsed behind the strip, like the record surfaces.
+      expect(screen.queryByRole('button', { name: '+ Add property' })).toBeNull();
+      await user.click(screen.getByTestId('view-details-toggle'));
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+      // Heading-claimed fields live in the strip, not the stack.
+      const rows = screen
+        .getAllByTestId('property-row')
+        .map((r) => r.getAttribute('data-property'));
+      expect(rows).toContain('priority');
+      expect(rows).not.toContain('status');
+    });
+
+    // The Task 5 ruling's trap, on this host too: a heading whose one field
+    // is empty under hide_when_empty folds the strip to NOTHING — the stack
+    // must render despite the expander never being touched.
+    it('a strip that folds to nothing shows the stack untoggled', () => {
+      // A fresh type doc, not a mutated copy of LAID_OUT_TYPE — makeEntry
+      // shares the properties object, and cross-test pollution through it is
+      // exactly the kind of pass-for-the-wrong-reason this suite avoids.
+      const foldingType = makeEntry({
+        path: 'types/work-item.md',
+        title: 'Work item',
+        type: 'Type',
+        properties: {
+          fields: {
+            status: { kind: 'status' },
+            due: { kind: 'date', visibility: 'hide_when_empty' },
+          },
+          statuses: [{ id: 'todo', group: 'active' }],
+          layout: { heading: ['due'] },
+        } as unknown as Entry['properties'],
+      });
+      useVaultStore.setState({ entries: [foldingType, typedCapture, older] });
+      render(<InboxPage />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.queryByTestId('view-details-toggle')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+
+    it('an un-laid-out type keeps the stack as the whole form', () => {
+      useVaultStore.setState({
+        entries: [TYPE_DOC, { ...typedCapture, properties: { [ORGANIZED_KEY]: false } }, older],
+      });
+      render(<InboxPage />);
+      expect(screen.queryByTestId('heading-strip')).toBeNull();
+      expect(screen.getByRole('button', { name: '+ Add property' })).toBeTruthy();
+    });
+  });
+
   it('reads as Inbox zero when nothing is queued', () => {
     useVaultStore.setState({ entries: [TYPE_DOC, organized] });
     render(<InboxPage />);

@@ -117,6 +117,18 @@ interface UiState {
   diffView: { path: string; commit: string | null } | null;
   openDiff(path: string, commit?: string | null): void;
   closeDiff(): void;
+  /**
+   * The type whose layout editor is open (M45.2), or null.
+   *
+   * One mount, one signal: three menus — the record ⋯ menu, PropertyMenu, and
+   * the Page options menu — set this, and the single App-level dialog is the
+   * only reader, so nothing threads callbacks through PropertyRow. Session
+   * state, not persisted: a fullscreen editor reopening itself on the next
+   * launch would be an ambush, not a restoration.
+   */
+  layoutEditor: { type: string } | null;
+  openLayoutEditor(type: string): void;
+  closeLayoutEditor(): void;
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
@@ -670,6 +682,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   diffView: null,
   openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
   closeDiff: () => set({ diffView: null }),
+
+  layoutEditor: null,
+  openLayoutEditor: (type) => set({ layoutEditor: { type } }),
+  closeLayoutEditor: () => set({ layoutEditor: null }),
 
   // M16.21: persisted. It was the one member of this store's collapse family
   // that was not — `expandedFolders`, `docPagesOpen`, `typesOpen` and the

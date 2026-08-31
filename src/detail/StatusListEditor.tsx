@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -22,14 +23,12 @@ function StatusRow({
   onChange,
   onRemove,
   grip,
-  dragging = false,
   style,
 }: {
   status: StatusDef;
   onChange: (next: StatusDef) => void;
   onRemove: () => void;
   grip?: GripProps;
-  dragging?: boolean;
   style?: React.CSSProperties;
 }) {
   const [editing, setEditing] = useState(false);
@@ -49,18 +48,10 @@ function StatusRow({
 
   const dot = status.color === null ? 'var(--n-300)' : resolveOptionColor(status.color).solid;
   return (
-    <div
-      style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
-    >
+    <div style={style} className="group flex flex-col rounded-md px-1 py-1 hover:bg-n-25">
       <div className="flex items-center gap-2">
         {grip !== undefined && (
-          <span
-            {...grip}
-            className="flex flex-none cursor-grab items-center justify-center rounded-xs text-n-300 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+          <Grip {...grip} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
         )}
         <button
           type="button"
@@ -204,14 +195,17 @@ function StatusGroup({
         <span className="flex-1" />
         <IconButton icon="plus" label={`Add status to ${label}`} size="sm" onClick={onStartAdd} />
       </div>
-      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>} className="flex flex-col">
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col"
+        style={sortable.containerStyle}
+      >
         {rows.map((s, i) => (
           <StatusRow
             key={s.id}
             status={s}
             grip={sortable.gripProps(s.id, i)}
-            dragging={sortable.dragging === s.id}
-            style={sortable.dropIndicator(i)}
+            style={sortable.rowStyle(i)}
             onChange={(next) => onChangeRow(s, next)}
             onRemove={() => onRemoveRow(s)}
           />
