@@ -194,11 +194,17 @@ test('dragging the gutter re-proportions the pair and writes the new ratios', as
   const box = await gutter.boundingBox();
   if (box === null) throw new Error('no gutter');
 
+  // Pressed near the BOTTOM of the handle, below the column's last block.
+  // BlockNote pops its side menu into this same gutter, vertically level with
+  // whatever block the pointer is beside — so a grab level with the prose
+  // races the menu for the press, and loses often enough to matter. Below the
+  // prose there is no block to hover and no menu to lose to.
+  const grabAt = { x: box.x + box.width / 2, y: box.y + box.height - 6 };
   // Drag it 120px to the RIGHT: the left column grows, the right shrinks.
-  await page.mouse.move(box.x + box.width / 2, box.y + 40);
+  await page.mouse.move(grabAt.x, grabAt.y);
   await page.mouse.down();
   for (let i = 1; i <= 6; i += 1) {
-    await page.mouse.move(box.x + box.width / 2 + 20 * i, box.y + 40);
+    await page.mouse.move(grabAt.x + 20 * i, grabAt.y);
   }
   await page.mouse.up();
 

@@ -204,14 +204,16 @@
   > .bn-block-group {
   display: flex;
   align-items: flex-start;
-  /* 48px, and the number is measured rather than chosen for looks. BlockNote
-     draws its side menu 24px to the LEFT of the block it is hovering, which
-     for every column after the first is the gutter — MEASURED, a 28px gap put
-     the menu (x 549, 48 wide) straight over the resize handle (x 553, 12
-     wide) and the handle became unclickable the moment the pointer arrived.
-     48px leaves a clear strip on the far side of the menu for the handle to
-     live in. It is also, as it happens, about what Notion uses. */
-  gap: 48px;
+  /* 72px, and every pixel of it is measured rather than chosen for looks.
+     BlockNote floats its side menu in the LEFT margin of whatever block the
+     pointer is beside — 48px wide, ending at the block's own edge — and inside
+     a column that margin IS the gutter. At 28px and again at 48px the menu
+     covered the resize handle completely: `elementFromPoint` over the handle
+     returned one of the menu's icons, and every press aimed at the handle went
+     to the menu instead. Raising the handle's `z-index` does not help; the
+     menu's container makes its own stacking context. 72px is the first width
+     that leaves a strip the menu does not reach. */
+  gap: 72px;
 }
 
 .cerebro-editor
@@ -306,8 +308,15 @@
 .cerebro-editor .cb-column-gutter {
   position: absolute;
   inset-block: 0;
-  inset-inline-start: -40px;
+  /* At the FAR end of the gutter, clear of the 48px the side menu claims
+     against the column's own edge. */
+  inset-inline-start: -66px;
   width: 12px;
+  /* Above BlockNote's side menu, which floats in this same margin and, being
+     later in the document, would otherwise take every press aimed at the
+     handle — MEASURED: the menu spans the whole gutter (x 522, 48 wide, over a
+     handle at 530) and `elementFromPoint` returned one of its icons. */
+  z-index: 3;
   cursor: col-resize;
   border: 0;
   padding: 0;
@@ -335,4 +344,39 @@
   width: 2px;
   border-radius: 1px;
   background: var(--cortex-500);
+}
+
+/* Columns are not an indent level (M48.5, after the author's screenshot).
+ *
+ * A columnList's children and a column's children are NESTED block groups, and
+ * BlockNote styles those for nested LISTS: `.bn-block-group .bn-block-group`
+ * gets `margin-left: 24px`, and every block outer inside one gets a `:before`
+ * guide at `left: -20px`. On a column layout that renders as a vertical rule
+ * beside every column and an indent nobody asked for.
+ *
+ * Both are switched off here rather than overridden per property, because
+ * neither is about columns at all — they belong to the nesting that indents a
+ * sub-list, and a column is a place, not a depth.
+ */
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList'],
+    > .bn-block-content[data-content-type='column'],
+    > * > .bn-block-content[data-content-type='column']
+  )
+  > .bn-block-group {
+  margin-left: 0;
+}
+
+.cerebro-editor
+  .bn-block:has(
+    > .bn-block-content[data-content-type='columnList'],
+    > * > .bn-block-content[data-content-type='columnList'],
+    > .bn-block-content[data-content-type='column'],
+    > * > .bn-block-content[data-content-type='column']
+  )
+  > .bn-block-group
+  > .bn-block-outer::before {
+  content: none;
 }
