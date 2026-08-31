@@ -167,6 +167,15 @@ browser timezone is fixed to UTC in `playwright.config.ts` for the same
 reason. For live checks, chrome-devtools MCP against `pnpm dev` works;
 synthetic `blur` events don't fire React `onBlur` (call `el.blur()`).
 
+**A scattered e2e failure is usually the machine, not the branch.** The suite
+runs in about a minute (124 tests, parallel — `workers` is Playwright's default
+locally and `1` only in CI). A run that takes ten times that and fails a
+handful of unrelated specs is a run that lost to something else on the box:
+MEASURED once at 49 minutes and six failures across five untouched surfaces,
+with Spotlight, iCloud and WindowServer holding the load average at 24, and
+clean at 2.8 minutes the moment that settled. Read `uptime` before you believe
+it, and re-run before you debug it.
+
 **Check the e2e port is FREE before running.** `reuseExistingServer` is on
 outside CI, so a port held by another worktree is silently reused and the
 suite runs against a different branch's app — producing confident, wrong
