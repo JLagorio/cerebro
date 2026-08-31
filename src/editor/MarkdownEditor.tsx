@@ -9,6 +9,7 @@ import {
   type PartialBlock,
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
+import { BlockGrip } from './BlockDragLayer';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
@@ -138,6 +139,51 @@ function AssignTaskButton({ onOpen }: { onOpen: (blockId: string) => void }) {
   );
 }
 
+/**
+ * The drag grip on the hovered block (M48.4).
+ *
+ * Replaces BlockNote's `DragHandleButton`. That one uses the browser's HTML5
+ * drag-and-drop, which MEASURED cannot be driven from our test harness at all
+ * — so every behaviour built on it shipped unverified, and it could not drop a
+ * block into a column. This one is a pointer drag on `useDragGesture`, the
+ * same loop the canvas, board, table and dashboard already run.
+ *
+ * Reads the hovered block from the side-menu extension, as `AssignTaskButton`
+ * does: `SideMenuProps` stopped carrying it in 0.46.
+ */
+function BlockGripButton({
+  hostRef,
+  sideMenu,
+}: {
+  hostRef: { current: HTMLElement | null };
+  sideMenu: React.ReactNode;
+}) {
+  const editor = useBlockNoteEditor();
+  const block = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block,
+  });
+  if (block === undefined) return null;
+  return (
+    <BlockGrip
+      blockId={block.id}
+      hostRef={hostRef}
+      onDrop={(spot) => {
+        const moving = editor.getBlock(block.id);
+        const target = editor.getBlock(spot.blockId);
+        if (moving === undefined || target === undefined) return;
+        // Remove FIRST, then insert. The other order leaves the document
+        // briefly holding two blocks with the same id, and BlockNote resolves
+        // `getBlock` by id.
+        editor.removeBlocks([moving]);
+        editor.insertBlocks([moving as never], target, spot.placement);
+      }}
+    >
+      {sideMenu}
+    </BlockGrip>
+  );
+}
+
 function isoAfterDays(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -197,6 +243,10 @@ export function MarkdownEditor({
   onDirty,
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
+  // M48.4 — what the block drag measures against. The editor's own host
+  // element, so a drop can be resolved against every rendered block including
+  // the ones inside columns.
+  const host = useRef<HTMLDivElement | null>(null);
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -759,6 +809,7 @@ export function MarkdownEditor({
 
   return (
     <div
+      ref={host}
       data-testid="markdown-editor"
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
@@ -826,7 +877,10 @@ export function MarkdownEditor({
               <SideMenu {...props}>
                 <AssignTaskButton onOpen={openAssignDialog} />
                 <AddBlockButton />
-                <DragHandleButton {...props} />
+                {/* M48.4: ours, not BlockNote's `DragHandleButton`. Same
+                    position, same click-opens-the-menu behaviour; a drag that
+                    a test can drive and a drop that can land in a column. */}
+                <BlockGripButton hostRef={host} sideMenu={<DragHandleButton {...props} />} />
               </SideMenu>
             )}
           />

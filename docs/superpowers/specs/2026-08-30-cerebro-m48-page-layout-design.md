@@ -135,7 +135,7 @@ serializer rule this codebase already follows.
 | **D3** | **Drag is rebuilt on `useDragGesture`, not extended on BlockNote's DnD.** The author's verdict is "it moves, but feels wrong", and the harness cannot see HTML5 drag at all. Polishing something untestable buys a feel we can never regression-test. |
 | **D4** | **`width` is a flex ratio.** Not pixels, not percentages. |
 | **D5** | **Toggle lists are not built** — they already ship. |
-| **D6** | **A column may not contain a `columnList`.** Notion allows it; it is where nested-layout editors become unusable, and every drop target doubles. Enforced at the drop layer, not just discouraged. |
+| **D6** | **A column may not contain a `columnList`.** Notion allows it; it is where nested-layout editors become unusable, and every drop target doubles. Enforced where a layout is CREATED — the `/` menu simply does not offer one inside a column. (The plan said "at the drop layer"; M48.4 found the drop layer needs no rule about columns at all, so there was nowhere there to put it.) |
 
 ---
 
@@ -167,12 +167,54 @@ it is wrong.
 
 | | | |
 | --- | --- | --- |
-| **M48.1** | The `columnList`/`column` block specs, the CSS that lays them out, and the schema registration. Renders a hand-built nest; nothing creates one yet. | |
-| **M48.2** | The markdown round trip: loosen/tighten, `promoteColumns`/`demoteColumns`, byte-stability tests, and the malformed-input tolerance. | |
-| **M48.3** | The `/` menu: **2 / 3 / 4 / 5 columns**, and the "turn into" variants that wrap the current block. | |
-| **M48.4** | Drag rebuilt on `useDragGesture`: the grip, the insertion line, and drop targets that include the gaps between and inside columns. Enforces D6. | |
+| **M48.1** | The `columnList`/`column` block specs, the CSS that lays them out, and the schema registration. Renders a hand-built nest; nothing creates one yet. | **done** `8977879` |
+| **M48.2** | The markdown round trip: loosen/tighten, `promoteColumns`/`demoteColumns`, byte-stability tests, and the malformed-input tolerance. | **done** `536b478` |
+| **M48.3** | The `/` menu: **2 / 3 / 4 / 5 columns**, and the "turn into" variants that wrap the current block. | **done** `aa43061` |
+| **M48.4** | Drag rebuilt on `useDragGesture`: the grip, the insertion line, and drop targets that include the gaps between and inside columns. | **done** |
 | **M48.5** | Column resize by dragging the gutter, writing `width=`. | |
-| **M48.6** | Demo-vault content that uses a column layout, plus the e2e spec that could not have existed before M48.4. | |
+| **M48.6** | Demo-vault content that uses a column layout. | |
+
+### What the built slices changed about the plan
+
+- **M48.1 shipped a layout that did not work, and M48.2 is where that was
+  found.** Two things were true in jsdom and false in a browser, and each was
+  invisible to every unit test:
+  - BlockNote wraps a custom React block in an extra `.react-renderer`
+    element in the browser and **not** under test, so
+    `:has(> .bn-block-content[…])` matched every unit test and nothing at all
+    in the app. Every column stacked; nothing errored.
+  - **ProseMirror owns `.bn-block-outer` and wipes foreign attributes off it.**
+    The `syncColumnWidths` pass reported moving two columns and left nothing
+    behind — not the inline style, not the marker attribute the probe went
+    looking for. That whole module is deleted. A column now renders a scoped
+    `<style>` inside its own node view keyed on the block's `data-id`, which
+    is how a descendant styles an ancestor and the one place ProseMirror
+    cannot reach.
+
+  The lesson is narrower than "test in a browser": **jsdom builds a different
+  DOM for a custom block than the browser does**, so any CSS keyed on that
+  block's structure is unverified until a browser measures it.
+- **A block that renders a stylesheet needs `toExternalHTML`.** Without it
+  BlockNote derives text/plain from the rendered text, so copying a column
+  would have put a CSS selector on the clipboard — the mermaid block's defect
+  (M29.53) with a sharper edge.
+- **M48.4 wraps BlockNote's handle rather than replacing it**, which the plan
+  did not anticipate. `DragHandleButton` is a MENU trigger that also happens
+  to be `draggable`; replacing it outright would have meant rebuilding its
+  menu, and adding a second grip beside it would have put two controls in a
+  six-pixel gutter. So the native drag is switched off in CSS
+  (`-webkit-user-drag: none`) and a pointer drag runs in its place, while a
+  press that never travels stays a click and opens the menu as before.
+- **D6 needed no work in the drop layer.** The whole document is one list of
+  horizontal insertion lines, columns included, and a spot wins by containing
+  the pointer's x — so dropping into a column is the ordinary case at a
+  greater depth rather than a rule about columns. The nesting ban is enforced
+  where layouts are CREATED (the `/` menu), which is the only place it can be
+  reached.
+- **`isNoOpDrop` cannot read document order alone**, and the case that proves
+  it is this milestone's own: the block directly below a paragraph may be the
+  first block of a column, so a drop that looks like "where it already was" by
+  position actually changes the block's parent. It compares parents first.
 
 M48.4 is the slice that pays for itself twice: it is the feel the author asked
 for, and it is the first time block drag in the editor is covered by a test at
@@ -202,3 +244,9 @@ all.
   accepting children, which is observed behaviour rather than documented API.
   The M48.1 tests pin it, so an upgrade that breaks it fails loudly instead of
   silently flattening people's pages.
+- **R5 (found in M48.2) — the app's DOM and the test's DOM are not the same.**
+  Anything keyed on how BlockNote renders a custom block must be measured in a
+  browser. `e2e/columns.spec.ts` asserts in geometry for exactly this reason,
+  and `e2e/block-drag.spec.ts` exists at all only because the drag was rebuilt
+  on pointer events — HTML5 drag-and-drop cannot be driven from the harness,
+  so the drag it replaced was untestable by construction.

@@ -242,3 +242,26 @@
 .cerebro-editor .bn-block-content[data-content-type='column'] {
   display: none;
 }
+
+/* The block drag is ours now (M48.4).
+ *
+ * BlockNote's handle button is a menu trigger that also carries
+ * `draggable="true"`. We keep the button — it is the menu — and switch off the
+ * browser's native drag on it, so the pointer drag wrapped around it is the
+ * only drag there is. Two drags on one control would race for the same press,
+ * and only one of them can be tested.
+ */
+.cerebro-editor .bn-side-menu [draggable='true'] {
+  -webkit-user-drag: none;
+}
+
+.cerebro-editor .bn-side-menu [draggable='true']:active {
+  cursor: grabbing;
+}
+
+/* While a block is in flight, the text cursor would otherwise select prose
+   across every block the pointer crosses. */
+.cerebro-editor.cb-block-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
