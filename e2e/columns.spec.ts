@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { boot } from './boot';
+import { boot, readMockFile } from './boot';
 
 /**
  * Columns, proven where they can be proven (M48.2).
@@ -93,4 +93,86 @@ test('the page still reads as markdown, and saving it changes nothing', async ({
     window.__cerebroMockFs.get('delivery/how-we-schedule.md'),
   );
   expect(onDisk).toBe(TWO_UP);
+});
+
+/**
+ * The `/` menu (M48.3). Asserted against the FILE, because a layout that looks
+ * right and does not survive being written is not a layout, it is a rendering.
+ */
+test('typing /columns builds a layout and writes it to the file', async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Expand Delivery' }).click();
+  await page
+    .getByTestId('collection-node-doc')
+    .filter({ hasText: 'How we schedule' })
+    .getByRole('button', { name: 'How we schedule' })
+    .click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
+
+  const editor = page.locator('[data-testid="markdown-editor"] .bn-editor');
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/2 columns');
+  await page.getByText('An empty side-by-side layout').first().click();
+  await page.keyboard.type('Left side');
+
+  await expect
+    .poll(() => readMockFile(page, 'delivery/how-we-schedule.md'), { timeout: 6_000 })
+    .toContain(':::columns');
+  const onDisk = await readMockFile(page, 'delivery/how-we-schedule.md');
+  expect(onDisk).toContain('::::column');
+  expect(onDisk).toContain('Left side');
+  // Two columns, one close for each and one for the list.
+  expect(onDisk.split('\n').filter((l) => l === '::::column')).toHaveLength(2);
+
+  // And it lays out: the cursor landed in the first column, so both are real.
+  await expect.poll(async () => (await columnBoxes(page)).length, { timeout: 6_000 }).toBe(2);
+  const [left, right] = await columnBoxes(page);
+  expect(right.x).toBeGreaterThan(left.x + left.width - 1);
+});
+
+test('a column layout is not offered inside a column', async ({ page }) => {
+  await openTwoUp(page);
+  // Click into the first column's prose, then open the menu there.
+  await page.getByText('The narrow one.').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('/columns');
+  // The menu is open (the trigger matched something) but offers no layout.
+  await expect(page.getByText('An empty side-by-side layout')).toHaveCount(0);
+});
+
+/* "Turn into" is the one-step version of what people actually want — put THIS
+   beside that — and the entry the screenshot that started this milestone was
+   open on. The failure it has to not have is duplication: the block moves into
+   the layout, it does not get copied there and left behind as well. */
+test('turn into moves the block you are standing in, and does not leave a copy', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Expand Delivery' }).click();
+  await page
+    .getByTestId('collection-node-doc')
+    .filter({ hasText: 'How we schedule' })
+    .getByRole('button', { name: 'How we schedule' })
+    .click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible({ timeout: 10_000 });
+
+  const editor = page.locator('[data-testid="markdown-editor"] .bn-editor');
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Beside me');
+  await page.keyboard.type('/2 columns');
+  await page.getByText('Move this block into the first column').first().click();
+
+  await expect
+    .poll(() => readMockFile(page, 'delivery/how-we-schedule.md'), { timeout: 6_000 })
+    .toContain(':::columns');
+  const onDisk = await readMockFile(page, 'delivery/how-we-schedule.md');
+  const lines = onDisk.split('\n');
+  // Exactly once, and INSIDE the layout rather than above it.
+  expect(lines.filter((l) => l.includes('Beside me'))).toHaveLength(1);
+  expect(lines.indexOf(':::columns')).toBeLessThan(lines.findIndex((l) => l.includes('Beside me')));
 });

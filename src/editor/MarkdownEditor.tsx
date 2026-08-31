@@ -6,8 +6,10 @@ import {
   createCodeBlockSpec,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
+  type PartialBlock,
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
+import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
@@ -463,6 +465,66 @@ export function MarkdownEditor({
     },
   ];
 
+  /**
+   * Columns in the `/` menu (M48.3), the way Notion spells them: N columns to
+   * make an empty layout, and "Turn into" to move the block you are standing
+   * in INTO one.
+   *
+   * The pair matters. Making an empty layout and then dragging a paragraph
+   * into it is two operations for the thing people actually want, which is
+   * "put this beside that". Turn-into is the one-step version, and it is the
+   * one the screenshot that started this milestone was open on.
+   *
+   * Nothing is offered at all inside a column (spec D6). A menu entry that
+   * does nothing is worse than one that is not there.
+   */
+  const columnSlashItems = (): DefaultReactSuggestionItem[] => {
+    const cursor = editor.getTextCursorPosition().block;
+    if (!canInsertColumnsAt(editor.document as PartialBlock[], cursor.id)) return [];
+    const insert = (count: number, turnInto: boolean) => () => {
+      const at = editor.getTextCursorPosition().block;
+      const moved = turnInto ? (JSON.parse(JSON.stringify(at)) as PartialBlock) : undefined;
+      const list = newColumnList(count, moved);
+      const inserted = editor.insertBlocks([list as never], at, 'after');
+      // The block moved INTO the layout is still sitting above it — remove the
+      // original, or turn-into silently duplicates what it moved.
+      if (turnInto) editor.removeBlocks([at]);
+      // The suggestion menu deletes its trigger text AFTER this callback and
+      // restores the selection while doing so, so the cursor is placed on the
+      // next tick or typing continues in the block we just left.
+      window.setTimeout(() => {
+        const firstColumn = (inserted[0] as { children?: { children?: unknown[] }[] })
+          ?.children?.[0];
+        const landing = firstColumn?.children?.[0];
+        if (landing !== undefined) {
+          editor.setTextCursorPosition(landing as never, turnInto ? 'end' : 'start');
+        }
+        editor.focus();
+      }, 0);
+    };
+    return COLUMN_COUNTS.flatMap((count) => [
+      {
+        title: `${count} columns`,
+        subtext: 'An empty side-by-side layout',
+        group: 'Layout',
+        aliases: ['columns', 'column', 'col', `${count}col`, `${count}columns`, 'side by side'],
+        // lucide has a shape per count up to 4; 5 borrows the 4-column glyph
+        // rather than showing a generic one, because the icons in this menu
+        // are how you pick without reading.
+        icon: <Icon name={`columns-${Math.min(count, 4)}`} size={14} />,
+        onItemClick: insert(count, false),
+      },
+      {
+        title: `${count} columns · Turn into`,
+        subtext: 'Move this block into the first column',
+        group: 'Layout',
+        aliases: ['columns', 'column', 'col', 'turn into', 'wrap'],
+        icon: <Icon name={`columns-${Math.min(count, 4)}`} size={14} />,
+        onItemClick: insert(count, true),
+      },
+    ]);
+  };
+
   // --- Templates in the slash menu (M2.x feedback) ------------------------
 
   const templates = listTemplates(entries);
@@ -747,6 +809,7 @@ export function MarkdownEditor({
                 [
                   ...(getDefaultReactSlashMenuItems(editor) as DefaultReactSuggestionItem[]),
                   dateSlashItem(),
+                  ...columnSlashItems(),
                   ...blockSlashItems(),
                   ...templateSlashItems(),
                 ],
