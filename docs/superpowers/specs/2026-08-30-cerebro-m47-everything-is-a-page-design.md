@@ -215,8 +215,8 @@ can grow a database-less form then, with instances to design against.
 | **M47.2** | The `database` block spec + markdown round-trip + the pointer resolver. Renders read-only first. | **done** `62a38ff` |
 | **M47.3** | Door 1 — embed an existing database. | **done** `02480c9` |
 | **M47.4** | Door 2 — create a database inline, and schema-by-use (`+` a column writes a field). **Includes the first writer for `folder:`**, which had none. | **done** `2139014` |
-| **M47.5** | The converter, the demo-vault migration, and the e2e churn. Retires `collection.yml` and `*.list.yml`. | next |
-| **M47.6** | Retire the New-list dialog and the sidebar `+` → New list path; the collection page grows its own create affordance and its own prose. | |
+| **M47.5** | The converter, the demo-vault migration, and the e2e churn. Retires `collection.yml` and `*.list.yml`. | **done** `3d6f734` `d8915ba` `97afc7d` `42ad07c` |
+| **M47.6** | Retire the New-list dialog and the sidebar `+` → New list path; the collection page grows its own create affordance and its own prose. | **done** |
 
 ### What the built slices changed about the plan
 
@@ -234,6 +234,23 @@ can grow a database-less form then, with instances to design against.
   below" on every surface, including the ones that pass no `onCreate` and so
   render no such row — the dashboard's embed has been making that false promise
   since M44.
+- **M47.6 deleted a file, not just a menu item.** `ViewSettingsDialog.tsx`
+  (217 lines) had exactly one consumer — App's New-list dialog — so retiring
+  the path retired the surface. `createList` and `nextListId` went with it.
+  What SURVIVES in `listActions` is the read-write half: a `*.list.yml`
+  already on disk still opens, still gains and loses view tabs, and is still
+  updated where it lives. D9 requires that, and "unmakeable" is not
+  "unreadable".
+- **The collection empty state stopped naming lists.** It read "A collection
+  holds pages, databases, folders and lists" — true about contents, false as
+  an invitation, because after M47.6 nothing creates one.
+- **The smoke spec's oldest segment changed subject.** It had created a List
+  from Delivery's `+` since M12 and asserted the layout change reached the
+  `.list.yml`. It now creates a DATABASE and asserts the layout change reaches
+  the Type doc's `views:` — the same claim about the same tab row, against the
+  file that holds the schema and the views together. The board assertion moved
+  from `board-column` to `board-view`: a database with no records groups into
+  no buckets, so a column assertion would have been about rows, not layout.
 - **R1 is resolved** (D9) — the evidence that settled it was in the corpus, not in the design: every `*.list.yml` in `demo-vault/` names a concrete type, so the homeless case has no instances to design against.
 
 ## 9. Non-goals

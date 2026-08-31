@@ -6,8 +6,6 @@ import { CheckpointHost } from '@/git/CheckpointHost';
 import { ReconciliationBanner } from '@/app/ReconciliationBanner';
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
-import { createList } from '@/app/listActions';
-import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog';
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
@@ -40,7 +38,7 @@ import {
   SIDEBAR_WIDTH_MIN,
   useUiStore,
 } from '@/stores/uiStore';
-import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 /**
  * A media query as React state (M15) — the shell had not one `@media` or
@@ -204,9 +202,6 @@ function App() {
   useTheme();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
-  const entries = useVaultStore((s) => s.entries);
-  const schema = useSchema();
-  const navigate = useNavStore((s) => s.navigate);
   const [booted, setBooted] = useState(false);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const detailPath = useUiStore((s) => s.detailPath);
@@ -223,12 +218,6 @@ function App() {
   // ⌘J brings it back with its transcript intact.
   const showAssistant = aiPanelOpen && (roomForTwo || !detailOpen);
   const drawnPanels = (showAssistant ? 1 : 0) + (detailOpen ? 1 : 0);
-  // M3.5: the sidebar's + opens the view builder — "New project" is gone,
-  // because a project is just a saved view over Work items.
-  // M10: null = the dialog is shut. Otherwise it holds the Collection folder the
-  // new List lands in — never null, because a Collection-less List is forbidden
-  // and the only entry point is a Collection's own + affordance.
-  const [newList, setNewList] = useState<{ collection: string } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -333,7 +322,7 @@ function App() {
       >
         Skip to content
       </button>
-      <Sidebar narrow={narrow} onNewView={(collection) => setNewList({ collection })} />
+      <Sidebar narrow={narrow} />
       {/* M15: the floor that makes the sidebar yield first. Without a minimum
           here the main column shrinks to nothing and the canvas absorbs every
           pixel of a narrow window; with it, flex has to take the shortfall out
@@ -401,27 +390,6 @@ function App() {
             segment of it is a control rather than a readout. */}
         <StatusBar />
       </div>
-      {newList !== null && (
-        <ViewSettingsDialog
-          initial={newViewDefinition(null, schema)}
-          entries={entries}
-          schema={schema}
-          title="New list"
-          onCancel={() => setNewList(null)}
-          onSubmit={async (definition) => {
-            const collection = newList.collection;
-            const id = await createList(definition, collection);
-            // Close only on success (M14.8) — a failed write already toasted,
-            // and the dialog keeps the view the user configured.
-            if (id === null) return false;
-            setNewList(null);
-            // Navigate WITH the collection: ids are unique per folder, so
-            // "roadmap" alone could resolve to another collection's list.
-            navigate({ kind: 'list', id, collection });
-            return true;
-          }}
-        />
-      )}
       <QuickOpen />
       {/* M45.2 — one mount, one signal: three menus raise uiStore.layoutEditor
           and this single App-level dialog is the only reader. */}

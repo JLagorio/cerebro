@@ -98,11 +98,21 @@ export default defineConfig({
       // there is real headroom; branches moved both (17153/20209 →
       // 17159/20213, 84.87 → 84.89) and keeps the wider margin, because a
       // ratchet that trips on its own measurement noise is a broken gate.
+      // M47.6 measured 82.90 statements / 84.98 branches / 77.45 functions /
+      // 82.90 lines. This slice earned its rise by DELETING rather than by
+      // adding: `ViewSettingsDialog.tsx` and `createList` were the New-list
+      // authoring path, and untested code that leaves the tree takes its
+      // uncovered lines with it. A floor that does not follow a deletion is a
+      // floor that quietly banks the credit and lets the next surface spend
+      // it. Same two-run protocol: statements, lines and functions reported
+      // the same numerator and denominator both times (55098/66459,
+      // 3153/4071); branches moved its numerator by one (17342 → 17343) at an
+      // unchanged 84.98, and keeps the wider margin for it.
       thresholds: {
-        lines: 82.6,
-        statements: 82.6,
-        functions: 77.2,
-        branches: 84.8,
+        lines: 82.87,
+        statements: 82.87,
+        functions: 77.39,
+        branches: 84.91,
       },
     },
   },

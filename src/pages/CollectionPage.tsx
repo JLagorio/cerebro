@@ -220,7 +220,12 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           <EmptyState
             icon="folder-open"
             title="Nothing in here yet"
-            description="A collection holds pages, databases, folders and lists."
+            /* Not "and lists" any more (M47.6): nothing creates one, and an
+               empty state that names a thing you cannot make sends you looking
+               for a door that was removed. A `*.list.yml` already on disk
+               still shows up in the tree above — it is unmakeable, not
+               unreadable. */
+            description="A collection holds pages, databases and folders."
             action={
               <Button
                 variant="primary"
