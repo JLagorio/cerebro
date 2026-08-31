@@ -8,6 +8,7 @@ import {
   defaultInlineContentSpecs,
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
+import { useColumnWidths } from './columnLayout';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
@@ -33,7 +34,14 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { AiBlock, CalloutBlock, DatabaseBlock, MermaidBlock } from './blocks';
+import {
+  AiBlock,
+  CalloutBlock,
+  ColumnBlock,
+  ColumnListBlock,
+  DatabaseBlock,
+  MermaidBlock,
+} from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
@@ -48,6 +56,8 @@ export const cerebroSchema = BlockNoteSchema.create({
     codeBlock: createCodeBlockSpec(codeBlockOptions),
     ai: AiBlock(),
     callout: CalloutBlock(),
+    column: ColumnBlock(),
+    columnList: ColumnListBlock(),
     database: DatabaseBlock(),
     mermaid: MermaidBlock(),
   },
@@ -186,6 +196,10 @@ export function MarkdownEditor({
   onDirty,
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
+  // M48.1 — a column's flex ratio lives two levels below the element the
+  // browser lays out, so it is carried up here. See columnLayout.ts.
+  const host = useRef<HTMLDivElement | null>(null);
+  useColumnWidths(host);
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -688,6 +702,7 @@ export function MarkdownEditor({
 
   return (
     <div
+      ref={host}
       data-testid="markdown-editor"
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}

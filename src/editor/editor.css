@@ -181,3 +181,41 @@
 .cerebro-editor-compact .bn-block-content[data-content-type='heading'] h3 {
   font-size: 14px;
 }
+
+/* Page columns (M48.1).
+ *
+ * The whole layout is these three rules over the nesting BlockNote already
+ * does. A `columnList` block renders nothing; its CHILDREN, which BlockNote
+ * puts in a sibling `.bn-block-group`, become a flex row. A `column` renders
+ * nothing either, and its own children group goes on stacking the way every
+ * block group stacks. There is no second document model here, only CSS.
+ *
+ * `--cb-column-width` is set by ColumnSizer on the flex item itself, because
+ * the ratio lives two levels below it in the DOM and CSS cannot reach upward.
+ */
+.cerebro-editor
+  .bn-block:has(> .bn-block-content[data-content-type='columnList'])
+  > .bn-block-group {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.cerebro-editor
+  .bn-block:has(> .bn-block-content[data-content-type='columnList'])
+  > .bn-block-group
+  > .bn-block-outer {
+  /* `min-width: 0` or a long word in one column pushes every other column off
+     the page: the flex default is `min-width: auto`, which refuses to shrink
+     below the content's intrinsic size. */
+  flex: var(--cb-column-width, 1) 1 0;
+  min-width: 0;
+}
+
+/* The container blocks draw nothing. They are structure, and a structural
+   block that reserved a line of height would put a blank gap above every
+   column on the page. */
+.cerebro-editor .bn-block-content[data-content-type='columnList'],
+.cerebro-editor .bn-block-content[data-content-type='column'] {
+  display: none;
+}

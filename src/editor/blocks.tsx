@@ -4,13 +4,16 @@ import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
 import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
+import { DEFAULT_COLUMN_WIDTH } from '@/engine/pageColumns';
 
 /**
- * Custom blocks (M2.x docs polish). Both stay plain markdown on disk:
+ * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:
  *
- *   callout   Obsidian-style `> [!info] …` blockquote
- *   mermaid   ```mermaid fenced code block
- *   database  ```cerebro-database fence holding a POINTER (M47.2)
+ *   callout     Obsidian-style `> [!info] …` blockquote
+ *   mermaid     ```mermaid fenced code block
+ *   database    ```cerebro-database fence holding a POINTER (M47.2)
+ *   columnList  `:::columns` directive container (M48.1)
+ *   column      `::::column` directive container (M48.1)
  *
  * markdown.ts promotes the plain forms into these blocks after parse and
  * demotes them back before serialization, so files never stop being
@@ -346,5 +349,56 @@ export const DatabaseBlock = createReactBlockSpec(
         </pre>
       );
     },
+  },
+);
+
+/**
+ * A row of columns, and one column in it (M48.1).
+ *
+ * Both are `content: 'none'` and both render NOTHING of their own. That is
+ * not an oversight, it is the design: BlockNote already renders a block's
+ * children as a nested block group underneath it, so a column list is that
+ * group turned into a flex row by CSS and a column is that group left
+ * stacking the way it already stacks. The layout is CSS over the nesting the
+ * editor has always had — not a second document model that could disagree
+ * with the first.
+ *
+ * MEASURED before this was written (`@blocknote/core@0.46.2`): a
+ * `content: 'none'` custom block DOES accept children, two levels deep, and
+ * `editor.document` round-trips the nest with ids, props and content intact.
+ * That observation is what makes this possible without
+ * `@blocknote/xl-multi-column`, which is GPL-3.0-or-commercial against this
+ * project's Apache-2.0 licence. `blocks.test.tsx` pins the observation so a
+ * BlockNote upgrade that withdraws it fails loudly rather than silently
+ * flattening somebody's page.
+ */
+export const ColumnListBlock = createReactBlockSpec(
+  { type: 'columnList', propSchema: {}, content: 'none' },
+  {
+    // The children BlockNote renders below this ARE the block. An empty
+    // element rather than nothing at all because the block needs a node to
+    // hang its data attributes and, in M48.4, its drop targets on.
+    render: () => <div className="cb-column-list" aria-hidden />,
+  },
+);
+
+export const ColumnBlock = createReactBlockSpec(
+  {
+    type: 'column',
+    // A flex RATIO, not pixels and not a percentage: a page that reflows keeps
+    // its proportions, and a column dragged narrower on a desktop does not
+    // become an unreadable ribbon on a laptop.
+    propSchema: { width: { default: DEFAULT_COLUMN_WIDTH } },
+    content: 'none',
+  },
+  {
+    // Renders nothing, and does not render the ratio either: BlockNote hoists
+    // a custom block's props onto the content element as data attributes
+    // itself, omitting any that still sit at their default. Getting that value
+    // onto the element the browser actually lays out is `syncColumnWidths`'
+    // job (columnLayout.ts) — that element is two levels ABOVE anything this
+    // render can see, and MEASURED, a `useLayoutEffect` here runs before
+    // ProseMirror has attached the node view and never finds it.
+    render: () => <div className="cb-column" aria-hidden />,
   },
 );
