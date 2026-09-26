@@ -959,7 +959,8 @@ export interface CollectionFile {
   folder: string;
   definition: CollectionDefinition;
   /**
-   * True when a `collection.yml` exists on disk.
+   * True when something on disk declares it: a `collection.yml`, or a folder
+   * note carrying `type: Collection` (M47.5 — see `page`).
    *
    * False for a folder that is a Collection purely because it holds Lists — the
    * rule that makes a Collection-less List unrepresentable. Such a folder has
@@ -967,6 +968,13 @@ export interface CollectionFile {
    * folder; it becomes declared the first time someone renames or restyles it.
    */
   declared: boolean;
+  /**
+   * The folder note that declares it, when a PAGE does (M47.5). Absent for a
+   * `collection.yml` marker and for an implied collection. Where an edit to
+   * the collection has to be written: a page-declared one has no marker, and
+   * writing one beside it would be ignored (the page wins).
+   */
+  page?: string;
 }
 
 /**

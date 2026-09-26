@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { collectionsFromPages } from './collections';
 import { isMigrated, planMigration } from './migrateContainers';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
@@ -80,7 +81,11 @@ describe('planMigration: collections become pages', () => {
       retires: 'delivery/collection.yml',
       merges: false,
     });
-    expect(plan.folderNotes[0].frontmatter).toEqual({ name: 'Delivery', icon: 'rocket' });
+    expect(plan.folderNotes[0].frontmatter).toEqual({
+      type: 'Collection',
+      name: 'Delivery',
+      icon: 'rocket',
+    });
   });
 
   /**
@@ -91,7 +96,7 @@ describe('planMigration: collections become pages', () => {
    */
   it('writes only what the collection actually declared', () => {
     const plan = planMigration([], [collection('work')], [], buildSchema([]));
-    expect(plan.folderNotes[0].frontmatter).toEqual({ name: 'work' });
+    expect(plan.folderNotes[0].frontmatter).toEqual({ type: 'Collection', name: 'work' });
   });
 
   /**
@@ -102,6 +107,43 @@ describe('planMigration: collections become pages', () => {
   it('leaves an undeclared collection alone', () => {
     const undeclared = { ...collection('adhoc'), declared: false };
     expect(planMigration([], [undeclared], [], buildSchema([])).folderNotes).toEqual([]);
+  });
+
+  /* The page IS the converted form. Planning it again produced folder-note
+     work on a vault that had finished converting, and `isMigrated` said no. */
+  it('leaves a collection its page already declares alone', () => {
+    const entries = [
+      makeEntry({
+        path: 'delivery/delivery.md',
+        filename: 'delivery.md',
+        folder: 'delivery',
+        title: 'Delivery',
+        type: 'Collection',
+      }),
+    ];
+    const plan = planMigration(entries, collectionsFromPages(entries), [], buildSchema(entries));
+    expect(plan.folderNotes).toEqual([]);
+    expect(isMigrated(plan)).toBe(true);
+  });
+
+  /* What the plan writes must be what `collectionsFromPages` reads back —
+     otherwise executing it retires the marker and nothing declares the folder. */
+  it('writes a folder note the collection reader recognises', () => {
+    const plan = planMigration(
+      [],
+      [collection('delivery', { name: 'Delivery' })],
+      [],
+      buildSchema([]),
+    );
+    const note = plan.folderNotes[0];
+    const written = makeEntry({
+      path: note.path,
+      filename: 'delivery.md',
+      folder: note.folder,
+      title: 'Delivery',
+      type: note.frontmatter.type as string,
+    });
+    expect(collectionsFromPages([written]).map((c) => c.folder)).toEqual(['delivery']);
   });
 
   it('merges into an existing folder note rather than displacing it', () => {

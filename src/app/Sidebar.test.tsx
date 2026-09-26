@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useRootsStore } from '@/stores/rootsStore';
@@ -425,6 +425,38 @@ describe('Sidebar', () => {
     // queries, so there is nothing left that authors a `*.list.yml`.
     const items = screen.getAllByRole('menuitem').map((i) => i.textContent);
     expect(items).toEqual(['New page', 'New database']);
+  });
+
+  // Enter or Space on the `+` reports clientX/clientY as 0, so a menu placed
+  // at the pointer opened in the window's corner for keyboard users.
+  it("anchors a Collection's add menu to the + itself, not the pointer", () => {
+    useVaultStore.setState({
+      views: [],
+      collections: [
+        {
+          folder: 'product',
+          declared: true,
+          definition: { name: 'Product', icon: null, color: null, order: null, description: null },
+        },
+      ],
+    });
+    render(<Sidebar />);
+    const plus = screen.getByRole('button', { name: 'Add to Product' });
+    vi.spyOn(plus, 'getBoundingClientRect').mockReturnValue({
+      left: 180,
+      bottom: 240,
+      top: 220,
+      right: 200,
+      width: 20,
+      height: 20,
+      x: 180,
+      y: 220,
+      toJSON: () => ({}),
+    });
+    fireEvent.click(plus, { clientX: 0, clientY: 0 });
+    const menu = screen.getByRole('menu');
+    expect(menu.style.left).toBe('180px');
+    expect(menu.style.top).toBe('240px');
   });
 
   // The context menu had its OWN "New list…" — a fourth entrance to the same

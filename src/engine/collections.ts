@@ -105,6 +105,22 @@ export function parseCollectionYaml(folder: string, yamlText: string): Collectio
 export const COLLECTION_TYPE = 'Collection';
 
 /**
+ * True when this entry is the page that declares its folder a Collection:
+ * `type: Collection` AND the folder's own note (`delivery/delivery.md`).
+ *
+ * The one rule for "is this a container page", so the collection list, the
+ * router and the record surfaces cannot disagree about it. Only a FOLDER NOTE
+ * speaks for its folder: a page called `delivery.md` sitting somewhere else
+ * describes nothing but itself, and adopting it would let a stray file rename
+ * a container it is not even in.
+ */
+export function isCollectionPage(entry: Entry): boolean {
+  return (
+    entry.type === COLLECTION_TYPE && entry.filename === `${entry.folder.split('/').pop() ?? ''}.md`
+  );
+}
+
+/**
  * Collections declared by a page rather than by a marker file.
  *
  * A folder note (`delivery/delivery.md`) carrying `type: Collection` IS its
@@ -115,15 +131,12 @@ export const COLLECTION_TYPE = 'Collection';
 export function collectionsFromPages(entries: Entry[]): CollectionFile[] {
   const out: CollectionFile[] = [];
   for (const e of entries) {
-    if (e.type !== COLLECTION_TYPE) continue;
-    // Only a FOLDER NOTE speaks for its folder. A page called `delivery.md`
-    // sitting somewhere else describes nothing but itself, and adopting it
-    // would let a stray file rename a container it is not even in.
-    if (e.filename !== `${e.folder.split('/').pop() ?? ''}.md`) continue;
+    if (!isCollectionPage(e)) continue;
     const obj = e.properties as Record<string, unknown>;
     out.push({
       folder: e.folder,
       declared: true,
+      page: e.path,
       definition: {
         // A page already has a title, so the frontmatter only has to carry a
         // name when it differs. Making the user write it twice is what a

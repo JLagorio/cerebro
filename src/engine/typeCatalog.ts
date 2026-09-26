@@ -11,7 +11,7 @@
 
 import { isTemplate } from '@/lib/templates';
 import { DEFAULT_TIME_FORMAT } from './dates';
-import { COLLECTION_TYPE } from './collections';
+import { COLLECTION_TYPE, isCollectionPage } from './collections';
 import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
@@ -169,6 +169,9 @@ export function isRecordEntry(entry: Entry): boolean {
     entry.type !== null &&
     entry.type !== '' &&
     entry.type !== 'Type' &&
+    // A container's page is its collection, not a row of a `Collection`
+    // database — there is no such database to show it in (M47.5).
+    !isCollectionPage(entry) &&
     // M18: skills and agents are how the vault works, not what it is about.
     // They keep their file and lose the record surfaces — see engine/library.
     !isLibraryEntry(entry) &&

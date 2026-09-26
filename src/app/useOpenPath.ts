@@ -1,3 +1,4 @@
+import { isCollectionPage } from '@/engine/collections';
 import { libraryKind } from '@/engine/library';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import { useNavStore } from '@/stores/navStore';
@@ -61,6 +62,13 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // editor is the old world.
     if (entry.type === 'Type') {
       navigate({ kind: 'type', name: entry.title });
+      return;
+    }
+    // Same rule for a container: its page IS the collection (M47.5). Routed
+    // as a record it opened a `Collection` type screen that exists nowhere
+    // else, with the container listed as a row of it.
+    if (isCollectionPage(entry)) {
+      navigate({ kind: 'collection', folder: entry.folder });
       return;
     }
     // M18: same rule, one level out. A skill's frontmatter is the app's own

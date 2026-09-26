@@ -1,3 +1,4 @@
+import { COLLECTION_TYPE } from './collections';
 import { folderNote } from './docPages';
 import type { CollectionFile, Entry, ListFile, Schema, ViewDefinition } from './types';
 
@@ -64,7 +65,10 @@ export const isMigrated = (plan: MigrationPlan): boolean =>
  * slug, which is exactly the styling the `collection.yml` existed to override.
  */
 function collectionFrontmatter(c: CollectionFile): Record<string, unknown> {
-  const fm: Record<string, unknown> = { name: c.definition.name };
+  // `type:` is what makes the folder note the container once the marker is
+  // gone (`collectionsFromPages`); without it the plan retires the marker and
+  // leaves nothing declaring the folder.
+  const fm: Record<string, unknown> = { type: COLLECTION_TYPE, name: c.definition.name };
   if (c.definition.icon !== null) fm.icon = c.definition.icon;
   if (c.definition.color !== null) fm.color = c.definition.color;
   if (c.definition.order !== null) fm.order = c.definition.order;
@@ -115,6 +119,10 @@ export function planMigration(
     // nothing stored about it, so converting it would invent a page nobody
     // asked for.
     .filter((c) => c.declared)
+    // A page-declared collection IS the converted form: there is no marker to
+    // retire, and planning it again made `isMigrated` false on a vault that
+    // had finished converting.
+    .filter((c) => c.page === undefined)
     .map((c) => {
       const existing = folderNote(c.folder, entries);
       const base = c.folder.split('/').pop() ?? c.folder;

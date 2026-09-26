@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { makeEntry } from '@/test/factories';
 import { useOpenPath } from './useOpenPath';
 
 describe('useOpenPath .mmd routing (M29.21)', () => {
@@ -41,5 +42,29 @@ describe('useOpenPath .mmd routing (M29.21)', () => {
     const { result } = renderHook(() => useOpenPath());
     act(() => result.current('notes/loose.md'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/loose.md' });
+  });
+});
+
+/*
+ * A container's page IS its collection (M47.5). Routed as a record it opened a
+ * `Collection` type screen that exists nowhere else, listing the container as
+ * a row, with a detail peek on top.
+ */
+describe('useOpenPath collection pages (M48.7)', () => {
+  beforeEach(() => {
+    useNavStore.setState({
+      selection: { kind: 'home' },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+  });
+
+  it('opens a folder note that declares a Collection as that collection', () => {
+    useVaultStore.setState({
+      entries: [makeEntry({ path: 'delivery/delivery.md', title: 'Delivery', type: 'Collection' })],
+    });
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('delivery/delivery.md'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'collection', folder: 'delivery' });
   });
 });

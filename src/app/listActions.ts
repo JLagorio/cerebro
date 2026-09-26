@@ -203,9 +203,23 @@ export async function updateCollection(
   // Writing the marker is also what turns an IMPLIED Collection (a folder that
   // is one because it holds Lists) into a declared one — the first rename is
   // the first moment there is anything about it worth storing.
-  const { vaultPath } = useVaultStore.getState();
+  const { vaultPath, entries, patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   if (vaultPath === null) return false;
+  // A collection its PAGE declares is edited on that page (M47.5). Written to
+  // a marker instead, the edit was ignored — the page wins — and left a stray
+  // `collection.yml` behind. `patchFrontmatter` toasts its own failure.
+  if (collection.page !== undefined) {
+    const title = entries.find((e) => e.path === collection.page)?.title;
+    return patchFrontmatter(collection.page, {
+      // The page's title already names it; `name:` is only a deviation.
+      name: definition.name === title ? null : definition.name,
+      icon: definition.icon,
+      color: definition.color,
+      order: definition.order,
+      description: definition.description,
+    });
+  }
   try {
     await saveCollection(vaultPath, collection.folder, serializeCollection(definition));
   } catch {
@@ -225,9 +239,22 @@ export async function updateCollection(
  * container should never be a way to lose work you did not name.
  */
 export async function deleteCollection(collection: CollectionFile): Promise<boolean> {
-  const { vaultPath } = useVaultStore.getState();
+  const { vaultPath, patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   if (vaultPath === null) return false;
+  // A page-declared collection has no marker to delete — deleting one failed
+  // and the collection stayed. What un-collects it is its page no longer
+  // saying so: the page keeps its prose and becomes an ordinary page, and
+  // everything in the folder stays, as "keeps contents" promises.
+  if (collection.page !== undefined) {
+    if (!(await patchFrontmatter(collection.page, { type: null }))) return false;
+    // A rename made before edits reached the page could have written a stray
+    // marker beside it, which would bring the collection straight back. Its
+    // absence is the normal case, so a failed delete here is not an error.
+    await deleteNote(vaultPath, `${collection.folder}/collection.yml`).catch(() => undefined);
+    await refresh();
+    return true;
+  }
   try {
     await deleteNote(vaultPath, `${collection.folder}/collection.yml`);
   } catch {

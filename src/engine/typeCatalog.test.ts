@@ -3,6 +3,7 @@ import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import {
   isLockedField,
+  isRecordEntry,
   isSystemType,
   listTypes,
   serializeFields,
@@ -262,5 +263,20 @@ describe('typeViews (M47.1)', () => {
       const entries = [typeDoc('Work item', { properties: { views } as Entry['properties'] })];
       expect(typeViews('Work item', buildSchema(entries)).map((v) => v.id)).toEqual(['all']);
     }
+  });
+});
+
+describe('isRecordEntry and collection pages (M48.7)', () => {
+  const at = (path: string, folder: string) =>
+    makeEntry({ path, filename: path.split('/').pop(), folder, type: 'Collection' });
+
+  // The container's page is its collection, not a row of a `Collection`
+  // database — so it never shows up counted or listed as one.
+  it('is false for the folder note that declares a Collection', () => {
+    expect(isRecordEntry(at('delivery/delivery.md', 'delivery'))).toBe(false);
+  });
+
+  it('stays true for a Collection-typed page that is not its folder note', () => {
+    expect(isRecordEntry(at('inbox/delivery.md', 'inbox'))).toBe(true);
   });
 });
