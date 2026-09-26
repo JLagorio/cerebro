@@ -10,11 +10,18 @@
  *   - duplicate names are checked case-insensitively.
  */
 
-import { recordsFolder } from '@/engine/createRecord';
+import { homeFolderFor } from '@/engine/createRecord';
+import { COLLECTION_TYPE } from '@/engine/collections';
+import { AGENT_TYPE, SKILL_TYPE } from '@/engine/library';
 import { kindMeta } from '@/engine/properties';
 import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
-import { isLockedField, serializeFields, serializeOptions } from '@/engine/typeCatalog';
+import {
+  isLockedField,
+  SYSTEM_TYPES,
+  serializeFields,
+  serializeOptions,
+} from '@/engine/typeCatalog';
 import { serializeTabList, serializeViewList } from '@/engine/views';
 import type {
   DisplayConfig,
@@ -30,7 +37,7 @@ import type {
 } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { getSchema, useVaultStore } from '@/stores/vaultStore';
 
 /** Frontmatter keys with schema meaning on a Type doc — never field names.
  * Exported for the layout editor's staging guard (M45.3), which must refuse
@@ -849,6 +856,14 @@ const STARTER_STATUSES = [
   { id: 'done', group: 'done', color: '#1F9D61' },
 ];
 
+/** Type names the app gives a meaning of its own — never a user database. */
+const RESERVED_NAMES = [
+  ...SYSTEM_TYPES.map((t) => t.name),
+  COLLECTION_TYPE,
+  SKILL_TYPE,
+  AGENT_TYPE,
+];
+
 /**
  * Create a database from wherever you are (M47.4) — Door 2 of the M47 spec.
  *
@@ -874,6 +889,15 @@ export async function createDatabase(rawName: string): Promise<string | null> {
     toast(`A database named "${name}" already exists`);
     return null;
   }
+  // The names the app itself means something by. The sidebar's New database
+  // dialog already refuses them through `listTypes`; this door did not, and a
+  // Type doc titled `Type` hangs a status field and a `folder:` on the
+  // metamodel itself, turning every schema doc into a task.
+  const lower = name.toLowerCase();
+  if (RESERVED_NAMES.some((r) => r.toLowerCase() === lower)) {
+    toast(`"${name}" is a name Cerebro reserves — choose another`);
+    return null;
+  }
 
   try {
     await createItem({
@@ -883,11 +907,12 @@ export async function createDatabase(rawName: string): Promise<string | null> {
         type: 'Type',
         icon: 'table-2',
         // `records/<plural>` is what `recordsFolder` would have picked anyway
-        // (M3.3's convention). Writing it DOWN rather than leaving it implied
+        // (M3.3's convention), unless another database already lives there
+        // (`homeFolderFor`). Writing it DOWN rather than leaving it implied
         // is the difference between a home you can see in the file and one
         // only the code knows — and it is the line a user edits when they want
         // their reading list to live in `reading/` instead.
-        folder: recordsFolder(name),
+        folder: homeFolderFor(name, getSchema(entries), entries),
         statuses: STARTER_STATUSES,
         fields: { status: { kind: 'status' } },
       },

@@ -728,6 +728,25 @@ describe('createDatabase (M47.4)', () => {
     expect(toasts.join(' ')).toContain('already exists');
   });
 
+  // The inline door let `Type` through, and a Type doc titled Type hangs a
+  // status field and a `folder:` on the metamodel itself.
+  it('refuses the names Cerebro reserves, in any case', async () => {
+    for (const name of ['Type', 'type', 'Collection', 'Skill', 'agent']) {
+      expect(await createDatabase(name)).toBeNull();
+    }
+    expect(created).toHaveLength(0);
+    expect(toasts.join(' ')).toContain('reserves');
+  });
+
+  // `Recipe` lives in records/recipes, and `Recipes` pluralizes to the same
+  // folder. Writing that down would give two databases one home.
+  it('gives a singular/plural twin a home of its own', async () => {
+    await createDatabase('Recipes');
+    const fm = created[0].frontmatter as Record<string, unknown>;
+    expect(fm.folder).not.toBe(recordsFolder('Recipe'));
+    expect(fm.folder).toBe('records/recipes-2');
+  });
+
   it('refuses a blank name silently — nothing was asked for', async () => {
     expect(await createDatabase('   ')).toBeNull();
     expect(created).toHaveLength(0);

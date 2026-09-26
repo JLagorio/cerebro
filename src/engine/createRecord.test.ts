@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { childLink, childTypeOf, createTarget, recordsFolder } from '@/engine/createRecord';
+import {
+  childLink,
+  childTypeOf,
+  createTarget,
+  homeFolderFor,
+  recordsFolder,
+} from '@/engine/createRecord';
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
@@ -159,6 +165,54 @@ describe('recordsFolder', () => {
     expect(recordsFolder('Process')).toBe('records/processes');
     expect(recordsFolder('Class')).toBe('records/classes');
     expect(recordsFolder('Box')).toBe('records/boxes');
+  });
+});
+
+describe('homeFolderFor', () => {
+  const typeDoc = (title: string, folder?: string) =>
+    makeEntry({
+      path: `types/${title.toLowerCase()}.md`,
+      title,
+      type: 'Type',
+      properties: (folder === undefined ? {} : { folder }) as Entry['properties'],
+    });
+
+  it('is the convention when nothing else lives there', () => {
+    const entries = [typeDoc('Risk')];
+    expect(homeFolderFor('Reading list', buildSchema(entries), entries)).toBe(
+      'records/reading-lists',
+    );
+  });
+
+  // `Task` and `Tasks` pluralize to one folder; written down, that would be
+  // two databases sharing a home.
+  it('steps past the implied home of a singular/plural twin', () => {
+    const entries = [typeDoc('Task')];
+    expect(homeFolderFor('Tasks', buildSchema(entries), entries)).toBe('records/tasks-2');
+  });
+
+  it('steps past another database’s DECLARED home', () => {
+    const entries = [typeDoc('Book', 'records/reading-lists')];
+    expect(homeFolderFor('Reading list', buildSchema(entries), entries)).toBe(
+      'records/reading-list',
+    );
+  });
+
+  // A folder that already holds another type's rows is taken even when no
+  // Type doc names it — the demo vault's Agents and Skills live like that.
+  it('steps past a folder that already holds another type’s records', () => {
+    const entries = [
+      makeEntry({ path: 'records/agents/scout.md', folder: 'records/agents', type: 'Agent' }),
+    ];
+    expect(homeFolderFor('Agents', buildSchema(entries), entries)).toBe('records/agents-2');
+  });
+
+  it('keeps the home of the database being named', () => {
+    const entries = [
+      typeDoc('Tasks'),
+      makeEntry({ path: 'records/tasks/a.md', folder: 'records/tasks', type: 'Tasks' }),
+    ];
+    expect(homeFolderFor('Tasks', buildSchema(entries), entries)).toBe('records/tasks');
   });
 });
 

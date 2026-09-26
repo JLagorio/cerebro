@@ -85,12 +85,49 @@ export function createTarget(
  * vault, used when the Type doc pins nothing with `folder:`.
  */
 export function recordsFolder(typeName: string): string {
-  const slug = typeName
+  return `records/${pluralize(typeSlug(typeName))}`;
+}
+
+const typeSlug = (typeName: string): string =>
+  typeName
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `records/${pluralize(slug)}`;
+
+/**
+ * The home a NEW database writes down as its `folder:` — `recordsFolder`,
+ * unless another database already lives there.
+ *
+ * `pluralize` leaves an already-plural name alone, so `Task` and `Tasks` (and
+ * `Bet`/`Bets`, `Note`/`Notes`) both come out as `records/tasks`. Harmless
+ * while the folder was an implicit fallback; once `createDatabase` writes it
+ * down, two databases would share one home — rows interleaved on disk, and
+ * one title able to land on another database's file. So the first free one
+ * of `records/<plural>`, `records/<slug>`, then `-2`, `-3`… is taken instead.
+ * "In use" is any other database's home, declared or implied, and any folder
+ * that already holds another type's records.
+ */
+export function homeFolderFor(name: string, schema: Schema, entries: Entry[]): string {
+  const taken = new Set<string>();
+  for (const [typeName, def] of schema.types) {
+    if (typeName !== name) taken.add(def.folder ?? recordsFolder(typeName));
+  }
+  const occupied = (folder: string) =>
+    taken.has(folder) ||
+    entries.some(
+      (e) =>
+        e.type !== null &&
+        e.type !== name &&
+        (e.folder === folder || e.folder.startsWith(`${folder}/`)),
+    );
+  const home = recordsFolder(name);
+  for (const candidate of [home, `records/${typeSlug(name) || 'records'}`]) {
+    if (!occupied(candidate)) return candidate;
+  }
+  for (let n = 2; ; n++) {
+    if (!occupied(`${home}-${n}`)) return `${home}-${n}`;
+  }
 }
 
 function pluralize(slug: string): string {
