@@ -2899,6 +2899,7 @@ mod tests {
         let dir = std::env::temp_dir().join("cerebro-actor-stamp");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
         let mut args = Map::new();
         args.insert("path".into(), json!("knowledge/systems/scouted.md"));
         args.insert("title".into(), json!("Scouted"));
@@ -4035,7 +4036,9 @@ mod tests {
         ok_patch.insert("patch".into(), json!({ "status": "done" }));
         assert!(tool_update_frontmatter(&dir, &ok_patch).is_ok());
 
-        // And write_concept — the sanctioned door — is still open.
+        // And write_concept — the sanctioned door — is still open, through
+        // the ledger writer it now requires (M49.1).
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
         let mut wc = Map::new();
         wc.insert("path".into(), json!("knowledge/metrics/onboarding.md"));
         wc.insert("type".into(), json!("Metric"));
@@ -4096,7 +4099,11 @@ mod tests {
         concept.insert("type".into(), json!("Type"));
         concept.insert("title".into(), json!("X"));
         concept.insert("body".into(), json!("b"));
-        assert!(tool_write_concept(&dir, &concept, DEFAULT_ACTOR).is_err());
+        // The type guard's refusal, not the missing ledger writer's (M49.1).
+        assert_eq!(
+            tool_write_concept(&dir, &concept, DEFAULT_ACTOR).unwrap_err(),
+            TYPE_DOC_REFUSAL
+        );
 
         // The doc survived all of it, and ordinary writes still land.
         assert_eq!(
@@ -4265,7 +4272,10 @@ mod tests {
         concept.insert("title".into(), json!("Helper"));
         concept.insert("description".into(), json!("A helper."));
         concept.insert("body".into(), json!("b"));
-        assert!(tool_write_concept(&dir, &concept, DEFAULT_ACTOR).is_err());
+        assert_eq!(
+            tool_write_concept(&dir, &concept, DEFAULT_ACTOR).unwrap_err(),
+            AGENT_DOC_REFUSAL
+        );
 
         // The record survived all of it, and ordinary writes still land.
         assert_eq!(

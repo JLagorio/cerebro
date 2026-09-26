@@ -1,12 +1,15 @@
 //! The `write_concept` compatibility adapter (M23.3): the flip from
 //! file-first to ledger-first for the knowledge bundle.
 //!
-//! With an active ledger writer, a concept write is a committed Belief
+//! A concept write is a committed Belief
 //! transition — `belief.created` or `belief.revised` plus exact
 //! relation/alias events, batched when the transition has more than one
 //! event — and the file on disk is the byte-stable PROJECTION of reducer
 //! state, written through the M23.2 manifest-first protocol. Reduce,
-//! project, write, then acknowledge.
+//! project, write, then acknowledge. Without an active ledger writer every
+//! entry point refuses with `ledger_writer_unavailable` and writes nothing
+//! (M49.1): the file-first fallback this adapter once kept was the direct
+//! cause of the 2026-09 divergence incident.
 //!
 //! M24.4 DELETED the hard-coded low-risk auto-apply decision this adapter
 //! shipped with. What remains here is SERVER ENRICHMENT — resolving
@@ -63,47 +66,71 @@ pub const UNSUPPORTED_ALIAS_REMOVAL: &str =
     "unsupported_alias_removal: alias removal has no v1 event — keep the alias or wait for the \
      maintenance channel";
 
-/// Ledger-first `write_concept`. `None` when no ledger writer is active
-/// for the vault (the caller keeps its legacy file-first path).
+/// The refusal every knowledge write returns when no ledger writer is
+/// active for the vault (M49.1, K1). There is deliberately no file-first
+/// fallback: a concept written beside the ledger is bytes the projection
+/// manifest never recorded, so the next scan reads it as divergence and
+/// pauses capture — the 2026-09 "Knowledge history diverged" incident.
+pub const LEDGER_WRITER_UNAVAILABLE: &str = "ledger_writer_unavailable";
+
+fn writer_unavailable(vault: &Path) -> String {
+    format!(
+        "{LEDGER_WRITER_UNAVAILABLE}: no ledger writer is active for {} — nothing was \
+         written (ledger_status says why)",
+        vault.display()
+    )
+}
+
+/// Refused outright rather than written: only `knowledge/` is ledger-backed.
+fn outside_bundle(rel: &str) -> String {
+    format!("only knowledge/ concepts are ledger-backed; {rel} is outside the bundle")
+}
+
+/// Ledger-first `write_concept`: a committed Belief transition whose file
+/// is the projection. Refuses with `ledger_writer_unavailable` when no
+/// writer is active for the vault.
 pub fn write_concept(
     vault: &Path,
     rel: &str,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
-) -> Option<Result<(), String>> {
+) -> Result<(), String> {
     if !rel.starts_with("knowledge/") {
-        return None; // only the flipped subtree runs ledger-first
+        return Err(outside_bundle(rel));
     }
     shadow::with_writer(vault, |writer| {
         write_concept_with(writer, vault, rel, frontmatter, body)
     })
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))
 }
 
-/// Ledger-first knowledge-log append. `None` without an active writer.
+/// Ledger-first knowledge-log append. Refuses without an active writer.
 pub fn append_log(
     vault: &Path,
     concept_rel: &str,
     title: &str,
     existed: bool,
-) -> Option<Result<(), String>> {
+) -> Result<(), String> {
     shadow::with_writer(vault, |writer| {
         append_log_with(writer, vault, concept_rel, title, existed)
     })
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))
 }
 
 /// Ledger-first `verify_concept` (M23.4): the human stamp lands in fields
 /// through a normal `belief.revised`, then `belief.attested` pins the
 /// reviewed — now current — revision event and its projection hash, and
-/// the projection regenerates. `None` without an active writer.
+/// the projection regenerates. Refuses without an active writer.
 pub fn verify_concept(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
-) -> Option<Result<(), String>> {
+) -> Result<(), String> {
     if !rel.starts_with("knowledge/") {
-        return None;
+        return Err(outside_bundle(rel));
     }
     shadow::with_writer(vault, |writer| verify_with(writer, vault, rel, patch))
+        .unwrap_or_else(|| Err(writer_unavailable(vault)))
 }
 
 /// Honest event time only: a date-only stamp yields None, never a

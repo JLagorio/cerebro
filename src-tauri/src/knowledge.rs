@@ -1,10 +1,12 @@
 //! Knowledge bundle boundary (M5).
 //!
 //! `knowledge/` is an Open Knowledge Format bundle maintained by the AI
-//! knowledge base. Humans read and VERIFY it; they do not edit it. That
-//! boundary is enforced here, at the IPC layer, rather than by disabling
-//! buttons in the UI — a disabled button is a suggestion, a rejected
-//! command is a rule.
+//! knowledge base. Humans read and VERIFY it; since M23.7 an in-app edit
+//! is CAPTURED through the ledger (`ledger::capture`) rather than written
+//! directly, and `guard_human_write` refuses what capture cannot take. That
+//! boundary is enforced at the IPC layer rather than by disabling buttons
+//! in the UI — a disabled button is a suggestion, a rejected command is a
+//! rule.
 //!
 //! Verification is the one exception, and it is deliberately narrow:
 //! `verify_concept` may touch the `verified` key and nothing else. Without

@@ -26,9 +26,10 @@
 //! Both authority fields are UI-selected and default to `unknown`; nothing
 //! here infers `project_owner` or `firsthand` from the actor's identity.
 //!
-//! The valve itself opens at M23.7 — until then `guard_human_write` still
-//! refuses the in-app paths, and this module is the machinery behind the
-//! new capture boundary plus the reconciliation adoption path.
+//! The valve opened at M23.7: `save_note` and the watcher route human and
+//! out-of-band edits here. `guard_human_write` still refuses the in-app
+//! paths where no writer is active or an edit cannot be represented. This
+//! module is also the reconciliation adoption path.
 
 use std::collections::BTreeSet;
 use std::path::Path;

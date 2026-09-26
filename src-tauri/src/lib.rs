@@ -934,8 +934,8 @@ fn verify_concept(
     patch: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
     knowledge::guard_verify(&path, &patch)?;
-    // Byte-identical writes to update_frontmatter; the shadow event says
-    // what actually happened (knowledge.verify, M21.8).
+    // A field revision plus its attestation through the ledger writer
+    // (M23.4); refused, not written, when no writer is active (M49.1).
     vault::write::verify_frontmatter(Path::new(&vault), &path, &patch)
 }
 
@@ -1456,8 +1456,9 @@ fn ledger_head(vault: String) -> Option<ledger::LedgerHead> {
     ledger::head(Path::new(&vault))
 }
 
-/// Shadow-mode diagnostics (M21.8): a live classification of the vault's
-/// ledger. Read-only — no minting, no side effects, no UI.
+/// Ledger diagnostics (M21.8): a live classification of the vault's
+/// ledger, read by the reconciliation banner. Read-only — no minting, no
+/// side effects.
 #[tauri::command(async)]
 fn ledger_status(app: tauri::AppHandle, vault: String) -> ledger::shadow::LedgerStatus {
     ledger::shadow::status(config_dir(&app).ok().as_deref(), Path::new(&vault))
@@ -1473,7 +1474,8 @@ fn start_watcher(
     let vault_path = PathBuf::from(&vault);
     // M21.8 startup: run the M21.4 verification, record the verdict, start
     // shadow recording for this vault. Never blocks watching — a refused
-    // ledger records nothing and says why through ledger_status.
+    // ledger holds no writer, so knowledge writes refuse and ledger_status
+    // says why. Idempotent across webview reloads (M49.1).
     if let Ok(dir) = config_dir(&app) {
         let _ = ledger::shadow::activate(&dir, &vault_path);
         // M24.2: the runtime DB is armed beside the ledger index, in

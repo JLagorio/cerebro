@@ -1,13 +1,17 @@
-//! Shadow-mode recording (M21.8): the ledger observes what the app already
-//! does. Existing write paths are unchanged from every caller's point of
-//! view — shadow events flow AFTER a write commits, `v: 0`, additive-only
-//! from here on. No UI, no frontend events, zero behavioral change.
+//! The active ledger writer (M21.8, M23.3): one per process, for the open
+//! vault. Two halves share it.
 //!
-//! Best-effort by constitution: `record` never fails the write it shadows.
-//! It is a silent no-op whenever there is no active writer — unit tests and
-//! browser builds (never activated), a vault whose verdict refused the
-//! writer, or a second app instance that lost the single-writer lock. What
-//! IS active is visible through `status`, never through behavior.
+//! `with_writer` is AUTHORITATIVE — the one door every ledger-first write
+//! goes through (concepts, verify, capture, proposals, ingest). Without an
+//! active writer it returns `None`, and the knowledge writers turn that into
+//! a `ledger_writer_unavailable` refusal (M49.1): nothing writes the bundle
+//! beside the ledger.
+//!
+//! `record` is SHADOW — `vault.write`-style observations appended AFTER an
+//! ordinary write commits, `v: 0`, additive-only. Best-effort by
+//! constitution: it never fails the write it shadows, and it is a silent
+//! no-op whenever there is no active writer (unit tests, a refused verdict,
+//! a second app instance that lost the single-writer lock).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -78,10 +82,21 @@ fn normalize(path: &Path) -> PathBuf {
 /// index's remembered head, records the verdict, opens the single writer on
 /// the recoverable verdicts (performing their recovery actions), replays
 /// the M21.5 index, and remembers the head. Never an error: a refused
-/// ledger simply records nothing, and says why through `ledger_status`.
+/// ledger holds no writer, every knowledge write refuses with
+/// `ledger_writer_unavailable` (M49.1), and `ledger_status` says why.
+///
+/// Idempotent for the vault that already holds a live writer (M49.1, K2):
+/// the webview re-runs `start_watcher` on every reload, and a second
+/// `LedgerWriter::open` here would fail on the flock this same process
+/// holds — replacing the working writer with that failure switched
+/// recording off mid-session.
 pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
     let vault = normalize(vault);
     let dir = ledger_dir(&vault);
+
+    if let Some(live_id) = live_writer_id(&vault) {
+        return classify(&dir, Some(&live_id), None).verdict;
+    }
 
     let id = match writer_id(config_dir) {
         Ok(id) => id,
@@ -114,7 +129,8 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
         Verdict::Valid | Verdict::TornTail { .. } | Verdict::SealPending | Verdict::NoLedger => {
             // Recoverable (or empty) — open performs the recovery actions
             // and mints on first contact. A held lock (second instance)
-            // lands in the None arm below: shadow stays silent there.
+            // leaves no writer: shadow events drop and knowledge writes
+            // refuse there.
             LedgerWriter::open(&vault, &id).ok()
         }
         _ => None,
@@ -271,6 +287,13 @@ fn install_if_unchanged(vault: &Path, folded: &Arc<Folded>) {
     }
 }
 
+/// The writer id of the live writer already holding `vault`, if one does.
+fn live_writer_id(vault: &Path) -> Option<String> {
+    let guard = active().lock().ok()?;
+    let active = guard.as_ref()?;
+    (active.vault == vault && active.writer.is_some()).then(|| active.writer_id.clone())
+}
+
 fn replace_active(next: Active) {
     if let Ok(mut guard) = active().lock() {
         *guard = Some(next);
@@ -288,9 +311,10 @@ pub(crate) fn deactivate() {
 
 /// Run `f` against this vault's ACTIVE ledger writer — the door the M23.3
 /// canonical knowledge write paths use. `None` when no writer is active
-/// for the vault (unit fixtures, browser builds, a refused ledger, a
-/// second instance that lost the lock); the caller keeps its legacy
-/// file-first behavior there, and `ledger_status` names why.
+/// for the vault (unit fixtures, a refused ledger, a second instance that
+/// lost the lock). `None` is a refusal, never a cue to write the file
+/// directly: the knowledge writers turn it into `ledger_writer_unavailable`
+/// (M49.1), and `ledger_status` names why.
 pub fn with_writer<T>(vault: &Path, f: impl FnOnce(&mut LedgerWriter) -> T) -> Option<T> {
     let mut guard = active().lock().ok()?;
     let active = guard.as_mut()?;
@@ -407,19 +431,37 @@ pub fn status(config_dir: Option<&Path>, vault: &Path) -> LedgerStatus {
     }
 }
 
+/// The Active slot is process-global, so every test in the crate that
+/// touches it shares one lock.
+#[cfg(test)]
+pub(crate) mod testing {
+    use std::path::Path;
+    use std::sync::{Mutex, MutexGuard};
+
+    static SHADOW_LOCK: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn lock() -> MutexGuard<'static, ()> {
+        SHADOW_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Make `vault` the active target with a live writer, the way the app's
+    /// startup does. Hold the guard for as long as the test writes: the
+    /// knowledge writers refuse without an active writer (M49.1).
+    pub(crate) fn activated(vault: &Path) -> MutexGuard<'static, ()> {
+        let guard = lock();
+        super::deactivate();
+        let config = crate::vault::testutil::temp_vault("shadow-activated-config");
+        super::activate(&config, vault);
+        guard
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::testing::lock;
     use super::*;
     use crate::vault::testutil;
     use crate::vault::write as vw;
-
-    /// The Active slot is process-global; tests that touch it take this
-    /// lock so parallel test threads cannot swap each other's vaults.
-    static SHADOW_LOCK: Mutex<()> = Mutex::new(());
-
-    fn lock() -> std::sync::MutexGuard<'static, ()> {
-        SHADOW_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
 
     fn fm(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
         pairs
@@ -782,5 +824,107 @@ mod tests {
         deactivate();
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(&config);
+    }
+
+    // M49.1 (K2): the webview re-runs start_watcher on every reload. A
+    // second open on the same vault used to fail on this process's own
+    // flock and replace the working writer with None.
+    #[test]
+    fn activate_twice_keeps_writer() {
+        let _guard = lock();
+        deactivate();
+        let vault = testutil::temp_vault("shadow-activate-twice");
+        let config = testutil::temp_vault("shadow-activate-twice-config");
+        assert_eq!(activate(&config, &vault), Verdict::NoLedger);
+        assert_eq!(activate(&config, &vault), Verdict::Valid);
+        assert!(
+            with_writer(&vault, |_| ()).is_some(),
+            "the live writer survived"
+        );
+
+        let before = read_ledger(&ledger_dir(&vault)).unwrap().records;
+        vw::write_concept(
+            &vault,
+            "knowledge/concepts/twice.md",
+            &fm(&[("description", serde_json::json!("Still recording."))]),
+            "# Twice\n\nStill recording.",
+        )
+        .unwrap();
+        assert!(read_ledger(&ledger_dir(&vault)).unwrap().records > before);
+
+        deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    // M49.1 (K1): the incident's direct cause was a file-first fallback
+    // that wrote concepts, verifies and log lines beside the ledger. With
+    // no writer for the vault — never activated, or another vault active —
+    // each of the three refuses and the disk is byte-for-byte unchanged.
+    #[test]
+    fn write_concept_without_writer_refuses_and_writes_nothing() {
+        let _guard = lock();
+        deactivate();
+        let other = testutil::temp_vault("shadow-writerless-other");
+        let config = testutil::temp_vault("shadow-writerless-config");
+        let vault = testutil::temp_vault("shadow-writerless");
+        let concept = "knowledge/concepts/kept.md";
+        let original = "---\ntype: Reference\ndescription: Kept.\n---\n\n# Kept\n";
+        testutil::write(&vault, concept, original);
+        let unchanged = |label: &str| {
+            assert_eq!(
+                std::fs::read_to_string(vault.join(concept)).unwrap(),
+                original,
+                "{label}: the concept is untouched"
+            );
+            assert!(
+                !vault.join("knowledge/concepts/fresh.md").exists(),
+                "{label}"
+            );
+            assert!(!vault.join(crate::knowledge::LOG_PATH).exists(), "{label}");
+            assert!(!ledger_dir(&vault).exists(), "{label}: nothing minted");
+        };
+
+        for (label, active_other) in [("never activated", false), ("another vault", true)] {
+            if active_other {
+                activate(&config, &other);
+            }
+            let refusals = [
+                vw::write_concept(
+                    &vault,
+                    concept,
+                    &fm(&[("description", serde_json::json!("Rewritten."))]),
+                    "# Kept\n\nRewritten.",
+                ),
+                vw::write_concept(
+                    &vault,
+                    "knowledge/concepts/fresh.md",
+                    &fm(&[("description", serde_json::json!("New."))]),
+                    "# Fresh",
+                ),
+                vw::verify_frontmatter(
+                    &vault,
+                    concept,
+                    &fm(&[(
+                        "verified",
+                        serde_json::json!({"by": "human", "at": "2026-09-26"}),
+                    )]),
+                ),
+                vw::append_knowledge_log(&vault, concept, "Kept", true),
+            ];
+            for refusal in refusals {
+                let err = refusal.expect_err(label);
+                assert!(
+                    err.starts_with(super::super::concepts::LEDGER_WRITER_UNAVAILABLE),
+                    "{label}: {err}"
+                );
+            }
+            unchanged(label);
+        }
+
+        deactivate();
+        for dir in [&vault, &other, &config] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }

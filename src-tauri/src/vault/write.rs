@@ -335,25 +335,17 @@ pub fn update_frontmatter(
     Ok(())
 }
 
-/// The verify path (M21.8): byte-identical writes to `update_frontmatter`,
-/// but the shadow event says what actually happened — a human confirmed a
-/// concept — instead of "a file changed". The lib.rs `verify_concept`
-/// command is the only caller.
+/// The verify path (M23.4): the stamp is a field revision plus a
+/// `belief.attested` pinned to the reviewed revision event and its
+/// projection hash, and the file regenerates as the projection. Refuses
+/// with `ledger_writer_unavailable` when no ledger writer is active
+/// (M49.1). The lib.rs `verify_concept` command is the only caller.
 pub fn verify_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    // The M23.4 flip: with an active writer, the stamp is a field revision
-    // plus a belief.attested pinned to the reviewed revision event and its
-    // projection hash, and the file regenerates as the projection.
-    if let Some(result) = crate::ledger::concepts::verify_concept(vault, rel, patch) {
-        return result;
-    }
-    let content = patched_frontmatter(vault, rel, patch)?;
-    write_file(&safe_join(vault, rel)?, &content)?;
-    shadow_write(vault, rel, &content, "knowledge.verify", None);
-    Ok(())
+    crate::ledger::concepts::verify_concept(vault, rel, patch)
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
@@ -597,36 +589,21 @@ pub fn create_note(
 /// stable identity (its path is its OKF concept ID), so an agent revising one
 /// must overwrite it rather than leave `churn-2.md` beside `churn.md`.
 /// Intermediate directories are created — the agent organizes the bundle.
+///
+/// The concept write is a committed Belief transition and the file is its
+/// byte-stable projection, written through the manifest-first protocol
+/// (M23.3). Refuses with `ledger_writer_unavailable` when no ledger writer
+/// is active (M49.1) — there is no file-first fallback.
 pub fn write_concept(
     vault: &Path,
     rel: &str,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
-    // The M23.3 flip: with an active ledger writer, the concept write is a
-    // committed Belief transition and the file is its byte-stable
-    // projection, written through the manifest-first protocol.
-    if let Some(result) = crate::ledger::concepts::write_concept(vault, rel, frontmatter, body) {
-        return result;
-    }
-    // Legacy file-first path — no active writer for this vault (unit
-    // fixtures, browser builds, a ledger the startup verdict refused; the
-    // refusal is visible through ledger_status, and the M23.6 scan
-    // reconciles once a writer returns).
-    let content = concept_write(vault, rel, frontmatter, body)?;
-    // "Actor where the call site knows it" (M21.8): the MCP layer already
-    // server-stamps `generated.by` into the frontmatter it passes here, so
-    // the actor rides the data — no new plumbing, and nothing an agent can
-    // separately claim.
-    let actor = frontmatter
-        .get("generated")
-        .and_then(|g| g.get("by"))
-        .and_then(|by| by.as_str());
-    shadow_write(vault, rel, &content, "knowledge.write_concept", actor);
-    Ok(())
+    crate::ledger::concepts::write_concept(vault, rel, frontmatter, body)
 }
 
-/// The shared exact-path writer behind `write_concept` and `write_source`.
+/// The exact-path writer behind `write_source`.
 fn concept_write(
     vault: &Path,
     rel: &str,
@@ -695,30 +672,9 @@ pub fn append_knowledge_log(
     title: &str,
     existed: bool,
 ) -> Result<(), String> {
-    // M23.3: the log is a projection too — with an active writer, the
-    // append is a Belief body revision and the file is regenerated.
-    if let Some(result) = crate::ledger::concepts::append_log(vault, rel, title, existed) {
-        return result;
-    }
-    let target = safe_join(vault, crate::knowledge::LOG_PATH)?;
-    let existing = std::fs::read_to_string(&target).unwrap_or_default();
-    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let next = crate::knowledge::insert_log_entry(
-        &existing,
-        &date,
-        crate::knowledge::log_kind(existed),
-        title,
-        rel,
-    );
-    write_file(&target, &next)?;
-    shadow_write(
-        vault,
-        crate::knowledge::LOG_PATH,
-        &next,
-        "vault.write",
-        None,
-    );
-    Ok(())
+    // M23.3: the log is a projection too — the append is a Belief body
+    // revision and the file is regenerated. No writer, no append (M49.1).
+    crate::ledger::concepts::append_log(vault, rel, title, existed)
 }
 
 /// Replace the H1 line that `parse::extract_h1_title` would read the title
