@@ -146,6 +146,23 @@ describe('planMigration: collections become pages', () => {
     expect(collectionsFromPages([written]).map((c) => c.folder)).toEqual(['delivery']);
   });
 
+  /* Merging `type: Collection` into a folder note that is a record would
+     re-type it and take it out of its database. */
+  it('keeps the marker when the folder note is already a record', () => {
+    const entries = [
+      makeEntry({
+        path: 'atlas/atlas.md',
+        filename: 'atlas.md',
+        folder: 'atlas',
+        title: 'Atlas',
+        type: 'Project',
+      }),
+    ];
+    const plan = planMigration(entries, [collection('atlas')], [], buildSchema(entries));
+    expect(plan.folderNotes).toEqual([]);
+    expect(plan.kept).toEqual([expect.objectContaining({ path: 'atlas/collection.yml' })]);
+  });
+
   it('merges into an existing folder note rather than displacing it', () => {
     const entries = [makeEntry({ path: 'delivery/delivery.md', title: 'Delivery' })];
     const plan = planMigration(entries, [collection('delivery')], [], buildSchema([]));

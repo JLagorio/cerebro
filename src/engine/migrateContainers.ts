@@ -113,12 +113,24 @@ export function planMigration(
   lists: ListFile[],
   schema: Schema,
 ): MigrationPlan {
+  const kept: KeptList[] = [];
   const folderNotes = collections
     // An UNDECLARED collection is a folder that is one only because it holds
     // lists (`declared: false`). There is no `collection.yml` to retire and
     // nothing stored about it, so converting it would invent a page nobody
     // asked for.
     .filter((c) => c.declared)
+    // A folder note that is already a RECORD would be re-typed by the merge
+    // and vanish from its database. Its marker stays, and says why.
+    .filter((c) => {
+      const type = folderNote(c.folder, entries)?.type ?? null;
+      if (type === null || type === COLLECTION_TYPE) return true;
+      kept.push({
+        path: `${c.folder}/collection.yml`,
+        reason: `Its folder note is a ${type} record; making it the container would take it out of its database.`,
+      });
+      return false;
+    })
     // A page-declared collection IS the converted form: there is no marker to
     // retire, and planning it again made `isMigrated` false on a vault that
     // had finished converting.
@@ -135,7 +147,6 @@ export function planMigration(
       };
     });
 
-  const kept: KeptList[] = [];
   const byDatabase = new Map<string, ListFile[]>();
   for (const list of lists) {
     const type = list.definition.source.type;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CollectionFile } from '@/engine/types';
-import { deleteNote, saveCollection } from '@/lib/ipc';
+import { deleteNote, listCollections, saveCollection } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
@@ -11,6 +11,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc')>()),
   saveCollection: vi.fn(async () => undefined),
   deleteNote: vi.fn(async () => undefined),
+  listCollections: vi.fn(async () => []),
 }));
 
 /**
@@ -35,6 +36,7 @@ beforeEach(() => {
   patches = [];
   vi.mocked(saveCollection).mockClear();
   vi.mocked(deleteNote).mockReset().mockResolvedValue(undefined);
+  vi.mocked(listCollections).mockReset().mockResolvedValue([]);
   useUiStore.setState({ toast: vi.fn() });
   useVaultStore.setState({
     vaultPath: '/demo-vault',
@@ -57,6 +59,9 @@ describe('updateCollection on a page-declared collection', () => {
     });
     expect(ok).toBe(true);
     expect(saveCollection).not.toHaveBeenCalled();
+    // `collections` is derived at scan time; in Tauri the page write does not
+    // rescan on its own, so without this the sidebar keeps the old name.
+    expect(useVaultStore.getState().rescan).toHaveBeenCalled();
     expect(patches).toEqual([
       {
         path: 'delivery/delivery.md',
@@ -93,12 +98,24 @@ describe('deleteCollection on a page-declared collection', () => {
     expect(deleteNote).not.toHaveBeenCalledWith('/demo-vault', 'delivery/delivery.md');
   });
 
+  it('touches no marker when there is none', async () => {
+    expect(await deleteCollection(declaredByPage)).toBe(true);
+    expect(deleteNote).not.toHaveBeenCalled();
+  });
+
   // A stray marker from before edits reached the page would bring the
-  // collection straight back; its usual absence is not a failure.
-  it('clears a stray marker, and succeeds when there is none', async () => {
-    vi.mocked(deleteNote).mockRejectedValue(new Error('not found'));
+  // collection straight back once the page stops claiming the folder.
+  it('clears a stray marker beside the page', async () => {
+    vi.mocked(listCollections).mockResolvedValue([{ folder: 'delivery', yaml: 'name: D\n' }]);
     expect(await deleteCollection(declaredByPage)).toBe(true);
     expect(deleteNote).toHaveBeenCalledWith('/demo-vault', 'delivery/collection.yml');
+  });
+
+  it('answers false, and says so, when a stray marker will not delete', async () => {
+    vi.mocked(listCollections).mockResolvedValue([{ folder: 'delivery', yaml: 'name: D\n' }]);
+    vi.mocked(deleteNote).mockRejectedValue(new Error('EACCES'));
+    expect(await deleteCollection(declaredByPage)).toBe(false);
+    expect(vi.mocked(useUiStore.getState().toast)).toHaveBeenCalled();
   });
 
   it('answers false when the page write fails', async () => {

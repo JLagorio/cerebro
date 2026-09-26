@@ -30,7 +30,7 @@ import type {
   ListFile,
   ViewDefinition,
 } from '@/engine/types';
-import { deleteNote, saveCollection, saveList, saveView } from '@/lib/ipc';
+import { deleteNote, listCollections, saveCollection, saveList, saveView } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
 import { slugifyListId } from '@/views/ViewToolbar';
 import { useUiStore } from '@/stores/uiStore';
@@ -211,7 +211,7 @@ export async function updateCollection(
   // `collection.yml` behind. `patchFrontmatter` toasts its own failure.
   if (collection.page !== undefined) {
     const title = entries.find((e) => e.path === collection.page)?.title;
-    return patchFrontmatter(collection.page, {
+    const ok = await patchFrontmatter(collection.page, {
       // The page's title already names it; `name:` is only a deviation.
       name: definition.name === title ? null : definition.name,
       icon: definition.icon,
@@ -219,6 +219,11 @@ export async function updateCollection(
       order: definition.order,
       description: definition.description,
     });
+    // `collections` is derived at scan time, and in Tauri `patchFrontmatter`
+    // does not rescan (own-write suppression) — without this the sidebar and
+    // the page keep the old name until something unrelated rescans.
+    if (ok) await refresh();
+    return ok;
   }
   try {
     await saveCollection(vaultPath, collection.folder, serializeCollection(definition));
@@ -231,11 +236,12 @@ export async function updateCollection(
 }
 
 /**
- * Stop a folder being a Collection by removing its marker.
+ * Stop a folder being a Collection by removing what declares it — its
+ * `collection.yml`, or the `type: Collection` on its folder note (M47.5).
  *
  * Deliberately NOT a recursive delete. The Lists and Docs inside are content;
- * the marker is the only thing that made the folder a container, so removing it
- * un-collects the folder and leaves everything in it on disk. Deleting a
+ * the declaration is the only thing that made the folder a container, so
+ * removing it un-collects the folder and leaves everything in it on disk. Deleting a
  * container should never be a way to lose work you did not name.
  */
 export async function deleteCollection(collection: CollectionFile): Promise<boolean> {
@@ -247,11 +253,27 @@ export async function deleteCollection(collection: CollectionFile): Promise<bool
   // saying so: the page keeps its prose and becomes an ordinary page, and
   // everything in the folder stays, as "keeps contents" promises.
   if (collection.page !== undefined) {
-    if (!(await patchFrontmatter(collection.page, { type: null }))) return false;
     // A rename made before edits reached the page could have written a stray
-    // marker beside it, which would bring the collection straight back. Its
-    // absence is the normal case, so a failed delete here is not an error.
-    await deleteNote(vaultPath, `${collection.folder}/collection.yml`).catch(() => undefined);
+    // marker beside it, and a surviving one brings the collection straight
+    // back the moment the page stops claiming the folder. Deleted only when
+    // it is really there, and a failure to delete it is a failure.
+    let stray: boolean;
+    try {
+      stray = (await listCollections(vaultPath)).some((m) => m.folder === collection.folder);
+    } catch {
+      toast(`Couldn't remove "${collection.definition.name}"`);
+      return false;
+    }
+    if (!(await patchFrontmatter(collection.page, { type: null }))) return false;
+    if (stray) {
+      try {
+        await deleteNote(vaultPath, `${collection.folder}/collection.yml`);
+      } catch {
+        toast(`Couldn't remove the old collection.yml in ${collection.folder}`);
+        await refresh();
+        return false;
+      }
+    }
     await refresh();
     return true;
   }

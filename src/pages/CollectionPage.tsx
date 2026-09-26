@@ -532,8 +532,9 @@ function ListCard({
  * Edited in place rather than in the rename dialog: it is prose about the work,
  * so it belongs on the page it describes, and a textarea you can click into is
  * a lower bar than remembering which dialog holds it. Saves on blur, and only
- * when it actually changed — every save writes `collection.yml`, and a write
- * per focus-out of an untouched field is a git commit nobody made.
+ * when it actually changed — every save writes the collection's declaration
+ * (its `collection.yml`, or its page's frontmatter), and a write per
+ * focus-out of an untouched field is a git commit nobody made.
  */
 function Description({ collection }: { collection: CollectionFile }) {
   const stored = collection.definition.description ?? '';
