@@ -261,6 +261,18 @@ describe('DatabaseBlockView pickers', () => {
     expect(document.querySelector('.cb-dlg')).toBeNull();
   });
 
+  // The form's hint says "Esc to go back". Closing the whole menu instead
+  // threw away what was typed and the roster with it.
+  it('steps back to the roster on Escape from the name form, menu still open', () => {
+    editable('');
+    fireEvent.click(screen.getByTestId('database-block-pick'));
+    fireEvent.click(screen.getByTestId('database-block-new'));
+    fireEvent.keyDown(screen.getByLabelText('New database name'), { key: 'Escape' });
+    expect(screen.queryByLabelText('New database name')).toBeNull();
+    expect(screen.getByTestId('database-block-new')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Reading list/ })).toBeTruthy();
+  });
+
   it('creates the database and points the block at it, in one gesture', async () => {
     const onChange = editable('');
     fireEvent.click(screen.getByTestId('database-block-pick'));

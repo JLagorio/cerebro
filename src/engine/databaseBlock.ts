@@ -1,4 +1,4 @@
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 import type { Schema, ViewDefinition } from './types';
 import { typeViews } from './typeCatalog';
 
@@ -73,11 +73,51 @@ export function parseDatabaseRef(body: string): DatabaseRef | null {
  * fallback for an absent `view:` is POSITIONAL ("the database's first"), so
  * omitting the id of a view that happens to be first today would let
  * reordering that database's tabs silently change what this page shows.
+ *
+ * Through the YAML writer, never interpolated: a database is named whatever
+ * its author typed, and `Books: 2026`, `Notes #1`, `2026` or `true` written
+ * raw read back as a parse error, a truncated name, a number or a boolean —
+ * each one a pointer lost on the next load. The writer quotes only a value
+ * that needs it, so `database: Reading list` stays as a person would type it.
  */
 export function serializeDatabaseRef(ref: DatabaseRef): string {
-  const lines = [`database: ${ref.database}`];
-  if (ref.view !== null) lines.push(`view: ${ref.view}`);
-  return lines.join('\n');
+  const body =
+    ref.view === null ? { database: ref.database } : { database: ref.database, view: ref.view };
+  return stringify(body, { lineWidth: 0 }).trimEnd();
+}
+
+/** The slice of an editor block `pointerOccurrence` reads. */
+interface BlockLike {
+  id: string;
+  type: string;
+  props?: Record<string, unknown>;
+  children?: BlockLike[];
+}
+
+/**
+ * Which copy of its pointer a block is: 0 for the first block in document
+ * order showing this database and view, 1 for the second, and so on.
+ *
+ * What keeps two embeds of one view on a page from sharing a fold. Not the
+ * block id — BlockNote mints fresh ids on every parse, so a fold keyed on one
+ * would not survive a reload and would leave a dead key behind each time. The
+ * ordinal is what the page itself says, so it does both.
+ */
+export function pointerOccurrence(blocks: BlockLike[], id: string): number {
+  const embeds: BlockLike[] = [];
+  const walk = (list: BlockLike[]) => {
+    for (const b of list) {
+      if (b.type === 'database') embeds.push(b);
+      if (b.children !== undefined) walk(b.children);
+    }
+  };
+  walk(blocks);
+  const self = embeds.find((b) => b.id === id);
+  if (self === undefined) return 0;
+  const twins = embeds.filter(
+    (b) => b.props?.database === self.props?.database && b.props?.view === self.props?.view,
+  );
+  return twins.indexOf(self);
 }
 
 export type ResolvedDatabaseBlock =

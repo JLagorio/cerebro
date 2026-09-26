@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DATABASE_FENCE,
   parseDatabaseRef,
+  pointerOccurrence,
   resolveDatabaseRef,
   serializeDatabaseRef,
 } from './databaseBlock';
@@ -92,6 +93,67 @@ describe('serializeDatabaseRef', () => {
     expect(serializeDatabaseRef({ database: 'Reading list', view: null })).toBe(
       'database: Reading list',
     );
+  });
+
+  /**
+   * A database is named whatever its author typed. Written raw, each of these
+   * read back as a parse error, a truncated name (`Notes #1` → `Notes`), a
+   * number, a boolean or a list — every one a pointer lost on the next load,
+   * and the truncated one written back over the original on the next save.
+   */
+  it('round-trips names YAML would otherwise read as something else', () => {
+    for (const database of [
+      'Books: 2026',
+      'Notes #1',
+      '2026',
+      'true',
+      'null',
+      '~',
+      '[draft]',
+      '? q',
+      '@home',
+      'x'.repeat(120),
+    ]) {
+      for (const view of [null, 'shelf', '2026']) {
+        expect(parseDatabaseRef(serializeDatabaseRef({ database, view }))).toEqual({
+          database,
+          view,
+        });
+      }
+    }
+  });
+});
+
+describe('pointerOccurrence', () => {
+  const db = (id: string, database: string, view = '') => ({
+    id,
+    type: 'database',
+    props: { database, view },
+  });
+  const doc = [
+    db('a', 'Reading list', 'shelf'),
+    { id: 'p', type: 'paragraph' },
+    db('b', 'Reading list', 'stack'),
+    {
+      id: 'cols',
+      type: 'columnList',
+      children: [{ id: 'c1', type: 'column', children: [db('c', 'Reading list', 'shelf')] }],
+    },
+    db('d', 'Reading list', 'shelf'),
+  ];
+
+  // Two embeds of one view on one page are two copies, told apart by order —
+  // including one nested in a column — so each folds on its own.
+  it('counts earlier blocks showing the same database and view, in document order', () => {
+    expect(['a', 'c', 'd'].map((id) => pointerOccurrence(doc, id))).toEqual([0, 1, 2]);
+  });
+
+  it('does not count a different view of the same database', () => {
+    expect(pointerOccurrence(doc, 'b')).toBe(0);
+  });
+
+  it('answers 0 for a block it cannot find', () => {
+    expect(pointerOccurrence(doc, 'nope')).toBe(0);
   });
 });
 

@@ -4,7 +4,7 @@ import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
-import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
+import { DATABASE_FENCE, pointerOccurrence, serializeDatabaseRef } from '@/engine/databaseBlock';
 import {
   BASE_MARKER_DEPTH,
   DEFAULT_COLUMN_WIDTH,
@@ -329,6 +329,7 @@ export const DatabaseBlock = createReactBlockSpec(
       <ConnectedDatabaseBlock
         database={String(props.block.props.database ?? '')}
         view={String(props.block.props.view ?? '')}
+        occurrence={pointerOccurrence(props.editor.document as never, props.block.id)}
         // The block rewrites its own pointer. Passed rather than assumed so
         // the view keeps a real read-only mood: rendered outside an editor
         // there is no document to write back to, and a picker that silently
@@ -344,11 +345,11 @@ export const DatabaseBlock = createReactBlockSpec(
      * fence is what markdown.ts already demotes this block to for the disk.
      */
     toExternalHTML: (props) => {
+      const database = String(props.block.props.database ?? '');
       const view = String(props.block.props.view ?? '');
-      const body = serializeDatabaseRef({
-        database: String(props.block.props.database ?? ''),
-        view: view === '' ? null : view,
-      });
+      // Unset copies as the empty fence, the same spelling the disk uses.
+      const body =
+        database === '' ? '' : serializeDatabaseRef({ database, view: view === '' ? null : view });
       return (
         <pre>
           <code>{`\`\`\`${DATABASE_FENCE}\n${body}\n\`\`\``}</code>

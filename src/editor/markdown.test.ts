@@ -166,10 +166,27 @@ describe('the cerebro-database fence', () => {
    * a code block, holding exactly what they wrote.
    */
   it('leaves a fence that names no database as an ordinary code block', async () => {
-    for (const body of ['', 'view: shelf', 'database:', 'not yaml: [', '- a list']) {
+    for (const body of ['view: shelf', 'database:', 'not yaml: [', '- a list']) {
       const blocks = await markdownToBlocks(editor, fence(body));
       expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
     }
+  });
+
+  /**
+   * `/database` inserts the picker before anything is chosen, and the page
+   * saves on a debounce. That unset block reaches disk as an EMPTY fence and
+   * must come back as the picker: written as `database: `, it came back a
+   * code block the picker could never return from. An empty body holds no
+   * text, so promoting it cannot replace anything anyone typed.
+   */
+  it('round-trips an unset block through the empty fence', async () => {
+    const blocks = await markdownToBlocks(editor, fence(''));
+    expect(blocks.map((b) => b.type)).toEqual(['database']);
+    expect(blocks[0].props).toMatchObject({ database: '', view: '' });
+    const saved = await roundTrip(fence(''));
+    expect(await roundTrip(saved)).toBe(saved);
+    const reloaded = await markdownToBlocks(editor, saved);
+    expect(reloaded.map((b) => b.type)).toEqual(['database']);
   });
 
   it('does not claim a fence in another language', async () => {

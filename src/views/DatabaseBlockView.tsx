@@ -30,8 +30,9 @@ export type DatabasePointer = { database: string; view: string };
 export function ConnectedDatabaseBlock({
   database,
   view,
+  occurrence,
   onChange,
-}: DatabasePointer & { onChange?: (next: DatabasePointer) => void }) {
+}: DatabasePointer & { occurrence?: number; onChange?: (next: DatabasePointer) => void }) {
   const entries = useVaultStore((s) => s.entries);
   // The same creator the database's own screen uses, so a record made here
   // lands in the database's declared `folder:` and inherits the band it was
@@ -44,6 +45,7 @@ export function ConnectedDatabaseBlock({
     <DatabaseBlockView
       database={database}
       view={view}
+      occurrence={occurrence}
       schema={useSchema()}
       entries={entries}
       onChange={onChange}
@@ -68,6 +70,7 @@ export function ConnectedDatabaseBlock({
 export function DatabaseBlockView({
   database,
   view,
+  occurrence = 0,
   schema,
   entries,
   onChange,
@@ -77,6 +80,11 @@ export function DatabaseBlockView({
   database: string;
   /** '' is the prop-schema spelling of "named no view" — see markdown.ts. */
   view: string;
+  /**
+   * Which copy of this pointer on the page the block is (`pointerOccurrence`).
+   * Keys the fold state, so a second embed of the same view folds on its own.
+   */
+  occurrence?: number;
   schema: Schema;
   entries: Entry[];
   /**
@@ -135,10 +143,9 @@ export function DatabaseBlockView({
     [surface, database, schema],
   );
 
-  // A block whose fence named nothing should never have become a block at
-  // all (`parseDatabaseRef` returns null and the code block survives), so
-  // this is the arm for a block built in memory rather than read from disk —
-  // a create flow that has not chosen a database yet.
+  // The unset block: `/database` before anything is chosen, or its empty
+  // fence read back from disk (markdown.ts). A fence that names something
+  // unusable never gets here — it stays the code block it already was.
   if (resolved === null) {
     return (
       <Shell tone="pending" testid="database-block-unset">
@@ -239,7 +246,9 @@ export function DatabaseBlockView({
             presentation={surface.presentation}
             schema={schema}
             fields={fields}
-            scope={`database-block:${resolved.database}:${shown?.id ?? ''}`}
+            // The first copy keeps the unsuffixed key, so folds made before
+            // copies were told apart are still where the reader left them.
+            scope={`database-block:${resolved.database}:${shown?.id ?? ''}${occurrence === 0 ? '' : `:${occurrence}`}`}
             // "+ New" here creates a record of THIS database, landing in its
             // declared `folder:` — which is the whole point of embedding one
             // in the page you are writing.
@@ -328,7 +337,15 @@ function DatabasePicker({
         {label}
       </button>
       {open && (
-        <Popover anchorRef={anchorRef} onClose={close} role="menu" ariaLabel="Databases">
+        <Popover
+          anchorRef={anchorRef}
+          onClose={close}
+          // Esc steps back from the name form to the roster, as its hint
+          // says; only from the roster does it close the menu.
+          onEscape={creating ? () => setCreating(false) : close}
+          role="menu"
+          ariaLabel="Databases"
+        >
           <MenuSurface width={260} autoFocus={!creating}>
             {/* Door 2 first, above the roster (spec §6). A database you are
                 about to invent is the case the old flow could not serve at

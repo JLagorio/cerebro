@@ -197,11 +197,18 @@ export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
       return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
     }
     if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === DATABASE_FENCE) {
+      const text = blockText(b.content);
+      // An EMPTY fence is how an unset block — the picker `/database` inserts
+      // before anything is chosen — reaches disk, and it comes back as that
+      // picker. Nothing is lost by the promotion: an empty body holds no text.
+      if (text.trim() === '') {
+        return { type: 'database', props: { database: '', view: '' } } as unknown as T;
+      }
       // A fence that names no database stays the code block it already is —
       // `parseDatabaseRef` returns null rather than an empty pointer, so a
       // half-typed fence keeps showing what the user typed instead of being
       // replaced by a database block complaining about it.
-      const ref = parseDatabaseRef(blockText(b.content));
+      const ref = parseDatabaseRef(text);
       if (ref !== null) {
         // `view: ''` is the prop-schema spelling of "named none" — BlockNote
         // prop defaults are primitives, so null does not survive the trip.
@@ -251,10 +258,14 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
     if (b.type === 'database') {
       const database = typeof b.props?.database === 'string' ? b.props.database : '';
       const view = typeof b.props?.view === 'string' && b.props.view !== '' ? b.props.view : null;
+      // Unset writes an empty fence, which `promoteRichBlocks` reads back as
+      // the picker. `database: ` would read back as a pointer to nothing —
+      // a code block the picker can never return from.
+      const text = database === '' ? '' : serializeDatabaseRef({ database, view });
       return {
         type: 'codeBlock',
         props: { language: DATABASE_FENCE },
-        content: [{ type: 'text', text: serializeDatabaseRef({ database, view }), styles: {} }],
+        content: text === '' ? [] : [{ type: 'text', text, styles: {} }],
       } as unknown as T;
     }
     if (b.type === 'callout') {
