@@ -432,14 +432,17 @@ function declaredByPage(dir: string): boolean {
   if (dir === '') return false;
   const base = dir.split('/').pop() ?? dir;
   const text = files.get(`${dir}/${base}.md`);
-  if (text === undefined || !text.startsWith('---\n')) return false;
-  const end = text.indexOf('\n---', 4);
-  if (end === -1) return false;
-  // Frontmatter only: a `type: Collection` mentioned in prose is prose.
-  return text
-    .slice(4, end)
-    .split('\n')
-    .some((l) => l.trimStart().startsWith('type:') && l.split(':')[1]?.trim() === 'Collection');
+  if (text === undefined) return false;
+  // Parity with write.rs, which reads `type:` the way the scanner does — so
+  // CRLF, a BOM, a quoted value and a trailing comment all count, and a
+  // `type: Collection` in prose does not.
+  const { yaml } = splitFrontmatter(text);
+  if (yaml === null) return false;
+  try {
+    return (YAML.parse(yaml) as { type?: unknown } | null)?.type === 'Collection';
+  } catch {
+    return false;
+  }
 }
 
 /** Nearest ancestor folder declaring itself a Collection — parity with write.rs. */

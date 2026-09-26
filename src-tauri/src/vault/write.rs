@@ -836,17 +836,11 @@ fn declared_by_page(dir: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(&note) else {
         return false;
     };
-    // Frontmatter only: a `type: Collection` mentioned in prose is prose.
-    let Some(rest) = text.strip_prefix("---\n") else {
-        return false;
-    };
-    let Some(end) = rest.find("\n---") else {
-        return false;
-    };
-    rest[..end].lines().any(|l| {
-        l.trim_start().starts_with("type:")
-            && l.split(':').nth(1).map(str::trim) == Some("Collection")
-    })
+    // The scanner's own read of `type:`, because the app believes the scanner:
+    // a hand-rolled line match missed CRLF, a BOM, a quoted value and a trailing
+    // comment, calling the folder a Collection while its Lists came back at the
+    // vault root. Frontmatter only — `type: Collection` in prose is prose.
+    parse::declared_type(&text).as_deref() == Some("Collection")
 }
 
 fn collection_of(vault: &Path, file: &Path) -> Option<String> {
@@ -1358,6 +1352,61 @@ mod tests {
         let views = list_views(&vault).unwrap();
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].collection, None);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_folder_note_declares_a_collection_exactly_when_the_scanner_types_it_one() {
+        // M48.7. A hand-rolled `---\n` + `type: Collection` line match
+        // disagreed with the scanner, and the app reads the scanner: it called
+        // the first four folders Collections while their Lists came back at
+        // the vault root. Parity cases: mockIpc.test.ts.
+        let vault = testutil::temp_vault("wfm-collection-shapes");
+        let shapes = [
+            (
+                "crlf",
+                "---\r\ntype: Collection\r\n---\r\n\r\n# Crlf\r\n",
+                true,
+            ),
+            ("bom", "\u{feff}---\ntype: Collection\n---\n\n# Bom\n", true),
+            (
+                "quoted",
+                "---\ntype: \"Collection\"\n---\n\n# Quoted\n",
+                true,
+            ),
+            (
+                "commented",
+                "---\ntype: Collection # container\n---\n\n# C\n",
+                true,
+            ),
+            (
+                "prose",
+                "---\ntitle: Prose\n---\n\ntype: Collection\n",
+                false,
+            ),
+            (
+                "nested",
+                "---\nmeta:\n  type: Collection\n---\n\n# Nested\n",
+                false,
+            ),
+        ];
+        for (folder, note, _) in shapes {
+            std::fs::create_dir_all(vault.join(folder)).unwrap();
+            std::fs::write(vault.join(format!("{folder}/{folder}.md")), note).unwrap();
+            std::fs::write(
+                vault.join(format!("{folder}/{folder}.list.yml")),
+                "name: L\n",
+            )
+            .unwrap();
+        }
+
+        let views = list_views(&vault).unwrap();
+        assert_eq!(views.len(), shapes.len());
+        for (folder, _, declares) in shapes {
+            let view = views.iter().find(|v| v.id == folder).unwrap();
+            let expected = declares.then_some(folder);
+            assert_eq!(view.collection.as_deref(), expected, "{folder}");
+        }
         let _ = std::fs::remove_dir_all(&vault);
     }
 

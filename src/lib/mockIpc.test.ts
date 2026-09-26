@@ -185,6 +185,32 @@ describe('mockIpc', () => {
     expect(views.find((v) => v.id === 'stray')?.collection).toBeNull();
   });
 
+  /**
+   * M48.7 parity with `write.rs`'s shape test: a folder note declares its
+   * folder exactly when the scanner would type it a Collection. A line match
+   * missed CRLF, a BOM, a quoted value and a trailing comment, so the app
+   * called those folders Collections while their Lists came back at the root.
+   */
+  it('listViews reads the folder note the way the scanner does', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const shapes: [string, string, boolean][] = [
+      ['crlf', '---\r\ntype: Collection\r\n---\r\n\r\n# Crlf\r\n', true],
+      ['bom', '﻿---\ntype: Collection\n---\n\n# Bom\n', true],
+      ['quoted', '---\ntype: "Collection"\n---\n\n# Quoted\n', true],
+      ['commented', '---\ntype: Collection # container\n---\n\n# C\n', true],
+      ['prose', '---\ntitle: Prose\n---\n\ntype: Collection\n', false],
+      ['nested', '---\nmeta:\n  type: Collection\n---\n\n# Nested\n', false],
+    ];
+    for (const [folder, note] of shapes) {
+      fs.set(`${folder}/${folder}.md`, note);
+      fs.set(`${folder}/${folder}.list.yml`, 'name: L\n');
+    }
+    const views = await mock.listViews('/demo-vault');
+    for (const [folder, , declares] of shapes) {
+      expect(views.find((v) => v.id === folder)?.collection, folder).toBe(declares ? folder : null);
+    }
+  });
+
   // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
   it('listViews scopes project views and sorts globals first', async () => {
     // The demo vault has no legacy project folders left, so seed one here.
