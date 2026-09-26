@@ -416,7 +416,9 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
   // Loosen FIRST: the parser only gives each `:::` marker its own paragraph
   // when the markers are blank-line separated, and collapses a tight run of
   // them into one paragraph with soft breaks. The file on disk is the tight
-  // form, because nobody wants to read a page that is half blank lines.
+  // form, because nobody wants to read a page that is half blank lines —
+  // except between two layouts in a row, where the blank is the author's
+  // (see `tightenColumnMarkers`).
   const source = loosenColumnMarkers(markdown);
   return promoteColumns(
     promoteRichBlocks(

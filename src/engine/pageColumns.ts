@@ -155,7 +155,11 @@ export function loosenColumnMarkers(markdown: string): string {
  *
  * Exactness is the point. Saving an unedited page must produce identical
  * bytes — the fidelity policy `markdown.ts` has held since M2 — and a round
- * trip that grows one blank line per save grows the file forever.
+ * trip that grows one blank line per save grows the file forever. One shape
+ * is normalised rather than kept: two layouts with NO blank between them
+ * (`:::` then `:::columns`) gain one on their first save, because the parser
+ * cannot tell that from the spaced form and one of the two has to be the
+ * canonical spelling. The spaced form is, and it is stable from then on.
  */
 export function tightenColumnMarkers(markdown: string): string {
   const lines = markdown.split('\n');

@@ -602,9 +602,9 @@ describe('Sidebar', () => {
         target: { value: 'Collection' },
       });
       expect(screen.getByText(/is a name Cerebro reserves/)).toBeTruthy();
-      expect(
-        (screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
     });
 
     // Declared at birth, like the inline door: an implied home is shared by

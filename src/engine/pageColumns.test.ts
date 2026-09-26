@@ -156,6 +156,27 @@ describe('loosening and tightening', () => {
     expect(tightenColumnMarkers(loosenColumnMarkers(pair))).toBe(pair);
   });
 
+  /* The one normalisation: a pair written with NO blank between the layouts
+     reads the same as the spaced pair, so it gains that blank once — and is
+     then stable, rather than growing on every save. */
+  it('spaces a tight pair of layouts once, then leaves it alone', () => {
+    const tight = [
+      ':::columns',
+      '::::column',
+      'A.',
+      '::::',
+      ':::',
+      ':::columns',
+      '::::column',
+      'B.',
+      '::::',
+      ':::',
+    ].join('\n');
+    const once = tightenColumnMarkers(loosenColumnMarkers(tight));
+    expect(once.split('\n').filter((l) => l === '')).toHaveLength(1);
+    expect(tightenColumnMarkers(loosenColumnMarkers(once))).toBe(once);
+  });
+
   it('leaves a file with no columns in it completely alone', () => {
     const plain = 'One.\n\nTwo.\n\n```ts\nconst a = 1;\n```\n\nThree.\n';
     expect(loosenColumnMarkers(plain)).toBe(plain);

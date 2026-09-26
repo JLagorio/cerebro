@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDragGesture } from '@/hooks/useDragGesture';
-import { DEFAULT_COLUMN_WIDTH, resizeColumnPair } from '@/engine/pageColumns';
+import { DEFAULT_COLUMN_WIDTH, MIN_COLUMN_SHARE, resizeColumnPair } from '@/engine/pageColumns';
 
 /** One arrow press, in pixels of gutter travel. */
 const KEY_STEP = 24;
@@ -34,6 +34,7 @@ export function ColumnGutter({
 }) {
   const host = useRef<HTMLButtonElement | null>(null);
   const [active, setActive] = useState(false);
+  const [share, setShare] = useState<number | null>(null);
   const gesture = useDragGesture();
 
   /**
@@ -60,6 +61,20 @@ export function ColumnGutter({
     const [left, right] = resizeColumnPair(from.left, from.right, deltaPx, from.width);
     onResize(left, right);
   };
+
+  /*
+   * A focusable `separator` is a widget, and a widget says where it is: the
+   * left column's share of the pair, as a percentage, is its value. Read from
+   * the DOM after each render and on focus (the ratios live on two blocks), so
+   * a screen reader hears the position and hears it move.
+   */
+  const measure = () => {
+    const p = pair();
+    setShare(p === null ? null : Math.round((p.left / (p.left + p.right)) * 100));
+  };
+  // After every render, deliberately: setState with an unchanged number does
+  // not re-render, so this settles at once.
+  useEffect(measure);
 
   /**
    * A NATIVE listener, not React's `onPointerDown`.
@@ -139,6 +154,10 @@ export function ColumnGutter({
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize column"
+      aria-valuenow={share ?? undefined}
+      aria-valuemin={Math.round(MIN_COLUMN_SHARE * 100)}
+      aria-valuemax={Math.round((1 - MIN_COLUMN_SHARE) * 100)}
+      onFocus={measure}
       data-testid="column-gutter"
       data-column={id}
       data-active={active ? 'true' : 'false'}

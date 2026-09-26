@@ -166,6 +166,17 @@ describe('the gutter handle', () => {
     expect(onResize).not.toHaveBeenCalled();
   });
 
+  /* A focusable separator is a widget, and a widget says where it is. Without
+     a value a screen reader announced a control with nowhere to be. */
+  it("carries the left column's share of the pair as its value", () => {
+    const host = twoColumns(1, 3);
+    render(<ColumnGutter id="c2" onResize={vi.fn()} />, { container: host });
+    const gutter = screen.getByRole('separator', { name: 'Resize column' });
+    expect(gutter.getAttribute('aria-valuenow')).toBe('25');
+    expect(gutter.getAttribute('aria-valuemin')).toBe('15');
+    expect(gutter.getAttribute('aria-valuemax')).toBe('85');
+  });
+
   it('ignores a press that is not the primary button', () => {
     const host = twoColumns(1, 2);
     const onResize = vi.fn();
