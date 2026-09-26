@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { measureBlocks, measureParentage } from './BlockDragLayer';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
+import { BlockGrip, measureBlocks, measureParentage } from './BlockDragLayer';
 
 /**
  * The DOM half of the block drag (M48.4).
@@ -66,8 +68,10 @@ function stubRects(root: HTMLElement) {
 }
 
 afterEach(() => {
+  cleanup();
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  resetLayers();
 });
 
 describe('measuring the blocks a drag can land between', () => {
@@ -140,5 +144,58 @@ describe('measuring which block holds which', () => {
       { id: 'c', parentId: 'b' },
       { id: 'd', parentId: null },
     ]);
+  });
+});
+
+/* jsdom has no `PointerEvent`. A `MouseEvent` under the pointer type reaches
+   the same listeners — React's included — with the `button` and coordinates
+   the grip reads. */
+const pointer = (type: string, init: MouseEventInit = {}) =>
+  act(() => {
+    const event = new MouseEvent(type, { bubbles: true, ...init });
+    if (type === 'pointerdown') screen.getByRole('button', { name: 'grip' }).dispatchEvent(event);
+    else window.dispatchEvent(event);
+  });
+
+/** Picks `a` up and carries it down past `d`, where it has somewhere to land. */
+function dragAPastD(onDrop = vi.fn()) {
+  const root = tree();
+  stubRects(root);
+  render(
+    <BlockGrip blockId="a" hostRef={{ current: root }} onDrop={onDrop}>
+      <button type="button">grip</button>
+    </BlockGrip>,
+  );
+  pointer('pointerdown', { button: 0, clientX: 10, clientY: 20 });
+  pointer('pointermove', { clientX: 300, clientY: 190 });
+  return { root, onDrop };
+}
+
+describe('the grip’s pointer loop', () => {
+  // The control for the case below: this same drag, released, DOES land.
+  it('drops the block where the line was when the pointer comes up', () => {
+    const { onDrop } = dragAPastD();
+    expect(screen.getByTestId('block-drop-line').getAttribute('data-block')).toBe('d');
+    pointer('pointerup');
+    expect(onDrop).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: 'd', placement: 'after' }),
+    );
+  });
+
+  /* A `pointercancel` is the browser taking the pointer back — a touch that
+     turned into a scroll, the OS claiming the gesture. It is not a release.
+     Left live, the next `pointerup` anywhere dropped the block on the last
+     line painted, and the drag held Escape until then. */
+  it('abandons on pointercancel: nothing lands, even on a later pointerup', () => {
+    pushLayer('beneath', { kind: 'surface' });
+    const { root, onDrop } = dragAPastD();
+    expect(root.classList.contains('cb-block-dragging')).toBe(true);
+    expect(ownsEscape('beneath')).toBe(false);
+    pointer('pointercancel');
+    expect(root.classList.contains('cb-block-dragging')).toBe(false);
+    expect(screen.queryByTestId('block-drop-line')).toBeNull();
+    expect(ownsEscape('beneath')).toBe(true);
+    pointer('pointerup');
+    expect(onDrop).not.toHaveBeenCalled();
   });
 });

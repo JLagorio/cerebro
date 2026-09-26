@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ownsEscape, pushLayer, resetLayers } from '@/components/ui/layers';
 import { ColumnGutter } from './ColumnGutter';
 
 /**
@@ -75,6 +76,7 @@ afterEach(() => {
   cleanup();
   document.body.replaceChildren();
   vi.restoreAllMocks();
+  resetLayers();
 });
 
 describe('the gutter handle', () => {
@@ -142,6 +144,26 @@ describe('the gutter handle', () => {
     moveTo(320);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(onResize).toHaveBeenLastCalledWith(1, 2);
+  });
+
+  /* A `pointercancel` is the browser taking the pointer back, not a release.
+     Left live, the loop kept writing widths on every later hover, and the
+     drag's Escape claim stayed on the stack with it. */
+  it('abandons on pointercancel: ratios restored, later moves ignored, Escape released', () => {
+    const host = twoColumns(1, 2);
+    const onResize = vi.fn();
+    render(<ColumnGutter id="c2" onResize={onResize} />, { container: host });
+    pushLayer('beneath', { kind: 'surface' });
+    press(200);
+    moveTo(320);
+    expect(ownsEscape('beneath')).toBe(false);
+    window.dispatchEvent(pointer('pointercancel', { bubbles: true }));
+    expect(onResize).toHaveBeenLastCalledWith(1, 2);
+    expect(ownsEscape('beneath')).toBe(true);
+    expect(screen.getByTestId('column-gutter').getAttribute('data-active')).toBe('false');
+    onResize.mockClear();
+    moveTo(400);
+    expect(onResize).not.toHaveBeenCalled();
   });
 
   it('ignores a press that is not the primary button', () => {

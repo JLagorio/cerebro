@@ -83,21 +83,33 @@ export function ColumnGutter({
     const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', lost);
       setActive(false);
     };
     // Escape abandons: the ratios go back to what the grab found, which on a
     // handle that paints by WRITING is a write of its own rather than the
     // absence of one.
+    const restore = () => onResize(from.left, from.right);
     const cancel = () => {
       teardown();
-      onResize(from.left, from.right);
+      restore();
     };
     function up() {
       gesture.end();
     }
+    // So does a `pointercancel` — a touch the browser turned into a scroll,
+    // the OS taking the pointer. It is not a release, and left live the loop
+    // would keep resizing on every later hover. Through `end()`, not `cancel`:
+    // the hook releases Escape BEFORE it calls `cancel`, so `cancel` alone
+    // would leave the claim standing.
+    function lost() {
+      gesture.end();
+      restore();
+    }
 
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', lost);
     gesture.begin(teardown, cancel);
     // The dependencies are a ref and two stable callbacks; `pair` and `apply`
     // are redefined per render by design and read only live DOM.

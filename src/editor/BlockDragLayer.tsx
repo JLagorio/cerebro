@@ -143,6 +143,7 @@ export function BlockGrip({ blockId, hostRef, onDrop, children }: BlockDragProps
     const teardown = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
       root.classList.remove('cb-block-dragging');
       setSpot(null);
     };
@@ -157,8 +158,17 @@ export function BlockGrip({ blockId, hostRef, onDrop, children }: BlockDragProps
       if (moved && landed !== null && !noop) onDrop(landed);
     }
 
+    // The browser took the pointer back — a touch that turned into a scroll,
+    // a pen out of range, the OS claiming the gesture. That is not a release,
+    // so nothing lands: left live, the next `pointerup` anywhere on the page
+    // would drop the block on whatever line was last painted.
+    function onCancel() {
+      gesture.end();
+    }
+
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
     gesture.begin(teardown);
   };
 

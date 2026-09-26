@@ -262,6 +262,9 @@
  */
 .cerebro-editor .bn-side-menu [draggable='true'] {
   -webkit-user-drag: none;
+  /* A touch drag on the grip is the drag, not a page scroll the browser would
+     answer with `pointercancel` a few pixels in. */
+  touch-action: none;
 }
 
 .cerebro-editor .bn-side-menu [draggable='true']:active {
@@ -318,6 +321,8 @@
      handle at 530) and `elementFromPoint` returned one of its icons. */
   z-index: 3;
   cursor: col-resize;
+  /* The same `touch-none` every resize handle in the app takes. */
+  touch-action: none;
   border: 0;
   padding: 0;
   background: transparent;
