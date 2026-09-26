@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -591,6 +591,37 @@ describe('Sidebar', () => {
       render(<Sidebar />);
       fireEvent.click(screen.getByRole('button', { name: 'New database' }));
       expect(screen.getByText('New database')).toBeTruthy();
+    });
+
+    // `listTypes` hides Collection, Skill and Agent, so the dialog's "taken"
+    // check alone let it declare a schema over the app's own machinery.
+    it('the New-database dialog refuses a name Cerebro reserves', () => {
+      render(<Sidebar />);
+      fireEvent.click(screen.getByRole('button', { name: 'New database' }));
+      fireEvent.change(screen.getByPlaceholderText(/Recipe, Book/), {
+        target: { value: 'Collection' },
+      });
+      expect(screen.getByText(/is a name Cerebro reserves/)).toBeTruthy();
+      expect(
+        (screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+
+    // Declared at birth, like the inline door: an implied home is shared by
+    // Recipe and Recipes, so the dialog writes one no other database uses.
+    it('the New-database dialog gives a plural twin a home of its own', async () => {
+      const createItem = vi.fn(async () => 'types/recipes.md');
+      useVaultStore.setState({ entries: [project, recipeType], createItem });
+      render(<Sidebar />);
+      fireEvent.click(screen.getByRole('button', { name: 'New database' }));
+      fireEvent.change(screen.getByPlaceholderText(/Recipe, Book/), {
+        target: { value: 'Recipes' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+      await waitFor(() => expect(createItem).toHaveBeenCalled());
+      const fm = (createItem.mock.calls[0] as unknown as [{ frontmatter: { folder: string } }])[0]
+        .frontmatter;
+      expect(fm.folder).toBe('records/recipes-2');
     });
 
     it('right-click on a custom type offers rename and delete', () => {

@@ -5,7 +5,8 @@ import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
 import { ensureTypeDoc } from '@/app/typeActions';
 import type { TypeListing } from '@/engine/typeCatalog';
-import { isSystemType, listTypes } from '@/engine/typeCatalog';
+import { homeFolderFor } from '@/engine/createRecord';
+import { isReservedTypeName, isSystemType, listTypes } from '@/engine/typeCatalog';
 import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -36,6 +37,8 @@ function useTypeNames(): Set<string> {
 
 export function NewTypeDialog({ onClose }: { onClose: () => void }) {
   const createItem = useVaultStore((s) => s.createItem);
+  const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
   const toast = useUiStore((s) => s.toast);
   const taken = useTypeNames();
@@ -44,15 +47,26 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
 
   const trimmed = name.trim();
   const duplicate = taken.has(trimmed.toLowerCase());
+  // `listTypes` hides Collection, Skill and Agent, so `taken` alone let this
+  // door declare a schema over them (`isReservedTypeName`).
+  const reserved = !duplicate && isReservedTypeName(trimmed);
 
   const create = async () => {
-    if (trimmed === '' || duplicate || submitting) return;
+    if (trimmed === '' || duplicate || reserved || submitting) return;
     setSubmitting(true);
     try {
       await createItem({
         folder: 'types',
         slug: slugify(trimmed) || 'type',
-        frontmatter: { type: 'Type', icon: DEFAULT_ICON, color: TYPE_COLORS[4] },
+        frontmatter: {
+          type: 'Type',
+          icon: DEFAULT_ICON,
+          color: TYPE_COLORS[4],
+          // Declared at birth, like the inline door (`createDatabase`): an
+          // implied `records/<plural>` home is shared by Task and Tasks, and
+          // `homeFolderFor` is what keeps two databases out of one folder.
+          folder: homeFolderFor(trimmed, schema, entries),
+        },
         body: `# ${trimmed}\n`,
       });
     } catch {
@@ -73,7 +87,7 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
       primaryAction={{
         label: 'Create',
         onClick: () => void create(),
-        disabled: trimmed === '' || duplicate || submitting,
+        disabled: trimmed === '' || duplicate || reserved || submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
@@ -94,6 +108,11 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
           {duplicate && (
             <span className="text-2xs text-danger-500">
               A database named "{trimmed}" already exists.
+            </span>
+          )}
+          {reserved && (
+            <span className="text-2xs text-danger-500">
+              "{trimmed}" is a name Cerebro reserves — choose another.
             </span>
           )}
         </label>
@@ -127,7 +146,7 @@ export function RenameTypeDialog({
     trimmed === '' ||
     trimmed === listing.name ||
     duplicate ||
-    isSystemType(trimmed) ||
+    isReservedTypeName(trimmed) ||
     isSystemType(listing.name);
 
   const rename = async () => {

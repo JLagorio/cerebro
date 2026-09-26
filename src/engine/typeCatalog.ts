@@ -12,7 +12,7 @@
 import { isTemplate } from '@/lib/templates';
 import { DEFAULT_TIME_FORMAT } from './dates';
 import { COLLECTION_TYPE, isCollectionPage } from './collections';
-import { isLibraryEntry, isLibraryType } from './library';
+import { AGENT_TYPE, isLibraryEntry, isLibraryType, SKILL_TYPE } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type {
@@ -63,6 +63,21 @@ export function systemTypeSpec(name: string): SystemTypeSpec | null {
 
 export function isSystemType(name: string): boolean {
   return systemTypeSpec(name) !== null;
+}
+
+/**
+ * Names the app gives a meaning of its own: the metamodel (`Type`), the
+ * container (`Collection`) and the library (`Skill`, `Agent`). Never a user
+ * database — a Type doc under one of them hangs a schema on the machinery,
+ * and `Type` in particular turns every schema doc into a task. Compared
+ * without case, because `type` and `Type` are one name to a person. Every
+ * door that creates or renames a database asks this.
+ */
+export function isReservedTypeName(name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  return [...SYSTEM_TYPES.map((t) => t.name), COLLECTION_TYPE, SKILL_TYPE, AGENT_TYPE].some(
+    (reserved) => reserved.toLowerCase() === lower,
+  );
 }
 
 /** True when the field is a built-in of a system type (rename/delete locked). */

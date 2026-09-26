@@ -5,7 +5,7 @@ import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui
 import { Popover } from '@/components/ui/Popover';
 import { createDatabase, setTypeViews } from '@/app/typeActions';
 import { columnUniverse } from '@/engine/columns';
-import { resolveDatabaseRef } from '@/engine/databaseBlock';
+import { foldKey, pointerOccurrence, resolveDatabaseRef } from '@/engine/databaseBlock';
 import { resolveSurface } from '@/engine/surface';
 import { listTypes, typeStyle, typeViews } from '@/engine/typeCatalog';
 import type { ColumnSpec, Entry, Schema, ViewDefinition } from '@/engine/types';
@@ -30,10 +30,30 @@ export type DatabasePointer = { database: string; view: string };
 export function ConnectedDatabaseBlock({
   database,
   view,
-  occurrence,
+  blockId,
+  document,
   onChange,
-}: DatabasePointer & { occurrence?: number; onChange?: (next: DatabasePointer) => void }) {
+}: DatabasePointer & {
+  /** This block's id, and the page's blocks — to tell twins apart. */
+  blockId?: string;
+  document?: Parameters<typeof pointerOccurrence>[0];
+  onChange?: (next: DatabasePointer) => void;
+}) {
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
+  // Which copy of the view it DRAWS this block is on the page. Recounted
+  // whenever the page changes (the caller hands a fresh `document`), so a
+  // twin inserted above an existing embed splits their folds at once, not on
+  // the next reload.
+  const occurrence = useMemo(
+    () =>
+      document === undefined || blockId === undefined
+        ? 0
+        : pointerOccurrence(document, blockId, (b) =>
+            foldKey(String(b.props?.database ?? ''), String(b.props?.view ?? ''), schema),
+          ),
+    [document, blockId, schema],
+  );
   // The same creator the database's own screen uses, so a record made here
   // lands in the database's declared `folder:` and inherits the band it was
   // created in. Logging a thing from the page you are writing is the point of
@@ -46,7 +66,7 @@ export function ConnectedDatabaseBlock({
       database={database}
       view={view}
       occurrence={occurrence}
-      schema={useSchema()}
+      schema={schema}
       entries={entries}
       onChange={onChange}
       onCreate={database === '' ? undefined : quickAdd}
@@ -81,8 +101,9 @@ export function DatabaseBlockView({
   /** '' is the prop-schema spelling of "named no view" — see markdown.ts. */
   view: string;
   /**
-   * Which copy of this pointer on the page the block is (`pointerOccurrence`).
-   * Keys the fold state, so a second embed of the same view folds on its own.
+   * Which copy, on its page, of the view it draws this block is
+   * (`pointerOccurrence` over `foldKey`). Keys the fold state, so a second
+   * embed of the same view folds on its own.
    */
   occurrence?: number;
   schema: Schema;
@@ -248,7 +269,7 @@ export function DatabaseBlockView({
             fields={fields}
             // The first copy keeps the unsuffixed key, so folds made before
             // copies were told apart are still where the reader left them.
-            scope={`database-block:${resolved.database}:${shown?.id ?? ''}${occurrence === 0 ? '' : `:${occurrence}`}`}
+            scope={`database-block:${foldKey(database, view, schema)}${occurrence === 0 ? '' : `:${occurrence}`}`}
             // "+ New" here creates a record of THIS database, landing in its
             // declared `folder:` — which is the whole point of embedding one
             // in the page you are writing.

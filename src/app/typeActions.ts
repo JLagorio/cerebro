@@ -11,14 +11,12 @@
  */
 
 import { homeFolderFor } from '@/engine/createRecord';
-import { COLLECTION_TYPE } from '@/engine/collections';
-import { AGENT_TYPE, SKILL_TYPE } from '@/engine/library';
 import { kindMeta } from '@/engine/properties';
 import { humanize, serializeDisplayConfig, serializeLayoutConfig } from '@/engine/schema';
 import { coerceValueToKind } from '@/engine/properties';
 import {
   isLockedField,
-  SYSTEM_TYPES,
+  isReservedTypeName,
   serializeFields,
   serializeOptions,
 } from '@/engine/typeCatalog';
@@ -856,14 +854,6 @@ const STARTER_STATUSES = [
   { id: 'done', group: 'done', color: '#1F9D61' },
 ];
 
-/** Type names the app gives a meaning of its own — never a user database. */
-const RESERVED_NAMES = [
-  ...SYSTEM_TYPES.map((t) => t.name),
-  COLLECTION_TYPE,
-  SKILL_TYPE,
-  AGENT_TYPE,
-];
-
 /**
  * Create a database from wherever you are (M47.4) — Door 2 of the M47 spec.
  *
@@ -889,12 +879,9 @@ export async function createDatabase(rawName: string): Promise<string | null> {
     toast(`A database named "${name}" already exists`);
     return null;
   }
-  // The names the app itself means something by. The sidebar's New database
-  // dialog already refuses them through `listTypes`; this door did not, and a
-  // Type doc titled `Type` hangs a status field and a `folder:` on the
-  // metamodel itself, turning every schema doc into a task.
-  const lower = name.toLowerCase();
-  if (RESERVED_NAMES.some((r) => r.toLowerCase() === lower)) {
+  // The names the app itself means something by (`isReservedTypeName`) — the
+  // same rule the sidebar's New database dialog asks.
+  if (isReservedTypeName(name)) {
     toast(`"${name}" is a name Cerebro reserves — choose another`);
     return null;
   }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { createReactBlockSpec } from '@blocknote/react';
+import type { BlockNoteEditor } from '@blocknote/core';
+import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
 import { ColumnGutter } from './ColumnGutter';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 import { ConnectedDatabaseBlock } from '@/views/DatabaseBlockView';
-import { DATABASE_FENCE, pointerOccurrence, serializeDatabaseRef } from '@/engine/databaseBlock';
+import { DATABASE_FENCE, serializeDatabaseRef } from '@/engine/databaseBlock';
 import {
   BASE_MARKER_DEPTH,
   DEFAULT_COLUMN_WIDTH,
@@ -308,6 +309,27 @@ export const AiBlock = createReactBlockSpec(
 );
 
 /**
+ * A database block that knows its page (M48.7).
+ *
+ * A ProseMirror node view whose own node is unchanged is reused without a
+ * re-render, so a copy-number computed in `render` went stale the moment a
+ * twin was inserted elsewhere on the page — two embeds of one view shared a
+ * fold until reload. Holding the document in state, refreshed on every
+ * editor change, re-renders each embed with the page as it is now.
+ */
+function LiveDatabaseBlock({
+  editor,
+  ...rest
+}: Omit<React.ComponentProps<typeof ConnectedDatabaseBlock>, 'document'> & {
+  // Erased generics, as in markdown.ts: this reads only `document`/`onChange`.
+  editor: BlockNoteEditor<any, any, any>;
+}) {
+  const [document, setDocument] = useState(() => editor.document);
+  useEditorChange(() => setDocument(editor.document), editor);
+  return <ConnectedDatabaseBlock {...rest} document={document as never} />;
+}
+
+/**
  * An embedded database (M47.2).
  *
  * `content: 'none'` — the block draws a database, it does not hold text. What
@@ -326,10 +348,11 @@ export const DatabaseBlock = createReactBlockSpec(
   },
   {
     render: (props) => (
-      <ConnectedDatabaseBlock
+      <LiveDatabaseBlock
+        editor={props.editor}
+        blockId={props.block.id}
         database={String(props.block.props.database ?? '')}
         view={String(props.block.props.view ?? '')}
-        occurrence={pointerOccurrence(props.editor.document as never, props.block.id)}
         // The block rewrites its own pointer. Passed rather than assumed so
         // the view keeps a real read-only mood: rendered outside an editor
         // there is no document to write back to, and a picker that silently

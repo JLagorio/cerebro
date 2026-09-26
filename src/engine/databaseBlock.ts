@@ -20,6 +20,9 @@ import { typeViews } from './typeCatalog';
  * Parsed with the vault's YAML, like every other hand-editable file we read,
  * and tolerant on the same terms: a fence that says nothing usable is not a
  * database block, and the editor leaves it as the code block it already is.
+ * The one exception is an EMPTY fence, which is how an unset block — the
+ * picker, before anything is chosen — is written; `markdown.ts` reads it back
+ * as that picker, and an empty body holds no text to lose.
  */
 
 /** The fence language that marks a database block on disk. */
@@ -47,7 +50,8 @@ const str = (raw: unknown): string | null => {
  * Null rather than a `{ database: '' }` shape on purpose: a pointer with no
  * target is not a broken pointer, it is not a pointer. The caller's job is to
  * leave that fence alone as an ordinary code block, which is the only
- * behaviour that cannot lose someone's text.
+ * behaviour that cannot lose someone's text — except an EMPTY fence, the
+ * unset block's own spelling, which `markdown.ts` promotes to the picker.
  */
 export function parseDatabaseRef(body: string): DatabaseRef | null {
   let raw: unknown;
@@ -103,7 +107,12 @@ interface BlockLike {
  * would not survive a reload and would leave a dead key behind each time. The
  * ordinal is what the page itself says, so it does both.
  */
-export function pointerOccurrence(blocks: BlockLike[], id: string): number {
+export function pointerOccurrence(
+  blocks: BlockLike[],
+  id: string,
+  keyOf: (block: BlockLike) => string = (b) =>
+    `${String(b.props?.database ?? '')}:${String(b.props?.view ?? '')}`,
+): number {
   const embeds: BlockLike[] = [];
   const walk = (list: BlockLike[]) => {
     for (const b of list) {
@@ -114,10 +123,21 @@ export function pointerOccurrence(blocks: BlockLike[], id: string): number {
   walk(blocks);
   const self = embeds.find((b) => b.id === id);
   if (self === undefined) return 0;
-  const twins = embeds.filter(
-    (b) => b.props?.database === self.props?.database && b.props?.view === self.props?.view,
-  );
-  return twins.indexOf(self);
+  const key = keyOf(self);
+  return embeds.filter((b) => keyOf(b) === key).indexOf(self);
+}
+
+/**
+ * What a block's folds are keyed on: the database and the view it actually
+ * DRAWS. Resolved, not raw, because two pointers can draw one view — one that
+ * names none and one that names the first, or two naming views that are gone
+ * and both fall back — and counting them apart would let them share a fold.
+ */
+export function foldKey(database: string, view: string, schema: Schema): string {
+  if (database === '') return ':';
+  const resolved = resolveDatabaseRef({ database, view: view === '' ? null : view }, schema);
+  if (resolved.kind === 'no-database') return `${database}:`;
+  return `${database}:${resolved.kind === 'no-view' ? resolved.fallback.id : resolved.view.id}`;
 }
 
 export type ResolvedDatabaseBlock =

@@ -4,6 +4,7 @@ import { makeEntry } from './testHelpers';
 import {
   isLockedField,
   isRecordEntry,
+  isReservedTypeName,
   isSystemType,
   listTypes,
   serializeFields,
@@ -278,5 +279,19 @@ describe('isRecordEntry and collection pages (M48.7)', () => {
 
   it('stays true for a Collection-typed page that is not its folder note', () => {
     expect(isRecordEntry(at('inbox/delivery.md', 'inbox'))).toBe(true);
+  });
+});
+
+describe('isReservedTypeName (M48.7)', () => {
+  // The metamodel, the container and the library: never a user database.
+  it('is true for the names the app means something by, in any case', () => {
+    for (const name of ['Type', 'type', 'Collection', 'Skill', ' agent ']) {
+      expect(isReservedTypeName(name), name).toBe(true);
+    }
+  });
+
+  it('is false for an ordinary database name', () => {
+    expect(isReservedTypeName('Recipe')).toBe(false);
+    expect(isReservedTypeName('Collections')).toBe(false);
   });
 });

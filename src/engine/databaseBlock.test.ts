@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DATABASE_FENCE,
+  foldKey,
   parseDatabaseRef,
   pointerOccurrence,
   resolveDatabaseRef,
@@ -154,6 +155,36 @@ describe('pointerOccurrence', () => {
 
   it('answers 0 for a block it cannot find', () => {
     expect(pointerOccurrence(doc, 'nope')).toBe(0);
+  });
+});
+
+describe('foldKey', () => {
+  const schema = buildSchema([typeDoc('Reading list', { views: [view('shelf'), view('stack')] })]);
+
+  // Folds follow what a block DRAWS. A pointer naming no view and one naming
+  // the first view draw the same table, so they are twins, not strangers.
+  it('keys an unnamed view as the view it falls back to', () => {
+    expect(foldKey('Reading list', '', schema)).toBe(foldKey('Reading list', 'shelf', schema));
+  });
+
+  it('keys a missing view as its fallback too', () => {
+    expect(foldKey('Reading list', 'gone', schema)).toBe('Reading list:shelf');
+  });
+
+  it('tells two drawn views apart', () => {
+    expect(foldKey('Reading list', 'stack', schema)).not.toBe(foldKey('Reading list', '', schema));
+  });
+
+  it('counts twins by what they draw when handed the resolved key', () => {
+    const blocks = [
+      { id: 'a', type: 'database', props: { database: 'Reading list', view: '' } },
+      { id: 'b', type: 'database', props: { database: 'Reading list', view: 'shelf' } },
+    ];
+    const byDrawn = (b: { props?: Record<string, unknown> }) =>
+      foldKey(String(b.props?.database ?? ''), String(b.props?.view ?? ''), schema);
+    expect(pointerOccurrence(blocks, 'b', byDrawn)).toBe(1);
+    // By raw props alone they would both be a first copy, sharing one fold.
+    expect(pointerOccurrence(blocks, 'b')).toBe(0);
   });
 });
 
