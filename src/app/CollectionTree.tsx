@@ -27,7 +27,8 @@ export interface CollectionTreeProps {
   /** Right-click actions for a node; empty means no menu. */
   menuFor?: (node: CollectionNode) => ContextMenuItem[];
   /** The + affordance on a container row. */
-  onAdd?: (node: CollectionNode) => void;
+  /** The `+` on a container row. `at` is where to anchor the menu it opens. */
+  onAdd?: (node: CollectionNode, at: { x: number; y: number }) => void;
   depth?: number;
 }
 
@@ -153,7 +154,12 @@ function CollectionRow({
             aria-label={`Add to ${node.label}`}
             onClick={(e) => {
               e.stopPropagation();
-              onAdd(node);
+              // Anchored to the button, not the pointer: Enter or Space
+              // reports clientX/clientY as 0, and the menu opened in the
+              // window's corner for exactly the keyboard users this control
+              // was kept in the tab order for.
+              const box = e.currentTarget.getBoundingClientRect();
+              onAdd(node, { x: box.left, y: box.bottom });
             }}
             className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
           >

@@ -8,11 +8,16 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
+import type { CollisionDetection } from '@dnd-kit/core';
+import { DragGhostLayer, InsertionLine, lineHosts } from '@/components/ui/BlockDrag';
 import { ContextMenu } from '@/components/ui/ContextMenu';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { MenuBack, MenuItem, MenuLabel, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { useDndGesture, useDragGesture } from '@/hooks/useDragGesture';
+import { alongX, resolveDropTarget } from '@/hooks/dropPartition';
 import { measureLabel } from '@/engine/chart';
 import { columnUniverse } from '@/engine/columns';
 import {
@@ -43,6 +48,7 @@ import { countRules } from '@/views/FilterChips';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
 import { ViewCanvas } from '@/views/ViewCanvas';
+import { BrokenNotice } from '@/views/ViewTabEmbed';
 import { hasBlocks, viewKind } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -185,21 +191,126 @@ export function handleWidgetDragEnd(
   args.commit(edit.spec);
 }
 
-/** A droppable insertion point (Edit mode only). Invisible until a drag
- * hovers it — then it paints itself as the insertion line, the repo's own
- * inset-line style rather than a DragOverlay. */
+/**
+ * Which insertion gaps widget `id` draws, pure (M46.2 Task 4).
+ *
+ * The row's gaps run `slot:<row>:0` through `slot:<row>:<n>` — one before each
+ * widget and one past the last — which is exactly the shape `lineHosts` pairs
+ * with the blocks between them. Derived from the spec rather than threaded
+ * through six widget components, because `WidgetShell` already has the spec in
+ * context and nothing else needs to know.
+ */
+export function widgetLines(
+  spec: DashboardSpec,
+  id: string,
+): { above: string; below?: string } | undefined {
+  const row = spec.rows.find((r) => r.widgets.some((w) => w.id === id));
+  if (row === undefined) return undefined;
+  const gaps = [
+    ...row.widgets.map((_, i) => `slot:${row.id}:${i}`),
+    `slot:${row.id}:${row.widgets.length}`,
+  ];
+  return lineHosts(gaps)[row.widgets.findIndex((w) => w.id === id)];
+}
+
+/**
+ * The dashboard's drop targeting (M46.2 Task 4) — the layout canvas's rule
+ * (`dropPartition.ts`), applied once per axis because these targets are laid
+ * out in two dimensions.
+ *
+ * The defect it closes is the canvas's, twice over. dnd-kit's default
+ * `rectIntersection` makes a target live only while the DRAGGED rect overlaps
+ * it, and what is dragged here is a 16x24 grip in the widget's header — so the
+ * 6px slots between widgets were live across a band narrower than the gaps
+ * between them (the dead-band arithmetic of §D7/D9), and reaching another ROW
+ * meant dragging that small rect down into its slots rather than pointing at
+ * the row. The POINTER decides now, and the two stages partition their axes
+ * with no arithmetic left that could fail to meet:
+ *
+ * 1. the rows partition Y — a lane is one row's slots taken together, and
+ *    `slot:new-row` is its own lane, being the only target below the last row;
+ * 2. inside the resolved row, the slots partition X, so the flip between two
+ *    insertion points is the midpoint between them, which is the widget's own
+ *    middle. That is Notion's above/below rule read sideways (§C-II.4).
+ */
+export function resolveWidgetSlot(
+  point: { x: number; y: number },
+  targets: { id: string; rect: { top: number; bottom: number; left: number; right: number } }[],
+): string | null {
+  const lanes = new Map<string, typeof targets>();
+  for (const t of targets) {
+    // The row id, greedy to the last colon — `moveToSlot`'s own rule, so a
+    // lane can never be split by a row id that carries one. `slot:new-row`
+    // ends in no index and is therefore already its own lane.
+    const lane = t.id.replace(/:\d+$/, '');
+    const held = lanes.get(lane);
+    if (held === undefined) lanes.set(lane, [t]);
+    else held.push(t);
+  }
+  const laneAt = resolveDropTarget(
+    point.y,
+    [...lanes].map(([id, members]) => ({
+      id,
+      rect: {
+        top: Math.min(...members.map((m) => m.rect.top)),
+        bottom: Math.max(...members.map((m) => m.rect.bottom)),
+      },
+    })),
+  );
+  if (laneAt === null) return null;
+  const members = lanes.get(laneAt) ?? [];
+  return resolveDropTarget(
+    point.x,
+    members.map((m) => ({ id: m.id, rect: alongX(m.rect) })),
+  );
+}
+
+export const widgetCollision: CollisionDetection = ({
+  collisionRect,
+  droppableRects,
+  droppableContainers,
+}) => {
+  const targets = [];
+  for (const container of droppableContainers) {
+    const rect = droppableRects.get(container.id);
+    if (rect !== undefined) targets.push({ id: String(container.id), rect });
+  }
+  // The pointer, or — for a keyboard drag, which reports none — the centre of
+  // the rect it is moving, the only coordinate that gesture has.
+  const hit = resolveWidgetSlot(
+    {
+      x: collisionRect.left + collisionRect.width / 2,
+      y: collisionRect.top + collisionRect.height / 2,
+    },
+    targets,
+  );
+  return hit === null ? [] : [{ id: hit }];
+};
+
+/**
+ * A droppable insertion point (Edit mode only): the gap between two widgets,
+ * and the rect the partition resolves against.
+ *
+ * It stopped painting in M46.2 Task 4 — Notion's insertion line is a child of
+ * the TARGET, so it inherits that block's box (reference §C-II.3), and the
+ * widgets draw their own. `slot:new-row` is the exception and draws its own
+ * line: it sits below every row, pointing at a row that does not exist yet,
+ * so there is no block whose edge it could hug.
+ */
 function WidgetSlot({ id, wide = false }: { id: string; wide?: boolean }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+  const { setNodeRef } = useDroppable({ id });
   return (
     <div
       ref={setNodeRef}
       data-testid="dashboard-slot"
       data-slot={id}
       className={[
-        wide ? 'h-1.5 w-full flex-none rounded' : 'w-1.5 flex-none self-stretch rounded',
-        isOver ? 'bg-cortex-500' : 'bg-transparent',
+        'relative',
+        wide ? 'h-1.5 w-full flex-none' : 'w-1.5 flex-none self-stretch',
       ].join(' ')}
-    />
+    >
+      {wide && <InsertionLine gap={id} side="top" />}
+    </div>
   );
 }
 
@@ -462,38 +573,42 @@ function WidgetShell({
   const hasCustom = widget.title !== undefined && widget.title !== '';
   // Registered even outside Edit mode (a hook cannot be conditional) but
   // disabled then — and with Edit off the grip never renders, so setNodeRef
-  // stays unattached and the registration costs nothing. The GRIP is
-  // the draggable node, not the whole tile: its small rect tracks the pointer
-  // into the thin slot strips, and the menu button and rename input keep
-  // their clicks — the listeners never touch them.
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  // stays unattached and the registration costs nothing. The GRIP is the
+  // draggable node, not the whole tile, so the menu button and the rename
+  // input keep their clicks — the listeners never touch them.
+  const { attributes, listeners, setNodeRef } = useDraggable({
     id: widget.id,
     disabled: edit === null,
   });
+  // The gaps this widget draws. Absent outside Edit mode, where no slot is
+  // rendered for a line to stand for.
+  const lines = edit === null ? undefined : widgetLines(edit.spec, widget.id);
   return (
     <section
       data-testid={`widget-${widget.id}`}
-      style={{
-        flexGrow: widget.w ?? 1,
-        flexBasis: 0,
-        minWidth: 280,
-        // The source dims in place; no DragOverlay (BoardView precedent).
-        opacity: isDragging ? 0.6 : undefined,
-      }}
-      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
+      // What `DragGhostLayer` clones (M46.2 Task 4). The widget stays put at
+      // full strength while a 40% copy of it follows the cursor; it used to
+      // dim to 0.6 in place and leave nothing under the pointer at all.
+      data-drag-id={widget.id}
+      style={{ flexGrow: widget.w ?? 1, flexBasis: 0, minWidth: 280 }}
+      className="relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0"
     >
+      {/* The column variant of the insertion line (§C-II.3): 4px wide, full
+          height, on the leading edge. Inside the tile's own border rather than
+          out in the gap, because the tile clips its overflow — and a line the
+          target clips is a line that is not there. */}
+      {lines !== undefined && <InsertionLine gap={lines.above} side="start" />}
+      {lines?.below !== undefined && <InsertionLine gap={lines.below} side="end" />}
       <header className="flex flex-none items-center gap-2 border-b border-n-100 px-3 py-2">
         {edit !== null && (
-          <span
+          <Grip
+            kind="block"
             ref={setNodeRef}
             data-testid="widget-grip"
             {...attributes}
             {...listeners}
             aria-label={`Drag ${title}`}
-            className="flex h-6 w-4 flex-none cursor-grab touch-none items-center justify-center rounded text-n-400 hover:bg-n-100 hover:text-n-700"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+          />
         )}
         {edit !== null && edit.renamingId === widget.id ? (
           <RenameWidget
@@ -567,6 +682,8 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
   const edit = useContext(EditContext);
   const ref = useRef<HTMLSpanElement>(null);
   const [active, setActive] = useState(false);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   if (edit === null) return null;
   const wA = a.w ?? 1;
   const wB = b.w ?? 1;
@@ -603,16 +720,29 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
       elB.style.flexGrow = String(w.b);
     };
     let moved = false;
+    let released = false;
     const move = (e: PointerEvent) => {
       moved = true;
       paint(at(e.clientX));
     };
-    const up = (e: PointerEvent) => {
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the pair goes back to the rendered weights and
+     * nothing is written (M46.2) — the same restore a press that never moved
+     * already did, for the same reason.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
+      if (!released) paint({ a: wA, b: wB });
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      gesture.end();
       // A press that never moved restores the rendered weights and writes
       // nothing: the px ratio rarely equals the weight ratio exactly (each
       // shell's minWidth clamps), and a click is not an edit.
@@ -638,6 +768,7 @@ function WidgetSeam({ a, b }: { a: DashboardWidget; b: DashboardWidget }) {
     // is outside the 7px strip, which is most of any real drag.
     document.body.classList.add('cb-resizing');
     setActive(true);
+    gesture.begin(teardown);
   };
 
   return (
@@ -686,6 +817,8 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
    * `null` means "nothing pending".
    */
   const pending = useRef<number | null>(null);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   if (edit === null) return null;
   const h0 = row.h ?? ROW_HEIGHT_DEFAULT;
   const clamp = (h: number) => Math.round(Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, h)));
@@ -715,21 +848,34 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
     pending.current = null;
     const at = (y: number) => clamp(h0 + (y - startY));
     let moved = false;
+    let released = false;
     const move = (e: PointerEvent) => {
       moved = true;
       el.style.height = `${at(e.clientY)}px`;
     };
-    const up = (e: PointerEvent) => {
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the row goes back to its stored height and
+     * nothing is written (M46.2) — the pointer's half of what the arrows'
+     * own Escape already does above.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
+      if (!released) el.style.height = `${h0}px`;
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      const h = at(e.clientY);
+      gesture.end();
       if (!moved) {
         el.style.height = `${h0}px`;
         return;
       }
-      const h = at(e.clientY);
       el.style.height = `${h}px`;
       if (h !== h0) edit.commit(setRowHeight(edit.spec, row.id, h));
     };
@@ -738,6 +884,7 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
     window.addEventListener('pointercancel', up);
     document.body.classList.add('cb-resizing');
     setActive(true);
+    gesture.begin(teardown);
   };
 
   return (
@@ -790,7 +937,11 @@ function RowResizeHandle({ row, index }: { row: DashboardRow; index: number }) {
 }
 
 /** A block that cannot draw says what is missing and where it pointed — a
- * blank tile is indistinguishable from a block that is still loading. */
+ * blank tile is indistinguishable from a block that is still loading. The
+ * sentence body is `BrokenNotice`, shared with the view-tab card both record
+ * surfaces render (M45.4; the peek joined the page in M45.6) — a second copy
+ * of it is the review-blocking defect the plan names; this shell only adds
+ * the widget chrome around it. */
 function BrokenBlock({
   widget,
   title,
@@ -806,10 +957,7 @@ function BrokenBlock({
 }) {
   return (
     <WidgetShell widget={widget} title={title} defaultTitle={defaultTitle} testId="dashboard-block">
-      <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
-        <Icon name={icon} size={14} color="var(--n-400)" />
-        {message}
-      </p>
+      <BrokenNotice icon={icon} message={message} />
     </WidgetShell>
   );
 }
@@ -1341,6 +1489,19 @@ export function DashboardView({
     [toast, write, spec],
   );
 
+  /**
+   * The drag's claim on Escape (M46.2). dnd-kit cancels correctly on its own,
+   * but from a `document` bubble listener that neither prevents the default nor
+   * stops propagation — so the keystroke also reached whatever surface the
+   * dashboard is drawn inside. The layer makes those defer through the
+   * `ownsEscape` they already ask, and dnd-kit's cancel still runs. A capture
+   * listener that swallowed the key would beat dnd-kit to it and cancel
+   * nothing.
+   */
+  const gesture = useDndGesture<DragEndEvent>((event) =>
+    handleWidgetDragEnd(event, { spec, commit: write, toast }),
+  );
+
   const globalDefs = useMemo(
     () =>
       filterFieldDefs(
@@ -1473,10 +1634,10 @@ export function DashboardView({
           // wrapper would remount every widget on the Edit toggle. With Edit
           // off there is nothing to drag (grips absent, draggables disabled)
           // and nothing to hit (slots unrendered), so it is inert chrome.
-          <DndContext
-            sensors={sensors}
-            onDragEnd={(event) => handleWidgetDragEnd(event, { spec, commit: write, toast })}
-          >
+          <DndContext sensors={sensors} collisionDetection={widgetCollision} {...gesture}>
+            {/* The C-II ghost (M46.2 Task 4): a 40% clone of the dragged
+                widget follows the cursor while the tile stays put. */}
+            <DragGhostLayer />
             <div className="flex flex-col gap-3">
               {spec.rows.map((row, rowIndex) => (
                 // One over-wide row scrolls alone inside its own wrapper —

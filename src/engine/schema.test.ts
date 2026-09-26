@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STATUSES, buildSchema, serializeDisplayConfig } from './schema';
+import {
+  DEFAULT_STATUSES,
+  buildSchema,
+  parseLayoutConfig,
+  serializeDisplayConfig,
+  serializeLayoutConfig,
+} from './schema';
 import type { DisplayConfig } from './types';
 import { makeEntry } from './testHelpers';
 
@@ -467,5 +473,126 @@ describe('display config (M44.1)', () => {
         }
       }
     }
+  });
+});
+
+describe('layout config (M45.1)', () => {
+  it('absent or non-object layout means the defaults — the flat pre-M45 stack', () => {
+    expect(parseLayoutConfig(undefined)).toEqual({ heading: [], groups: [] });
+    expect(parseLayoutConfig('doc')).toEqual({ heading: [], groups: [] });
+    expect(parseLayoutConfig(['status'])).toEqual({ heading: [], groups: [] });
+  });
+
+  it('heading keeps strings only, trimmed, first claim wins', () => {
+    expect(parseLayoutConfig({ heading: ['status', ' due ', 'status', 7] }).heading).toEqual([
+      'status',
+      'due',
+    ]);
+  });
+
+  it('mints group ids in two passes — a declared id is never stolen', () => {
+    expect(
+      parseLayoutConfig({ groups: [{}, { id: 'group-1', fields: ['a'] }] }).groups.map((g) => g.id),
+    ).toEqual(['group-2', 'group-1']);
+  });
+
+  it('re-mints a duplicate declared id — the first occurrence keeps it', () => {
+    expect(
+      parseLayoutConfig({ groups: [{ id: 'g' }, { id: 'g' }] }).groups.map((g) => g.id),
+    ).toEqual(['g', 'group-2']);
+  });
+
+  it('re-mints the container sentinels — heading and rest can never name a group', () => {
+    // layoutEdit's container-address grammar spells 'heading' | 'rest' | groupId,
+    // and Task 6's droppable ids extend it; a group wearing a sentinel would
+    // swallow drops meant for the real container (id: rest = silent deletion).
+    expect(
+      parseLayoutConfig({ groups: [{ id: 'heading' }, { id: 'rest' }] }).groups.map((g) => g.id),
+    ).toEqual(['group-1', 'group-2']);
+  });
+
+  it('falls back group names and drops later claims across containers', () => {
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [{ name: 'Main', fields: ['status', 'due', 'x'] }, { fields: ['due', 'team'] }],
+    });
+    // The contested name STAYS where it was claimed first — a later claim
+    // evicting the earlier one would pass the group assertions alone.
+    expect(l.heading).toEqual(['status']);
+    expect(l.groups[0]).toEqual({ id: 'group-1', name: 'Main', fields: ['due', 'x'] });
+    expect(l.groups[1]).toEqual({ id: 'group-2', name: 'Group 2', fields: ['team'] });
+  });
+
+  it('serializes deviations only — defaults delete the key, empty heading is omitted', () => {
+    expect(serializeLayoutConfig({ heading: [], groups: [] })).toBeNull();
+    expect(serializeLayoutConfig({ heading: ['status'], groups: [] })).toStrictEqual({
+      heading: ['status'],
+    });
+    expect(
+      serializeLayoutConfig({
+        heading: [],
+        groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+      }),
+    ).toStrictEqual({ groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }] });
+  });
+
+  it('round-trips a parsed layout through the serializer', () => {
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [{ name: 'Main', fields: ['status', 'due', 'x'] }, { fields: ['due', 'team'] }],
+    });
+    expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
+  });
+
+  it('ignores a group `tab:` key and never writes one back (M46.1)', () => {
+    // The only accommodation the reversal gets: a `layout:` written by a
+    // local M45.6 build parses as though the key were never there — no
+    // throw, no migration, no compatibility branch — and sheds it on the
+    // next Apply. No user of a shipped build can have one.
+    const l = parseLayoutConfig({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Main', fields: ['due'], tab: 'spec' },
+        { id: 'g2', name: 'Loose', fields: ['team'] },
+      ],
+    });
+    expect(l.groups.map((g) => Object.keys(g))).toEqual([
+      ['id', 'name', 'fields'],
+      ['id', 'name', 'fields'],
+    ]);
+    expect(l.groups.map((g) => g.id)).toEqual(['g1', 'g2']);
+    // The key does not survive a round-trip: what the vault gets back is a
+    // pre-M45.6 group, byte for byte.
+    expect(serializeLayoutConfig(l)).toStrictEqual({
+      heading: ['status'],
+      groups: [
+        { id: 'g1', name: 'Main', fields: ['due'] },
+        { id: 'g2', name: 'Loose', fields: ['team'] },
+      ],
+    });
+    expect(parseLayoutConfig(serializeLayoutConfig(l))).toEqual(l);
+  });
+
+  it('buildSchema resolves layout from the Type doc frontmatter', () => {
+    const doc = makeEntry({
+      path: 'types/work-item.md',
+      type: 'Type',
+      title: 'Work item',
+      properties: {
+        type: 'Type',
+        layout: {
+          heading: ['status'],
+          groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+        },
+      } as unknown as ReturnType<typeof makeEntry>['properties'],
+    });
+    expect(buildSchema([doc]).types.get('Work item')?.layout).toEqual({
+      heading: ['status'],
+      groups: [{ id: 'group-1', name: 'Main', fields: ['due'] }],
+    });
+    expect(buildSchema([typeNote]).types.get('Work item')?.layout).toEqual({
+      heading: [],
+      groups: [],
+    });
   });
 });

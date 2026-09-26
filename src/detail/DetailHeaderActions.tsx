@@ -2,14 +2,12 @@ import { useRef, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { FavoriteStar } from '@/app/FavoriteStar';
 import { IconButton } from '@/components/ui/IconButton';
-import { MenuBack, MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
+import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
-import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { deleteNote } from '@/lib/ipc';
 import { duplicateRecord } from '@/app/recordActions';
-import { setTypeDisplay } from '@/app/typeActions';
-import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
+import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -50,15 +48,14 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
   const siblings = useUiStore((s) => s.detailSiblings);
   const width = useUiStore((s) => s.detailWidth);
   const setWidth = useUiStore((s) => s.setDetailWidth);
+  const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuStep, setMenuStep] = useState<'menu' | 'display'>('menu');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef<HTMLButtonElement | null>(null);
 
   const schema = useSchema();
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  const display = typeDef?.display ?? DISPLAY_DEFAULTS;
   const listing = typeDef !== null ? { name: typeDef.name, docPath: null } : null;
 
   const at = siblings.indexOf(entry.path);
@@ -66,12 +63,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
   const hasNext = at !== -1 && at < siblings.length - 1;
   const wide = width >= DETAIL_WIDTH_MAX;
 
-  // Closes the whole menu, not just the drilled-in step — a step left behind
-  // would reopen the panel on "Customize display" instead of the top level.
-  const closeMenu = () => {
-    setMenuOpen(false);
-    setMenuStep('menu');
-  };
+  const closeMenu = () => setMenuOpen(false);
 
   const copy = (text: string, what: string) => {
     void (async () => {
@@ -186,101 +178,64 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
           <Popover
             anchorRef={menuRef}
             onClose={closeMenu}
-            onEscape={menuStep === 'display' ? () => setMenuStep('menu') : undefined}
             role="menu"
-            ariaLabel={menuStep === 'display' ? 'Customize display' : 'Record actions'}
+            ariaLabel="Record actions"
             trapFocus
           >
-            {menuStep === 'display' && listing !== null ? (
-              // autoFocus off: this surface is arrived at by drilling in, not
-              // by opening fresh — focus should stay where the user put it,
-              // same as PropertyMenu's edit step (PropertyMenu.tsx:104-106).
-              <MenuSurface width={260} className="p-2" autoFocus={false}>
-                <MenuBack title="Customize display" onBack={() => setMenuStep('menu')} />
-                <div className="flex flex-col gap-2 px-1 pt-1">
-                  <Switch
-                    checked={display.showEmpty}
-                    onChange={(on) => void setTypeDisplay(listing, { ...display, showEmpty: on })}
-                    label="Show empty properties"
-                  />
-                  <Switch
-                    checked={display.showFile}
-                    onChange={(on) => void setTypeDisplay(listing, { ...display, showFile: on })}
-                    label="Show file path"
-                  />
-                  <Switch
-                    checked={display.showBody}
-                    onChange={(on) => void setTypeDisplay(listing, { ...display, showBody: on })}
-                    label="Show description"
-                  />
-                  <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
-                    Applies to every {typeDef?.name} record. Hide individual properties from each
-                    property&rsquo;s own menu.
-                  </p>
-                  <button
-                    type="button"
-                    data-testid="display-reset"
-                    onClick={() => void setTypeDisplay(listing, DISPLAY_DEFAULTS)}
-                    className="self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
-                  >
-                    Reset to defaults
-                  </button>
-                </div>
-              </MenuSurface>
-            ) : (
-              <MenuSurface width={216}>
+            <MenuSurface width={216}>
+              <MenuItem
+                icon="link"
+                label="Copy link"
+                testId="record-copy-link"
+                onSelect={() => {
+                  closeMenu();
+                  copy(`[[${entry.title}]]`, 'Link');
+                }}
+              />
+              <MenuItem
+                icon="file-text"
+                label="Copy path"
+                testId="record-copy-path"
+                onSelect={() => {
+                  closeMenu();
+                  copy(entry.path, 'Path');
+                }}
+              />
+              <MenuItem
+                icon="copy"
+                label="Duplicate"
+                testId="record-duplicate"
+                onSelect={() => {
+                  closeMenu();
+                  duplicate();
+                }}
+              />
+              {listing !== null && (
+                // M45.2 — the M44.1 display drill-in retired into this one
+                // door: the switches live in the layout editor's rail now.
+                // Fires the uiStore signal; the dialog mounts at App level.
                 <MenuItem
-                  icon="link"
-                  label="Copy link"
-                  testId="record-copy-link"
+                  icon="layout"
+                  label="Customize layout"
+                  testId="record-customize-layout"
                   onSelect={() => {
+                    openLayoutEditor(listing.name);
                     closeMenu();
-                    copy(`[[${entry.title}]]`, 'Link');
                   }}
                 />
-                <MenuItem
-                  icon="file-text"
-                  label="Copy path"
-                  testId="record-copy-path"
-                  onSelect={() => {
-                    closeMenu();
-                    copy(entry.path, 'Path');
-                  }}
-                />
-                <MenuItem
-                  icon="copy"
-                  label="Duplicate"
-                  testId="record-duplicate"
-                  onSelect={() => {
-                    closeMenu();
-                    duplicate();
-                  }}
-                />
-                {listing !== null && (
-                  <MenuItem
-                    icon="sliders-horizontal"
-                    label="Customize display"
-                    submenu
-                    testId="record-customize-display"
-                    // Drills in without closing the menu — the Popover stays
-                    // mounted and this component's own `menuStep` decides
-                    // which MenuSurface it renders, same as PropertyMenu.
-                    onSelect={() => setMenuStep('display')}
-                  />
-                )}
-                <MenuSeparator />
-                <MenuItem
-                  icon="trash-2"
-                  label="Delete"
-                  danger
-                  testId="record-delete"
-                  onSelect={() => {
-                    closeMenu();
-                    setConfirmDelete(true);
-                  }}
-                />
-              </MenuSurface>
-            )}
+              )}
+              <MenuSeparator />
+              <MenuItem
+                icon="trash-2"
+                label="Delete"
+                danger
+                testId="record-delete"
+                onSelect={() => {
+                  closeMenu();
+                  setConfirmDelete(true);
+                }}
+              />
+            </MenuSurface>
           </Popover>
         )}
       </span>

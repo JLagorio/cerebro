@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { childLink, childTypeOf, createTarget, recordsFolder } from '@/engine/createRecord';
+import {
+  childLink,
+  childTypeOf,
+  createTarget,
+  homeFolderFor,
+  recordsFolder,
+} from '@/engine/createRecord';
 import { buildSchema } from '@/engine/schema';
+import type { Entry } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
 
 const project = makeEntry({
@@ -138,6 +145,75 @@ describe('recordsFolder', () => {
     expect(recordsFolder('Story')).toBe('records/stories');
     expect(recordsFolder('Process')).toBe('records/processes');
   });
+
+  /**
+   * Found by M47.4, which made this visible. People name databases in the
+   * PLURAL — Tasks, Notes, Groceries — and the sibilant rule read every one
+   * of them as wanting `es`. It did not matter while `recordsFolder` was an
+   * implicit fallback nobody could see; `createDatabase` writes the folder
+   * into the user's own Type doc, where `folder: records/grocerieses` is a
+   * misspelling they have to look at and fix.
+   */
+  it('leaves an already-plural name alone', () => {
+    expect(recordsFolder('Groceries')).toBe('records/groceries');
+    expect(recordsFolder('Tasks')).toBe('records/tasks');
+    expect(recordsFolder('Notes')).toBe('records/notes');
+  });
+
+  // `ss` is not a plural ending, so the sibilant rule still owns it.
+  it('still pluralizes a name that merely ends in a sibilant', () => {
+    expect(recordsFolder('Process')).toBe('records/processes');
+    expect(recordsFolder('Class')).toBe('records/classes');
+    expect(recordsFolder('Box')).toBe('records/boxes');
+  });
+});
+
+describe('homeFolderFor', () => {
+  const typeDoc = (title: string, folder?: string) =>
+    makeEntry({
+      path: `types/${title.toLowerCase()}.md`,
+      title,
+      type: 'Type',
+      properties: (folder === undefined ? {} : { folder }) as Entry['properties'],
+    });
+
+  it('is the convention when nothing else lives there', () => {
+    const entries = [typeDoc('Risk')];
+    expect(homeFolderFor('Reading list', buildSchema(entries), entries)).toBe(
+      'records/reading-lists',
+    );
+  });
+
+  // `Task` and `Tasks` pluralize to one folder; written down, that would be
+  // two databases sharing a home.
+  it('steps past the implied home of a singular/plural twin', () => {
+    const entries = [typeDoc('Task')];
+    expect(homeFolderFor('Tasks', buildSchema(entries), entries)).toBe('records/tasks-2');
+  });
+
+  it('steps past another database’s DECLARED home', () => {
+    const entries = [typeDoc('Book', 'records/reading-lists')];
+    expect(homeFolderFor('Reading list', buildSchema(entries), entries)).toBe(
+      'records/reading-list',
+    );
+  });
+
+  // A folder that already holds another type's rows is taken even when no
+  // Type doc names it — the demo vault's Agents and Skills live like that.
+  it('steps past a folder that already holds another type’s records', () => {
+    const entries = [
+      makeEntry({ path: 'records/agents/scout.md', folder: 'records/agents', type: 'Agent' }),
+    ];
+    expect(homeFolderFor('Agents', buildSchema(entries), entries)).toBe('records/agents-2');
+  });
+
+  it('keeps the home of the database being named', () => {
+    const entries = [
+      typeDoc('Tasks'),
+      makeEntry({ path: 'records/tasks/a.md', folder: 'records/tasks', type: 'Tasks' }),
+    ];
+    expect(homeFolderFor('Tasks', buildSchema(entries), entries)).toBe('records/tasks');
+  });
 });
 
 describe('childLink', () => {
@@ -191,5 +267,62 @@ describe('childTypeOf', () => {
     expect(
       childTypeOf({ direction: 'forward', field: 'mystery' }, 'Key result', schema),
     ).toBeNull();
+  });
+});
+
+/**
+ * `folder:` on a Type doc (M47.1).
+ *
+ * M12.2 built this and nothing has ever exercised it: no Type doc in
+ * `demo-vault/` declares a `folder:`, and no test declared one either. M47
+ * makes it load-bearing — it is where a database's new rows land — so it gets
+ * measured before anything is built on top of it.
+ */
+describe('createTarget honours a declared home folder', () => {
+  const typeDoc = (properties: Record<string, unknown>, path = 'types/reading.md') =>
+    makeEntry({ path, title: 'Reading', type: 'Type', properties: properties as never });
+
+  /** Schema built from the same entries, exactly as every call site does. */
+  const homeOf = (entries: Entry[], inProject: Entry | null = null) =>
+    createTarget('Reading', { project: inProject, entries, schema: buildSchema(entries) }).folder;
+
+  it('places new records in the folder the Type doc declares', () => {
+    expect(homeOf([typeDoc({ folder: 'reading' })])).toBe('reading');
+  });
+
+  /**
+   * The database page may BE the folder note of its own folder
+   * (`reading/reading.md`) — decision D8 of the M47 spec. It holds because a
+   * Type doc is found by TITLE: `buildSchema` scans every entry and never
+   * looks at the path. Pinned so D8 is a measured fact, not a hoped-for one.
+   */
+  it('finds the Type doc by title, wherever the file sits', () => {
+    expect(homeOf([typeDoc({ folder: 'reading' }, 'reading/reading.md')])).toBe('reading');
+  });
+
+  it('strips wrapping slashes, so `/reading/` is not a sibling of the vault', () => {
+    expect(homeOf([typeDoc({ folder: '/reading/' })])).toBe('reading');
+  });
+
+  /**
+   * Vault-tolerant, like every other read of a hand-edited file. The blank
+   * case matters more than it looks: `''` is a legal folder path meaning the
+   * VAULT ROOT, so a `folder:` that fell through as-written would spray new
+   * records across the top level of someone's vault.
+   */
+  it('falls back to the records convention when `folder:` says nothing usable', () => {
+    for (const folder of ['', '   ', 42, null, ['reading'], { path: 'reading' }]) {
+      expect(homeOf([typeDoc({ folder })])).toBe('records/readings');
+    }
+  });
+
+  /**
+   * Containment is a property of the CONTEXT, not of the type (M12.2), and
+   * that rule outranks `folder:` — a record created inside a project lands in
+   * the project. Worth pinning because it is the one case where a database's
+   * declared home does NOT win, and M47's create affordances have to know it.
+   */
+  it('yields to a project context, which still wins over the declared folder', () => {
+    expect(homeOf([project, typeDoc({ folder: 'reading' })], project)).toBe('projects/atlas/items');
   });
 });

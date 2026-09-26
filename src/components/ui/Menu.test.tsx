@@ -85,6 +85,22 @@ describe('MenuSurface', () => {
 });
 
 describe('MenuItem', () => {
+  it('declares its hover wash — a menu is READ by sweeping down it', () => {
+    // M46.2 Task 3: undeclared, the wash computes to `transition: all`, the
+    // CSS initial value, and strobes as the pointer crosses the stack.
+    // `motion-hover` is 20ms ease-in — declared, not slow.
+    render(
+      <MenuSurface>
+        <MenuItem label="First" onSelect={() => {}} />
+      </MenuSurface>,
+    );
+    const item = screen.getByRole('menuitem', { name: 'First' });
+    expect(item.className).toContain('motion-hover');
+    // Never `motion-move`: a menu item that slid or resized under the pointer
+    // would move the target the user is already aiming at.
+    expect(item.className).not.toContain('motion-move');
+  });
+
   it('is a menuitem, and fires on click', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

@@ -27,6 +27,7 @@ import type {
   SortSpec,
   TabDef,
   ViewDefinition,
+  ViewTabSource,
   ViewType,
 } from './types';
 import {
@@ -933,6 +934,29 @@ export function serializeViewList(views: ViewDefinition[]): unknown[] {
 
 const TAB_CONTENT_SET = new Set<string>(TAB_CONTENTS);
 
+/** A view tab's source pointer, judged by VALUE, never by a `kind` key: an
+ * object with a non-empty `type` string is a type source (`type` wins when
+ * both keys appear — a type IS a database, M39); a non-empty `list` string
+ * is a list source, `collection` riding along because list ids are unique
+ * per FOLDER (surface.ts doctrine); anything else is `null` — the tab still
+ * parses and the RENDERER shows the broken state. Shape-checking only:
+ * whether the named type/list still EXISTS is resolution's question, so a
+ * well-shaped pointer at a dead target is kept verbatim. */
+function parseTabSource(raw: unknown): ViewTabSource | null {
+  const obj = asRecord(raw);
+  if (typeof obj.type === 'string' && obj.type.trim() !== '') return { type: obj.type.trim() };
+  if (typeof obj.list === 'string' && obj.list.trim() !== '') {
+    return {
+      list: obj.list.trim(),
+      collection:
+        typeof obj.collection === 'string' && obj.collection.trim() !== ''
+          ? obj.collection.trim()
+          : null,
+    };
+  }
+  return null;
+}
+
 /** A minted `tab-N` id, checked against a `taken` set that already holds
  * every id ANY entry in the list legitimately owns — declared earlier or
  * later — so a blind `tab-${i + 1}` guess can never steal an id another
@@ -956,6 +980,16 @@ function mintTabId(i: number, taken: Set<string>): string {
  * (first occurrence wins a duplicate, same as before); pass two hands each
  * entry its reservation or, lacking one, the first `tab-N` nothing already
  * answers to.
+ *
+ * The retired `properties` kind (M44.5–M46.1) needs no arm of its own: it
+ * falls to the generic unrecognised default, `sections`, and becomes an
+ * empty free-text tab. With the property stack hoisted above the strip such
+ * a tab has no content left of its own, so it must become SOMETHING — and
+ * `overview` is the wrong something, because a type carrying both an
+ * Overview and a Properties tab would end up with TWO body tabs, two
+ * editors mounted against one file. One empty tab the user can fill or
+ * delete is the better failure. It is never DROPPED either way: its id is
+ * what `_sections` keys per-record content by.
  */
 export function parseTabList(raw: unknown): TabDef[] {
   if (!Array.isArray(raw) || raw.length === 0) return [];
@@ -973,22 +1007,62 @@ export function parseTabList(raw: unknown): TabDef[] {
   return items.map((obj, i) => {
     const id = owns[i] ? declaredIds[i] : mintTabId(i, taken);
     taken.add(id);
-    return {
+    const content: TabDef['content'] =
+      typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
+        ? (obj.content as TabDef['content'])
+        : 'sections';
+    const tab: TabDef = {
       id,
       name:
         typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name.trim() : `Tab ${i + 1}`,
       icon: typeof obj.icon === 'string' && obj.icon.trim() !== '' ? obj.icon.trim() : null,
-      content:
-        typeof obj.content === 'string' && TAB_CONTENT_SET.has(obj.content)
-          ? (obj.content as TabDef['content'])
-          : 'sections',
+      content,
     };
+    if (content === 'view') {
+      // A view tab MISSING a source still parses — `source: null`, rendered
+      // broken — never dropped: dropping would eat the declared id, and the
+      // id is what `_sections` keys per-record content by (M45.4).
+      tab.source = parseTabSource(obj.source);
+      if (typeof obj.view === 'string' && obj.view.trim() !== '') tab.view = obj.view.trim();
+      if (obj.scope === 'related') tab.scope = 'related';
+    }
+    // Non-view tabs SHED stray pointer keys: no arm reads a source on a
+    // sections tab, so persisting one would be noise the serializer writes
+    // back forever — normalize-on-parse, same as the content fallback.
+    // Latent hazard this shed creates: no UI path changes `content` on an
+    // existing tab today, but a future one must carry/restore the pointer
+    // keys itself — flip to sections → serialize → parse sheds → flip back
+    // leaves the tab pointerless after one disk round-trip.
+    return tab;
   });
 }
 
-/** TabDef[] → the plain objects stored under `tabs:`. Inverse of parseTabList. */
+/** TabDef[] → the plain objects stored under `tabs:`. Inverse of parseTabList.
+ * The M45.4 pointer keys are emitted only when SET — and a null source
+ * serializes as NO source key, not `source: null`: null on disk would be an
+ * invented value, and parseTabList regains `source: null` from the absent
+ * key on a view tab, so nothing is lost. A list source's `collection` rides
+ * along only when non-null, for the same reason. */
 export function serializeTabList(tabs: TabDef[]): unknown[] {
-  return tabs.map((t) => ({ id: t.id, name: t.name, icon: t.icon, content: t.content }));
+  return tabs.map((t) => {
+    const out: Record<string, unknown> = {
+      id: t.id,
+      name: t.name,
+      icon: t.icon,
+      content: t.content,
+    };
+    if (t.source != null) {
+      out.source =
+        'type' in t.source
+          ? { type: t.source.type }
+          : t.source.collection != null
+            ? { list: t.source.list, collection: t.source.collection }
+            : { list: t.source.list };
+    }
+    if (t.view !== undefined) out.view = t.view;
+    if (t.scope !== undefined) out.scope = t.scope;
+    return out;
+  });
 }
 
 /** The view a selection names, or the first tab when it names none. */

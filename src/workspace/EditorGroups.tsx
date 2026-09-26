@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { useDragGesture } from '@/hooks/useDragGesture';
 import type { EditorGroup } from '@/engine/editorGroups';
 import { useRootsStore } from '@/stores/rootsStore';
 import { Breadcrumb } from './Breadcrumb';
@@ -25,6 +26,8 @@ export function EditorGroups() {
   const focusGroup = useRootsStore((s) => s.focusGroup);
   const rowRef = useRef<HTMLDivElement>(null);
   const [grow, setGrow] = useState<Record<string, number>>({});
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
 
   const growOf = useCallback((id: string): number => grow[id] ?? 1, [grow]);
 
@@ -46,21 +49,38 @@ export function EditorGroups() {
     const total = leftW + rightW;
     const growTotal = growOf(leftId) + growOf(rightId);
 
+    const fromLeft = growOf(leftId);
+    const fromRight = growOf(rightId);
+
     const move = (ev: PointerEvent) => {
       const width = Math.max(MIN_PANE, Math.min(total - MIN_PANE, leftW + (ev.clientX - startX)));
       const nextLeft = (growTotal * width) / total;
       setGrow((g) => ({ ...g, [leftId]: nextLeft, [rightId]: growTotal - nextLeft }));
     };
-    const up = () => {
+    let released = false;
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the two panes go back to the grow they had
+     * when the divider was grabbed (M46.2). This drag paints THROUGH state,
+     * with no separate commit — so the restore is a `setGrow` of its own.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
+      if (!released) setGrow((g) => ({ ...g, [leftId]: fromLeft, [rightId]: fromRight }));
+    };
+    const up = () => {
+      released = true;
+      gesture.end();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
     document.body.classList.add('cb-resizing');
+    gesture.begin(teardown);
   };
 
   const nudge = (index: number) => (e: React.KeyboardEvent) => {

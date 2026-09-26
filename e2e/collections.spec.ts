@@ -25,9 +25,26 @@ async function switchLayout(page: Page, kind: string): Promise<void> {
   await page.getByTestId(`view-switch-${kind}`).click();
 }
 
-test('collections: a container holds lists and docs, and the sidebar walks it', async ({
-  page,
-}) => {
+/**
+ * Open one of a database's saved views (M47.5).
+ *
+ * These used to be `*.list.yml` files clicked in a Collection's subtree. The
+ * corpus converted: three Lists over Work item are three TABS of Work item,
+ * and the OKR tree is a tab of Objective. The subjects below did not change —
+ * layouts, nesting, the date axes — only the route to them.
+ */
+async function openDatabaseView(page: Page, database: string, view: string): Promise<void> {
+  await page.getByTestId('sidebar-type').filter({ hasText: database }).first().click();
+  const tab = page.getByTestId('view-tabs').getByRole('tab', { name: view });
+  await expect(tab).toBeVisible();
+  // Pressing the tab you are ALREADY on opens its menu (that is how the
+  // layout picker is reached), and the menu's backdrop then swallows every
+  // later click in the test. The first view of a database is selected on
+  // arrival, so this is the common case rather than the corner one.
+  if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+}
+
+test('collections: a container is a page that holds docs and databases', async ({ page }) => {
   await boot(page);
 
   // The sidebar's top-level concept is Collections, not Views. (Scoped to
@@ -35,38 +52,37 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   const sidebar = page.getByLabel('Sidebar', { exact: true });
   await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
 
-  // The demo vault ships one: `delivery/`, holding three Lists and a Doc.
+  // M47.5: `delivery/` is a PAGE — `delivery/delivery.md` carrying
+  // `type: Collection` — holding a doc and, in its own body, the three views
+  // that used to be three `*.list.yml` files sitting beside it.
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
   await expect(delivery).toBeVisible();
 
   // Collapsed, its contents are not on screen; expanding reveals them.
-  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
+  await expect(page.getByTestId('collection-node-doc')).toHaveCount(0);
   await expand(page, 'Delivery');
-  await expect(
-    page.getByTestId('collection-node-list').filter({ hasText: 'Delivery schedule' }),
-  ).toBeVisible();
   await expect(
     page.getByTestId('collection-node-doc').filter({ hasText: 'How we schedule' }),
   ).toBeVisible();
+  // The Lists are gone from the tree because they are gone from disk.
+  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
 
-  // The Collection has a home page of its own: what is in here, and nothing
-  // else. A container carries no query, so this is contents, not a canvas.
+  // The container's home page carries its own BODY — the thing it could not
+  // do while it was a marker file and a listing, and the reason its empty
+  // state used to tell you to go and use the sidebar.
   await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
   const page_ = page.getByTestId('collection-page');
   await expect(page_).toBeVisible();
-  // M11: Lists are cards reporting what they hold; Docs are rows.
-  await expect(page_.getByTestId('collection-card').first()).toBeVisible();
-  await expect(page_.locator('[data-testid="collection-card"][data-kind="list"]')).toHaveCount(3);
+  await expect(page_.getByText('Everything in flight')).toBeVisible();
   await expect(
     page_.locator('[data-testid="collection-content-row"][data-kind="doc"]'),
   ).toHaveCount(1);
-  // No record canvas on a container.
-  await expect(page.getByTestId('table-view')).toHaveCount(0);
-  await expect(page.getByTestId('list-view')).toHaveCount(0);
 
-  // A List inside it opens the record canvas.
-  await page_.getByRole('button', { name: 'At risk', exact: true }).click();
-  await expect(page.getByTestId('table-view')).toBeVisible();
+  // And a database block in that body draws real rows, in place.
+  const block = page.getByTestId('database-block').first();
+  await expect(block).toBeVisible();
+  await expect(block.getByText('Work item')).toBeVisible();
+  await expect(block.getByTestId('table-view')).toBeVisible();
 });
 
 test('collections: nothing sits outside a Collection — there is no Lists bucket', async ({
@@ -81,53 +97,32 @@ test('collections: nothing sits outside a Collection — there is no Lists bucke
   await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
   await expect(sidebar.getByText('Lists', { exact: true })).toHaveCount(0);
 
-  // Every List node in the sidebar is nested under a Collection, never a sibling
-  // of one.
+  // M47.5 converted the corpus's Lists into views of their databases, so the
+  // rule holds in a stronger form than the orphan walk this used to do: there
+  // is no list node anywhere in the tree that COULD be orphaned. The reader
+  // still understands one — a hand-written `*.list.yml` keeps working, which
+  // is D9 — so this asserts the corpus is converted, not that lists died.
   await expand(page, 'Delivery');
   await expand(page, 'Strategy');
-  const listCount = await page.getByTestId('collection-node-list').count();
-  expect(listCount).toBeGreaterThan(0);
-  const orphans = await page.evaluate(
-    () =>
-      [...document.querySelectorAll('[data-testid="collection-node-list"]')].filter((el) => {
-        // A list row is legitimate only if a collection row precedes it at a
-        // shallower indent — which is what nesting looks like in this flat DOM.
-        const indent = parseInt((el as HTMLElement).style.paddingLeft || '0', 10);
-        let prev = el.previousElementSibling;
-        while (prev !== null) {
-          if (prev.getAttribute('data-testid') === 'collection-node-collection') {
-            return parseInt((prev as HTMLElement).style.paddingLeft || '0', 10) >= indent;
-          }
-          prev = prev.previousElementSibling;
-        }
-        return true;
-      }).length,
-  );
-  expect(orphans).toBe(0);
+  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
 });
 
 test('collections: a nested table renders the retired hierarchy view’s job', async ({ page }) => {
   await boot(page);
-  await expand(page, 'Strategy');
-  await page
-    .getByTestId('collection-node-list')
-    .filter({ hasText: 'OKR tree' })
-    .getByRole('button', { name: 'OKR tree', exact: true })
-    .click();
+  await openDatabaseView(page, 'Objective', 'OKR tree');
 
   // Written as `type: tree` — the retired Hierarchy view. It opens as a TABLE
   // that nests, because the nesting always lived in the grouping chain.
   await expect(page.getByTestId('table-view')).toBeVisible();
   await expect(page.locator('[data-testid="table-row"][data-depth="1"]').first()).toBeVisible();
 
-  // Switching the LAYOUT of the open tab persists to the List's own file,
-  // in place — the tab keeps its identity, it just draws differently.
+  // Switching the LAYOUT of the open tab persists — to the DATABASE's own
+  // Type doc now that the view lives there, but the contract is unchanged:
+  // the tab keeps its identity, it just draws differently.
   await switchLayout(page, 'list');
   await expect(page.getByTestId('list-view')).toBeVisible();
   await expect
-    .poll(async () =>
-      page.evaluate(() => window.__cerebroMockFs.get('strategy/okr-tree.list.yml') ?? ''),
-    )
+    .poll(async () => page.evaluate(() => window.__cerebroMockFs.get('types/objective.md') ?? ''))
     .toContain('type: list');
 });
 
@@ -157,12 +152,7 @@ test('views: every kind is offered, and the date views place records on an axis'
   page,
 }) => {
   await boot(page);
-  await expand(page, 'Delivery');
-  await page
-    .getByTestId('collection-node-list')
-    .filter({ hasText: 'Delivery schedule' })
-    .getByRole('button', { name: 'Delivery schedule', exact: true })
-    .click();
+  await openDatabaseView(page, 'Work item', 'Delivery schedule');
 
   // Every kind in the catalog is offered — this roster is the e2e twin of
   // viewKinds.test's registration contract — and the retired kinds are offered
@@ -186,7 +176,13 @@ test('views: every kind is offered, and the date views place records on an axis'
   }
   await expect(page.getByTestId('view-switch-tree')).toHaveCount(0);
   await expect(page.getByTestId('view-switch-split')).toHaveCount(0);
-  await page.getByLabel('Close layout picker').click();
+  // At the corner, deliberately. "Close layout picker" is a `fixed inset-0`
+  // backdrop, so a default click lands at the CENTRE of the viewport — which
+  // is now inside the picker's own menu and hits a layout row instead of
+  // dismissing. Escape is not an option either: this picker still mounts
+  // through the pre-M16.1 `FixedBelowAnchor`, which registers no dismiss
+  // layer, so nothing is listening for the key.
+  await page.getByLabel('Close layout picker').click({ position: { x: 4, y: 4 } });
 
   // -- Gantt: the List declares `dateField: window` and `dependencyField:
   // blocked_by`, so it draws bars AND the arrows the data claims.
@@ -202,9 +198,7 @@ test('views: every kind is offered, and the date views place records on an axis'
   await page.getByTestId('zoom-week').click();
   await expect(page.getByTestId('gantt-view')).toHaveAttribute('data-zoom', 'week');
   await expect
-    .poll(async () =>
-      page.evaluate(() => window.__cerebroMockFs.get('delivery/delivery-schedule.list.yml') ?? ''),
-    )
+    .poll(async () => page.evaluate(() => window.__cerebroMockFs.get('types/work-item.md') ?? ''))
     .toContain('zoom: week');
 
   // -- Timeline: same axis, no dependency layer, bars carry their own label.
@@ -227,14 +221,9 @@ test('views: every kind is offered, and the date views place records on an axis'
 
 test('views: a table nests when its grouping chain descends a relation', async ({ page }) => {
   await boot(page);
-  // The OKR list bands nothing and descends two relations: Objective → Key
+  // The OKR view bands nothing and descends two relations: Objective → Key
   // result → Work item. This is what the retired Hierarchy view was for.
-  await expand(page, 'Strategy');
-  await page
-    .getByTestId('collection-node-list')
-    .filter({ hasText: 'OKR tree' })
-    .getByRole('button', { name: 'OKR tree', exact: true })
-    .click();
+  await openDatabaseView(page, 'Objective', 'OKR tree');
   await switchLayout(page, 'table');
 
   const depth0 = page.locator('[data-testid="table-row"][data-depth="0"]');
@@ -256,25 +245,26 @@ test('views: a table nests when its grouping chain descends a relation', async (
 });
 
 /**
- * Multiple views per List (M11).
+ * Multiple views per database (M11, rehomed M47.5).
  *
  * The regression this guards is the one the whole change exists to prevent: a
  * List used to carry exactly one presentation, so "look at this as a board"
  * REPLACED the table you had configured. Two tabs must be able to disagree
  * about layout, filters and grouping while querying the same records.
+ *
+ * The tabs belong to the DATABASE now rather than to a `*.list.yml`, which is
+ * the same contract reached through one file instead of two — and the corpus
+ * arrives with three of them, where a converted List used to arrive with one.
  */
-test('views: a list keeps several views as tabs, each with its own layout', async ({ page }) => {
+test('views: a database keeps several views as tabs, each with its own layout', async ({
+  page,
+}) => {
   await boot(page);
-  await expand(page, 'Delivery');
-  await page
-    .getByTestId('collection-node-list')
-    .filter({ hasText: 'At risk' })
-    .getByRole('button', { name: 'At risk', exact: true })
-    .click();
+  await openDatabaseView(page, 'Work item', 'At risk');
 
-  // A pre-M11 file opens with one tab, named after the layout it declared.
   const tabs = page.getByTestId('view-tabs');
-  await expect(tabs.getByRole('tab')).toHaveCount(1);
+  const before = await tabs.getByRole('tab').count();
+  expect(before).toBeGreaterThan(1);
   await expect(page.getByTestId('table-view')).toBeVisible();
   // And no pill strip in the toolbar — layout belongs to the tab now.
   await expect(page.getByTestId('view-switch-board')).toHaveCount(0);
@@ -284,12 +274,12 @@ test('views: a list keeps several views as tabs, each with its own layout', asyn
   await page.getByTestId('new-view-board').click();
   await page.getByTestId('create-view').click();
 
-  await expect(tabs.getByRole('tab')).toHaveCount(2);
+  await expect(tabs.getByRole('tab')).toHaveCount(before + 1);
   await expect(page.getByTestId('board-column').first()).toBeVisible();
 
-  // Both views live in the one file, which is what makes them the same List.
-  const yaml = () =>
-    page.evaluate(() => window.__cerebroMockFs.get('delivery/at-risk-work.list.yml') ?? '');
+  // Every view lives in the one Type doc, which is what makes them views of
+  // the same database.
+  const yaml = () => page.evaluate(() => window.__cerebroMockFs.get('types/work-item.md') ?? '');
   await expect.poll(yaml, { timeout: 5_000 }).toContain('type: board');
   await expect.poll(yaml).toContain('type: table');
 

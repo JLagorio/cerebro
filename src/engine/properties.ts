@@ -608,6 +608,26 @@ export function isEmptyForVisibility(def: FieldDef, display: string): boolean {
 }
 
 /**
+ * The ONE fold predicate every property surface hands `splitByVisibility`
+ * (M45.3): does this field fold away for being UNSET on `entry`? Formerly a
+ * character-identical lambda in RecordProperties, DocProperties, the heading
+ * strip, and the layout canvas.
+ *
+ * `showEmpty` — the type's display bit, or the layout editor's DRAFT — turns
+ * folding-for-emptiness off entirely (M44.1): a show-empty surface unfolds
+ * only what was hidden for BEING EMPTY, while a field hidden on purpose
+ * (`visibility: hide`) stays folded either way — that half is
+ * `splitByVisibility`'s call, not this predicate's.
+ */
+export function foldsWhenUnset(
+  entry: Entry,
+  schema: Schema,
+  showEmpty: boolean,
+): (f: FieldDef) => boolean {
+  return (f) => !showEmpty && isEmptyForVisibility(f, schema.resolveField(entry, f.name).display);
+}
+
+/**
  * Split declared fields into what a record panel shows and what it folds away
  * behind the "N hidden properties" expander (M16.10).
  *

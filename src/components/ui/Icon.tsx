@@ -45,6 +45,9 @@ export const ICON_ALIASES: Record<string, string> = {
   'external-link': 'square-arrow-out-up-right',
   'gantt-chart': 'chart-gantt',
   'help-circle': 'circle-question-mark',
+  // The spec name for the layout-editor doors (M45.2) — lucide shipped the
+  // rename before the doors did.
+  layout: 'panels-top-left',
   'minus-circle': 'circle-minus',
   'more-horizontal': 'ellipsis',
   'more-vertical': 'ellipsis-vertical',

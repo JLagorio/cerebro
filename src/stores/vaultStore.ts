@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { validatePatch } from '@/engine/properties';
 import { buildSchema } from '@/engine/schema';
-import { parseCollectionYaml } from '@/engine/collections';
+import { collectionsFromPages, parseCollectionYaml } from '@/engine/collections';
 import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
@@ -73,6 +73,8 @@ function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
  * the two halves disagree for a frame. */
 async function loadCollections(
   vault: string,
+  /** Scanned pages, so a Collection declared by its own page is found (M47.5). */
+  entries: Entry[],
 ): Promise<{ views: ListFile[]; collections: CollectionFile[] }> {
   const [rawLists, rawCollections] = await Promise.all([
     ipc.listViews(vault),
@@ -86,7 +88,18 @@ async function loadCollections(
         path: v.path,
       }),
     ),
-    collections: rawCollections.map((c) => parseCollectionYaml(c.folder, c.yaml)),
+    // A page wins over a marker for the same folder (M47.5). Both can only
+    // coexist mid-conversion, and the page is the form being converted TO —
+    // preferring the marker would make a conversion look like it had not
+    // happened.
+    collections: (() => {
+      const fromPages = collectionsFromPages(entries);
+      const claimed = new Set(fromPages.map((c) => c.folder));
+      const fromYaml = rawCollections
+        .map((c) => parseCollectionYaml(c.folder, c.yaml))
+        .filter((c) => !claimed.has(c.folder));
+      return [...fromPages, ...fromYaml];
+    })(),
   };
 }
 
@@ -105,7 +118,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     set({ vaultPath: path, status: 'scanning', error: null });
     try {
       const entries = await ipc.scanVault(path);
-      const { views, collections } = await loadCollections(path);
+      const { views, collections } = await loadCollections(path, entries);
       const folders = await ipc.listFolders(path);
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
@@ -142,7 +155,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     // rescan inside another action's catch block could throw OUT of it.
     try {
       const entries = await ipc.scanVault(vault);
-      const { views, collections } = await loadCollections(vault);
+      const { views, collections } = await loadCollections(vault, entries);
       const folders = await ipc.listFolders(vault);
       set({ entries, views, collections, folders, status: 'ready' });
     } catch {

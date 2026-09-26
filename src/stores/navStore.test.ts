@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { Selection } from '@/engine/types';
 import { useNavStore } from './navStore';
 import { useUiStore } from './uiStore';
 
@@ -171,6 +172,23 @@ describe('navStore', () => {
     useUiStore.setState({ detailPath: 'records/bets/office-hours.md' });
     navigate({ kind: 'doc', path: 'notes/a.md' });
     expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  // The deepEqual hoist (M45.3) counts an explicitly-undefined key as a key,
+  // so `{kind:'doc', path, tab: undefined}` compares UNEQUAL to the
+  // spread-free literal and would mint a phantom history step. navigate()
+  // strips undefined-valued keys at the door: absent and explicitly
+  // undefined spell the same place.
+  it('an explicitly-undefined optional key is still the same place — no history step', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'a.md' });
+    navigate({ kind: 'doc', path: 'a.md', tab: undefined } as Selection);
+    const s = useNavStore.getState();
+    expect(s.history).toHaveLength(2);
+    expect(s.historyIndex).toBe(1);
+    // The stored selection is the stripped shape — no undefined-valued key
+    // survives to poison a LATER compare from the other direction.
+    expect('tab' in s.selection).toBe(false);
   });
 
   it('back and forward walk the history', () => {

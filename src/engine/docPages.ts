@@ -1,3 +1,4 @@
+import { COLLECTION_TYPE } from './collections';
 import type { Entry } from './types';
 import { isDocEntry } from './typeCatalog';
 
@@ -29,12 +30,22 @@ export function folderNote(folder: string, entries: Entry[]): Entry | null {
   return entries.find((e) => e.path === notePath) ?? null;
 }
 
-/** Pages of the multi-page doc `entry` belongs to, or null for plain docs.
- * project.md files never participate — projects have their own surface. */
+/**
+ * Pages of the multi-page doc `entry` belongs to, or null for plain docs.
+ * project.md files never participate — projects have their own surface.
+ *
+ * Nor does a Collection page (M47.5). Once a container declares itself with a
+ * folder note, `delivery/delivery.md` matches the folder-note convention
+ * exactly — and the doc beside it, `how-we-schedule.md`, started rendering as
+ * the SECOND TAB of a document called Delivery. Both conventions read the same
+ * file and mean different things by it; the container wins, because it is the
+ * one that also owns the sidebar row and the page you navigate to.
+ */
 export function docPagesFor(entry: Entry, entries: Entry[]): DocPages | null {
   if (entry.filename === 'project.md') return null;
   const main = folderNote(entry.folder, entries);
   if (main === null || main.filename === 'project.md') return null;
+  if (main.type === COLLECTION_TYPE) return null;
   const rest = entries
     .filter(
       (e) =>

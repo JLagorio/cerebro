@@ -1,6 +1,11 @@
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
 
+/* Deliberately still `--dur-fast` after M46.2 Task 3. The 20ms hover token is
+ * an anti-flicker guard for a STACK of rows a pointer sweeps; a field is one
+ * large target you land on, and its border change is mostly a FOCUS state,
+ * where 120ms reads as the ring arriving rather than as lag. Select.tsx is the
+ * same case. */
 const css = `
 .cb-input{display:inline-flex;align-items:center;gap:8px;background:var(--n-0);border:1px solid var(--n-300);border-radius:var(--r-md);padding:0 10px;transition:border-color var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out);color:var(--n-500)}
 .cb-input:hover{border-color:var(--n-400)}

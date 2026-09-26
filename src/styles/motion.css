@@ -1,0 +1,39 @@
+/* The two motion kinds, as utilities (M46.2 Task 3).
+ *
+ * The values and the reasoning live in tokens/spacing.css; these are the same
+ * two pairs spelled for Tailwind call sites, so a component says WHICH KIND of
+ * change it is making and never how many milliseconds that is.
+ *
+ * Real `@utility` rules rather than a hand-written class: they land in
+ * Tailwind's utilities layer, so `transition-none` or a longer duration on the
+ * same element still wins the way any utility pair does, and an inline style
+ * — `useSortableList` sets `transition: none` on the row under the cursor —
+ * beats both.
+ *
+ * The property lists are deliberately short. `transition: all` is the defect
+ * the baseline was reporting, not the fix for it: it animates properties
+ * nobody chose, and on a drag surface it will animate the very transform that
+ * has to track the pointer 1:1. */
+
+/* A hover wash, and the ink that changes with it. Colour only — never
+ * `transform` or `opacity`, because a row that reveals a grip on hover is
+ * doing two different things at two different speeds and this is the slow
+ * one at 20ms. */
+@utility motion-hover {
+  transition-property: color, background-color, border-color, fill;
+  transition-duration: var(--dur-hover);
+  transition-timing-function: var(--ease-hover);
+}
+
+/* Something slid, appeared, or changed size. Collapses to 0s under
+ * `prefers-reduced-motion: reduce` by way of `--dur-move`.
+ *
+ * No `background-color` here, deliberately. An element that both moves and
+ * washes on hover — the property row's grip is one — needs the two at two
+ * different speeds, and a single utility cannot say that. Appearance is
+ * spelled with `opacity` so this list covers it. */
+@utility motion-move {
+  transition-property: transform, opacity, box-shadow;
+  transition-duration: var(--dur-move);
+  transition-timing-function: var(--ease-move);
+}

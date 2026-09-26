@@ -202,6 +202,22 @@ describe('PropertyMenu', () => {
     expect(screen.getByText(/Changes Work item — \d+ records?/)).toBeTruthy();
   });
 
+  // M45.2 — Notion's verbatim order ends `─ · Customize layout`, the slot the
+  // docblock held open since M16.7. It edits the TYPE's layout, not this
+  // property, so it fires the one uiStore signal and closes the menu.
+  it('ends on Customize layout, which opens the layout editor for the type', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ layoutEditor: null });
+    setup();
+    await openMenu(user, 'Priority');
+    const items = screen.getAllByRole('menuitem');
+    expect(items[items.length - 1].textContent).toContain('Customize layout');
+
+    await user.click(screen.getByTestId('property-menu-customize-layout'));
+    expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Work item' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  });
+
   // The M16.1 contract, now that a real menu depends on it.
   it('closes on an outside click', async () => {
     const user = userEvent.setup();

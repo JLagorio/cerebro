@@ -304,11 +304,16 @@ export function AddPropertyPanel({
         data-testid="add-relation"
         disabled={(target === null && !isPerson) || duplicate}
         onClick={addRelation}
-        // text-n-0, never text-white: index.css resets the stock
-        // palette with `--color-*: initial` inside @theme inline, so
-        // `text-white` emits no CSS at all and the label inherited --n-900
-        // on the blue fill (2.34:1 — the button read as disabled).
-        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-sm font-medium text-n-0 hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
+        // text-inverse, never text-white and no longer text-n-0 (M45.5).
+        // index.css resets the stock palette with `--color-*: initial` inside
+        // @theme inline, so `text-white` emits no CSS at all and the label
+        // inherited --n-900 on the blue fill (2.34:1 — the button read as
+        // disabled). --n-0 fixed that in light and reintroduced it in dark,
+        // where the ramp inverts to #15181f and the ink fell back to 2.4:1 on
+        // the same fill. --text-inverse is #ffffff in BOTH themes — index.css
+        // names it the ink for anything sitting on --accent or --cortex-* —
+        // so the label holds 7.4:1 either way.
+        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-sm font-medium text-inverse hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
       >
         {isPerson ? 'Add person' : 'Add relation'}
       </button>

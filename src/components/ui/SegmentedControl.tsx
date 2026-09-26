@@ -1,9 +1,13 @@
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
 
+/* The segment's own hover ink spends `--motion-hover` (M46.2). The SELECTED
+ * segment's `--shadow-xs` lift is deliberately not transitioned: it is a
+ * commit, it lands with a re-render rather than with the pointer, and a
+ * fading shadow under a moving pill reads as a smear. */
 const css = `
 .cb-seg{display:inline-flex;background:var(--n-100);border-radius:var(--r-md);padding:2px;gap:2px}
-.cb-seg button{font-family:var(--font-ui);font-size:var(--fs-xs);font-weight:500;color:var(--n-600);background:transparent;border:none;border-radius:var(--r-sm);height:24px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:background var(--dur-fast) var(--ease-out);outline:none;white-space:nowrap}
+.cb-seg button{font-family:var(--font-ui);font-size:var(--fs-xs);font-weight:500;color:var(--n-600);background:transparent;border:none;border-radius:var(--r-sm);height:24px;padding:0 10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;transition:background var(--motion-hover),color var(--motion-hover);outline:none;white-space:nowrap}
 .cb-seg button:hover{color:var(--n-800)}
 .cb-seg button:focus-visible{box-shadow:var(--ring)}
 .cb-seg .cb-seg-on{background:var(--n-0);color:var(--n-900);box-shadow:var(--shadow-xs)}

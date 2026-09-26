@@ -1,8 +1,11 @@
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
 
+/* Hover and press both spend `--motion-hover` (M46.2) — the wash and the
+ * border are one state change and a button that fills 120ms after the press
+ * reads as a laggy button, not a smooth one. */
 const css = `
-.cb-btn{font-family:var(--font-ui);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:background var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out);outline:none}
+.cb-btn{font-family:var(--font-ui);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:background var(--motion-hover),border-color var(--motion-hover);outline:none}
 .cb-btn:focus-visible{border-color:var(--border-focus);box-shadow:var(--ring)}
 .cb-btn[disabled]{cursor:not-allowed;opacity:.45}
 .cb-btn-md{height:var(--control-h);padding:0 12px;font-size:var(--fs-sm)}

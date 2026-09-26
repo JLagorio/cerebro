@@ -102,10 +102,36 @@ describe('Dropdown', () => {
     );
   });
 
-  it('closes on backdrop click', () => {
+  /**
+   * There is no backdrop element to click any more — the `Popover` the menu
+   * became dismisses on a real outside pointerdown, in the capture phase, and
+   * a test that clicked a "Close menu" button was only ever proving that
+   * button's own onClick ran. This presses somewhere genuinely outside.
+   */
+  it('closes on an outside press', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close menu' }));
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  /**
+   * The bug that moved this menu onto `Popover` (M46.3): rendered in place it
+   * was clipped by any scrolling ancestor, which in the New list dialog cut
+   * the option list off at the dialog's edge. Portalling is what fixes it, so
+   * that is what this pins — the panel is NOT inside the scroll container it
+   * was opened from.
+   */
+  it('portals the menu out of a scrolling ancestor', () => {
+    render(
+      <div data-testid="scroller" style={{ overflow: 'auto', height: 40 }}>
+        <Dropdown options={options} value="status" onChange={vi.fn()} label="Nested" size="sm" />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Nested' }));
+    const list = screen.getByRole('listbox', { name: 'Nested' });
+    expect(screen.getByTestId('scroller').contains(list)).toBe(false);
+    expect(document.body.contains(list)).toBe(true);
   });
 });

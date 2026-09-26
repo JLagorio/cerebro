@@ -10,7 +10,9 @@
  */
 
 import { isTemplate } from '@/lib/templates';
-import { isLibraryEntry, isLibraryType } from './library';
+import { DEFAULT_TIME_FORMAT } from './dates';
+import { COLLECTION_TYPE, isCollectionPage } from './collections';
+import { AGENT_TYPE, isLibraryEntry, isLibraryType, SKILL_TYPE } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type {
@@ -39,7 +41,17 @@ export const SYSTEM_TYPES: SystemTypeSpec[] = [
     // The meta-type: `type: Type` docs ARE the schema. Fully locked — its
     // reserved frontmatter keys are the schema format itself.
     name: 'Type',
-    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views', 'display', 'tabs'],
+    lockedFields: [
+      'fields',
+      'statuses',
+      'icon',
+      'color',
+      'folder',
+      'views',
+      'display',
+      'tabs',
+      'layout',
+    ],
     fallbackIcon: 'shapes',
     fallbackColor: '#8B7CF6',
   },
@@ -51,6 +63,21 @@ export function systemTypeSpec(name: string): SystemTypeSpec | null {
 
 export function isSystemType(name: string): boolean {
   return systemTypeSpec(name) !== null;
+}
+
+/**
+ * Names the app gives a meaning of its own: the metamodel (`Type`), the
+ * container (`Collection`) and the library (`Skill`, `Agent`). Never a user
+ * database — a Type doc under one of them hangs a schema on the machinery,
+ * and `Type` in particular turns every schema doc into a task. Compared
+ * without case, because `type` and `Type` are one name to a person. Every
+ * door that creates or renames a database asks this.
+ */
+export function isReservedTypeName(name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  return [...SYSTEM_TYPES.map((t) => t.name), COLLECTION_TYPE, SKILL_TYPE, AGENT_TYPE].some(
+    (reserved) => reserved.toLowerCase() === lower,
+  );
 }
 
 /** True when the field is a built-in of a system type (rename/delete locked). */
@@ -91,6 +118,12 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
   // the Type doc is harmless, and demanding the user delete a file to fix
   // their sidebar would be the app blaming them for its own migration.
   for (const name of names) if (isLibraryType(name)) names.delete(name);
+
+  // A Collection is a container, not a database (M47.5). It carries a `type:`
+  // because that is how a page says what it is, but listing it here would put
+  // "Collection · 2" in the Databases section beside Risk and Work item and
+  // invite you to open a table of your own folders.
+  names.delete(COLLECTION_TYPE);
 
   // Templates carry a `type:` so pages created from them inherit it — they
   // are scaffolding, never records, and must not inflate counts (M3.1: the
@@ -151,6 +184,9 @@ export function isRecordEntry(entry: Entry): boolean {
     entry.type !== null &&
     entry.type !== '' &&
     entry.type !== 'Type' &&
+    // A container's page is its collection, not a row of a `Collection`
+    // database — there is no such database to show it in (M47.5).
+    !isCollectionPage(entry) &&
     // M18: skills and agents are how the vault works, not what it is about.
     // They keep their file and lose the record surfaces — see engine/library.
     !isLibraryEntry(entry) &&
@@ -212,12 +248,25 @@ function fieldToSpec(def: FieldDef): unknown {
   if (def.calculate !== undefined) spec.calculate = def.calculate;
   if (def.format !== undefined && def.format !== 'plain') spec.format = def.format;
   if (def.precision !== undefined) spec.precision = def.precision;
+  // Deviations only, like parseFieldDef's defaults: absent visibility = show,
+  // absent formats = 'short' / '12'. Dropping a set NON-default here loses
+  // data on every round-trip (M45.1: applyTypeLayout serializes ADDED fields
+  // with this) — but an explicit default normalizes to NO key, same rule as
+  // `format !== 'plain'` above: a Type doc should not carry the absence of
+  // an opinion.
+  if (def.dateFormat !== undefined && def.dateFormat !== 'short') spec.dateFormat = def.dateFormat;
+  if (def.timeFormat !== undefined && def.timeFormat !== DEFAULT_TIME_FORMAT) {
+    spec.timeFormat = def.timeFormat;
+  }
+  if (def.visibility !== undefined && def.visibility !== 'show') spec.visibility = def.visibility;
   return spec;
 }
 
 /**
  * FieldDef[] → the `fields:` frontmatter mapping on a Type doc. Inverse of
- * schema.ts parseFields; the write-side used by property configuration.
+ * schema.ts parseFields; the write-side of applyTypeLayout's ADDED path
+ * (M45.1) — existing declarations are merged raw, never round-tripped
+ * through here, so a hand-edited vault's unmodeled keys survive.
  */
 export function serializeFields(fields: FieldDef[]): Record<string, unknown> {
   return Object.fromEntries(fields.map((f) => [f.name, fieldToSpec(f)]));
@@ -270,9 +319,20 @@ export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
 }
 
 /**
- * The record page's tabs for a type (M44.5) — same contract as `typeViews`:
- * a type that saved none gets the Overview default, and nothing is written
- * to its Type doc until the user makes the tabs their own.
+ * A record's tabs for a type (M44.5) — same contract as `typeViews`: a type
+ * that saved none gets the Overview default, and nothing is written to its
+ * Type doc until the user makes the tabs their own.
+ *
+ * The record PAGE was the only reader when this landed; since M45.6 the PEEK
+ * shows the same tabs, and both reach them through `recordTabSet`
+ * (src/detail/RecordTabs.tsx) rather than calling here directly — so neither
+ * surface hand-rolls the "does a strip exist" gate a second time. The layout
+ * editor's canvas is the strip's third host but not this function's reader:
+ * it renders a staged draft, not a saved type's tabs.
+ *
+ * A tab's roster has NO bearing on where properties render (M46.1): the
+ * property stack stands above the strip, on every tab, so no module here
+ * answers "which tab holds this section".
  */
 export function typeTabs(typeName: string, schema: Schema): TabDef[] {
   const saved = schema.types.get(typeName)?.tabs ?? [];

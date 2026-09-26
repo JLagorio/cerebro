@@ -70,11 +70,49 @@ export default defineConfig({
       // M34.1 measured 80.34 / 80.34 / 75.52 / 83.61 — the grant, capability,
       // and prompt work arrived tested, so the floor follows it up. Ratchets
       // only tighten.
+      // M45.5 measured 82.24 statements / 84.56 branches / 76.65 functions /
+      // 82.24 lines: M44's dashboards and views and M45's layout editor all
+      // arrived with their own suites, and two points of headroom is a floor
+      // that would let the next surface rot while still reporting green.
+      // Branches gets the wider margin on purpose — statements, lines and
+      // functions reported the same denominator on two consecutive runs while
+      // the branch total moved (19864 → 19861, 84.56 → 84.55), and a ratchet
+      // that trips on its own measurement noise is a broken gate, not a floor.
+      // M45.6 measured 82.31 statements / 84.66 branches / 76.77 functions /
+      // 82.31 lines on two consecutive runs — the tab seam, the peek's strip
+      // and the customizer's tab-scoped canvas all arrived with their suites.
+      // The margins are thinner than M45.5's because the noise is now
+      // measured rather than guessed at: statements, lines and functions
+      // reported the SAME numerator and denominator both times (53987/65587,
+      // 3071/4000), so a 0.01 gap is real headroom there; branches moved its
+      // denominator again (19999 → 20001) at an unchanged 84.66, and keeps
+      // the wider margin for it.
+      // M46.2 measured 82.63 statements / 84.87 branches / 77.26 functions /
+      // 82.63 lines. The drag rebuild added four tested primitives that did
+      // not exist (`useDragGesture`, `sortableGeometry`, `dropPartition`,
+      // `BlockDrag`) plus `Grip`, `ResizeHandle` and the motion tokens, and a
+      // slice that adds that much tested code and leaves the floor where it
+      // was is licensing the NEXT one to add none. Same two-run protocol:
+      // statements, lines and functions reported the same numerator and
+      // denominator both times (54608/66086, 3126/4046), so the small gap
+      // there is real headroom; branches moved both (17153/20209 →
+      // 17159/20213, 84.87 → 84.89) and keeps the wider margin, because a
+      // ratchet that trips on its own measurement noise is a broken gate.
+      // M47.6 measured 82.90 statements / 84.98 branches / 77.45 functions /
+      // 82.90 lines. This slice earned its rise by DELETING rather than by
+      // adding: `ViewSettingsDialog.tsx` and `createList` were the New-list
+      // authoring path, and untested code that leaves the tree takes its
+      // uncovered lines with it. A floor that does not follow a deletion is a
+      // floor that quietly banks the credit and lets the next surface spend
+      // it. Same two-run protocol: statements, lines and functions reported
+      // the same numerator and denominator both times (55098/66459,
+      // 3153/4071); branches moved its numerator by one (17342 → 17343) at an
+      // unchanged 84.98, and keeps the wider margin for it.
       thresholds: {
-        lines: 80.4,
-        statements: 80.4,
-        functions: 75.4,
-        branches: 83.6,
+        lines: 82.87,
+        statements: 82.87,
+        functions: 77.39,
+        branches: 84.91,
       },
     },
   },

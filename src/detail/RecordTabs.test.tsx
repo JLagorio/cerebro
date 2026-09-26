@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TabDef } from '@/engine/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ListFile, TabDef } from '@/engine/types';
 import { RecordTabs } from '@/detail/RecordTabs';
+import { useVaultStore } from '@/stores/vaultStore';
+import { makeEntry } from '@/test/factories';
 
 const TABS: TabDef[] = [
   { id: 'overview', name: 'Overview', icon: null, content: 'overview' },
@@ -62,11 +64,25 @@ describe('RecordTabs (M44.5)', () => {
   it('the add popover suggests a free name and takes a picked content kind', () => {
     const props = setup({ tabs: [TABS[0], { ...TABS[1], name: 'Tab' }] });
     fireEvent.click(screen.getByTestId('new-record-tab'));
-    fireEvent.click(screen.getByRole('button', { name: 'Properties' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
     fireEvent.click(screen.getByTestId('create-record-tab'));
     const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
     // "Tab" is taken by a sibling, so the suggestion moves along.
-    expect(next[2]).toMatchObject({ name: 'Tab 2', content: 'properties' });
+    expect(next[2]).toMatchObject({ name: 'Tab 2', content: 'overview' });
+  });
+
+  it('offers no Properties kind — a property section is never a tab (M46.1)', () => {
+    setup();
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    // "sorry tabs are only for related data sources. fields shwo above." The
+    // stack stands above the strip on every tab, so a tab that IS the stack
+    // is exactly the shape the correction forbids.
+    expect(screen.queryByRole('button', { name: 'Properties' })).toBeNull();
+    // The other three survive — `getByRole` throws if one goes missing, so
+    // this is the vacuity guard on the absence above.
+    for (const kind of ['Sections', 'Overview', 'View']) {
+      screen.getByRole('button', { name: kind });
+    }
   });
 
   it('the last tab cannot be deleted', () => {
@@ -121,6 +137,21 @@ describe('RecordTabs (M44.5)', () => {
     expect(new Set(next.map((t) => t.id)).size).toBe(3);
     expect(next[1].content).toBe('overview');
   });
+
+  // M45.6 — the strip's horizontal inset is the HOST's measurement, not its
+  // own: the record page and the editor canvas are 24px columns (`md`, the
+  // default, so neither passes anything), the peek is a 16px one (`sm`). A
+  // strip that carried the wider gutter into the panel would sit misaligned
+  // under everything above it.
+  it('sits in the gutter its host has, 24px unless asked for 16', () => {
+    setup();
+    expect(screen.getByTestId('record-tabs').parentElement?.className).toContain('px-6');
+    cleanup();
+    setup({ gutter: 'sm' });
+    const strip = screen.getByTestId('record-tabs').parentElement;
+    expect(strip?.className).toContain('px-4');
+    expect(strip?.className).not.toContain('px-6');
+  });
 });
 
 describe('RecordTabs keyboard contract (M44.5)', () => {
@@ -138,5 +169,282 @@ describe('RecordTabs keyboard contract (M44.5)', () => {
     fireEvent.keyDown(screen.getByLabelText(/^Reorder Overview/), { key: 'ArrowRight' });
     expect(props.onChange).toHaveBeenCalledWith([TABS[1], TABS[0]]);
     expect(props.onSelect).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M45.4 — a new tab can be a view of any database.
+// ---------------------------------------------------------------------------
+
+/** Project ← Task (Task holds the relation), plus a relation-less Note and
+ * two typeless "everything" Lists — one qualifying source, the rest never
+ * offer the related toggle. Task saves TWO views so the view picker has a
+ * reason to exist; Note's synthesized single default keeps it hidden. The
+ * second list's collection legally contains `::` — the case that broke a
+ * composite-keyed option value and keeps the roster index-keyed. */
+const makeList = (id: string, collection: string, name: string): ListFile => ({
+  id,
+  collection,
+  project: null,
+  path: `${collection}/${id}.list.yml`,
+  definition: {
+    name,
+    icon: null,
+    color: null,
+    order: null,
+    source: { type: null, project: null },
+    views: [
+      {
+        id: 'main',
+        name: 'All',
+        icon: null,
+        filters: null,
+        presentation: { type: 'table', group: [], sort: [], columns: [] },
+      },
+    ],
+  },
+});
+
+const READING_LIST = makeList('reading', 'crm', 'Reading list');
+const CLIPS_LIST = makeList('clips', 'notes::archive', 'Clips');
+
+function seedVault() {
+  useVaultStore.setState({
+    entries: [
+      makeEntry({ path: 'types/project.md', title: 'Project', type: 'Type' }),
+      makeEntry({
+        path: 'types/task.md',
+        title: 'Task',
+        type: 'Type',
+        properties: {
+          fields: { project: { kind: 'relation', target: 'Project' } },
+          views: [
+            { id: 'all', name: 'Everything' },
+            { id: 'open', name: 'Open' },
+          ],
+        } as never,
+      }),
+      makeEntry({ path: 'types/note.md', title: 'Note', type: 'Type' }),
+    ],
+    views: [READING_LIST, CLIPS_LIST],
+  });
+}
+
+/** A saved view tab wearing all three optional keys — the prefill fixture. */
+const VIEW_TAB: TabDef = {
+  id: 'tasks',
+  name: 'Tasks',
+  icon: null,
+  content: 'view',
+  source: { type: 'Task' },
+  view: 'open',
+  scope: 'related',
+};
+
+/** Open the add popover and stand on the View tile. */
+function openViewForm() {
+  fireEvent.click(screen.getByTestId('new-record-tab'));
+  fireEvent.click(screen.getByTestId('new-tab-kind-view'));
+}
+
+const pickSource = (value: string) =>
+  fireEvent.change(screen.getByTestId('view-tab-source'), { target: { value } });
+
+describe('RecordTabs view tabs (M45.4)', () => {
+  beforeEach(seedVault);
+  // Unmount BEFORE the store empties — a reset under a live ViewSourcePicker
+  // is a state update no test fired (the act warning it produced).
+  afterEach(() => {
+    cleanup();
+    useVaultStore.setState({ entries: [], views: [] });
+  });
+
+  it('offers the View tile last and drills into the source roster', () => {
+    setup({ hostType: 'Project' });
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    const tiles = screen.getAllByTestId(/^new-tab-kind-/);
+    expect(tiles.at(-1)?.getAttribute('data-testid')).toBe('new-tab-kind-view');
+    // The drill-in belongs to the View tile alone.
+    expect(screen.queryByTestId('view-tab-source')).toBeNull();
+    fireEvent.click(screen.getByTestId('new-tab-kind-view'));
+    const select = screen.getByTestId('view-tab-source') as HTMLSelectElement;
+    // Types first (listTypes' sorted catalog), then Lists labeled by their
+    // definition name (the dashboard submenu's labeling) and VALUED by roster
+    // index — UI-transient keys that never need parsing back apart.
+    expect([...select.options].map((o) => o.text)).toEqual([
+      'Choose a database…',
+      'Note',
+      'Project',
+      'Task',
+      'Type',
+      'Reading list',
+      'Clips',
+    ]);
+    expect([...select.options].map((o) => o.value)).toEqual([
+      '',
+      'type:Note',
+      'type:Project',
+      'type:Task',
+      'type:Type',
+      'list:0',
+      'list:1',
+    ]);
+    // No source yet — nothing to add a view of.
+    const create = screen.getByTestId('create-record-tab') as HTMLButtonElement;
+    expect(create.textContent).toBe('Add view');
+    expect(create.disabled).toBe(true);
+  });
+
+  it('offers the saved-view picker only when the source has more than one view', () => {
+    setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('type:Note');
+    expect(screen.queryByTestId('view-tab-view')).toBeNull();
+    pickSource('type:Task');
+    const picker = screen.getByTestId('view-tab-view') as HTMLSelectElement;
+    expect([...picker.options].map((o) => o.text)).toEqual(['Everything', 'Open']);
+  });
+
+  it('offers the related toggle default-ON when the source stores a relation at the host type', () => {
+    setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('type:Task');
+    const toggle = screen.getByRole('switch', {
+      name: 'Only related to this record',
+    }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    // Note declares no relation at Project — the toggle goes away, never grays.
+    pickSource('type:Note');
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('offers no toggle when the host type is unqualified', () => {
+    // Task's relation targets Project, not Note — a Note record cannot scope it.
+    setup({ hostType: 'Note' });
+    openViewForm();
+    pickSource('type:Task');
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('offers no toggle when the host has no type at all', () => {
+    setup();
+    openViewForm();
+    pickSource('type:Task');
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('creates the full view TabDef: source, picked view, related scope', () => {
+    const props = setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('type:Task');
+    fireEvent.change(screen.getByTestId('view-tab-view'), { target: { value: 'open' } });
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    // The name comes from the SOURCE, the id from the name — exact shape,
+    // every optional key present.
+    expect(next[2]).toEqual({
+      id: 'task',
+      name: 'Task',
+      icon: null,
+      content: 'view',
+      source: { type: 'Task' },
+      view: 'open',
+      scope: 'related',
+    });
+  });
+
+  it('creates the minimal view TabDef: list source, default view, no scope keys', () => {
+    const props = setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('list:0');
+    // One view, typeless source: no picker, no toggle.
+    expect(screen.queryByTestId('view-tab-view')).toBeNull();
+    expect(screen.queryByRole('switch')).toBeNull();
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    expect(next[2]).toEqual({
+      id: 'reading-list',
+      name: 'Reading list',
+      icon: null,
+      content: 'view',
+      source: { list: 'reading', collection: 'crm' },
+    });
+  });
+
+  it('a collection legally containing :: survives the index-keyed pick intact', () => {
+    const props = setup({ hostType: 'Project' });
+    openViewForm();
+    pickSource('list:1');
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    // The pointer is read off the roster ROW, never parsed out of the option
+    // value — the collection path comes through whole, the id unglued.
+    expect(next[2]).toEqual({
+      id: 'clips',
+      name: 'Clips',
+      icon: null,
+      content: 'view',
+      source: { list: 'clips', collection: 'notes::archive' },
+    });
+  });
+
+  it('moves the suggested name along when a sibling took it, and a toggled-off scope is absent', () => {
+    const props = setup({
+      hostType: 'Project',
+      tabs: [TABS[0], { id: 'task', name: 'Task', icon: null, content: 'sections' } as TabDef],
+    });
+    openViewForm();
+    pickSource('type:Task');
+    fireEvent.click(screen.getByRole('switch', { name: 'Only related to this record' }));
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    expect(next[2]).toMatchObject({ name: 'Task 2', content: 'view', source: { type: 'Task' } });
+    expect('scope' in next[2]).toBe(false);
+    expect('view' in next[2]).toBe(false);
+    expect(new Set(next.map((t) => t.id)).size).toBe(3);
+  });
+
+  it('offers Change source… on view tabs only', () => {
+    setup({ tabs: [TABS[0], VIEW_TAB], hostType: 'Project' });
+    fireEvent.contextMenu(screen.getByTestId('record-tab-overview'));
+    expect(screen.queryByRole('menuitem', { name: 'Change source…' })).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('record-tab-tasks'));
+    expect(screen.getByRole('menuitem', { name: 'Change source…' })).toBeTruthy();
+  });
+
+  it('Change source… reopens the drill-in prefilled and commits the rewrite', () => {
+    const props = setup({ tabs: [TABS[0], VIEW_TAB], hostType: 'Project' });
+    fireEvent.contextMenu(screen.getByTestId('record-tab-tasks'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Change source…' }));
+    // Prefilled from the tab: source, saved view, scope.
+    expect((screen.getByTestId('view-tab-source') as HTMLSelectElement).value).toBe('type:Task');
+    expect((screen.getByTestId('view-tab-view') as HTMLSelectElement).value).toBe('open');
+    expect((screen.getByRole('switch') as HTMLInputElement).checked).toBe(true);
+    pickSource('list:0');
+    fireEvent.click(screen.getByTestId('change-source-save'));
+    // The old pointer's view/scope never survive a source change: the new
+    // source has one view and no type, so both keys are GONE, not stale.
+    expect(props.onChange).toHaveBeenCalledWith([
+      TABS[0],
+      {
+        id: 'tasks',
+        name: 'Tasks',
+        icon: null,
+        content: 'view',
+        source: { list: 'reading', collection: 'crm' },
+      },
+    ]);
+  });
+
+  it('non-view tabs still create through the plain path', () => {
+    const props = setup({ hostType: 'Project' });
+    fireEvent.click(screen.getByTestId('new-record-tab'));
+    fireEvent.click(screen.getByTestId('new-tab-kind-view'));
+    // Stepping back off the View tile abandons the drill-in entirely.
+    fireEvent.click(screen.getByTestId('new-tab-kind-sections'));
+    expect(screen.queryByTestId('view-tab-source')).toBeNull();
+    fireEvent.click(screen.getByTestId('create-record-tab'));
+    const next = props.onChange.mock.calls.at(-1)?.[0] as TabDef[];
+    expect(next[2]).toEqual({ id: 'tab', name: 'Tab', icon: null, content: 'sections' });
   });
 });

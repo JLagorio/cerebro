@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Grip } from '@/components/ui/Grip';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -46,6 +47,11 @@ function ColorPicker({
               aria-label={`Use color ${name}`}
               aria-pressed={picked}
               onClick={() => onPick(name === 'default' ? null : name)}
+              // No motion token (M46.2 Task 3). The swatch IS the value being
+              // chosen, and the outline is the answer to "which one is
+              // selected" — a colour the user is actively editing must read
+              // true the instant they click it, not one frame's worth of
+              // interpolation later.
               className="h-4 w-4 rounded-full border-0 p-0"
               style={{
                 background: sw.solid,
@@ -73,14 +79,12 @@ function OptionRow({
   onChange,
   onRemove,
   grip,
-  dragging = false,
   style,
 }: {
   option: FieldOption;
   onChange: (next: FieldOption) => void;
   onRemove: () => void;
   grip?: GripProps;
-  dragging?: boolean;
   style?: React.CSSProperties;
 }) {
   const [editing, setEditing] = useState(false);
@@ -100,18 +104,10 @@ function OptionRow({
   };
 
   return (
-    <div
-      style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
-    >
+    <div style={style} className="group flex flex-col rounded-md px-1 py-1 hover:bg-n-25">
       <div className="flex items-center gap-2">
         {grip !== undefined && (
-          <span
-            {...grip}
-            className="flex flex-none cursor-grab items-center justify-center rounded-xs text-n-300 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <Icon name="grip-vertical" size={12} />
-          </span>
+          <Grip {...grip} className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100" />
         )}
         <button
           type="button"
@@ -228,14 +224,14 @@ export function OptionListEditor({
       <div
         ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
         className="flex flex-col gap-0.5"
+        style={sortable.containerStyle}
       >
         {options.map((o, i) => (
           <OptionRow
             key={o.id}
             option={o}
             grip={sortable.gripProps(o.id, i)}
-            dragging={sortable.dragging === o.id}
-            style={sortable.dropIndicator(i)}
+            style={sortable.rowStyle(i)}
             onChange={(next) => onChange(options.map((x, xi) => (xi === i ? next : x)))}
             onRemove={() => onChange(options.filter((_, xi) => xi !== i))}
           />

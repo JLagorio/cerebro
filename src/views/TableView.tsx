@@ -11,6 +11,7 @@ import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { useDragGesture } from '@/hooks/useDragGesture';
 import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
@@ -942,6 +943,8 @@ function ColumnResizer({
 }) {
   const start = useRef({ x: 0, w: 0 });
   const [active, setActive] = useState(false);
+  /** The drag's claim on Escape, and the teardown an unmount runs (M46.2). */
+  const gesture = useDragGesture();
   /**
    * The width an arrow key is building, before it is persisted (M20.5).
    *
@@ -966,17 +969,32 @@ function ColumnResizer({
     // the blur after the drag would settle the stale pending as a second
     // write on top of the drag's own.
     pending.current = null;
-    start.current = { x: clientX, w: width };
+    const from = width;
+    start.current = { x: clientX, w: from };
     setActive(true);
     const at = (x: number) => Math.max(min, Math.round(start.current.w + (x - start.current.x)));
     const move = (e: PointerEvent) => onDrag(at(e.clientX));
-    const up = (e: PointerEvent) => {
+    let released = false;
+    /**
+     * Ends the gesture. `released` is false for an Escape and for an unmount
+     * that catches the drag still live, and both mean the same thing: the
+     * gesture never finished, so the column is repainted at the width the grab
+     * found it and nothing is persisted (M46.2). The paint/persist split is
+     * what makes that cheap — the drag has written nothing yet.
+     */
+    const teardown = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       document.body.classList.remove('cb-resizing');
       setActive(false);
-      onCommit(at(e.clientX));
+      if (!released) onDrag(from);
+    };
+    const up = (e: PointerEvent) => {
+      released = true;
+      const w = at(e.clientX);
+      gesture.end();
+      onCommit(w);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -984,6 +1002,7 @@ function ColumnResizer({
     // Kills text selection and keeps the col-resize cursor while the pointer
     // is outside the 9px handle, which is most of any real drag.
     document.body.classList.add('cb-resizing');
+    gesture.begin(teardown);
   };
 
   return (
@@ -2543,6 +2562,18 @@ export function TableView({
   const suppressClick = useRef(false);
   const [drag, setDrag] = useState<{ key: string; slot: number } | null>(null);
 
+  /**
+   * The drag's claim on Escape, and the teardown an unmount runs (M46.2).
+   *
+   * Measured before this existed: `Escape` cancelled nothing, the loop kept
+   * tracking the pointer and the RELEASE COMMITTED the reorder — the opposite
+   * of what the user asked for, and the app has no undo. Two leaks came with
+   * it, both closed by the same teardown: a table unmounted mid-drag stranded
+   * its window listeners, and left `cb-col-dragging` on `<body>`, which is
+   * `cursor: grabbing !important` on every element in the app, permanently.
+   */
+  const gesture = useDragGesture();
+
   const startHeaderDrag = useCallback(
     (key: string) => (e: React.PointerEvent) => {
       if (onPresentationChange === undefined || e.button !== 0) return;
@@ -2562,6 +2593,7 @@ export function TableView({
       const startY = e.clientY;
       const slotAt = (x: number) => mids.filter((m) => x > m).length;
       let started = false;
+      let cancelled = false;
       const move = (ev: PointerEvent) => {
         // 5px threshold keeps a plain click on the label opening the menu.
         if (!started && Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) {
@@ -2574,14 +2606,28 @@ export function TableView({
         }
         setDrag({ key, slot: slotAt(ev.clientX) });
       };
-      const up = (ev: PointerEvent) => {
+      /**
+       * Everything the drag paints and tracks, minus the release listener.
+       * Escape stops here: the pointer is still down, and its release still
+       * fires a `click` on the header label — which is also the column menu's
+       * trigger — so `up` has to outlive the cancel or one keystroke would
+       * abandon the drag and open a menu.
+       */
+      const stop = () => {
         window.removeEventListener('pointermove', move);
-        window.removeEventListener('pointerup', up);
-        window.removeEventListener('pointercancel', up);
         document.body.classList.remove('cb-col-dragging');
         setDrag(null);
+      };
+      const teardown = () => {
+        stop();
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      const up = (ev: PointerEvent) => {
+        const commit = started && !cancelled;
+        gesture.end();
         if (!started) return;
-        reorderDisplay(key, slotAt(ev.clientX));
+        if (commit) reorderDisplay(key, slotAt(ev.clientX));
         // Cleared on a timeout so the click event this pointerup produces is
         // still inside the suppression window.
         setTimeout(() => {
@@ -2591,8 +2637,15 @@ export function TableView({
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
       window.addEventListener('pointercancel', up);
+      // Nothing else moved on screen during the drag — the insertion line is
+      // the whole of its visible state — so stripping that state IS the
+      // restore, and the release simply finds nothing to commit.
+      gesture.begin(teardown, () => {
+        cancelled = true;
+        stop();
+      });
     },
-    [onPresentationChange, reorderDisplay],
+    [gesture, onPresentationChange, reorderDisplay],
   );
 
   const swallowDraggedClick = (e: React.MouseEvent) => {
@@ -2926,7 +2979,16 @@ export function TableView({
                 description={
                   filtered === true
                     ? 'Adjust the filters in view settings to widen the query.'
-                    : 'Create the first one below.'
+                    : // "below" is only true when there IS an add row, and
+                      // `buildRows` emits one exactly when `onCreate` was
+                      // passed (M47.4). A surface that cannot create — the
+                      // dashboard's embed has never passed one — was pointing
+                      // at a control that does not exist on it, which is the
+                      // same defect M20.5 fixed for the case where the control
+                      // was merely in the wrong place.
+                      onCreate !== undefined
+                      ? 'Create the first one below.'
+                      : 'Nothing here yet.'
                 }
               />
             </div>

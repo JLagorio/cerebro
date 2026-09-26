@@ -13,7 +13,8 @@ import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { CreateMenu } from '@/app/CreateMenu';
-import { deleteCollection, deleteList } from '@/app/listActions';
+import { createPageIn, deleteCollection, deleteList } from '@/app/listActions';
+import { createDatabase } from '@/app/typeActions';
 import { SectionHeader } from '@/app/SectionHeader';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass } from '@/app/sidebarChrome';
@@ -37,7 +38,6 @@ export interface SidebarProps {
    * List always lives in a Collection, so there is no top-level variant to
    * offer and no null to handle downstream.
    */
-  onNewView: (collection: string) => void;
   /**
    * The window is too narrow to honour a stored width (M15). The sidebar draws
    * at its minimum instead — the STORED preference is untouched, so widening
@@ -135,7 +135,7 @@ function SurfaceRow({
  * design's `sec()` treats a roster the way Databases already reads: a
  * labelled shelf of subjects, not a place with children.
  */
-export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
+export function Sidebar({ narrow = false }: SidebarProps) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
@@ -163,6 +163,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
   const [adopting, setAdopting] = useState(false);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
   );
@@ -272,11 +273,6 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
       if (file === undefined) return [];
       const items: ContextMenuItem[] = [
         {
-          icon: 'plus',
-          label: 'New list…',
-          onSelect: () => onNewView(node.id),
-        },
-        {
           icon: 'pencil',
           label: 'Rename…',
           onSelect: () => setCollectionDialog({ mode: 'rename', collection: file }),
@@ -312,6 +308,40 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
     }
     return [];
   };
+
+  /**
+   * What a container's `+` offers (M47.5, narrowed by M47.6).
+   *
+   * A PAGE first, then a database — the two things a container can hold now
+   * that everything is a page. The only door this had before was "New list",
+   * which is why the empty collection page could do nothing but tell you to go
+   * and use the sidebar, and why there was no way to put a doc in a collection
+   * at all. M47.6 closed the third door: a saved view belongs to the database
+   * it queries (`views:` on its Type doc), so authoring a standalone
+   * `*.list.yml` would be authoring the lane M47 exists to retire. The ones
+   * already on disk still open and still edit — see listActions.
+   */
+  const addMenuItems = (folder: string): ContextMenuItem[] => [
+    {
+      icon: 'file-plus',
+      label: 'New page',
+      onSelect: () =>
+        void (async () => {
+          // createPageIn toasts its own failure and answers null.
+          const path = await createPageIn(folder);
+          if (path !== null) openPath(path);
+        })(),
+    },
+    {
+      icon: 'table-2',
+      label: 'New database',
+      onSelect: () =>
+        void (async () => {
+          const name = await createDatabase('Untitled database');
+          if (name !== null) navigate({ kind: 'type', name });
+        })(),
+    },
+  ];
 
   const typeMenuItems = (listing: TypeListing): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -560,7 +590,9 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               onNavigate={navigate}
               onOpenDoc={openPath}
               menuFor={nodeMenuItems}
-              onAdd={(node) => onNewView(node.id)}
+              // The `+` opens a menu; see addMenuItems for what is behind it
+              // and why the third door closed (M47.5, M47.6).
+              onAdd={(node, at) => setAddMenu({ ...at, folder: node.id })}
             />
           </>
         )}
@@ -834,6 +866,14 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           y={typeMenu.y}
           items={typeMenuItems(typeMenu.listing)}
           onClose={() => setTypeMenu(null)}
+        />
+      )}
+      {addMenu !== null && (
+        <ContextMenu
+          x={addMenu.x}
+          y={addMenu.y}
+          items={addMenuItems(addMenu.folder)}
+          onClose={() => setAddMenu(null)}
         />
       )}
       {collectionDialog !== null && (

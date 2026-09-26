@@ -21,10 +21,10 @@ vi.mock('@/lib/ipc', async (orig) => ({
   readNote: (...args: unknown[]) => readNote(...args),
 }));
 
-// setTypeDisplay finds the Type doc BY NAME (findTypeDoc), so the fixture
-// must seed a `types/work-item.md` Type doc whose title matches `type:
-// 'Work item'` above — without it the schema has no TypeDef for the type at
-// all, `listing` stays null, and the menu offers no "Customize display" row.
+// The schema builds a TypeDef only from a Type doc, so the fixture must seed
+// a `types/work-item.md` whose title matches `type: 'Work item'` above —
+// without it `listing` stays null and the menu offers no "Customize layout"
+// row (M45.2; the row's signal carries the type name).
 const TYPE_DOC = makeEntry({ path: 'types/work-item.md', title: 'Work item', type: 'Type' });
 
 function setup(siblings: string[] = [A, B, C], open = B) {
@@ -252,40 +252,41 @@ describe('DetailHeaderActions', () => {
   });
 });
 
-describe('customize display (M44.1)', () => {
+// M45.2 — the M44.1 drill-in retired: the ⋯ menu's display step became one
+// door into the layout editor. These replace the drill-in tests; the three
+// display bits' round-trip coverage already lives in the typeActions suite.
+describe('customize layout entry (M45.2)', () => {
+  beforeEach(() => {
+    resetLayers();
+    useUiStore.setState({ layoutEditor: null });
+  });
   afterEach(cleanup);
 
-  it('drills into a display panel and toggles write through setTypeDisplay', async () => {
+  it('offers Customize layout to a typed record: fires the signal, closes the menu', async () => {
     const user = userEvent.setup();
     setup();
     await user.click(screen.getByRole('button', { name: 'Record actions' }));
-    await user.click(await screen.findByTestId('record-customize-display'));
-    await user.click(screen.getByRole('switch', { name: 'Show empty properties' }));
-    const patchFrontmatter = useVaultStore.getState().patchFrontmatter as ReturnType<typeof vi.fn>;
-    await waitFor(() =>
-      expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', {
-        display: { show_empty: true },
-      }),
-    );
-  });
-
-  it('reset writes display: null', async () => {
-    const user = userEvent.setup();
-    setup();
-    await user.click(screen.getByRole('button', { name: 'Record actions' }));
-    await user.click(await screen.findByTestId('record-customize-display'));
-    await user.click(await screen.findByTestId('display-reset'));
-    const patchFrontmatter = useVaultStore.getState().patchFrontmatter as ReturnType<typeof vi.fn>;
-    await waitFor(() =>
-      expect(patchFrontmatter).toHaveBeenCalledWith('types/work-item.md', { display: null }),
-    );
+    await user.click(await screen.findByTestId('record-customize-layout'));
+    // The STORE effect is the contract — the dialog itself mounts at App
+    // level (Task 2) and is not this component's to render.
+    expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Work item' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   });
 
   it('an untyped record offers no customize entry', async () => {
     const user = userEvent.setup();
     setupUntyped();
     await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    expect(screen.queryByTestId('record-customize-layout')).toBeNull();
+    expect(useUiStore.getState().layoutEditor).toBeNull();
+  });
+
+  it('the display drill-in is gone — one door, not two', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
     expect(screen.queryByTestId('record-customize-display')).toBeNull();
+    expect(screen.queryByText('Customize display')).toBeNull();
   });
 });
 

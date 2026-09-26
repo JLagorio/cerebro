@@ -5,12 +5,13 @@ import type {
   FieldKind,
   FieldOption,
   FieldVisibility,
+  LayoutConfig,
   ResolvedField,
   Schema,
   StatusDef,
   TypeDef,
 } from './types';
-import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import { DISPLAY_DEFAULTS, FIELD_KINDS, FIELD_VISIBILITIES, LAYOUT_DEFAULTS } from './types';
 import {
   DATE_DISPLAY_FORMATS,
   DEFAULT_TIME_FORMAT,
@@ -179,6 +180,95 @@ export function serializeDisplayConfig(d: DisplayConfig): Record<string, unknown
   return Object.keys(out).length === 0 ? null : out;
 }
 
+function asRecord(raw: unknown): Record<string, unknown> {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
+/** A minted `group-N` id, checked against a `taken` set that already holds
+ * every id ANY group in the list legitimately declares — earlier or later —
+ * so a blind `group-${i + 1}` guess can never steal a declared id (the
+ * parseTabList two-pass shape; ids matter to the layout editor's drag
+ * model). */
+function mintGroupId(i: number, taken: Set<string>): string {
+  let n = i + 1;
+  while (taken.has(`group-${n}`)) n += 1;
+  return `group-${n}`;
+}
+
+/** Field names claimed into `into`, honoring the cross-container claim set:
+ * a name appears at most once across heading + all groups, first claim
+ * wins, so no consumer ever dedups. Non-strings and blanks are dropped —
+ * `layout:` is advisory, like every Type-doc block. */
+function claimFieldNames(raw: unknown, claimed: Set<string>): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim();
+    if (name === '' || claimed.has(name)) continue;
+    claimed.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/** `layout:` is advisory, like every Type-doc block: malformed → defaults.
+ * Exported — unlike parseDisplayConfig — for the M45.2 layout editor's
+ * draft seeding: this parser has a consumer beyond buildSchema coming. */
+export function parseLayoutConfig(raw: unknown): LayoutConfig {
+  const obj = asRecord(raw);
+  const claimed = new Set<string>();
+  const heading = claimFieldNames(obj.heading, claimed);
+
+  const items = Array.isArray(obj.groups) ? obj.groups.map((g) => asRecord(g)) : [];
+  const declaredIds = items.map((g) =>
+    typeof g.id === 'string' && g.id.trim() !== '' ? g.id.trim() : '',
+  );
+  const taken = new Set<string>();
+  const owns = declaredIds.map((id) => {
+    // 'heading' and 'rest' are container ADDRESSES, not ids a group may wear:
+    // layoutEdit's grammar is 'heading' | 'rest' | groupId, and the editor's
+    // droppable ids extend it — a group declaring a sentinel would swallow
+    // drops meant for the real container (id: rest = silent deletion). A
+    // hand-written sentinel re-mints, exactly like a duplicate.
+    if (id === '' || id === 'heading' || id === 'rest' || taken.has(id)) return false;
+    taken.add(id);
+    return true;
+  });
+
+  // A group carries id, name and fields and nothing else. M45.6's `tab:` key
+  // is not read (M46.1 — a section belongs to the record, not to a tab), and
+  // an unknown key is simply not carried: a vault written by a local M45.6
+  // build parses as though the key were never there and sheds it on the next
+  // Apply, which is the only accommodation that reversal gets.
+  const groups = items.map((g, i) => {
+    const id = owns[i] ? declaredIds[i] : mintGroupId(i, taken);
+    taken.add(id);
+    return {
+      id,
+      name: typeof g.name === 'string' && g.name.trim() !== '' ? g.name.trim() : `Group ${i + 1}`,
+      fields: claimFieldNames(g.fields, claimed),
+    };
+  });
+
+  return { heading, groups };
+}
+
+/** LayoutConfig → the `layout:` frontmatter value. Deviations only: the
+ * defaults = null (patchFrontmatter deletes the key), an empty heading is
+ * omitted, and groups always serialize whole — an empty group is a real drop
+ * target the editor keeps. */
+export function serializeLayoutConfig(l: LayoutConfig): Record<string, unknown> | null {
+  const out: Record<string, unknown> = {};
+  if (l.heading.length !== LAYOUT_DEFAULTS.heading.length) out.heading = [...l.heading];
+  if (l.groups.length !== LAYOUT_DEFAULTS.groups.length) {
+    out.groups = l.groups.map((g) => ({ id: g.id, name: g.name, fields: [...g.fields] }));
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
 function isEmptyValue(raw: unknown): boolean {
   return (
     raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
@@ -201,6 +291,7 @@ export function buildSchema(entries: Entry[]): Schema {
           : null,
       views: parseViewList((e.properties as Record<string, unknown>).views),
       display: parseDisplayConfig((e.properties as Record<string, unknown>).display),
+      layout: parseLayoutConfig((e.properties as Record<string, unknown>).layout),
       tabs: parseTabList((e.properties as Record<string, unknown>).tabs),
     });
   }

@@ -15,6 +15,9 @@ export function rowClass(active: boolean): string {
   // cortex-700), never a gray — gray is what HOVER says (M42.1).
   return [
     'flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 px-2 text-left text-sm',
+    // The nav is the surface a pointer crosses fastest — a dozen rows in one
+    // flick — so an undeclared wash strobes. 20ms is the guard (M46.2).
+    'motion-hover',
     active
       ? 'bg-surface-selected font-medium text-cortex-700'
       : 'bg-transparent font-normal text-n-700 hover:bg-n-100',

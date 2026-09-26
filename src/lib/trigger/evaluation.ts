@@ -13,6 +13,7 @@
  * into a metric cannot make the two languages disagree about sameness.
  */
 
+import { deepEqual } from '../deepEqual';
 import { isRfc3339 } from '../epistemic/schema';
 import { sha256Hex } from '../sha256';
 import { resolveGate, type ParentRule, type Registry, type Variant } from './registry';
@@ -608,24 +609,6 @@ function validateMetrics(record: TriggerEvaluation, registry: Registry): void {
 }
 
 // --- the parent half -------------------------------------------------------
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, i) => deepEqual(item, b[i]));
-  }
-  if (typeof a === 'object') {
-    const ka = Object.keys(a as object).sort();
-    const kb = Object.keys(b as object).sort();
-    if (!deepEqual(ka, kb)) return false;
-    return ka.every((k) =>
-      deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
-    );
-  }
-  return false;
-}
 
 function fieldOf(record: TriggerEvaluation, field: string): unknown {
   switch (field) {

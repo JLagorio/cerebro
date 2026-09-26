@@ -25,6 +25,11 @@
  *
  * These rules are unlayered, so they sit above Tailwind's `utilities` layer
  * and no `opacity-*`/`visible` utility on a cell can fight them.
+ *
+ * No motion token here (M46.2 Task 3). `visibility` is a discrete property —
+ * it steps rather than interpolates — so a duration on it buys nothing, and
+ * swapping to `opacity` to make it fadeable would put an invisible glyph back
+ * in the hit path, which is half of what the rules above exist to prevent.
  */
 
 .cb-row
