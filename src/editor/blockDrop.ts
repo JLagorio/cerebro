@@ -131,10 +131,16 @@ export function isNoOpDrop(
 ): boolean {
   if (spot === null) return true;
   if (spot.blockId === draggedId) return true;
-  const from = siblings.findIndex((b) => b.id === draggedId);
-  const to = siblings.findIndex((b) => b.id === spot.blockId);
-  if (from < 0 || to < 0) return false;
-  if (siblings[from].parentId !== siblings[to].parentId) return false;
+  const dragged = siblings.find((b) => b.id === draggedId);
+  const target = siblings.find((b) => b.id === spot.blockId);
+  if (dragged === undefined || target === undefined) return false;
+  if (dragged.parentId !== target.parentId) return false;
+  // Adjacent among the PARENT's children, not in document order: a container's
+  // descendants sit between it and its next sibling in the flat list, so
+  // putting a column row back where it was looked like a move.
+  const peers = siblings.filter((b) => b.parentId === dragged.parentId);
+  const from = peers.indexOf(dragged);
+  const to = peers.indexOf(target);
   if (spot.placement === 'before') return to === from + 1;
   return to === from - 1;
 }

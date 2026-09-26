@@ -175,6 +175,8 @@ test('turn into moves the block you are standing in, and does not leave a copy',
   // Exactly once, and INSIDE the layout rather than above it.
   expect(lines.filter((l) => l.includes('Beside me'))).toHaveLength(1);
   expect(lines.indexOf(':::columns')).toBeLessThan(lines.findIndex((l) => l.includes('Beside me')));
+  // The slash query never rides along into the column.
+  expect(onDisk).not.toContain('/2 columns');
 });
 
 /**
@@ -226,7 +228,9 @@ test('dragging the gutter re-proportions the pair and writes the new ratios', as
 test('the gutter resizes from the keyboard too', async ({ page }) => {
   await openTwoUp(page);
   const [beforeLeft] = await columnBoxes(page);
-  await page.getByTestId('column-gutter').focus();
+  // By role, not test id: a role query honours aria-hidden, so a gutter
+  // hidden from assistive tech again would fail here rather than pass.
+  await page.getByRole('separator', { name: 'Resize column' }).focus();
   await page.keyboard.press('ArrowRight');
   await expect
     .poll(async () => (await columnBoxes(page))[0].width, { timeout: 6_000 })

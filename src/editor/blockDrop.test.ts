@@ -134,6 +134,36 @@ describe('a drop that would change nothing', () => {
     expect(isNoOpDrop(page, 'c', spot('a', 'before'))).toBe(false);
   });
 
+  /* In document order a container's descendants sit between it and its next
+     sibling, so "adjacent in the flat list" called putting a column row back
+     where it was a move — an undo entry and a dirty file for nothing. */
+  describe('around a block with children', () => {
+    const nested = [
+      { id: 'p', parentId: null },
+      { id: 'row', parentId: null },
+      { id: 'col1', parentId: 'row' },
+      { id: 'x', parentId: 'col1' },
+      { id: 'col2', parentId: 'row' },
+      { id: 'y', parentId: 'col2' },
+      { id: 'q', parentId: null },
+    ];
+
+    it('is a no-op to put a column row back between its neighbours', () => {
+      expect(isNoOpDrop(nested, 'row', spot('q', 'before'))).toBe(true);
+      expect(isNoOpDrop(nested, 'row', spot('p', 'after'))).toBe(true);
+    });
+
+    it('is a no-op to put a column back beside its sibling column', () => {
+      expect(isNoOpDrop(nested, 'col1', spot('col2', 'before'))).toBe(true);
+      expect(isNoOpDrop(nested, 'col2', spot('col1', 'after'))).toBe(true);
+    });
+
+    it('is still a real move past a sibling', () => {
+      expect(isNoOpDrop(nested, 'p', spot('q', 'before'))).toBe(false);
+      expect(isNoOpDrop(nested, 'q', spot('p', 'after'))).toBe(false);
+    });
+  });
+
   /* The case this whole milestone is about, and the one document order alone
      gets WRONG: `above` sits directly before the column's first block, so by
      position this looks like a block dropped where it already is. It is not —

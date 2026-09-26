@@ -485,7 +485,10 @@ function ColumnView({
       {width !== DEFAULT_COLUMN_WIDTH && usable && (
         <style>{`.cerebro-editor .bn-block-outer[data-id="${id}"]{flex-grow:${width};}`}</style>
       )}
-      <div className="cb-column" aria-hidden>
+      {/* Hidden from assistive tech only when it holds nothing: the gutter is
+          a focusable `separator` with arrow keys, and inside `aria-hidden` it
+          was neither announced nor valid. */}
+      <div className="cb-column" aria-hidden={!gutter}>
         {gutter && <ColumnGutter id={id} onResize={onResize} />}
       </div>
     </>

@@ -135,6 +135,27 @@ describe('loosening and tightening', () => {
     expect(tightenColumnMarkers(loosenColumnMarkers(prose))).toBe(prose);
   });
 
+  /* Two layouts in a row with a blank between them: that blank sits outside
+     both containers, so it is the author's. Dropping it changed an unedited
+     page's bytes on its first save. */
+  it('keeps the blank between two layouts in a row', () => {
+    const pair = [
+      ':::columns',
+      '::::column',
+      'A.',
+      '::::',
+      ':::',
+      '',
+      ':::columns',
+      '::::column',
+      'B.',
+      '::::',
+      ':::',
+    ].join('\n');
+    expect(tightenColumnMarkers(pair)).toBe(pair);
+    expect(tightenColumnMarkers(loosenColumnMarkers(pair))).toBe(pair);
+  });
+
   it('leaves a file with no columns in it completely alone', () => {
     const plain = 'One.\n\nTwo.\n\n```ts\nconst a = 1;\n```\n\nThree.\n';
     expect(loosenColumnMarkers(plain)).toBe(plain);

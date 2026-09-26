@@ -464,9 +464,10 @@ export function MarkdownEditor({
     const cursor = editor.getTextCursorPosition().block;
     const inserted = editor.insertBlocks([block as never], cursor, 'after');
     const target = inserted[0];
-    // The suggestion menu deletes its trigger text AFTER this callback and
-    // restores the selection while doing so — place the cursor once that
-    // cleanup has run, or typing continues in the old block.
+    // BlockNote closes the menu and clears its `/query` BEFORE this callback
+    // (SuggestionMenuWrapper: closeMenu, clearQuery, onItemClick). The cursor
+    // is still placed on the next tick, once that close has finished handing
+    // focus back, or typing continues in the old block.
     window.setTimeout(() => {
       if (target !== undefined && block.type === 'callout') {
         editor.setTextCursorPosition(target, 'start');
@@ -539,9 +540,10 @@ export function MarkdownEditor({
       // The block moved INTO the layout is still sitting above it — remove the
       // original, or turn-into silently duplicates what it moved.
       if (turnInto) editor.removeBlocks([at]);
-      // The suggestion menu deletes its trigger text AFTER this callback and
-      // restores the selection while doing so, so the cursor is placed on the
-      // next tick or typing continues in the block we just left.
+      // The `/2 columns` query is already gone — BlockNote clears it before
+      // this callback — so the copy above holds only the block's own text.
+      // The cursor is placed on the next tick, once the menu's close has
+      // finished, or typing continues in the block we just left.
       window.setTimeout(() => {
         const firstColumn = (inserted[0] as { children?: { children?: unknown[] }[] })
           ?.children?.[0];

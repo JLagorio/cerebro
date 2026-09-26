@@ -151,6 +151,7 @@ export function loosenColumnMarkers(markdown: string): string {
  *   ::::column ␣ text      drop — just inside an opening marker
  *   text ␣ ::::            drop — just inside a closing marker
  *   ::: ␣ text             keep — outside, after the container closed
+ *   ::: ␣ :::columns       keep — between two layouts, outside both
  *
  * Exactness is the point. Saving an unedited page must produce identical
  * bytes — the fidelity policy `markdown.ts` has held since M2 — and a round
@@ -173,10 +174,16 @@ export function tightenColumnMarkers(markdown: string): string {
       while (a < lines.length && lines[a] === '') a += 1;
       const before = b >= 0 ? markers[b] : null;
       const after = a < lines.length ? markers[a] : null;
+      // A close followed by an opening layout is two layouts side by side in
+      // their parent's flow: the blank between them is outside both, and
+      // the author's. (`loosen` writes one there too, so a hand-written
+      // tight pair gains it once, on the first save, and is stable after.)
+      const between = before?.kind === 'close' && after?.kind === 'open-list';
       const inside =
-        (before !== null && after !== null) ||
-        (before !== null && before.kind !== 'close') ||
-        (after !== null && after.kind === 'close');
+        !between &&
+        ((before !== null && after !== null) ||
+          (before !== null && before.kind !== 'close') ||
+          (after !== null && after.kind === 'close'));
       if (inside) continue;
     }
     out.push(lines[i]);
