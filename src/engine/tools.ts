@@ -53,7 +53,7 @@ export const TOOLSETS: Toolset[] = [
       { name: 'get_note', summary: 'Read one note in full', writes: false },
       {
         name: 'knowledge_about',
-        summary: 'What the knowledge base already knows about one entity',
+        summary: 'What Knowledge already holds about one entity',
         writes: false,
       },
       { name: 'list_inbox', summary: 'Captures waiting to be filed', writes: false },
@@ -72,9 +72,14 @@ export const TOOLSETS: Toolset[] = [
   {
     id: 'knowledge',
     label: 'Knowledge and sources',
-    hint: 'The agent-written bundle, which has its own guard — a concept still needs your stamp to count as verified.',
+    hint: 'The agent-written bundle: every write is recorded in its history, replacing a concept needs read access to it, and a concept still needs your stamp to count as verified.',
     tools: [
       { name: 'write_concept', summary: 'Record a concept in knowledge/', writes: true },
+      {
+        name: 'recheck_concept',
+        summary: 'Mark a rechecked concept still true, and when to check it next',
+        writes: true,
+      },
       {
         name: 'cache_source',
         summary: 'Save fetched external material under sources/',
@@ -146,7 +151,7 @@ const PROPOSAL_TOOLSET: Toolset = {
   // `propose_organize`, and two sets sharing one id would make
   // `matchedToolset` answer with whichever came first.
   id: 'proposals',
-  label: 'Propose changes to the knowledge base',
+  label: 'Propose changes to Knowledge',
   hint: 'Suggests changes through the policy layer. Low- and medium-risk ones apply automatically once committed; high-risk ones wait for you on a card. Off unless the proposal surface is switched on.',
   tools: PROPOSAL_TOOLS,
 };

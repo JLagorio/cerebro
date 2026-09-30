@@ -236,14 +236,20 @@ pub struct LedgerWriter {
     _lock: std::fs::File,
     dir: PathBuf,
     writer_id: String,
-    /// None only after a failed rotation — the writer fail-stops rather
-    /// than guess which segment is current.
+    /// None after a failed rotation, write, or fsync — the writer
+    /// fail-stops rather than guess which segment is current, or append
+    /// after a line that may be half on disk (M49.10, K34). The next open
+    /// classifies and repairs the torn tail.
     segment: Option<SegmentWriter>,
+    /// Test seam: fail the next frame write as a full disk would.
+    #[cfg(test)]
+    fail_next_write: bool,
     /// `ingested_at` of the newest record, for wall-clock-anomaly stamping.
     prev_wall_clock: Option<String>,
     segment_limit: u64,
     /// Seq of the newest committed record — with the chain hash, the head
-    /// that shadow mode remembers into the index after each append.
+    /// that `shadow::with_writer`'s `remember_head` writes into the index
+    /// after each append.
     head_seq: Option<u64>,
     /// The store identity — schema-v1 structural validation pins ids to it.
     store_id: String,
@@ -330,6 +336,8 @@ impl LedgerWriter {
             store_id: read.store.store_id.clone(),
             keys,
             operations,
+            #[cfg(test)]
+            fail_next_write: false,
         })
     }
 
@@ -362,10 +370,7 @@ impl LedgerWriter {
         {
             self.rotate()?;
         }
-        let segment = self
-            .segment
-            .as_mut()
-            .ok_or("ledger writer fail-stopped after a failed rotation")?;
+        let segment = self.segment.as_mut().ok_or(FAIL_STOPPED)?;
 
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let anomaly = self
@@ -384,17 +389,41 @@ impl LedgerWriter {
             body,
         }
         .with_hash()?;
-        segment.append(&frame)?;
+        #[cfg(test)]
+        let injected = std::mem::take(&mut self.fail_next_write);
+        #[cfg(not(test))]
+        let injected = false;
+        let written = if injected {
+            Err("No space left on device (os error 28) — injected".to_string())
+        } else {
+            segment.append(&frame)
+        };
+        if let Err(e) = written {
+            // A write that failed may have left part of a line on disk.
+            // Appending after it would turn a recoverable torn tail into a
+            // corrupt committed region, so the writer stops here.
+            self.segment = None;
+            return Err(format!("{FAIL_STOPPED}: {e}"));
+        }
         self.prev_wall_clock = Some(now);
         self.head_seq = Some(frame.seq);
         Ok(frame)
     }
 
-    fn sync(&self) -> Result<(), String> {
-        self.segment
-            .as_ref()
-            .ok_or("ledger writer fail-stopped after a failed rotation")?
-            .sync()
+    fn sync(&mut self) -> Result<(), String> {
+        let synced = self.segment.as_ref().ok_or(FAIL_STOPPED)?.sync();
+        if let Err(e) = synced {
+            // Not durable, so not acknowledged — and nothing may follow it.
+            self.segment = None;
+            return Err(format!("{FAIL_STOPPED}: {e}"));
+        }
+        Ok(())
+    }
+
+    /// Test seam (M49.10): the next frame write fails as a full disk would.
+    #[cfg(test)]
+    pub(crate) fn inject_write_failure(&mut self) {
+        self.fail_next_write = true;
     }
 
     /// Append one event. Returns only after the frame is durably on disk —
@@ -729,10 +758,7 @@ impl LedgerWriter {
     /// a crash between the two leaves "last segment sealed, none open" —
     /// a state `open` already handles — never two open segments.
     fn rotate(&mut self) -> Result<(), String> {
-        let full = self
-            .segment
-            .take()
-            .ok_or("ledger writer fail-stopped after a failed rotation")?;
+        let full = self.segment.take().ok_or(FAIL_STOPPED)?;
         let anchor = full.last_hash().to_string();
         let start = full.next_seq();
         full.seal()?;
@@ -952,6 +978,10 @@ fn resume_last(
 /// The M21 plan named the `fs4` crate for this; std has provided the same
 /// flock since 1.89, and the house rule is to justify every crate — a
 /// dependency duplicating std does not qualify.
+///
+/// The holder writes who it is into the file (M49.2, K3) — pid, build, and
+/// since when — so the process that LOST names the one that won. The flock,
+/// not this text, is the lock: the text is a label a crash can leave stale.
 fn acquire_lock(dir: &Path) -> Result<std::fs::File, String> {
     let path = dir.join(LOCK_FILE);
     let file = std::fs::File::options()
@@ -961,12 +991,47 @@ fn acquire_lock(dir: &Path) -> Result<std::fs::File, String> {
         .open(&path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
-        Err(std::fs::TryLockError::WouldBlock) => Err(
-            "another Cerebro instance holds this vault's ledger — one writer per vault".to_string(),
-        ),
+        Ok(()) => {
+            label_holder(&file);
+            Ok(file)
+        }
+        Err(std::fs::TryLockError::WouldBlock) => {
+            let holder = std::fs::read_to_string(&path)
+                .ok()
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .map(|text| format!(" (held by {text})"))
+                .unwrap_or_default();
+            Err(format!(
+                "{LEDGER_LOCK_HELD}: another Cerebro instance holds this vault's ledger — one \
+                 writer per vault{holder}"
+            ))
+        }
         Err(std::fs::TryLockError::Error(e)) => Err(format!("{}: {e}", path.display())),
     }
+}
+
+/// What every append says once the writer has stopped (M49.10, K34).
+pub const FAIL_STOPPED: &str = "ledger writer fail-stopped after a failed rotation, write, or \
+     fsync — reopen the vault; opening repairs a torn tail";
+
+/// The typed prefix of a lost single-writer race (M49.2): `ledger_status`
+/// reports it as `lost-lock`, distinct from a refused verdict.
+pub const LEDGER_LOCK_HELD: &str = "ledger_lock_held";
+
+/// Best-effort: a label that fails to write still leaves a held lock.
+fn label_holder(file: &std::fs::File) {
+    use std::io::Write;
+    let label = format!(
+        "pid {} · {} · since {}\n",
+        std::process::id(),
+        crate::app_config::build_label(),
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    );
+    let mut handle = file;
+    let _ = file
+        .set_len(0)
+        .and_then(|()| handle.write_all(label.as_bytes()));
 }
 
 /// True when `now` reads earlier than `prev` — a wall-clock regression,
@@ -1083,14 +1148,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // M49.10 (K34): a failed write stops the writer. Nothing is appended
+    // after a line that may be half on disk, the failed event is not
+    // acknowledged, and the next open finds a clean or repairable ledger.
+    #[test]
+    fn a_failed_write_stops_the_writer_and_the_ledger_reopens_clean() {
+        let vault = testutil::temp_vault("writer-enospc");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        writer.append("vault.write", body("before.md")).unwrap();
+        let head = writer.head();
+
+        writer.inject_write_failure();
+        let err = writer.append("vault.write", body("lost.md")).unwrap_err();
+        assert!(err.starts_with(FAIL_STOPPED), "{err}");
+        let next = writer.append("vault.write", body("after.md")).unwrap_err();
+        assert!(next.starts_with(FAIL_STOPPED), "it stays stopped: {next}");
+        assert_eq!(writer.head(), None, "a stopped writer claims no head");
+        drop(writer);
+
+        let mut reopened = LedgerWriter::open(&vault, WRITER).unwrap();
+        assert_eq!(
+            reopened.head(),
+            head,
+            "nothing past the last acknowledged frame"
+        );
+        reopened.append("vault.write", body("resumed.md")).unwrap();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn the_lock_admits_exactly_one_writer() {
         let vault = testutil::temp_vault("writer-lock");
         let first = LedgerWriter::open(&vault, WRITER).unwrap();
-        let second = LedgerWriter::open(&vault, WRITER);
+        let second = LedgerWriter::open(&vault, WRITER).unwrap_err();
         assert!(
-            second.unwrap_err().contains("another Cerebro"),
-            "a second writer must be refused while the first lives"
+            second.starts_with(LEDGER_LOCK_HELD) && second.contains("another Cerebro"),
+            "a second writer must be refused while the first lives: {second}"
+        );
+        // The loser names the winner (M49.2): pid and build, from the label.
+        assert!(
+            second.contains(&format!("held by pid {}", std::process::id())),
+            "{second}"
+        );
+        assert!(
+            second.contains(&crate::app_config::build_label()),
+            "{second}"
         );
         drop(first);
         LedgerWriter::open(&vault, WRITER).unwrap();

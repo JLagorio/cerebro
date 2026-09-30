@@ -147,7 +147,18 @@ pub fn classify(dir: &Path, writer_id: Option<&str>, remembered: Option<&Remembe
             (_, None) => false,
             (None, Some(_)) => true,
             (Some(head), Some(seen)) => {
-                head < seen || (head == seen && read.head_hash != remembered.head_hash)
+                head < seen
+                    || (head == seen && read.head_hash != remembered.head_hash)
+                    // M49.10 (K26): LONGER is not proof of the same history.
+                    // The head this machine saw must still be in the chain
+                    // at its seq; a history rewritten and then extended
+                    // used to pass because only "behind" was checked.
+                    || (head > seen
+                        && read
+                            .frames
+                            .iter()
+                            .find(|f| f.seq == seen)
+                            .is_none_or(|f| f.hash != remembered.head_hash))
             }
         };
         if regressed {
@@ -527,5 +538,34 @@ mod tests {
         assert_eq!(json["committed_seq"], 7);
         let json = serde_json::to_value(Verdict::NoLedger).unwrap();
         assert_eq!(json["state"], "no-ledger");
+    }
+
+    // M49.10 (K26): a history rewritten and then EXTENDED past the head
+    // this machine saw is not the same history — longer used to pass.
+    #[test]
+    fn a_longer_history_that_lost_the_remembered_head_is_diverged() {
+        let vault = testutil::temp_vault("recovery-longer-rewrite");
+        let mut writer = super::super::writer::LedgerWriter::open(&vault, WRITER).unwrap();
+        writer
+            .append("vault.write", serde_json::json!({"path": "a.md"}))
+            .unwrap();
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let mut seen = remember(&read);
+        writer
+            .append("vault.write", serde_json::json!({"path": "b.md"}))
+            .unwrap();
+        drop(writer);
+        // The same history, longer: fine.
+        assert!(matches!(
+            verdict_of(&vault, Some(WRITER), Some(&seen)),
+            Verdict::Valid
+        ));
+        // A head this ledger never held at that seq: diverged.
+        seen.head_hash = "0".repeat(64);
+        assert!(matches!(
+            verdict_of(&vault, Some(WRITER), Some(&seen)),
+            Verdict::Diverged { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

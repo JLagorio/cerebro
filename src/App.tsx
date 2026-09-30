@@ -4,6 +4,22 @@ import { AiPanel } from '@/agent/AiPanel';
 import { JobRunnerHost } from '@/agent/useJobRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
 import { ReconciliationBanner } from '@/app/ReconciliationBanner';
+import { RecordingBanner } from '@/app/RecordingBanner';
+import {
+  mainColumnFloor,
+  mainColumnFloorPx,
+  nextRailLatch,
+  PARKED_TAB_WIDTH,
+  panelRooms,
+  SHELL_BARE_TWO_PANEL_MIN,
+  SHELL_CLASSES,
+  SHELL_PARKED_COLUMN_MIN,
+  SHELL_RAIL_TWO_PANEL_MIN,
+  SHELL_TWO_PANEL_MIN,
+  shellBands,
+  shellPlan,
+  sidebarCeiling,
+} from '@/app/shellLayout';
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
 import { QuickOpen } from '@/app/QuickOpen';
@@ -15,7 +31,7 @@ import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
-import { DocPage } from '@/pages/DocPage';
+import { DocPage, usePageAsideOpen } from '@/pages/DocPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
@@ -27,17 +43,14 @@ import { StudioPage } from '@/pages/StudioPage';
 import { TypePage } from '@/pages/TypePage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
 import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
+import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { RemindersHost } from '@/hooks/useReminders';
 import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
-import {
-  CANVAS_MIN_WIDTH,
-  RIGHT_PANEL_MIN_WIDTH,
-  SIDEBAR_WIDTH_MIN,
-  useUiStore,
-} from '@/stores/uiStore';
+import { CANVAS_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -74,19 +87,13 @@ function useMediaQuery(query: string): boolean {
 const SHELL_NARROW_MAX = 1048;
 
 /**
- * Above this BOTH right-hand panels are drawn at once (M17.2).
- *
- * Derived rather than picked, from the same floors the layout already
- * enforces: 180 (sidebar at its MINIMUM — flex takes the shortfall out of the
- * sidebar first) + 400 (canvas floor) + 2 x 320 (panel floors) = 1220. Below
- * it the record wins the space and the assistant is parked, still mounted and
- * still streaming.
- *
- * The 264px sidebar in M15's "~20px canvas at 1280" complaint is the DEFAULT
- * width, not the floor; at the floor the arithmetic clears 1280 with room to
- * spare, which is why the old rule over-corrected into mutual exclusion.
+ * Above this BOTH right-hand panels are drawn beside a sidebar column (M17.2).
+ * Derived, not picked, from the floors the layout already enforces; it lives
+ * in app/shellLayout.ts with the widths below it, where the sidebar steps
+ * down to its rail, then the assistant parks, then the rail makes room for
+ * the parked tab (M52).
  */
-export const SHELL_TWO_PANEL_MIN = SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
+export { SHELL_TWO_PANEL_MIN };
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -207,17 +214,82 @@ function App() {
   const detailPath = useUiStore((s) => s.detailPath);
   const narrow = useMediaQuery(`(max-width: ${SHELL_NARROW_MAX}px)`);
   // M17.2: the record panel and the assistant are independent again, so both
-  // can be open at once. `roomForTwo` decides whether both are DRAWN — the one
+  // can be open at once. The room decides whether both are DRAWN — the one
   // that loses is hidden, never unmounted, because unmounting the assistant is
   // what killed its run mid-answer (see uiStore's detailPath comment).
-  const roomForTwo = useMediaQuery(`(min-width: ${SHELL_TWO_PANEL_MIN}px)`);
+  //
+  // M52: CSS draws that decision (`SHELL_CLASSES`); these queries tell React
+  // what CSS drew, for what CSS cannot say — `inert`, labels, drag ranges.
+  // They arrive a frame late: a `matchMedia` change is reported after the
+  // frame at the new size has been laid out, and WebKit reports it later
+  // still. So nothing here may decide a width or what is on screen.
+  const room = {
+    column: useMediaQuery(`(min-width: ${SHELL_TWO_PANEL_MIN}px)`),
+    rail: useMediaQuery(`(min-width: ${SHELL_RAIL_TWO_PANEL_MIN}px)`),
+    bare: useMediaQuery(`(min-width: ${SHELL_BARE_TWO_PANEL_MIN}px)`),
+    parkedColumn: useMediaQuery(`(min-width: ${SHELL_PARKED_COLUMN_MIN}px)`),
+  };
   const detailOpen = detailPath !== null;
+  const closeDetail = useUiStore((s) => s.closeDetail);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   // When only one fits, the RECORD wins: something just asked for it to be
   // seen — the agent's open_note, or a wikilink the user clicked — and that
-  // request is the newer intent. The assistant keeps streaming behind it and
-  // ⌘J brings it back with its transcript intact.
-  const showAssistant = aiPanelOpen && (roomForTwo || !detailOpen);
-  const drawnPanels = (showAssistant ? 1 : 0) + (detailOpen ? 1 : 0);
+  // request is the newer intent. The sidebar steps down to its rail before it
+  // comes to that (M52). A parked assistant keeps streaming behind the record,
+  // its tab says so, and closing the record brings it back intact.
+  const shell = { detail: detailOpen, assistant: aiPanelOpen, collapsed: sidebarCollapsed };
+  // The rail, once showing, stays below 1084 rather than growing back into a
+  // column as the window shrinks (shellLayout `nextRailLatch`). Adjusted
+  // during render, so the classes below never draw a frame of the old value.
+  const [railLatched, setRailLatched] = useState(false);
+  const latch = nextRailLatch(railLatched, { ...shell, room });
+  if (latch !== railLatched) setRailLatched(latch);
+  const plan = shellPlan({ ...shell, railLatched: latch, room });
+  const bands = shellBands({ ...shell, railLatched: latch });
+  const park = SHELL_CLASSES.park[bands.park];
+  const showAssistant = plan.assistant === 'drawn';
+  const parked = plan.assistant === 'parked';
+  const aiWidth = useUiStore((s) => s.aiPanelWidth);
+  // M52: a page on the canvas with its own side panel open asks the sidebar
+  // for that panel's width as well — beside the assistant it was the page's
+  // reading column that gave instead, down to a title one letter a line.
+  const selection = useNavStore((s) => s.selection);
+  const pagePath =
+    selection.kind === 'doc'
+      ? selection.path
+      : selection.kind === 'knowledge'
+        ? (selection.path ?? null)
+        : null;
+  const pageAside = usePageAsideOpen(pagePath);
+  // M52: what each right-hand panel is drawn at, from the row it shares with
+  // the canvas. CSS draws it (app/shellLayout.ts); these say it for the drag
+  // handles and the widen control, which CSS cannot.
+  const [canvasRowRef, rowWidth] = useMeasuredWidth();
+  const rooms =
+    rowWidth === null
+      ? null
+      : panelRooms({
+          row: rowWidth,
+          detail: detailOpen,
+          assistant: showAssistant,
+          assistantWidth: aiWidth,
+          parked,
+        });
+  // The main column's floor, with the assistant drawn and with it parked;
+  // `park.floor` picks between them in CSS.
+  const drawnFloor = {
+    detail: detailOpen,
+    assistant: aiPanelOpen,
+    assistantWidth: aiWidth,
+    pageAside,
+  };
+  const parkedFloor = { ...drawnFloor, assistant: false, parked: true };
+  // M52: the sidebar's drag stops at what can be drawn beside that floor.
+  const [shellRef, shellWidth] = useMeasuredWidth();
+  const sidebarMax = sidebarCeiling(
+    shellWidth,
+    mainColumnFloorPx(parked ? parkedFloor : drawnFloor),
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -312,7 +384,10 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900">
+    <div
+      ref={shellRef}
+      className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900"
+    >
       {/* The whole sidebar tree sits between the top of the tab order and the
           content, which in a real vault is dozens of stops. */}
       <button
@@ -322,20 +397,36 @@ function App() {
       >
         Skip to content
       </button>
-      <Sidebar narrow={narrow} />
+      <Sidebar
+        narrow={narrow}
+        rail={plan.sidebar === 'rail'}
+        railBand={bands.rail}
+        maxWidth={sidebarMax}
+      />
       {/* M15: the floor that makes the sidebar yield first. Without a minimum
           here the main column shrinks to nothing and the canvas absorbs every
           pixel of a narrow window; with it, flex has to take the shortfall out
-          of the sidebar (which is shrinkable down to SIDEBAR_WIDTH_MIN). */}
+          of the sidebar (which is shrinkable down to SIDEBAR_WIDTH_MIN).
+          M52: the assistant counts at its whole width, and a page's own side
+          panel at its own, so the sidebar gives before either does — and the
+          parked tab instead of the assistant under the width it parks at. */}
       <div
-        className="flex min-w-0 flex-1 flex-col"
-        style={{
-          minWidth: CANVAS_MIN_WIDTH + drawnPanels * RIGHT_PANEL_MIN_WIDTH,
-        }}
+        data-testid="main-column"
+        className={`flex min-w-[var(--shell-floor)] flex-1 flex-col ${park.floor}`}
+        style={
+          {
+            '--shell-floor': mainColumnFloor(drawnFloor),
+            '--shell-floor-parked': mainColumnFloor(parkedFloor),
+          } as React.CSSProperties
+        }
       >
-        {/* M23.7: the divergence circuit breaker's banner — visible only
-            while the ledger's reconciliation mode is open (never in the
-            browser mock, which has no ledger). */}
+        {/* M49.2: "Not recording" — visible whenever this process holds no
+            ledger writer for the vault (never in the browser mock). It also
+            refreshes the ledger status both banners read.
+            M23.7: the divergence circuit breaker's banner — visible while
+            the ledger's reconciliation mode is open, or while any file is
+            quarantined (M49.5: divergence is per path). */}
+        <RecordingBanner vault={vaultPath} />
         <ReconciliationBanner vault={vaultPath} />
         {/* M11: the record panel is a COLUMN here, beside the canvas, rather
             than a fixed overlay on top of it. That is what lets a table keep
@@ -345,7 +436,10 @@ function App() {
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` lets a page respond to the width it actually
             has rather than the viewport's. */}
-        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0">
+        <div
+          ref={canvasRowRef}
+          className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0"
+        >
           <main
             id="main"
             // -1 so the skip link can put focus here; no ring, because a ring
@@ -362,27 +456,60 @@ function App() {
               resolves against a box the panel does not live in, so it never
               engaged. M17.2: the record sits inboard of the assistant, so a
               turn that opens a note slides the record in beside the answer
-              instead of on top of it. */}
-          {drawnPanels > 0 && (
+              instead of on top of it. M52: inside the cap the record is the
+              one that shrinks and the assistant is capped at the slot less
+              the record's floor, so the two never add up to more than the
+              cap — which clipped the assistant whenever they did — and CSS
+              works it out in the same layout pass as the window. */}
+          {(detailOpen || aiPanelOpen) && (
             <div
               data-testid="right-panel-slot"
               className="flex min-w-0 flex-none overflow-hidden"
               style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
             >
-              {detailOpen && <DetailPanel />}
-              {showAssistant && <AiPanel />}
-            </div>
-          )}
-          {/* Open but not drawn: kept MOUNTED, clipped to zero width (M17.2).
-              Unmounting is what kills the run — that is the whole bug — so a
-              panel that cannot fit is parked, not destroyed. Clipped rather
-              than display:none because the transcript keeps its scroll metrics
-              this way and comes back where the user left it. `inert` (React 19)
-              takes it out of the tab order and the a11y tree, which
-              `aria-hidden` alone would not do. */}
-          {aiPanelOpen && !showAssistant && (
-            <div inert data-testid="ai-panel-parked" className="w-0 flex-none overflow-hidden">
-              <AiPanel />
+              {detailOpen && (
+                <DetailPanel room={rooms?.detail ?? null} besideAssistant={showAssistant} />
+              )}
+              {/* One mount, drawn or parked, so crossing the width it parks
+                  at never remounts it (M17.2: unmounting is what kills the
+                  run). Parked is `park.frame`: clipped to zero width in the
+                  same layout pass — see SHELL_CLASSES. `inert` (React 19)
+                  follows a frame later, and takes it out of the tab order and
+                  the a11y tree, which `aria-hidden` alone would not do. */}
+              {aiPanelOpen && (
+                <div
+                  data-testid="ai-panel-frame"
+                  data-parked={parked || undefined}
+                  inert={parked}
+                  className={`flex min-w-0 flex-none ${park.frame}`}
+                  style={{
+                    maxWidth: detailOpen ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)` : '100%',
+                  }}
+                >
+                  <AiPanel room={rooms?.assistant ?? null} />
+                </div>
+              )}
+              {/* M52: parked, and saying so. The sidebar's zap stayed pressed
+                  with nothing on screen to say where the assistant went or
+                  why. The tab is the way back, and the way back is the
+                  record's close. Inside the slot, so the record gives it its
+                  strip in the same pass it parks in. */}
+              {bands.park !== 'never' && (
+                <button
+                  type="button"
+                  data-testid="ai-parked-tab"
+                  aria-label="Assistant hidden — close the record to show it"
+                  title="Assistant hidden — close the record to show it"
+                  onClick={closeDetail}
+                  className={`${park.tab} flex-none cursor-pointer flex-col items-center gap-2 border-0 border-l border-solid border-n-200 bg-surface-sunken py-3 text-n-500 hover:bg-n-50 hover:text-n-800`}
+                  style={{ width: PARKED_TAB_WIDTH }}
+                >
+                  <Icon name="zap" size={14} color="var(--synapse-500)" />
+                  <span className="text-xs font-medium [writing-mode:vertical-rl]">
+                    Assistant hidden
+                  </span>
+                </button>
+              )}
             </div>
           )}
         </div>

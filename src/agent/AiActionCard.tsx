@@ -41,6 +41,7 @@ const TOOL_ICONS: Record<string, string> = {
   update_frontmatter: 'list',
   append_to_note: 'file-pen',
   write_concept: 'brain',
+  recheck_concept: 'calendar-check',
   cache_source: 'download',
   propose_organize: 'wand-sparkles',
   open_note: 'eye',
@@ -64,6 +65,7 @@ const WRITE_TOOLS = new Set([
   'update_frontmatter',
   'append_to_note',
   'write_concept',
+  'recheck_concept',
   'cache_source',
 ]);
 

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
+import { boot, openKnowledgeSystem, seedBeforeBoot } from './boot';
 
 /**
  * The M25.7 control surface: what the background ran, what it spent, and what
@@ -87,12 +87,13 @@ const OVERVIEW = {
 
 type Overview = typeof OVERVIEW;
 
-/** Boot into Knowledge's "Background" tab with this overview staged, and
- * hand back the section that holds the background controls. */
+/** Boot into Knowledge's Background section (Activity › System since M51)
+ * with this overview staged, and hand back the section that holds the
+ * background controls. */
 async function openSystem(page: Page, fixture: Partial<Overview>) {
   await seedBeforeBoot(page, '__cerebroSeedPipeline', fixture);
   await boot(page);
-  await openKnowledgeTab(page, 'Background');
+  await openKnowledgeSystem(page);
   return page.locator('[data-section="system"]');
 }
 

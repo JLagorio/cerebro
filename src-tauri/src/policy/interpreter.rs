@@ -17,7 +17,7 @@
 //! edit plus a derivation, not a new branch in the ladder.
 
 use crate::ledger::reduce::EpistemicState;
-use crate::ledger::schema::{ProposalV1, TargetClass};
+use crate::ledger::schema::{ProposalOp, ProposalV1, RelationAction, RelationKind, TargetClass};
 
 use super::risk::{SignalValue, Signals};
 use super::submit::{facts_of, SubmitError};
@@ -47,15 +47,34 @@ pub fn lineage_fan_in(state: &EpistemicState, belief_id: &str) -> u64 {
         .count() as u64
 }
 
-/// Has a human attested any Belief this proposal targets?
+/// Has a human attested any Belief this proposal targets — or the Belief a
+/// `supersedes` edge would retire?
+///
+/// M49.8 (K22): adding `supersedes` targets only the Relation, so an
+/// unreviewed concept could retire a human-VERIFIED one at the auto-applied
+/// MEDIUM rung, with no card: every reader treats the edge as retirement.
+/// Retiring a verified Belief is a change TO it, whichever record carries
+/// the edge, so the retired end counts as targeted here.
 fn target_has_attestation(state: &EpistemicState, proposal: &ProposalV1) -> bool {
-    proposal.targets.iter().any(|target| {
-        target.target_class == TargetClass::Belief
-            && state
-                .beliefs
-                .get(&target.target_id)
-                .is_some_and(|belief| belief.attested.is_some())
-    })
+    let attested = |id: &str| {
+        state
+            .beliefs
+            .get(id)
+            .is_some_and(|belief| belief.attested.is_some())
+    };
+    proposal
+        .targets
+        .iter()
+        .any(|target| target.target_class == TargetClass::Belief && attested(&target.target_id))
+        || matches!(
+            &proposal.op,
+            ProposalOp::EditRelation {
+                relation: RelationKind::Supersedes,
+                action: RelationAction::Add,
+                to,
+                ..
+            } if attested(to)
+        )
 }
 
 /// Derive every escalator signal for one proposal at one snapshot.

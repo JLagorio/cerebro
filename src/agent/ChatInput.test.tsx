@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { ChatInput } from './ChatInput';
+import { useEscapeLayer } from '@/components/ui/Popover';
 import { chipId, type ContextChip } from './contextChips';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -94,6 +95,33 @@ describe('ChatInput slash completion (M13.1)', () => {
     // dismissal.
     fireEvent.change(box(), { target: { value: 'compare [[risk and [[weekly' } });
     expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
+  });
+
+  // M52 — verified at 1100 with a concept's side panel open as a drawer: the
+  // textarea took Escape in React's bubble phase, after the drawer's layer
+  // had taken it on window capture, so the drawer closed and the menu stayed.
+  // Beside a record, the same Escape closed the record.
+  it('Escape closes the menu before any surface behind it', () => {
+    const onBehind = vi.fn();
+    function Behind() {
+      useEscapeLayer(onBehind);
+      return null;
+    }
+    render(
+      <>
+        <Behind />
+        <Harness />
+      </>,
+    );
+    fireEvent.change(box(), { target: { value: 'see [[risk' } });
+    expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(screen.queryByTestId('wikilink-menu')).toBeNull();
+    expect(onBehind).not.toHaveBeenCalled();
+    // Closed, it is off the stack: the next Escape is the drawer's.
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(onBehind).toHaveBeenCalledTimes(1);
+    expect(box().value).toBe('see [[risk');
   });
 
   it('an @ menu is not offered when there is nowhere for a chip to go', () => {

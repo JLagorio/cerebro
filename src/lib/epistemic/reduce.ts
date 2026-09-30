@@ -633,6 +633,8 @@ function apply(
       return applyMigrationCompleted(state, body);
     case 'projection.overridden':
       return applyOverride(state, frame, body);
+    case 'projection.moved':
+      return applyProjectionMoved(state, frame, body);
     case 'ledger.divergence':
       return applyDivergence(state, frame, body);
     case 'ledger.reconciliation_resolved':
@@ -2867,6 +2869,26 @@ function descriptor(state: EpistemicState, belief: BeliefState): JsonObject {
     contest_head_event_id: belief.contestHeadEvent,
     entity_merge_event_ids: [...belief.entityMergeEventIds],
   };
+}
+
+/** A projection file moved (M49.5, K29) — mirrors `apply_projection_moved`. */
+function applyProjectionMoved(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const belief = state.beliefs.get(body.belief_id as string);
+  if (!belief) throw new RefusedError('belief does not exist');
+  if (belief.path !== body.from_path) {
+    throw new RefusedError('the belief does not project at from_path');
+  }
+  if (state.projectionPaths.has(body.to_path as string)) {
+    throw new RefusedError('to_path is already claimed');
+  }
+  if (sha256Hex(projected(state, belief)) !== body.projection_hash) {
+    throw new RefusedError('projection_hash does not match the current projection');
+  }
+  state.projectionPaths.delete(body.from_path as string);
+  state.projectionPaths.set(body.to_path as string, belief.beliefId);
+  belief.path = body.to_path as string;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
 }
 
 function applyOverride(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {

@@ -31,8 +31,9 @@ export type ContextChip =
  * Stable identity for a chip.
  *
  * What a dismissal remembers and what deduplicates an add. Prefixed by kind so
- * a doc place and the same doc attached as a record are two chips — they are:
- * one says "this is where we are", the other "read this".
+ * a doc place and the same doc attached as a record keep separate identities:
+ * dismissing where we are must not dismiss a deliberate "read this". Which of
+ * the two is DRAWN is `resolveChips`' call.
  */
 export function chipId(chip: ContextChip): string {
   return chip.kind === 'place' ? `place:${placeKey(chip.place)}` : `record:${chip.path}`;
@@ -58,6 +59,12 @@ export function recordChip(path: string, entries: Entry[]): ContextChip | null {
  * chips survive dismissal — removing a chip and then attaching the same thing
  * on purpose is a request, not a contradiction — so a re-added chip is
  * filtered out of `auto` rather than out of the result.
+ *
+ * A record chip for the page you are standing on is dropped (M52.3). The page
+ * is already the turn's active note, body and links (M50.4), so asking about
+ * the concept you are reading drew the same page twice — once as where you
+ * are, once as what to read. Take the place away and the record comes back:
+ * it was only ever redundant, never unwanted.
  */
 export function resolveChips(
   auto: ContextChip[],
@@ -66,5 +73,9 @@ export function resolveChips(
 ): ContextChip[] {
   const addedIds = new Set(added.map(chipId));
   const kept = auto.filter((c) => !addedIds.has(chipId(c)) && !dismissed.includes(chipId(c)));
-  return [...kept, ...added];
+  const chips = [...kept, ...added];
+  const pages = new Set(
+    chips.flatMap((c) => (c.kind === 'place' && c.place.kind === 'doc' ? [c.place.path] : [])),
+  );
+  return chips.filter((c) => c.kind !== 'record' || !pages.has(c.path));
 }

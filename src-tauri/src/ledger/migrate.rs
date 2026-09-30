@@ -400,31 +400,12 @@ pub fn migrate_vault(
     }
 
     // --- Phase two: relations, per path, by canonical tuple. ---------------
-    let stems: BTreeMap<String, &Concept> = concepts
-        .iter()
-        .map(|c| (stem_of(&c.path).to_string(), c))
-        .collect();
-    for concept in &concepts {
-        let mut relations: Vec<(String, String, schema::RelationKind)> = Vec::new();
-        for (field, kind) in [
-            ("supersedes", schema::RelationKind::Supersedes),
-            ("refines", schema::RelationKind::Refines),
-            ("contradicts", schema::RelationKind::Contradicts),
-        ] {
-            for link in wikilinks(concept.fields.get(field)) {
-                match stems.get(&link) {
-                    Some(target) => {
-                        relations.push((concept.belief_id.clone(), target.belief_id.clone(), kind))
-                    }
-                    None => outcome
-                        .unresolved_relations
-                        .push((concept.path.clone(), link)),
-                }
-            }
-        }
-        relations.sort_by_key(|(from, to, kind)| {
-            serde_json::to_string(&serde_json::json!([from, to, kind.as_str()])).unwrap()
-        });
+    for (concept, (relations, unresolved)) in concepts.iter().zip(migration_relations(&concepts)) {
+        outcome.unresolved_relations.extend(
+            unresolved
+                .into_iter()
+                .map(|link| (concept.path.clone(), link)),
+        );
         for (ordinal, (from, to, kind)) in relations.iter().enumerate() {
             let body = schema::BeliefRelation {
                 schema: schema::BODY_SCHEMA,
@@ -521,20 +502,60 @@ fn planned_outputs(
         count += explicit_aliases(&concept.fields).len() as u64;
         count += verified_stamps(&concept.fields).len() as u64;
     }
-    // Relations: only resolvable targets emit events.
-    let stems: std::collections::BTreeSet<String> = concepts
+    // Relations: the SAME list phase two emits, so plan and emission cannot
+    // drift — a drift fails the epoch closer on every launch, forever.
+    count += migration_relations(concepts)
         .iter()
-        .map(|c| stem_of(&c.path).to_string())
-        .collect();
-    for concept in concepts {
-        for field in ["supersedes", "refines", "contradicts"] {
-            count += wikilinks(concept.fields.get(field))
-                .into_iter()
-                .filter(|link| stems.contains(link))
-                .count() as u64;
-        }
-    }
+        .map(|(relations, _)| relations.len() as u64)
+        .sum::<u64>();
     Ok(count)
+}
+
+type MigratedRelation = (String, String, schema::RelationKind);
+
+/// Per concept (in `concepts` order): the relations migration emits, in
+/// canonical tuple order, and the links it cannot resolve.
+///
+/// Resolved exactly as every later writer resolves them (`resolve_link`):
+/// a stem two concepts share names neither and is recorded unresolved —
+/// the stem map this replaced kept whichever path sorted last, and the
+/// capture valve, which refuses that guess, then refused every edit of the
+/// concept carrying it. A link to the concept itself is unresolved too
+/// (every writer drops self links), and two spellings of one target are one
+/// relation.
+fn migration_relations(concepts: &[Concept]) -> Vec<(Vec<MigratedRelation>, Vec<String>)> {
+    let by_path: BTreeMap<String, String> = concepts
+        .iter()
+        .map(|c| (c.path.clone(), c.belief_id.clone()))
+        .collect();
+    concepts
+        .iter()
+        .map(|concept| {
+            let mut relations: Vec<MigratedRelation> = Vec::new();
+            let mut unresolved: Vec<String> = Vec::new();
+            for (field, kind) in [
+                ("supersedes", schema::RelationKind::Supersedes),
+                ("refines", schema::RelationKind::Refines),
+                ("contradicts", schema::RelationKind::Contradicts),
+            ] {
+                for link in wikilinks(concept.fields.get(field)) {
+                    match resolve_link(&by_path, &link) {
+                        LinkTarget::One(target) if target != concept.belief_id => {
+                            let relation = (concept.belief_id.clone(), target, kind);
+                            if !relations.contains(&relation) {
+                                relations.push(relation);
+                            }
+                        }
+                        _ => unresolved.push(link),
+                    }
+                }
+            }
+            relations.sort_by_key(|(from, to, kind)| {
+                serde_json::to_string(&serde_json::json!([from, to, kind.as_str()])).unwrap()
+            });
+            (relations, unresolved)
+        })
+        .collect()
 }
 
 fn append_output<T: serde::Serialize>(
@@ -648,6 +669,62 @@ pub(crate) fn wikilinks(value: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What one relation link names (M49.10, K33).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LinkTarget {
+    /// Exactly one concept — its Belief id.
+    One(String),
+    /// Several concepts share the stem; the link names none of them.
+    Ambiguous(Vec<String>),
+    /// No concept.
+    Unknown,
+}
+
+/// Resolve a relation link against the projection paths: `[[stem]]`,
+/// `[[stem|label]]`, or a bundle path (`[[systems/stem]]`, with or without
+/// `.md`). A stem two concepts share is AMBIGUOUS — the map this replaced
+/// kept whichever path sorted last and related to it without a word.
+pub(crate) fn resolve_link(
+    projection_paths: &std::collections::BTreeMap<String, String>,
+    link: &str,
+) -> LinkTarget {
+    let target = link.split('|').next().unwrap_or(link).trim();
+    if target.contains('/') {
+        let path = target.trim_start_matches('/');
+        let path = path.strip_prefix("knowledge/").unwrap_or(path);
+        let path = if path.ends_with(".md") {
+            path.to_string()
+        } else {
+            format!("{path}.md")
+        };
+        return projection_paths
+            .get(&path)
+            .map_or(LinkTarget::Unknown, |b| LinkTarget::One(b.clone()));
+    }
+    let hits: Vec<(&String, &String)> = projection_paths
+        .iter()
+        .filter(|(path, _)| stem_of(path) == target)
+        .collect();
+    match hits.as_slice() {
+        [] => LinkTarget::Unknown,
+        [(_, belief)] => LinkTarget::One((*belief).clone()),
+        many => LinkTarget::Ambiguous(many.iter().map(|(p, _)| format!("knowledge/{p}")).collect()),
+    }
+}
+
+/// The refusal an ambiguous relation link earns.
+pub(crate) fn ambiguous_link(link: &str, paths: &[String]) -> String {
+    format!(
+        "[[{link}]] names more than one concept ({}) — link by path, e.g. [[{}]]",
+        paths.join(", "),
+        paths
+            .first()
+            .and_then(|p| p.strip_prefix("knowledge/"))
+            .and_then(|p| p.strip_suffix(".md"))
+            .unwrap_or(link)
+    )
+}
+
 pub(crate) fn stem_of(path: &str) -> &str {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.strip_suffix(".md").unwrap_or(name)
@@ -664,6 +741,44 @@ fn rfc3339_or_null(stamp: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    // M49.10 (K33): a stem two concepts share names neither; a label is
+    // stripped; a path picks exactly one.
+    #[test]
+    fn a_shared_stem_is_ambiguous_and_a_path_or_label_resolves() {
+        let paths: std::collections::BTreeMap<String, String> = [
+            ("systems/churn.md", "b1"),
+            ("metrics/churn.md", "b2"),
+            ("systems/pilot.md", "b3"),
+        ]
+        .into_iter()
+        .map(|(p, b)| (p.to_string(), b.to_string()))
+        .collect();
+        assert_eq!(
+            resolve_link(&paths, "churn"),
+            LinkTarget::Ambiguous(vec![
+                "knowledge/metrics/churn.md".into(),
+                "knowledge/systems/churn.md".into()
+            ])
+        );
+        assert_eq!(
+            resolve_link(&paths, "systems/churn"),
+            LinkTarget::One("b1".into())
+        );
+        assert_eq!(
+            resolve_link(&paths, "metrics/churn.md"),
+            LinkTarget::One("b2".into())
+        );
+        assert_eq!(
+            resolve_link(&paths, "pilot|the pilot"),
+            LinkTarget::One("b3".into())
+        );
+        assert_eq!(resolve_link(&paths, "nothing"), LinkTarget::Unknown);
+        assert!(
+            ambiguous_link("churn", &["knowledge/metrics/churn.md".into()])
+                .contains("[[metrics/churn]]")
+        );
+    }
     use super::super::{ledger_dir, read_ledger, reduce::reduce};
     use super::*;
     use crate::vault::testutil;
@@ -870,6 +985,71 @@ pub(crate) mod tests {
         );
         assert_eq!(err.signal(), Some("migration_source_changed"));
         assert!(err.to_string().contains("reconcile"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn every_link_spelling_migrates_and_the_plan_matches_what_is_emitted() {
+        // Plan and emission once counted relations two different ways; a
+        // path, label, shared-stem or respelled link then failed the epoch
+        // closer on every launch, and the ledger never armed.
+        let vault = testutil::temp_vault("migrate-link-spellings");
+        let dir = vault.join("knowledge");
+        let concept = |rel: &str, title: &str, links: &[&str]| {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let mut text = format!("---\ntype: Reference\ntitle: {title}\n");
+            if !links.is_empty() {
+                text.push_str("refines:\n");
+                for link in links {
+                    text.push_str(&format!("  - \"{link}\"\n"));
+                }
+            }
+            text.push_str(&format!("---\n\n# {title}\n"));
+            std::fs::write(path, text).unwrap();
+        };
+        concept("systems/churn.md", "Churn system", &[]);
+        concept("metrics/churn.md", "Churn metric", &[]);
+        concept("systems/pilot.md", "Pilot", &[]);
+        concept(
+            "systems/x.md",
+            "X",
+            &[
+                "[[churn]]",           // shared stem: names neither
+                "[[systems/pilot]]",   // path form
+                "[[pilot|The pilot]]", // label, same target: one relation
+                "[[metrics/churn]]",   // path form of a shared stem
+                "[[x]]",               // itself
+            ],
+        );
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let store = writer.store_id().to_string();
+        let outcome = migrate_vault(&mut writer, &dir).unwrap();
+        assert_eq!(
+            outcome.unresolved_relations,
+            vec![
+                ("systems/x.md".to_string(), "churn".to_string()),
+                ("systems/x.md".to_string(), "x".to_string()),
+            ]
+        );
+        drop(writer);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        let x = schema::migrate_id(&store, "belief", "systems/x.md");
+        let mut targets: Vec<String> = state
+            .relations
+            .values()
+            .filter(|r| r.live && r.from == x)
+            .map(|r| r.to.clone())
+            .collect();
+        targets.sort();
+        let mut expected = vec![
+            schema::migrate_id(&store, "belief", "systems/pilot.md"),
+            schema::migrate_id(&store, "belief", "metrics/churn.md"),
+        ];
+        expected.sort();
+        assert_eq!(targets, expected);
         let _ = std::fs::remove_dir_all(&vault);
     }
 

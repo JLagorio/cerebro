@@ -264,14 +264,14 @@ export function AskAiPopover({
                     // Both sides always visible: the decision is between two
                     // readings of the sentence, and hiding one makes it a
                     // decision about a word.
-                    className="mx-0.5 rounded border-0 bg-transparent p-0 align-baseline"
+                    className="mx-0.5 rounded-xs border-0 bg-transparent p-0 align-baseline"
                   >
                     {part.before !== '' && (
                       <span
                         className={
                           accepted.has(part.id)
-                            ? 'text-n-400 line-through decoration-danger-400'
-                            : 'rounded bg-n-100 text-n-700'
+                            ? 'text-n-400 line-through decoration-danger-500'
+                            : 'rounded-xs bg-n-100 text-n-700'
                         }
                       >
                         {part.before}
@@ -281,7 +281,7 @@ export function AskAiPopover({
                       <span
                         className={
                           accepted.has(part.id)
-                            ? 'rounded bg-ok-50 text-ok-700'
+                            ? 'rounded-xs bg-success-50 text-success-700'
                             : 'text-n-400 line-through decoration-n-400'
                         }
                       >

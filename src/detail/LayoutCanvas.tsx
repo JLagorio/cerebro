@@ -493,11 +493,15 @@ export function LayoutCanvas({
                 anything icon-only.
 
                 The glyph is `text-inverse` (#ffffff in both themes), NOT
-                `text-n-0`: the neutral ramp inverts, so on this cortex-600
-                fill a dark-theme n-0 measured 2.4:1 — at rest the button read
-                as a dark disc with a plus-shaped hole, on the one control
-                whose whole job is being found. Hover (cortex-700, a light
-                tint in dark) was never the problem; the resting state was. */}
+                `text-n-0`: the neutral ramp inverts, so on the blue fill a
+                dark-theme n-0 measured 2.4:1 — at rest the button read as a
+                dark disc with a plus-shaped hole, on the one control whose
+                whole job is being found. The fill is the DS primary button's
+                (M52.4): --accent at rest (cortex-500, white at 5.6:1 in both
+                themes) and --accent-hover under the pointer — cortex-600 in
+                light, cortex-400 in dark (~3.6:1 under white). It hovered to
+                cortex-700, which dark mode turns into a pale tint the white
+                glyph all but vanished on. */}
             <div className="flex justify-center pb-3">
               <Tooltip label="Add section">
                 <button
@@ -505,7 +509,7 @@ export function LayoutCanvas({
                   aria-label="Add section"
                   data-testid="layout-add-section"
                   onClick={() => stageNewSection(draft, update, setEditing)}
-                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-cortex-600 p-0 text-inverse hover:bg-cortex-700 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+                  className="flex h-7 w-7 items-center justify-center rounded-full border-0 bg-accent p-0 text-inverse hover:bg-accent-hover focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
                 >
                   <Icon name="plus" size={16} />
                 </button>
@@ -928,7 +932,7 @@ function BlockShell({
       {lines?.below !== undefined && <InsertionLine gap={lines.below} side="bottom" />}
       <span
         data-testid="layout-block-label"
-        className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700"
+        className="pointer-events-none absolute -top-2 left-1.5 z-10 rounded-xs border border-cortex-500 bg-cortex-50 px-1 text-2xs font-medium text-cortex-700"
       >
         {label}
       </span>

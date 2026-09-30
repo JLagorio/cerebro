@@ -9,6 +9,7 @@
 // cap, fence-aware snippets). The shared fixtures in mockParse.test.ts are
 // asserted by both implementations — keep them in sync.
 import YAML from 'yaml';
+import { isKnowledgePath } from '@/engine/okf';
 import type { Entry, Scalar } from '@/engine/types';
 import { firstMeaningfulLine } from '@/mermaid/detect';
 
@@ -295,7 +296,13 @@ export function parseNote(path: string, raw: string, createdAt: string, modified
     }
   }
 
-  const h1 = extractH1Title(body);
+  // OKF (M50.1): a knowledge file's title is its frontmatter `title` —
+  // parity with entry.rs.
+  const okfTitle =
+    isKnowledgePath(path) && typeof mapping.title === 'string' && mapping.title.trim() !== ''
+      ? mapping.title.trim()
+      : null;
+  const h1 = okfTitle ?? extractH1Title(body);
   return {
     path,
     filename,

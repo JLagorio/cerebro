@@ -1,16 +1,23 @@
+import { useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { DocProperties } from '@/detail/DocProperties';
 import { OutlineTab } from '@/editor/DocOutline';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
+import type { Concept } from '@/engine/okf';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { typeStyle } from '@/engine/typeCatalog';
-import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
-import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
-import { augmentDocPrompt } from '@/lib/prompts';
-import { useUiStore, type DocPanelTab } from '@/stores/uiStore';
+import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
+import { PageKnowledge } from '@/knowledge/PageKnowledge';
+import {
+  DOC_PANEL_MIN_WIDTH,
+  DOC_PANEL_WIDTH,
+  useUiStore,
+  type ConceptPanelTab,
+  type DocPanelTab,
+} from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const TABS: { id: DocPanelTab; label: string }[] = [
@@ -20,6 +27,14 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   // M8.3 — the PRD case. A tab rather than an inline suggestion: opening it
   // is the ask, so the assistant never speaks first while you are writing.
   { id: 'knowledge', label: 'Knowledge' },
+];
+
+/** A concept's panel (M50.1): its provenance first. The review itself is the
+ *  bar under the title (M51.3). */
+const CONCEPT_TABS: { id: ConceptPanelTab; label: string }[] = [
+  { id: 'details', label: 'Details' },
+  { id: 'outline', label: 'Outline' },
+  { id: 'links', label: 'Links' },
 ];
 
 function LinkRow({ link }: { link: DocLink }) {
@@ -96,23 +111,59 @@ export function DocSidePanel({
   schema,
   editor,
   scrollRef,
+  concept = null,
+  overlay = false,
 }: {
   entry: Entry;
   schema: Schema;
   editor: CerebroEditor | null;
   scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Set on a concept page: the panel leads with the concept's details. */
+  concept?: Concept | null;
+  /**
+   * Drawn as a drawer over the reading column rather than beside it (M52):
+   * the page has no room for both floors, so the panel folded, and the user
+   * asked for it anyway. The page decides; the stored open flag is not asked.
+   */
+  overlay?: boolean;
 }) {
-  const tab = useUiStore((s) => s.docPanelTab);
-  const setTab = useUiStore((s) => s.setDocPanelTab);
+  const docTab = useUiStore((s) => s.docPanelTab);
+  const setDocTab = useUiStore((s) => s.setDocPanelTab);
+  const conceptTab = useUiStore((s) => s.conceptPanelTab);
+  const setConceptTab = useUiStore((s) => s.setConceptPanelTab);
+  const tabs: { id: DocPanelTab | ConceptPanelTab; label: string }[] =
+    concept !== null ? CONCEPT_TABS : TABS;
+  const tab: DocPanelTab | ConceptPanelTab = concept !== null ? conceptTab : docTab;
+  const drawerRef = useDrawerFocus<HTMLElement>(overlay);
+  const setTab = (next: DocPanelTab | ConceptPanelTab) => {
+    if (concept !== null) setConceptTab(next as ConceptPanelTab);
+    else setDocTab(next as DocPanelTab);
+  };
 
   return (
     <aside
+      ref={drawerRef}
       data-testid="doc-side-panel"
       aria-label="Document panel"
-      className="flex w-[272px] flex-none flex-col border-l border-n-200 bg-n-0"
+      data-overlay={overlay || undefined}
+      tabIndex={overlay ? -1 : undefined}
+      // A preference, not a wall (M52): it gives from its width down to its
+      // floor once the reading column beside it has reached its own. Past
+      // that the page folds it, and a drawer is how it comes back.
+      className={[
+        'flex flex-col border-l border-n-200 bg-n-0',
+        overlay ? 'absolute inset-y-0 right-0 z-20 shadow-[var(--shadow-lg)] outline-none' : '',
+      ].join(' ')}
+      style={
+        overlay
+          ? { width: DOC_PANEL_WIDTH, maxWidth: '85%' }
+          : { flex: `0 1 ${DOC_PANEL_WIDTH}px`, minWidth: DOC_PANEL_MIN_WIDTH }
+      }
     >
-      <div className="flex flex-none items-center gap-1 border-b border-n-100 px-2 py-1.5">
-        {TABS.map((t) => (
+      {/* Wraps rather than clips: at the panel's floor four tabs are wider
+          than the panel. */}
+      <div className="flex flex-none flex-wrap items-center gap-1 border-b border-n-100 px-2 py-1.5">
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -130,6 +181,7 @@ export function DocSidePanel({
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
+        {tab === 'details' && concept !== null && <ConceptDetailsTab concept={concept} />}
         {tab === 'outline' &&
           (editor !== null ? (
             <OutlineTab editor={editor} scrollRef={scrollRef} />
@@ -138,21 +190,13 @@ export function DocSidePanel({
           ))}
         {tab === 'info' && <DocProperties entry={entry} schema={schema} />}
         {tab === 'links' && <LinksTab entry={entry} />}
+        {/* The record peek's Knowledge, component for component (M52.3).
+            What this note gave Knowledge comes before what Knowledge can give
+            the note: every doc is a candidate source, not just the ones that
+            happened to arrive through the Inbox. */}
         {tab === 'knowledge' && (
-          <div className="flex flex-col gap-4 pb-2">
-            {/* What this note gave the base comes before what the base can
-                give the note: every doc is a candidate source, not just the
-                ones that happened to arrive through the Inbox. */}
-            <KnowledgeCommit entry={entry} variant="panel" />
-            <div className="border-t border-n-100 pt-3.5">
-              <RelatedKnowledge
-                entry={entry}
-                variant="panel"
-                askPrompt={augmentDocPrompt(entry.path, entry.title)}
-                askSubject={entry.path}
-                askLabel="What am I missing?"
-              />
-            </div>
+          <div className="pb-2 pt-1.5">
+            <PageKnowledge entry={entry} />
           </div>
         )}
       </div>

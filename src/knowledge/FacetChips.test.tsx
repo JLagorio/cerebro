@@ -2,7 +2,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { BeliefChips, FacetChips as Row } from '@/lib/ipc';
-import { FacetChips, FacetLines } from './FacetChips';
+import { FacetChips, FacetLines, scopeWords } from './FacetChips';
 import { chipsFor, indexChips, NO_CHIPS } from './useBeliefChips';
 
 afterEach(cleanup);
@@ -40,10 +40,10 @@ function row(partial: Partial<Row> & { predicate: string | null; stage: string }
       stale_after: '2026-08-01T06:00:00Z',
     },
     review: { status: 'unreviewed' },
-    support_text: 'single-source',
-    coverage_text: 'coverage unassessed',
+    support_text: 'one source',
+    coverage_text: 'sources not yet assessed',
     validity_text: 'stale and contested',
-    line: 'single-source, coverage unassessed, stale and contested',
+    line: 'one source, sources not yet assessed, stale and contested',
     ...partial,
   };
 }
@@ -65,8 +65,8 @@ describe('FacetChips', () => {
     expect(axes.map((c) => c.dataset.value)).toEqual(['single_source', 'blind', 'stale']);
     // Every word came over the wire. Nothing here maps a value to a phrase.
     expect(axes.map((c) => c.textContent)).toEqual([
-      'single-source',
-      'coverage unassessed',
+      'one source',
+      'sources not yet assessed',
       'stale and contested',
     ]);
   });
@@ -77,7 +77,7 @@ describe('FacetChips', () => {
     render(<FacetChips chips={chips([row({ predicate: 'ci_status', stage: 'implemented' })])} />);
     const coverage = screen.getAllByTestId('axis-chip')[1];
     expect(coverage?.dataset.assessed).toBe('no_assessments');
-    expect(coverage?.textContent).toBe('coverage unassessed');
+    expect(coverage?.textContent).toBe('sources not yet assessed');
   });
 
   it('renders a multi-facet belief as separate scoped rows', () => {
@@ -92,7 +92,7 @@ describe('FacetChips', () => {
             stage: 'implemented',
             validity: { freshness: 'fresh', conflict: 'clear', lifecycle: 'active' },
             validity_text: 'fresh',
-            line: 'single-source, coverage unassessed, fresh',
+            line: 'one source, sources not yet assessed, fresh',
           }),
         ])}
       />,
@@ -104,13 +104,39 @@ describe('FacetChips', () => {
       'ci_status at implemented',
     ]);
     // The scope is named only when there is more than one — a single facet's
-    // scope is the whole belief's, and saying it every time is noise.
-    expect(rows[0]?.textContent).toContain('bill_of_materials at shipping');
+    // scope is the whole belief's, and saying it every time is noise. In
+    // words, as Activity says it (M52.5); the key stays on the element.
+    expect(screen.getAllByTestId('facet-scope').map((e) => e.textContent)).toEqual([
+      'Bill of materials, at the shipping stage',
+      'CI status, at the implemented stage',
+    ]);
+    expect(rows[0]?.textContent).not.toContain('bill_of_materials');
+  });
+
+  // The same sentences `attention::status::scope_words` writes for Activity's
+  // lane and change lines (its `an_unknown_stage_drops_out…` test): the two
+  // change together.
+  it('says a scope as Activity does', () => {
+    expect(scopeWords('ci_status', 'implemented')).toBe('CI status, at the implemented stage');
+    expect(scopeWords('ci_status', 'unknown')).toBe('CI status');
+    expect(scopeWords('owner_id', 'go_live')).toBe('Owner ID, at the go live stage');
+    expect(scopeWords(null, 'unknown')).toBe("what it is about isn't recorded");
   });
 
   it('says so out loud when a facet has no recorded predicate', () => {
-    render(<FacetChips chips={chips([row({ predicate: null, stage: 'unknown' })])} />);
-    expect(screen.getByTestId('facet-chips').dataset.facet).toBe('no recorded predicate');
+    render(
+      <FacetChips
+        chips={chips([
+          row({ predicate: null, stage: 'unknown' }),
+          row({ predicate: 'ci_status', stage: 'implemented' }),
+        ])}
+      />,
+    );
+    // The ledger's own key on the element; the row's label in words.
+    expect(screen.getAllByTestId('facet-chips')[0]?.dataset.facet).toBe('unknown');
+    expect(screen.getAllByTestId('facet-scope')[0]?.textContent).toBe(
+      "What it is about isn't recorded",
+    );
   });
 
   it('renders nothing at all when nobody derived an answer', () => {
@@ -125,7 +151,7 @@ describe('FacetChips', () => {
   it('gives list surfaces the same sentence as one line', () => {
     render(<FacetLines chips={chips([row({ predicate: 'ci_status', stage: 'implemented' })])} />);
     expect(screen.getByTestId('facet-line').textContent).toBe(
-      'single-source, coverage unassessed, stale and contested',
+      'one source, sources not yet assessed, stale and contested',
     );
   });
 });

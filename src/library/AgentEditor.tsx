@@ -237,7 +237,7 @@ export function AgentEditor({
           />
           <p className="m-0 mt-1.5 text-2xs text-n-500">
             {draft.scope !== null && draft.scope.length === 0
-              ? 'It can still record findings through the knowledge bundle, which has its own guard.'
+              ? 'It can still record findings in Knowledge, which has its own guard.'
               : `Writes anywhere under ${(draft.scope ?? []).join(' or ')} and nowhere else.`}
           </p>
         </GuardRow>
@@ -306,7 +306,7 @@ export function AgentEditor({
               return (
                 <div
                   data-testid="agent-consequence"
-                  className="mt-2 flex flex-col gap-0.5 rounded border border-n-200 px-2.5 py-2 text-2xs text-n-600"
+                  className="mt-2 flex flex-col gap-0.5 rounded-xs border border-n-200 px-2.5 py-2 text-2xs text-n-600"
                 >
                   <span>
                     Applies on its own once committed — {applies} low- and medium-risk operations.
@@ -360,7 +360,7 @@ export function AgentEditor({
 
       <EditorSection
         title="Memory"
-        hint="What survives between runs. Two tiers are fields on this record; the third — what the agent inferred — is the knowledge bundle, which already stores inferences with provenance and already requires your stamp to become verified."
+        hint="What survives between runs. Two tiers are fields on this record; the third — what the agent inferred — is Knowledge, which already stores inferences with provenance and already requires your stamp to become verified."
       >
         <Field
           label="Your corrections"
@@ -447,7 +447,7 @@ function TriggerRow({
           type="button"
           aria-label={`Remove trigger ${index + 1}`}
           onClick={onRemove}
-          className="rounded border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
+          className="rounded-xs border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           <Icon name="x" size={13} />
         </button>

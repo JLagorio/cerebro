@@ -179,12 +179,17 @@ pub fn verified_ancestor(frames: &[Frame], store_id: &str, entry: &ManifestEntry
 /// out-of-band edits PARKED (M23.7 captures them), divergence recorded.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScanOutcome {
+    /// Same-bytes moves adopted before classifying, as (from, to) vault
+    /// paths (M49.5, K29).
+    pub moved: Vec<(String, String)>,
     pub matches: usize,
     /// Paths regenerated or created from reducer state — ZERO capture.
     pub regenerated: Vec<String>,
     /// Pending entries finalized (the file already held the target bytes).
     pub finalized: Vec<String>,
-    /// Valid out-of-band edits still parked (mode open, or mass signature).
+    /// Valid out-of-band edits still parked: capture was held back by a
+    /// vault-wide stop, a mass signature, or a migration signal. A divergence
+    /// on OTHER paths no longer parks them (M49.5).
     pub out_of_band: Vec<String>,
     /// Out-of-band edits CAPTURED this scan (M23.7's live half).
     pub captured: Vec<String>,
@@ -204,25 +209,37 @@ const MASS_MIN_RATIO: f64 = 0.25;
 /// The M23.6 launch scan: after recovery and arming, compare file,
 /// manifest, and reducer projection for EVERY path; execute the safe
 /// branches (match, pending recovery, ledger-ahead — all zero capture);
-/// park valid out-of-band edits; and on any unproven state, migration
-/// refusal, or the mass threshold, record ONE idempotent
-/// `ledger.divergence` and open reconciliation mode. Regular agent writes
-/// stay available while the mode is open; automatic capture does not.
+/// capture valid out-of-band edits path by path; and on any unproven state,
+/// migration refusal, or the mass threshold, record ONE idempotent
+/// `ledger.divergence` and open reconciliation mode. The model is per path
+/// (M49.5): a diverged path is quarantined on its own while every other
+/// path keeps its recoveries and captures. Only a vault-wide stop
+/// ([`global_stop`] — a mass, migration, or regressed-head signal), a mass
+/// signature, or a migration signal in THIS scan holds capture back, and
+/// then the edits stay parked in `out_of_band`.
 ///
-/// Detection is BEST EFFORT: the remembered app-data head and git anchors
-/// are corroboration, not proof — a coherent restore that rewinds ledger,
-/// manifest, files, and every anchor together may be undetectable, and
-/// nothing here claims otherwise.
+/// Detection is BEST EFFORT: the remembered app-data head is
+/// corroboration, not proof, and git trailers are only a join key — nothing
+/// reads them back (M49.10). A coherent restore that rewinds ledger,
+/// manifest, and files together may be undetectable, and nothing here
+/// claims otherwise.
 pub fn launch_scan(
     writer: &mut super::writer::LedgerWriter,
     vault: &Path,
     migration_signal: Option<schema::DivergenceSignal>,
     remembered_head: Option<&str>,
 ) -> Result<ScanOutcome, String> {
+    // Moves first (M49.5, K29): a concept moved with its bytes unchanged is
+    // adopted before anything is classified, so a folder tidied in Finder
+    // never reads as a mass of deletions and strangers.
+    let moved = adopt_moves(writer, vault)?;
     let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
     let state = reduce(&read.frames, writer.store_id());
     let manifest = super::manifest::load(vault)?;
-    let mut outcome = ScanOutcome::default();
+    let mut outcome = ScanOutcome {
+        moved,
+        ..ScanOutcome::default()
+    };
 
     // The path universe: manifest entries ∪ knowledge files ∪ reducer
     // projections (vault-relative `knowledge/…` keys).
@@ -253,7 +270,9 @@ pub fn launch_scan(
         }
     }
 
-    let already_open = state.reconciliation_open();
+    // Only a vault-wide stop holds the safe recoveries and the captures back
+    // (M49.5, K8); a divergence on some paths quarantines only those.
+    let stopped = global_stop(vault, &state)?;
     for path in &paths {
         let krel = path.strip_prefix("knowledge/").unwrap_or(path);
         let file = match std::fs::read(vault.join(path)) {
@@ -273,8 +292,21 @@ pub fn launch_scan(
             entry.is_some_and(|entry| verified_ancestor(&read.frames, writer.store_id(), entry));
         match classify_path(&file, entry, projection.as_ref(), ancestor) {
             PathClass::Match => outcome.matches += 1,
+            // The knowledge log is a derived, system-owned view (the
+            // 2026-09 owner decision; K11): a file that differs from its
+            // projection is regenerated, never captured as an override or
+            // escalated — its entries are ledger state, not the file's.
+            _ if path == crate::knowledge::LOG_PATH
+                && projection.is_some()
+                && file.hash.as_deref() != projection.as_ref().map(|p| p.content_hash.as_str()) =>
+            {
+                if !stopped {
+                    regenerate_log(writer, vault)?;
+                }
+                outcome.regenerated.push(path.clone());
+            }
             PathClass::InterruptedFinalize => {
-                if !already_open {
+                if !stopped {
                     super::manifest::complete_entry(vault, path)?;
                 }
                 outcome.finalized.push(path.clone());
@@ -283,7 +315,7 @@ pub fn launch_scan(
             | PathClass::LedgerAheadRegenerate
             | PathClass::LedgerAheadAdvance
             | PathClass::LedgerAheadCreate => {
-                if !already_open {
+                if !stopped {
                     let projection = projection
                         .as_ref()
                         .ok_or("a ledger-ahead class always has reducer state")?;
@@ -306,20 +338,20 @@ pub fn launch_scan(
         && initial_mismatches >= MASS_MIN_MISMATCHES
         && (initial_mismatches as f64) >= (projection_count as f64) * MASS_MIN_RATIO;
 
-    // The M23.7 live half: capture parked out-of-band edits — but only
-    // when nothing else already demands reconciliation. A failed capture
-    // (forged provenance, alias removal, ambiguous overlap) escalates to
+    // The M23.7 live half: capture parked out-of-band edits — per path
+    // (M49.5): another path's divergence no longer holds this one back.
+    // Only a vault-wide condition does. A failed capture (forged
+    // provenance, alias removal, ambiguous overlap) escalates THAT path to
     // divergence instead of guessing.
-    if !already_open
-        && !mass_signature
-        && outcome.divergent.is_empty()
-        && migration_signal.is_none()
-    {
+    if !stopped && !mass_signature && migration_signal.is_none() {
         let parked = std::mem::take(&mut outcome.out_of_band);
         for path in parked {
             match super::capture::capture_out_of_band_with(writer, vault, &path) {
                 Ok(()) => outcome.captured.push(path),
-                Err(reason) => outcome.divergent.push((path, reason)),
+                Err(reason) => {
+                    super::capture::log_refused_capture("launch_scan", &path, &reason);
+                    outcome.divergent.push((path, reason));
+                }
             }
         }
     }
@@ -342,6 +374,12 @@ pub fn launch_scan(
     signals.sort();
 
     if !signals.is_empty() {
+        // M49.10 (K32): the record describes the ledger AFTER the captures
+        // above — it used to be built from the state read before them, so
+        // its head and digests named a moment that had already passed.
+        let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+        let state = reduce(&read.frames, writer.store_id());
+        let manifest = super::manifest::load(vault)?;
         let empty_digest = crate::ledger::sha256_hex(b"");
         let manifest_digest = match std::fs::read(super::manifest::manifest_path(vault)) {
             Ok(bytes) => crate::ledger::sha256_hex(&bytes),
@@ -358,12 +396,44 @@ pub fn launch_scan(
         samples.sort();
         samples.dedup();
         samples.truncate(schema::reconciliation::MAX_SAMPLE_PATHS);
-        // The stable detection key: the condition, not the launch.
+        // The stable detection key: the condition, not the launch — and
+        // the condition is the diverged FILES (M49.10, K32): each path,
+        // whether it is on disk, and the bytes the manifest recorded.
+        // Whole-bundle digests made the key move with any unrelated edit, so
+        // one open condition minted event after event — and so did hashing
+        // the diverged file itself, whose every autosave moved the key. Its
+        // later edits are the same open condition.
+        let mut files: Vec<(String, String, String)> = outcome
+            .divergent
+            .iter()
+            .map(|(path, _)| path)
+            .chain(outcome.out_of_band.iter())
+            .map(|path| {
+                let on_disk = if vault.join(path).exists() {
+                    "present"
+                } else {
+                    "missing"
+                }
+                .to_string();
+                let recorded = manifest
+                    .as_ref()
+                    .and_then(|m| m.entries.get(path))
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_else(|| "unrecorded".to_string());
+                (path.clone(), on_disk, recorded)
+            })
+            .collect();
+        files.sort();
+        files.dedup();
+        // …and the resolution EPOCH: a condition resolved once and back
+        // again (a restored file copied back, a second rewind) is a new
+        // divergence. Without it the key collided with the resolved one's
+        // claimed idempotency key, the append was a hard conflict, and the
+        // recurrence could never be recorded.
         let condition = serde_json::json!({
             "signals": signals.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            "samples": samples,
-            "manifest_digest": manifest_digest,
-            "reducer_digest": reducer_digest,
+            "files": files,
+            "epoch": state.reconciliation_log.len(),
         });
         let detection_key = crate::ledger::sha256_hex(
             serde_json::to_string(&condition)
@@ -386,7 +456,7 @@ pub fn launch_scan(
             detection_key: detection_key.clone(),
             signals,
             ledger_head: read.head_hash.clone(),
-            git_anchored_head: None, // best-effort: read at M23.7's exits
+            git_anchored_head: None, // never read — a trailer cannot anchor a synced ledger (M49.10)
             remembered_head: remembered_head.map(str::to_string),
             manifest_digest,
             reducer_projection_digest: reducer_digest,
@@ -409,6 +479,156 @@ pub fn launch_scan(
     Ok(outcome)
 }
 
+/// Adopt every same-bytes move (M49.5, K29): a recorded concept whose file
+/// is gone, paired with a file the ledger never recorded whose bytes ARE
+/// that concept's projection. Only unambiguous pairs — one missing concept,
+/// one candidate file, one hash — are adopted; anything else stays for a
+/// person. Recorded as `projection.moved` under the unattributed actor (no
+/// one can say who moved it), and the manifest entry follows the file.
+pub(crate) fn adopt_moves(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+) -> Result<Vec<(String, String)>, String> {
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    // Missing recorded projections, by the hash of what they project.
+    let mut missing: std::collections::BTreeMap<String, Vec<(String, String)>> = Default::default();
+    for (krel, belief_id) in &state.projection_paths {
+        if vault.join(format!("knowledge/{krel}")).exists() {
+            continue;
+        }
+        let projection = project_belief(&state, belief_id)?;
+        missing
+            .entry(projection.content_hash)
+            .or_default()
+            .push((krel.clone(), belief_id.clone()));
+    }
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Unrecorded files, by the hash of their bytes.
+    let mut strangers: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let knowledge = vault.join("knowledge");
+    if knowledge.exists() {
+        for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if !entry.file_type().is_file()
+                || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
+            {
+                continue;
+            }
+            let krel = entry
+                .path()
+                .strip_prefix(&knowledge)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if state.projection_paths.contains_key(&krel) {
+                continue;
+            }
+            let bytes = std::fs::read(entry.path()).map_err(|e| e.to_string())?;
+            strangers
+                .entry(crate::ledger::sha256_hex(&bytes))
+                .or_default()
+                .push(krel);
+        }
+    }
+    let mut moved = Vec::new();
+    for (hash, candidates) in &missing {
+        let ([(from, belief_id)], Some([to])) = (
+            candidates.as_slice(),
+            strangers.get(hash).map(Vec::as_slice),
+        ) else {
+            continue;
+        };
+        let body = schema::ProjectionMoved {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: schema::Actor {
+                id: super::capture::OUT_OF_BAND_ACTOR.to_string(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief_id.clone(),
+            from_path: from.clone(),
+            to_path: to.clone(),
+            projection_hash: hash.clone(),
+        };
+        writer.append_once(
+            &format!("projection-moved-v1:{belief_id}:{from}:{to}:{hash}"),
+            schema::KIND_PROJECTION_MOVED,
+            serde_json::to_value(&body).map_err(|e| e.to_string())?,
+        )?;
+        // The manifest entry follows the file: the new path's identity is
+        // the moved projection (its bytes are already on disk), and the old
+        // path's entry goes.
+        let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+        let state = reduce(&read.frames, writer.store_id());
+        let projection = project_belief(&state, belief_id)?;
+        let (old_rel, new_rel) = (format!("knowledge/{from}"), format!("knowledge/{to}"));
+        super::manifest::write_adopted_projection(vault, &new_rel, &projection, hash)?;
+        if let Some(mut manifest) = super::manifest::load(vault)? {
+            if manifest.entries.remove(&old_rel).is_some() {
+                super::manifest::save(vault, &manifest)?;
+            }
+        }
+        moved.push((old_rel, new_rel));
+    }
+    Ok(moved)
+}
+
+/// Regenerate the knowledge log from the ledger: retire any override that
+/// pinned it (K11), then write the projection over whatever the file holds.
+pub(crate) fn regenerate_log(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+) -> Result<(), String> {
+    super::concepts::clear_log_overrides_with(writer, vault)?;
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    let belief = state
+        .projection_paths
+        .get("log.md")
+        .ok_or("the knowledge log has no Belief")?;
+    let projection = project_belief(&state, belief)?;
+    super::manifest::restore_projection(vault, crate::knowledge::LOG_PATH, &projection)
+}
+
+/// Is automatic capture stopped for the WHOLE vault? (M49.5, K8)
+///
+/// Only an open divergence carrying a vault-wide signal stops it: a mass
+/// mismatch (a restore signature), a migration refusal, or a regressed head.
+/// `manifest_reducer_disagreement` alone names particular paths, and those
+/// paths are quarantined by the projection guard — the file on disk is not
+/// the one the manifest recorded — while the rest of the bundle keeps
+/// capturing. Before M49.5 one diverged file stopped every human knowledge
+/// edit in the vault: 39 days on the live vault.
+pub fn global_stop(vault: &Path, state: &super::reduce::EpistemicState) -> Result<bool, String> {
+    if !state.reconciliation_open() {
+        return Ok(false);
+    }
+    let open: std::collections::BTreeSet<&String> =
+        state.reconciliation_divergences.values().collect();
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    Ok(read
+        .frames
+        .iter()
+        .filter(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE && open.contains(&f.event_id))
+        .any(|f| {
+            f.body
+                .get("signals")
+                .and_then(|s| s.as_array())
+                .is_some_and(|signals| {
+                    signals.iter().any(|s| {
+                        s.as_str()
+                            != Some(schema::DivergenceSignal::ManifestReducerDisagreement.as_str())
+                    })
+                })
+        }))
+}
+
 // --- The reconciliation exits (M23.7) --------------------------------------
 
 /// Dispatch one reconciliation action through the vault's active writer.
@@ -421,9 +641,11 @@ pub fn resolve(vault: &Path, action: &str) -> Option<Result<(), String>> {
 }
 
 /// restore-ledger-authority: regenerate EVERY projection from reducer state
-/// through the pending-manifest protocol, remove what the ledger cannot
-/// explain, recheck F=M=R, and only then append the UNBATCHED resolution.
-/// A crash before that append leaves the mode open and resumable.
+/// through the pending-manifest protocol, move the files the ledger cannot
+/// explain into `.cerebro/reconcile-backup/` (a copy of each overwritten
+/// file goes there too — nothing is deleted), drop their manifest entries,
+/// recheck F=M=R, and only then append the UNBATCHED resolution. A crash
+/// before that append leaves the mode open and resumable.
 pub(crate) fn resolve_restore_with(
     writer: &mut super::writer::LedgerWriter,
     vault: &Path,
@@ -439,10 +661,20 @@ pub(crate) fn resolve_restore_with(
     }
 
     // The ledger is the authority: every projection regenerates; files and
-    // manifest entries the reducer cannot explain are removed.
+    // manifest entries the reducer cannot explain are set aside. The one
+    // deliberate overwrite in the ledger (M49.3): a person chose it — and
+    // what it replaces is kept in `.cerebro/reconcile-backup/` (M49.5, K12).
+    let backup = backup_dir(vault, &backup_label(&state, &read.head_hash));
     for (krel, belief) in &state.projection_paths {
+        let rel = format!("knowledge/{krel}");
         let projection = project_belief(&state, belief)?;
-        super::manifest::write_projection(vault, &format!("knowledge/{krel}"), &projection)?;
+        let differs = std::fs::read(vault.join(&rel))
+            .map(|bytes| bytes != projection.bytes.as_bytes())
+            .unwrap_or(false);
+        if differs {
+            back_up(vault, &rel, &backup, Keeping::Copy)?;
+        }
+        super::manifest::restore_projection(vault, &rel, &projection)?;
     }
     if let Some(mut manifest) = super::manifest::load(vault)? {
         manifest
@@ -469,7 +701,7 @@ pub(crate) fn resolve_restore_with(
                 .to_string_lossy()
                 .replace('\\', "/");
             if !state.projection_paths.contains_key(&krel) {
-                std::fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+                back_up(vault, &format!("knowledge/{krel}"), &backup, Keeping::Move)?;
             }
         }
     }
@@ -517,412 +749,382 @@ pub(crate) fn resolve_restore_with(
     Ok(())
 }
 
-/// accept-current-files: adoption through the capture valve, never manifest
-/// rebaselining. Every affected file is parsed and mechanically diffed;
-/// every representable epistemic diff becomes assertion+revision/effect
-/// members and every editorial diff an override member; the resolution
-/// rides the SAME logical batch, its digests proving the staged reducer
-/// projections equal the adopted bytes. One unparsable, forged, ambiguous,
-/// or unrepresentable file refuses the entire action — the manifest
-/// advances only after the marker fsync and reducer equality.
+/// accept-current-files — "Keep my files" for the whole vault (M49.5, K5):
+/// per-path Keep over every quarantined file, then the divergence closes
+/// once nothing is left quarantined.
+///
+/// It was ONE batch whose resolution pinned the RAW file bytes while the
+/// reducer checks the CANONICAL projections — any formatting difference
+/// killed it — under an operation key derived from the divergence alone,
+/// so a refused attempt replayed forever and Keep could never work again.
+/// Per path, each adoption stands on its own capture (keyed by the bytes it
+/// adopts), one refused file stays quarantined without holding back the
+/// rest, and the closing resolution is proven over projections the reducer
+/// already holds.
 pub(crate) fn resolve_accept_with(
     writer: &mut super::writer::LedgerWriter,
     vault: &Path,
 ) -> Result<(), String> {
-    use super::capture;
-    use super::writer::{batch_self_ref, member_ref};
+    let state = reduce(
+        &super::read_ledger(&super::ledger_dir(vault))
+            .map_err(|e| e.to_string())?
+            .frames,
+        writer.store_id(),
+    );
+    if !state.reconciliation_open() {
+        return Err("no open reconciliation to resolve".to_string());
+    }
+    let quarantined = quarantined_paths(vault, &state)?;
+    let mut refused: Vec<String> = Vec::new();
+    for path in &quarantined {
+        if let Err(reason) = keep_path_with(writer, vault, path) {
+            refused.push(format!("{path}: {reason}"));
+        }
+    }
+    close_if_clean(writer, vault, Exit::Keep)?;
+    if refused.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "kept {} of {} files; these could not be kept — Restore them, or fix them and Keep \
+             again: {}",
+            quarantined.len() - refused.len(),
+            quarantined.len(),
+            refused.join("; ")
+        ))
+    }
+}
 
+/// One file's exit (M49.5, K8): `keep` adopts the file as it is on disk;
+/// `restore` backs it up and puts the recorded version back. Either way,
+/// the recorded divergence closes once no file is left quarantined.
+pub fn resolve_path(vault: &Path, path: &str, action: &str) -> Option<Result<(), String>> {
+    super::shadow::with_writer(vault, |writer| {
+        resolve_path_with(writer, vault, path, action)
+    })
+}
+
+pub(crate) fn resolve_path_with(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+    path: &str,
+    action: &str,
+) -> Result<(), String> {
+    let path = crate::knowledge::canonical_path(path)
+        .ok_or_else(|| format!("{path} is not in the knowledge bundle"))?;
+    match action {
+        "keep" => {
+            keep_path_with(writer, vault, &path)?;
+            close_if_clean(writer, vault, Exit::Keep).map(|_| ())
+        }
+        "restore" => {
+            restore_path_with(writer, vault, &path)?;
+            close_if_clean(writer, vault, Exit::Restore).map(|_| ())
+        }
+        other => Err(format!("unknown per-file action {other:?}")),
+    }
+}
+
+/// Keep one file as it is on disk.
+fn keep_path_with(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+    path: &str,
+) -> Result<(), String> {
+    if path == crate::knowledge::LOG_PATH {
+        // Derived: there is nothing of the file's to keep (K11).
+        return regenerate_log(writer, vault);
+    }
+    let state = reduce(
+        &super::read_ledger(&super::ledger_dir(vault))
+            .map_err(|e| e.to_string())?
+            .frames,
+        writer.store_id(),
+    );
+    let krel = path.strip_prefix("knowledge/").unwrap_or(path);
+    let recorded = state.projection_paths.contains_key(krel);
+    let on_disk = vault.join(path).is_file();
+    // A half of a same-bytes move (K29): keeping it is keeping the move.
+    if recorded != on_disk
+        && adopt_moves(writer, vault)?
+            .iter()
+            .any(|(from, to)| from == path || to == path)
+    {
+        return Ok(());
+    }
+    match (recorded, on_disk) {
+        (true, true) => super::capture::keep_file_with(writer, vault, path),
+        (true, false) => Err(
+            "the file was deleted, and a deletion is not something Keep can record yet — Restore \
+             brings it back"
+                .to_string(),
+        ),
+        (false, _) => Err(
+            "Cerebro never recorded this file, so there is no history to adopt it into — move it \
+             out of knowledge/, or Restore to set it aside"
+                .to_string(),
+        ),
+    }
+}
+
+/// Put the recorded version of one file back, keeping what was there.
+fn restore_path_with(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+    path: &str,
+) -> Result<(), String> {
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    let backup = backup_dir(vault, &backup_label(&state, &read.head_hash));
+    let krel = path.strip_prefix("knowledge/").unwrap_or(path);
+    match state.projection_paths.get(krel) {
+        Some(belief) => {
+            let projection = project_belief(&state, belief)?;
+            let differs = std::fs::read(vault.join(path))
+                .map(|bytes| bytes != projection.bytes.as_bytes())
+                .unwrap_or(false);
+            if differs {
+                back_up(vault, path, &backup, Keeping::Copy)?;
+            }
+            super::manifest::restore_projection(vault, path, &projection)
+        }
+        // Nothing recorded explains the file: it is set aside, never
+        // deleted.
+        None if vault.join(path).is_file() => back_up(vault, path, &backup, Keeping::Move),
+        None => Err(format!("{path} is neither recorded nor on disk")),
+    }
+}
+
+/// Which exit closed the divergence — recorded as the resolution's action.
+#[derive(Clone, Copy, PartialEq)]
+enum Exit {
+    Keep,
+    Restore,
+}
+
+/// Close the recorded divergence once every file matches the ledger and no
+/// unrecorded file remains (M49.5). The resolution is proven the way the
+/// reducer proves every resolution — its digest over the reducer's own
+/// projections — and those are exactly what is on disk now. `Ok(false)`
+/// while anything is still quarantined, or when nothing is open.
+fn close_if_clean(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+    exit: Exit,
+) -> Result<bool, String> {
     let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
     let store = writer.store_id().to_string();
     let state = reduce(&read.frames, &store);
     let Some(divergence_event) = state.reconciliation_divergences.values().next().cloned() else {
-        return Err("no open reconciliation to resolve".to_string());
+        return Ok(false);
     };
-    let manifest = super::manifest::load(vault)?;
+    if !quarantined_paths(vault, &state)?.is_empty() {
+        return Ok(false);
+    }
+    // The derived log may still differ; it is regenerated, never judged.
+    regenerate_log(writer, vault).ok();
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, &store);
+    let affected: Vec<String> = state.projection_paths.keys().cloned().collect();
+    if affected.is_empty() {
+        return Ok(false);
+    }
+    // Every file matches: advance the manifest identity (byte-identical,
+    // nothing moves on disk) so F = M = R before the resolution says so.
+    for (krel, belief) in &state.projection_paths {
+        let projection = project_belief(&state, belief)?;
+        super::manifest::write_projection(vault, &format!("knowledge/{krel}"), &projection)?;
+    }
+    let resulting = reducer_projection_digest(&state)?;
+    let body = |action, capture_batch_ids, accepted| schema::ReconciliationResolved {
+        schema: schema::BODY_SCHEMA,
+        batch_id: None,
+        idempotency_key: None,
+        actor: schema::Actor {
+            id: schema::ACTOR_RECONCILIATION.to_string(),
+        },
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        divergence_event_id: divergence_event.clone(),
+        action,
+        affected_paths: affected.clone(),
+        capture_batch_ids,
+        accepted_files_digest: accepted,
+        resulting_projection_digest: resulting.clone(),
+    };
+    match exit {
+        // An accept resolution rides a batch by schema; this one carries
+        // only itself — the adoptions it closes over committed file by file.
+        Exit::Keep => {
+            let resolution = body(
+                schema::ReconciliationAction::AcceptCurrentFiles,
+                vec![super::writer::batch_self_ref()],
+                Some(resulting.clone()),
+            );
+            writer.append_batch(
+                vec![(
+                    schema::KIND_RECONCILIATION_RESOLVED.to_string(),
+                    serde_json::to_value(&resolution).map_err(|e| e.to_string())?,
+                )],
+                Some(&format!(
+                    "reconcile-close-v1:{store}:{divergence_event}:{resulting}"
+                )),
+            )?;
+        }
+        Exit::Restore => {
+            let resolution = body(
+                schema::ReconciliationAction::RestoreLedgerAuthority,
+                vec![],
+                None,
+            );
+            writer.append(
+                schema::KIND_RECONCILIATION_RESOLVED,
+                serde_json::to_value(&resolution).map_err(|e| e.to_string())?,
+            )?;
+        }
+    }
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    if reduce(&read.frames, &store).reconciliation_open() {
+        return Err("the closing resolution did not close the divergence".to_string());
+    }
+    Ok(true)
+}
 
-    // Classify everything; every non-Match path is affected and must be
-    // fully explainable from its CURRENT file bytes.
-    let mut paths: std::collections::BTreeSet<String> = state
-        .projection_paths
-        .keys()
-        .map(|krel| format!("knowledge/{krel}"))
-        .collect();
-    if let Some(manifest) = &manifest {
-        paths.extend(manifest.entries.keys().cloned());
+/// Every knowledge file that is not the ledger's (M49.5, K8): a recorded
+/// concept whose file differs from its projection or is missing, and any
+/// `.md` in the bundle the ledger never recorded. The derived log is not
+/// among them — it is regenerated, never quarantined.
+pub fn quarantined_paths(
+    vault: &Path,
+    state: &super::reduce::EpistemicState,
+) -> Result<Vec<String>, String> {
+    let mut quarantined = Vec::new();
+    for (krel, belief) in &state.projection_paths {
+        let path = format!("knowledge/{krel}");
+        if path == crate::knowledge::LOG_PATH {
+            continue;
+        }
+        let projection = project_belief(state, belief)?;
+        let matches = std::fs::read(vault.join(&path))
+            .is_ok_and(|bytes| bytes == projection.bytes.as_bytes());
+        if !matches {
+            quarantined.push(path);
+        }
     }
     let knowledge = vault.join("knowledge");
     if knowledge.exists() {
         for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
             let entry = entry.map_err(|e| e.to_string())?;
-            if entry.file_type().is_file()
-                && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+            if !entry.file_type().is_file()
+                || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
             {
-                let rel = entry
-                    .path()
-                    .strip_prefix(vault)
-                    .map_err(|e| e.to_string())?
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                paths.insert(rel);
+                continue;
+            }
+            let krel = entry
+                .path()
+                .strip_prefix(&knowledge)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !state.projection_paths.contains_key(&krel) {
+                quarantined.push(format!("knowledge/{krel}"));
             }
         }
     }
+    quarantined.sort();
+    Ok(quarantined)
+}
 
-    let mut affected: Vec<String> = Vec::new();
-    let mut diffs: Vec<(String, capture::FileDiff, String)> = Vec::new(); // (krel, diff, raw)
-    for path in &paths {
-        let krel = path.strip_prefix("knowledge/").unwrap_or(path);
-        let raw = match std::fs::read_to_string(vault.join(path)) {
-            Ok(raw) => raw,
-            Err(_) => {
-                return Err(format!(
-                    "accept-current-files: {path} is missing — a deleted projection has no bytes \
-                     to adopt; restore ledger authority instead"
-                ))
+/// One quarantined file, as `ledger_status` reports it (M49.6, K13).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct QuarantinedPath {
+    pub path: String,
+    /// `adoptable` — edited outside Cerebro, and Keep can record it.
+    /// `refused` — Keep cannot record it (`reason` says why); Restore can.
+    /// `deleted` — recorded, but the file is gone; Restore brings it back.
+    /// `unrecorded` — in the bundle, but Cerebro never recorded it.
+    pub class: &'static str,
+    pub reason: String,
+}
+
+/// Why each quarantined file is quarantined — computed live, read-only,
+/// from the same diff Keep would run. Before M49.6 the banner said "1
+/// unresolved" and named nothing: the person could not find the files, let
+/// alone judge the two buttons.
+pub fn quarantine_report(
+    vault: &Path,
+    state: &super::reduce::EpistemicState,
+) -> Result<Vec<QuarantinedPath>, String> {
+    let mut report = Vec::new();
+    for path in quarantined_paths(vault, state)? {
+        let krel = path.strip_prefix("knowledge/").unwrap_or(&path);
+        let (class, reason) = if !state.projection_paths.contains_key(krel) {
+            (
+                "unrecorded",
+                "in the knowledge bundle, but Cerebro never recorded it".to_string(),
+            )
+        } else {
+            match std::fs::read_to_string(vault.join(&path)) {
+                Err(_) => ("deleted", "deleted outside Cerebro".to_string()),
+                Ok(raw) => match super::capture::diff_projection_file(state, krel, &raw) {
+                    Ok(_) => ("adoptable", "edited outside Cerebro".to_string()),
+                    Err(reason) => ("refused", reason),
+                },
             }
         };
-        let entry = manifest.as_ref().and_then(|m| m.entries.get(path));
-        let projection = state
-            .projection_paths
-            .get(krel)
-            .and_then(|belief| project_belief(&state, belief).ok());
-        let ancestor = entry.is_some_and(|entry| verified_ancestor(&read.frames, &store, entry));
-        let file = FileFact {
-            hash: Some(crate::ledger::sha256_hex(raw.as_bytes())),
-            parses: super::project::parse_okf(&raw).is_ok(),
-        };
-        if classify_path(&file, entry, projection.as_ref(), ancestor) == PathClass::Match {
-            continue;
-        }
-        // The mechanical diff refuses forgery, alias removal, ambiguity,
-        // and unknown paths — one bad file kills the whole adoption.
-        let diff = capture::diff_projection_file(&state, krel, &raw)
-            .map_err(|e| format!("accept-current-files refused at {path}: {e}"))?;
-        affected.push(krel.to_string());
-        diffs.push((krel.to_string(), diff, raw));
+        report.push(QuarantinedPath {
+            path,
+            class,
+            reason,
+        });
     }
-    if affected.is_empty() {
-        return Err("accept-current-files: nothing differs — resolve by restore instead".into());
-    }
-    affected.sort();
+    Ok(report)
+}
 
-    // Assemble ONE logical batch: staged registration first when needed,
-    // then per file the editorial override (based on CURRENT state) and the
-    // assertion+revision+effect members, then the resolution.
-    let authority = capture::AuthorityAnswers::default();
-    let mut members: Vec<(String, serde_json::Value)> = Vec::new();
-    let (source_id, registration_event, staged_registration) =
-        capture::resolve_registration(&state, &store, "human:owner", members.len());
-    if let Some(member) = staged_registration {
-        members.push(member);
-    }
-    let common = |actor: &str| schema::Actor {
-        id: actor.to_string(),
-    };
-    for (krel, diff, _) in &diffs {
-        let belief = state.beliefs.get(&diff.belief_id).expect("diffed belief");
-        let current = belief.current();
-        if !diff.editorial_ops.is_empty() {
-            let (mut content, mut fields) = super::reduce::overlaid(&state, belief);
-            for op in &diff.editorial_ops {
-                super::reduce::apply_overlay_op(&mut content, &mut fields, op);
-            }
-            let after_bytes = super::project::project(&content, &fields);
-            let body = schema::ProjectionOverridden {
-                schema: schema::BODY_SCHEMA,
-                batch_id: None,
-                idempotency_key: None,
-                actor: common("human:owner"),
-                occurred_at: None,
-                valid_from: None,
-                valid_to: None,
-                belief_id: diff.belief_id.clone(),
-                path: krel.clone(),
-                base_belief_revision: current.revision,
-                base_belief_revision_event: current.event_id.clone(),
-                base_generating_event: belief.projection_head_event.clone(),
-                before_projection_hash: diff.old_hash.clone(),
-                after_projection_hash: crate::ledger::sha256_hex(after_bytes.as_bytes()),
-                origin: schema::OverrideOrigin::ReconciliationAdoption,
-                change: schema::OverrideChange::Set {
-                    patch: diff.editorial_ops.clone(),
-                    supersedes_override_event_ids: vec![],
-                },
-            };
-            members.push((
-                schema::KIND_PROJECTION_OVERRIDDEN.to_string(),
-                serde_json::to_value(&body).map_err(|e| e.to_string())?,
-            ));
-        }
-        if diff.fields.is_empty() && diff.relations.is_empty() && diff.alias_adds.is_empty() {
-            continue;
-        }
-        let mut observation_refs: Vec<String> = Vec::new();
-        for edit in &diff.fields {
-            let ordinal = members.len();
-            members.push(capture::human_assertion(
-                "human:owner",
-                &source_id,
-                &registration_event,
-                &belief.entity_id,
-                &authority,
-                &edit.field_path,
-                edit.after.clone(),
-                schema::HumanAssertionForm::FieldChange {
-                    target_belief_id: diff.belief_id.clone(),
-                    field_path: edit.field_path.clone(),
-                    before: edit.before.clone(),
-                    after: edit.after.clone(),
-                    corrects: edit.corrects.clone(),
-                    reason: edit.reason.clone(),
-                },
-            ));
-            observation_refs.push(member_ref(ordinal));
-        }
-        for relation in &diff.relations {
-            let relation_id =
-                schema::derive_relation_id(&diff.belief_id, &relation.to_belief_id, relation.kind);
-            let value = schema::TypedValue::Object {
-                value: [
-                    (
-                        "relation_id".to_string(),
-                        schema::TypedValue::string(&relation_id),
-                    ),
-                    (
-                        "action".to_string(),
-                        schema::TypedValue::string(match relation.action {
-                            schema::RelationAction::Add => "add",
-                            schema::RelationAction::Remove => "remove",
-                        }),
-                    ),
-                    (
-                        "from".to_string(),
-                        schema::TypedValue::string(&diff.belief_id),
-                    ),
-                    (
-                        "to".to_string(),
-                        schema::TypedValue::string(&relation.to_belief_id),
-                    ),
-                    (
-                        "relation".to_string(),
-                        schema::TypedValue::string(relation.kind.as_str()),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            };
-            let ordinal = members.len();
-            members.push(capture::human_assertion(
-                "human:owner",
-                &source_id,
-                &registration_event,
-                &belief.entity_id,
-                &authority,
-                "belief_relation",
-                value,
-                schema::HumanAssertionForm::RelationChange {
-                    target_belief_id: diff.belief_id.clone(),
-                    relation_id,
-                    action: relation.action,
-                    from: diff.belief_id.clone(),
-                    to: relation.to_belief_id.clone(),
-                    relation: relation.kind,
-                    corrects: None,
-                    reason: None,
-                },
-            ));
-            observation_refs.push(member_ref(ordinal));
-        }
-        for alias in &diff.alias_adds {
-            let normalized = schema::normalize_alias_v1(alias);
-            let value = schema::TypedValue::Object {
-                value: [
-                    (
-                        "entity_id".to_string(),
-                        schema::TypedValue::string(&belief.entity_id),
-                    ),
-                    ("alias".to_string(), schema::TypedValue::string(alias)),
-                    (
-                        "normalized_alias".to_string(),
-                        schema::TypedValue::string(&normalized),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            };
-            let ordinal = members.len();
-            members.push(capture::human_assertion(
-                "human:owner",
-                &source_id,
-                &registration_event,
-                &belief.entity_id,
-                &authority,
-                "entity_alias",
-                value,
-                schema::HumanAssertionForm::AliasAdd {
-                    target_belief_id: diff.belief_id.clone(),
-                    entity_id: belief.entity_id.clone(),
-                    alias: alias.clone(),
-                    normalized_alias: normalized,
-                    corrects: None,
-                    reason: None,
-                },
-            ));
-            observation_refs.push(member_ref(ordinal));
-        }
-        let mut links: Vec<schema::BasisLink> = match &current.basis {
-            schema::BeliefBasis::Linked { links } => links.clone(),
-            schema::BeliefBasis::Unsupported { .. } => Vec::new(),
-        };
-        for observation in &observation_refs {
-            links.push(schema::BasisLink {
-                observation_event_id: observation.clone(),
-                role: schema::BasisRole::Supports,
-            });
-        }
-        let revised = schema::BeliefRevised {
-            schema: schema::BODY_SCHEMA,
-            batch_id: None,
-            idempotency_key: None,
-            actor: common("human:owner"),
-            occurred_at: None,
-            valid_from: None,
-            valid_to: None,
-            belief_id: diff.belief_id.clone(),
-            patch: diff
-                .fields
-                .iter()
-                .map(|edit| schema::PatchOp {
-                    field_path: edit.field_path.clone(),
-                    before: edit.before.clone(),
-                    after: edit.after.clone(),
-                })
-                .collect(),
-            basis: schema::BeliefBasis::Linked { links },
-        };
-        members.push((
-            schema::KIND_BELIEF_REVISED.to_string(),
-            serde_json::to_value(&revised).map_err(|e| e.to_string())?,
-        ));
-        for relation in &diff.relations {
-            let body = schema::BeliefRelation {
-                schema: schema::BODY_SCHEMA,
-                batch_id: None,
-                idempotency_key: None,
-                actor: common("human:owner"),
-                occurred_at: None,
-                valid_from: None,
-                valid_to: None,
-                relation_id: schema::derive_relation_id(
-                    &diff.belief_id,
-                    &relation.to_belief_id,
-                    relation.kind,
-                ),
-                action: relation.action,
-                from: diff.belief_id.clone(),
-                to: relation.to_belief_id.clone(),
-                relation: relation.kind,
-            };
-            members.push((
-                schema::KIND_BELIEF_RELATION.to_string(),
-                serde_json::to_value(&body).map_err(|e| e.to_string())?,
-            ));
-        }
-        for alias in &diff.alias_adds {
-            let body = schema::EntityAliasAdded {
-                schema: schema::BODY_SCHEMA,
-                batch_id: None,
-                idempotency_key: None,
-                actor: common("human:owner"),
-                occurred_at: None,
-                valid_from: None,
-                valid_to: None,
-                entity_id: belief.entity_id.clone(),
-                alias: alias.clone(),
-                normalized_alias: schema::normalize_alias_v1(alias),
-            };
-            members.push((
-                schema::KIND_ENTITY_ALIAS_ADDED.to_string(),
-                serde_json::to_value(&body).map_err(|e| e.to_string())?,
-            ));
-        }
-    }
+/// Where a Restore keeps what it replaced (M49.5, K12): one folder per
+/// divergence inside the gitignored `.cerebro/`, mirroring vault paths.
+/// Restore never unlinks — a file it replaces is copied here first, and a
+/// file it cannot explain is MOVED here rather than deleted.
+pub fn backup_dir(vault: &Path, label: &str) -> std::path::PathBuf {
+    vault.join(".cerebro").join("reconcile-backup").join(label)
+}
 
-    // The resolution member, in the SAME batch: its digests pin the adopted
-    // bytes, and the reducer proves the staged projections equal them —
-    // or the whole batch dies.
-    let adopted: Vec<serde_json::Value> = affected
-        .iter()
-        .map(|krel| {
-            let (_, _, raw) = diffs
-                .iter()
-                .find(|(k, _, _)| k == krel)
-                .expect("affected paths come from diffs");
-            serde_json::json!({
-                "path": krel,
-                "content_hash": crate::ledger::sha256_hex(raw.as_bytes()),
-            })
-        })
-        .collect();
-    let accepted_digest = crate::ledger::sha256_hex(
-        serde_json::to_string(&adopted)
-            .map_err(|e| e.to_string())?
-            .as_bytes(),
-    );
-    let resolution = schema::ReconciliationResolved {
-        schema: schema::BODY_SCHEMA,
-        batch_id: None,
-        idempotency_key: None,
-        actor: common(schema::ACTOR_RECONCILIATION),
-        occurred_at: None,
-        valid_from: None,
-        valid_to: None,
-        divergence_event_id: divergence_event.clone(),
-        action: schema::ReconciliationAction::AcceptCurrentFiles,
-        affected_paths: affected.clone(),
-        capture_batch_ids: vec![batch_self_ref()],
-        accepted_files_digest: Some(accepted_digest.clone()),
-        resulting_projection_digest: accepted_digest,
-    };
-    members.push((
-        schema::KIND_RECONCILIATION_RESOLVED.to_string(),
-        serde_json::to_value(&resolution).map_err(|e| e.to_string())?,
-    ));
+/// The backup folder's name: the open divergence, else the ledger head the
+/// restore ran against.
+fn backup_label(state: &super::reduce::EpistemicState, head: &str) -> String {
+    state
+        .reconciliation_divergences
+        .values()
+        .next()
+        .cloned()
+        .unwrap_or_else(|| format!("head-{head}"))
+}
 
-    let op_key = format!("reconcile-accept-v1:{store}:{divergence_event}");
-    let receipt = writer.append_batch(members, Some(&op_key))?;
-    crate::crash::crash_point("accept-committed");
+#[derive(Clone, Copy)]
+enum Keeping {
+    Copy,
+    Move,
+}
 
-    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
-    let state = reduce(&read.frames, &store);
-    let committed = state
-        .batches
-        .iter()
-        .any(|b| b.batch_id == receipt.batch_id && b.state == "committed");
-    if !committed && !receipt.replayed {
-        let detail = state
-            .anomalies
-            .iter()
-            .rev()
-            .find(|a| a.batch_id.as_deref() == Some(receipt.batch_id.as_str()))
-            .map(|a| a.detail.clone())
-            .unwrap_or_else(|| "the adoption batch did not apply".to_string());
-        return Err(format!("accept-current-files refused: {detail}"));
+/// Copy or move `rel` into `backup`, never overwriting an earlier backup of
+/// the same file (a second restore under one divergence gets `.1`, `.2`…).
+fn back_up(vault: &Path, rel: &str, backup: &Path, keeping: Keeping) -> Result<(), String> {
+    let from = vault.join(rel);
+    let mut to = backup.join(rel);
+    let mut n = 0;
+    while to.exists() {
+        n += 1;
+        to = backup.join(format!("{rel}.{n}"));
     }
-    if state.reconciliation_open() {
-        return Err("the adoption resolution did not close the mode".to_string());
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    // Only now may the manifest advance — every adopted file is already the
-    // reducer projection, so this is identity-only.
-    for krel in &affected {
-        let belief = state
-            .projection_paths
-            .get(krel)
-            .ok_or_else(|| format!("adopted path {krel} lost its Belief"))?;
-        let projection = project_belief(&state, belief)?;
-        super::manifest::write_projection(vault, &format!("knowledge/{krel}"), &projection)?;
+    match keeping {
+        Keeping::Copy => std::fs::copy(&from, &to).map(|_| ()),
+        Keeping::Move => std::fs::rename(&from, &to),
     }
-    Ok(())
+    .map_err(|e| format!("could not back up {rel}: {e}"))
 }
 
 /// `path_digest` over EVERY reducer projection, path-sorted — the
@@ -1345,7 +1547,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unproven_state_records_one_divergence_opens_the_mode_and_suspends_capture() {
+    fn an_unproven_state_records_one_divergence_and_quarantines_only_its_path() {
         let (vault, mut writer) = armed("scan-divergent");
         // Forge one manifest entry to pin non-ancestor reducer state.
         let mut manifest = manifest_mod::load(&vault).unwrap().unwrap();
@@ -1368,7 +1570,17 @@ mod tests {
         assert_eq!(head_of(&writer), head, "no second event, no storm");
         let _ = second;
 
-        // Automatic capture is SUSPENDED while the mode is open…
+        // M49.5 (K8): one path's divergence quarantines THAT path — the
+        // rest of the vault keeps capturing. No vault-wide stop…
+        let state = reduce(
+            &super::super::read_ledger(&super::super::ledger_dir(&vault))
+                .unwrap()
+                .frames,
+            writer.store_id(),
+        );
+        assert!(!global_stop(&vault, &state).unwrap());
+        // …so a capture on ANOTHER path is judged on its own terms, never
+        // refused as suspended.
         let request = crate::ledger::capture::CaptureRequest {
             path: "knowledge/metrics/webinar-attendance.md".into(),
             actor_id: "human:owner".into(),
@@ -1384,10 +1596,14 @@ mod tests {
             authority: Default::default(),
             request_id: "req-suspended".into(),
         };
-        let err = crate::ledger::capture::capture_structured_with(&mut writer, &vault, &request)
-            .unwrap_err();
-        assert!(err.contains("reconciliation is open"), "{err}");
-        // …and the status surface names it.
+        let result = crate::ledger::capture::capture_structured_with(&mut writer, &vault, &request);
+        assert!(
+            !result
+                .as_ref()
+                .is_err_and(|e| e.starts_with("reconciliation_suspended")),
+            "{result:?}"
+        );
+        // …and the status surface names the open divergence.
         drop(writer);
         let status = super::super::shadow::status(None, &vault);
         assert!(status.reconciliation_open);
@@ -1402,7 +1618,9 @@ mod tests {
         // mismatches, ≥25% — the restore signature.
         for rel in [
             "knowledge/index.md",
-            "knowledge/log.md",
+            // Not log.md: the log is a derived view, regenerated rather than
+            // counted as a mismatch (M49.5, K11).
+            "knowledge/playbooks/warehouse-cutover.md",
             "knowledge/metrics/onboarding-completion.md",
             "knowledge/metrics/sync-error-rate.md",
             "knowledge/metrics/webinar-attendance.md",
@@ -1526,7 +1744,9 @@ mod tests {
     fn mass_edited(vault: &Path, writer: &mut LedgerWriter) -> Vec<&'static str> {
         let edited = vec![
             "knowledge/index.md",
-            "knowledge/log.md",
+            // Not log.md: the log is a derived view, regenerated rather than
+            // counted as a mismatch (M49.5, K11).
+            "knowledge/playbooks/warehouse-cutover.md",
             "knowledge/metrics/onboarding-completion.md",
             "knowledge/metrics/sync-error-rate.md",
             "knowledge/metrics/webinar-attendance.md",
@@ -1582,7 +1802,7 @@ mod tests {
     }
 
     #[test]
-    fn accept_current_files_adopts_through_capture_in_one_batch() {
+    fn accept_current_files_captures_file_by_file_then_closes_in_its_own_batch() {
         let (vault, mut writer) = armed("exit-accept");
         let store = writer.store_id().to_string();
         let edited = mass_edited(&vault, &mut writer);
@@ -1614,7 +1834,9 @@ mod tests {
                 "{rel}: adopted bytes are reducer-reproducible"
             );
         }
-        // The resolution rode the adoption batch and pins matching digests.
+        // Each file committed on its own capture; the closing batch holds
+        // only the resolution, which names that batch and pins matching
+        // digests.
         let resolution = read
             .frames
             .iter()
@@ -1636,7 +1858,7 @@ mod tests {
     }
 
     #[test]
-    fn one_forged_file_refuses_the_entire_adoption() {
+    fn one_forged_file_stays_quarantined_while_the_rest_are_kept() {
         let (vault, mut writer) = armed("exit-accept-forged");
         mass_edited(&vault, &mut writer);
         // One of the edited files also forges its verified stamp.
@@ -1651,14 +1873,52 @@ mod tests {
         )
         .unwrap();
 
-        let head = head_of(&writer);
+        let forged_bytes = std::fs::read(&forged).unwrap();
+        // M49.5 (K5, K8): per path. The forged stamp refuses THAT file and
+        // names it; every other file is kept.
         let err = resolve_accept_with(&mut writer, &vault).unwrap_err();
-        assert!(err.contains("forgery") || err.contains("refused"), "{err}");
-        assert_eq!(head_of(&writer), head, "nothing committed");
-        // The mode stays open; the manifest did not move.
+        assert!(
+            err.contains("sync-error-rate.md") && err.contains("forgery"),
+            "{err}"
+        );
+        assert!(err.starts_with("kept 4 of 5 files"), "{err}");
         let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
         let state = reduce(&read.frames, writer.store_id());
-        assert!(state.reconciliation_open());
+        assert_eq!(
+            quarantined_paths(&vault, &state).unwrap(),
+            vec!["knowledge/metrics/sync-error-rate.md".to_string()],
+            "only the forged file is left quarantined"
+        );
+        assert_eq!(
+            std::fs::read(&forged).unwrap(),
+            forged_bytes,
+            "its bytes are untouched"
+        );
+        assert!(
+            state.reconciliation_open(),
+            "the divergence stays open for it"
+        );
+
+        // Restoring that one file backs it up, closes the divergence, and
+        // keeps the forged bytes recoverable.
+        resolve_path_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/sync-error-rate.md",
+            "restore",
+        )
+        .unwrap();
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        assert!(!state.reconciliation_open());
+        let divergence = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .unwrap();
+        let backup =
+            backup_dir(&vault, &divergence.event_id).join("knowledge/metrics/sync-error-rate.md");
+        assert_eq!(std::fs::read(backup).unwrap(), forged_bytes);
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -1688,5 +1948,473 @@ mod tests {
                 );
             }
         }
+    }
+
+    // M49.4 (K10): an out-of-band change is filed under the unattributed
+    // actor — never as the owner's own assertion. Seq 179 on the live vault
+    // recorded an agent's log output as `human:owner`.
+    #[test]
+    fn an_out_of_band_change_is_recorded_as_unattributed() {
+        let (vault, mut writer) = armed("scan-unattributed");
+        let before = read_ledger_records(&vault);
+        let rel = vault.join("knowledge/metrics/webinar-attendance.md");
+        let original = std::fs::read_to_string(&rel).unwrap();
+        let edited = original.replacen("lifecycle: ", "lifecycle: deprecated\nx-was: ", 1);
+        let edited = if edited == original {
+            format!("{original}\nEdited outside the app.\n")
+        } else {
+            edited
+        };
+        std::fs::write(&rel, format!("{edited}\nAnd a body line.\n")).unwrap();
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(outcome.captured.len(), 1, "{outcome:?}");
+
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let actors: Vec<String> = read.frames[before..]
+            .iter()
+            .filter_map(|f| f.body.get("actor").and_then(|a| a.get("id")))
+            .filter_map(|id| id.as_str().map(str::to_string))
+            .collect();
+        assert!(
+            actors
+                .iter()
+                .any(|a| a == super::super::capture::OUT_OF_BAND_ACTOR),
+            "{actors:?}"
+        );
+        assert!(!actors.iter().any(|a| a == "human:owner"), "{actors:?}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    fn read_ledger_records(vault: &Path) -> usize {
+        super::super::read_ledger(&super::super::ledger_dir(vault))
+            .unwrap()
+            .frames
+            .len()
+    }
+
+    // M49.5 (K11): an override on the knowledge log pinned its body, so
+    // every later entry was committed and never shown (the live vault's seq
+    // 179). The log is a derived view: the next append retires the
+    // override, and the entry appears.
+    #[test]
+    fn an_override_on_the_log_is_retired_and_new_entries_appear() {
+        let (vault, mut writer) = armed("log-override-retired");
+        let log = vault.join(crate::knowledge::LOG_PATH);
+        let before = std::fs::read_to_string(&log).unwrap();
+        let (content, _) = super::super::project::parse_okf(&before).unwrap();
+        let request = crate::ledger::capture::EditorialRequest {
+            path: crate::knowledge::LOG_PATH.into(),
+            actor_id: "human:owner".into(),
+            ops: vec![schema::OverridePatchOp {
+                field_path: "/body".into(),
+                before: schema::TypedValue::string(&content),
+                after: schema::TypedValue::string(&format!("{content}\nPinned by hand.\n")),
+            }],
+            origin: schema::OverrideOrigin::InApp,
+            request_id: "log-pin".into(),
+        };
+        crate::ledger::capture::capture_editorial_with(&mut writer, &vault, &request).unwrap();
+        assert!(std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("Pinned by hand."));
+
+        super::super::concepts::tests_append_log(&mut writer, &vault, "knowledge/x.md", "X");
+        let after = std::fs::read_to_string(&log).unwrap();
+        assert!(after.contains("[X]"), "the new entry shows: {after}");
+        assert!(
+            !after.contains("Pinned by hand."),
+            "the override is retired"
+        );
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        let belief = &state.beliefs[&state.projection_paths["log.md"]];
+        assert!(belief.overrides.is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.5 (K8): a mass mismatch — a restore signature — is the vault-wide
+    // stop; one path's divergence is not.
+    #[test]
+    fn a_mass_mismatch_is_a_vault_wide_stop() {
+        let (vault, mut writer) = armed("mass-global-stop");
+        mass_edited(&vault, &mut writer);
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        assert!(global_stop(&vault, &state).unwrap());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.5 (K5): the incident's exact shape — a recheck lane rewrote
+    // `generated.at` and nothing else. Same `by`, new `at`: a restamp, not
+    // forgery. The scan captures it as an unattributed revision and nothing
+    // diverges.
+    #[test]
+    fn a_generated_at_restamp_is_captured_not_refused_as_forgery() {
+        let (vault, mut writer) = armed("restamp-captured");
+        let rel = "knowledge/metrics/webinar-attendance.md";
+        let original = std::fs::read_to_string(vault.join(rel)).unwrap();
+        let restamped = original.replace(
+            "generated: { by: claude-code/2.0, at: 2026-07-20T11:00:00Z }",
+            "generated: { by: claude-code/2.0, at: 2026-08-17T11:52:02Z }",
+        );
+        assert_ne!(restamped, original, "the fixture carries the stamp");
+        std::fs::write(vault.join(rel), &restamped).unwrap();
+
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(outcome.captured, vec![rel.to_string()], "{outcome:?}");
+        assert!(outcome.divergence_recorded.is_none());
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        let belief = &state.projection_paths["metrics/webinar-attendance.md"];
+        let disk = std::fs::read_to_string(vault.join(rel)).unwrap();
+        assert_eq!(disk, project_belief(&state, belief).unwrap().bytes);
+        assert!(
+            disk.contains("at: 2026-08-17T11:52:02Z"),
+            "the new stamp is kept"
+        );
+        // The concept was verified at r1; the restamp is r2. The review line
+        // says so rather than keeping a stamp the ledger no longer grants
+        // for the current revision — trust is the attestation's, not the
+        // file's.
+        assert!(disk.contains("attestation predates revision"), "{disk}");
+        let revision = read
+            .frames
+            .iter()
+            .rev()
+            .find(|f| f.kind == schema::KIND_BELIEF_REVISED)
+            .unwrap();
+        assert_eq!(
+            revision.body["actor"]["id"],
+            super::super::capture::OUT_OF_BAND_ACTOR
+        );
+        // A different AUTHOR is still forgery.
+        let reauthored = restamped.replace("by: claude-code/2.0", "by: human:someone");
+        std::fs::write(vault.join(rel), reauthored).unwrap();
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(outcome.divergent.len(), 1, "{outcome:?}");
+        assert!(outcome.divergent[0].1.contains("forgery"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.5 (K12): Restore never unlinks. What it overwrites is copied, and
+    // a file it cannot explain is moved, into the divergence's backup.
+    #[test]
+    fn restore_keeps_what_it_replaces_and_deletes_nothing() {
+        let (vault, mut writer) = armed("restore-backup");
+        let edited = mass_edited(&vault, &mut writer);
+        let edited_bytes: Vec<Vec<u8>> = edited
+            .iter()
+            .map(|rel| std::fs::read(vault.join(rel)).unwrap())
+            .collect();
+        let stray = "knowledge/systems/hand-made.md";
+        std::fs::write(
+            vault.join(stray),
+            "---\ntype: Reference\n---\n\n# Hand made\n",
+        )
+        .unwrap();
+
+        resolve_restore_with(&mut writer, &vault).unwrap();
+
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let divergence = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .unwrap();
+        let backup = backup_dir(&vault, &divergence.event_id);
+        for (rel, bytes) in edited.iter().zip(&edited_bytes) {
+            assert_eq!(&std::fs::read(backup.join(rel)).unwrap(), bytes, "{rel}");
+        }
+        assert!(!vault.join(stray).exists(), "set aside…");
+        assert!(backup.join(stray).is_file(), "…never deleted");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.10 (K32): the divergence key is the diverged FILES, so an
+    // unrelated capture elsewhere (which moves the manifest digest) does not
+    // mint a second event for the same open condition.
+    #[test]
+    fn an_unrelated_change_does_not_mint_a_second_divergence() {
+        let (vault, mut writer) = armed("scan-stable-key");
+        let mut manifest = manifest_mod::load(&vault).unwrap().unwrap();
+        manifest
+            .entries
+            .get_mut("knowledge/systems/status-model.md")
+            .unwrap()
+            .projection_state_digest = crate::ledger::sha256_hex(b"forged");
+        manifest_mod::save(&vault, &manifest).unwrap();
+        let first = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(first.divergence_recorded.is_some());
+
+        // Elsewhere, an ordinary out-of-band edit the next scan captures —
+        // the manifest digest moves with it.
+        let other = vault.join("knowledge/metrics/webinar-attendance.md");
+        let text = std::fs::read_to_string(&other).unwrap();
+        std::fs::write(&other, format!("{text}\nAn unrelated edit.\n")).unwrap();
+        let second = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(second.captured.len(), 1, "{second:?}");
+        assert_eq!(second.divergence_recorded, first.divergence_recorded);
+
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let divergences = read
+            .frames
+            .iter()
+            .filter(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .count();
+        assert_eq!(divergences, 1, "one open condition, one event");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_diverged_files_own_edits_do_not_mint_a_second_divergence() {
+        // A file whose capture is refused (a stamp the ledger never
+        // recorded), saved again and again — an editor's autosave.
+        let (vault, mut writer) = armed("scan-own-edits");
+        let path = vault.join("knowledge/metrics/sync-error-rate.md");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let forged = text.replacen(
+            "---\n",
+            "---\nverified: { by: \"human:someone\", at: 2026-01-01 }\n",
+            1,
+        );
+        std::fs::write(&path, &forged).unwrap();
+        let first = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(first.divergence_recorded.is_some(), "{first:?}");
+        for draft in 0..3 {
+            std::fs::write(&path, format!("{forged}\nDraft {draft}.\n")).unwrap();
+            let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+            assert_eq!(again.divergence_recorded, first.divergence_recorded);
+        }
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let divergences = read
+            .frames
+            .iter()
+            .filter(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .count();
+        assert_eq!(divergences, 1, "one open condition, one event");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.5 (K29): a concept moved in Finder, bytes unchanged, is adopted as
+    // a move — never one concept deleted plus one stranger.
+    #[test]
+    fn a_same_bytes_rename_is_adopted_as_a_move() {
+        let (vault, mut writer) = armed("scan-move");
+        let from = vault.join("knowledge/systems/status-model.md");
+        let to = vault.join("knowledge/archive/status-model.md");
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::rename(&from, &to).unwrap();
+
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(
+            outcome.moved,
+            vec![(
+                "knowledge/systems/status-model.md".to_string(),
+                "knowledge/archive/status-model.md".to_string()
+            )]
+        );
+        assert!(outcome.divergence_recorded.is_none(), "{outcome:?}");
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        assert!(state
+            .projection_paths
+            .contains_key("archive/status-model.md"));
+        assert!(!state
+            .projection_paths
+            .contains_key("systems/status-model.md"));
+        assert!(quarantined_paths(&vault, &state).unwrap().is_empty());
+        let manifest = manifest_mod::load(&vault).unwrap().unwrap();
+        assert!(manifest
+            .entries
+            .contains_key("knowledge/archive/status-model.md"));
+        assert!(!manifest
+            .entries
+            .contains_key("knowledge/systems/status-model.md"));
+        // The next scan is quiet.
+        let head = head_of(&writer);
+        let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(again.moved.is_empty());
+        assert_eq!(head_of(&writer), head);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Two candidate files with the moved bytes: which one is the concept is
+    // a person's call, so nothing is adopted.
+    #[test]
+    fn an_ambiguous_move_is_left_for_a_person() {
+        let (vault, mut writer) = armed("scan-move-ambiguous");
+        let from = vault.join("knowledge/systems/status-model.md");
+        let bytes = std::fs::read(&from).unwrap();
+        std::fs::remove_file(&from).unwrap();
+        std::fs::write(vault.join("knowledge/a.md"), &bytes).unwrap();
+        std::fs::write(vault.join("knowledge/b.md"), &bytes).unwrap();
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(outcome.moved.is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Review fix (M49.10): a condition resolved and then back again is a new
+    // divergence — the file-keyed condition used to collide with the
+    // resolved one's claimed key, and the recurrence was never recorded.
+    #[test]
+    fn a_condition_that_recurs_after_resolution_is_recorded_again() {
+        let (vault, mut writer) = armed("scan-recur");
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let path = vault.join(rel);
+        let original = std::fs::read_to_string(&path).unwrap();
+        let forged = original.replace(
+            "---\ntype:",
+            "---\nverified: { by: human:me, at: 2026-08-09 }\ntype:",
+        );
+        std::fs::write(&path, &forged).unwrap();
+        let first = launch_scan(&mut writer, &vault, None, None).unwrap();
+        let key = first.divergence_recorded.expect("recorded");
+        resolve_path_with(&mut writer, &vault, rel, "restore").unwrap();
+        std::fs::write(&path, &forged).unwrap(); // copied back from the backup
+        let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+        let second = again.divergence_recorded.expect("recorded again");
+        assert_ne!(second, key);
+        assert!(again.reconciliation_open);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_formatting_only_difference_is_normalized_and_leaves_quarantine() {
+        // K5: same values, different spelling. The diff is empty, so before
+        // M49.5's fix nothing was written and the file stayed quarantined
+        // forever — Keep "succeeded" and changed nothing.
+        let (vault, mut writer) = armed("capture-formatting");
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let canonical = std::fs::read_to_string(vault.join(rel)).unwrap();
+        let reformatted =
+            canonical.replacen("title: Sync error rate", "title: \"Sync error rate\"", 1);
+        assert_ne!(reformatted, canonical);
+        std::fs::write(vault.join(rel), &reformatted).unwrap();
+        let head = head_of(&writer);
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, rel).unwrap();
+        assert_eq!(head_of(&writer), head, "formatting is not an epistemic act");
+        assert_eq!(std::fs::read_to_string(vault.join(rel)).unwrap(), canonical);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        assert!(quarantined_paths(&vault, &state).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_watcher_edit_of_the_log_is_regenerated_not_pinned() {
+        let (vault, mut writer) = armed("capture-log");
+        let log = crate::knowledge::LOG_PATH;
+        let recorded = std::fs::read_to_string(vault.join(log)).unwrap();
+        std::fs::write(
+            vault.join(log),
+            format!("{recorded}\nA hand-written line.\n"),
+        )
+        .unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, log).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join(log)).unwrap(), recorded);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        let belief = &state.beliefs[&state.projection_paths["log.md"]];
+        assert!(
+            belief.overrides.is_empty(),
+            "the derived log is never pinned"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_in_app_edit_is_filed_under_the_owner_and_a_file_edit_is_not() {
+        // Activation arms the corpus through the process's one writer.
+        let vault = corpus_copy("capture-actors");
+        let _guard = crate::ledger::shadow::testing::activated(&vault);
+        let actor_of_last_override = |vault: &Path| {
+            let read = read_ledger(&ledger_dir(vault)).unwrap();
+            read.frames
+                .iter()
+                .rev()
+                .find(|f| f.kind == schema::KIND_PROJECTION_OVERRIDDEN)
+                .map(|f| f.body["actor"]["id"].as_str().unwrap().to_string())
+                .unwrap()
+        };
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let mut bytes = std::fs::read_to_string(vault.join(rel)).unwrap();
+        bytes.push_str("\nWritten in another editor.\n");
+        std::fs::write(vault.join(rel), &bytes).unwrap();
+        crate::ledger::capture::capture_out_of_band(&vault, rel)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            actor_of_last_override(&vault),
+            crate::ledger::capture::OUT_OF_BAND_ACTOR
+        );
+
+        let file = std::fs::read_to_string(vault.join(rel)).unwrap();
+        let (_, body) = file.split_once("\n---\n").unwrap();
+        crate::ledger::capture::capture_body_edit(&vault, rel, &format!("{body}\nTyped here.\n"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            actor_of_last_override(&vault),
+            crate::ledger::capture::OWNER_ACTOR
+        );
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_owners_own_supersedes_edit_is_their_agreement_and_a_file_edit_is_not() {
+        // K22's gate asks whether a PERSON agreed a replacement retires a
+        // reviewed claim. A card approval says so; so does the owner typing
+        // `supersedes` into the replacement in the app. The same line
+        // arriving from another editor does not.
+        let vault = corpus_copy("capture-owner-supersedes");
+        let _guard = crate::ledger::shadow::testing::activated(&vault);
+        let pair = |state: &super::super::reduce::EpistemicState| {
+            crate::knowledge::approved_supersessions(state).contains(&(
+                "knowledge/metrics/webinar-attendance.md".to_string(),
+                "knowledge/metrics/sync-error-rate.md".to_string(),
+            ))
+        };
+        let state_now = || {
+            let read = read_ledger(&ledger_dir(&vault)).unwrap();
+            let store = super::super::store::load(&ledger_dir(&vault))
+                .unwrap()
+                .unwrap()
+                .store_id;
+            reduce(&read.frames, &store)
+        };
+        let replacement = "knowledge/metrics/webinar-attendance.md";
+        let before = std::fs::read_to_string(vault.join(replacement)).unwrap();
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            "supersedes".into(),
+            serde_json::json!(["[[sync-error-rate]]"]),
+        );
+        crate::ledger::capture::capture_frontmatter_patch(&vault, replacement, &patch)
+            .unwrap()
+            .unwrap();
+        assert!(pair(&state_now()), "the owner typed it");
+
+        // Undo it, then have the same line arrive from another editor.
+        let mut clear = serde_json::Map::new();
+        clear.insert("supersedes".into(), serde_json::Value::Null);
+        crate::ledger::capture::capture_frontmatter_patch(&vault, replacement, &clear)
+            .unwrap()
+            .unwrap();
+        assert!(!pair(&state_now()));
+        let typed = std::fs::read_to_string(vault.join(replacement)).unwrap();
+        assert_ne!(typed, before);
+        let elsewhere = typed.replacen(
+            "---\n",
+            "---\nsupersedes:\n  - \"[[sync-error-rate]]\"\n",
+            1,
+        );
+        std::fs::write(vault.join(replacement), elsewhere).unwrap();
+        crate::ledger::capture::capture_out_of_band(&vault, replacement)
+            .unwrap()
+            .unwrap();
+        assert!(!pair(&state_now()), "an unattributed edit is not agreement");
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

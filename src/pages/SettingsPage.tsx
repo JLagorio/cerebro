@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
@@ -75,9 +76,11 @@ export function SettingsPage() {
   // Settings and nowhere else: a number in the nav chrome that ticks up is the
   // "you have 47 unread" pattern the knowledge surfaces are barred from.
   const skillRuns = useUiStore((s) => s.skillRuns);
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
   const pending = useMemo(
     () =>
-      jobQueue(entries, listConcepts(entries, todayIso()), {
+      jobQueue(entries, listConcepts(entries, todayIso(), quarantine, ledgerReview), {
         attempts,
         // The fire-key ledger is vault-scoped (PR #5 review) — the count
         // must read the same slice of it the runner does.
@@ -87,7 +90,7 @@ export function SettingsPage() {
         // every visit, and a due schedule missing until then costs a label.
         now: new Date(),
       }).length,
-    [attempts, connectors, entries, skillRuns, vaultPath],
+    [attempts, connectors, entries, skillRuns, vaultPath, quarantine, ledgerReview],
   );
 
   const changeVault = async () => {
@@ -227,11 +230,12 @@ export function SettingsPage() {
           <p className="mb-4 text-sm text-n-500">
             The AI knowledge base in{' '}
             <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
-            agent and read-only here. Verifying a concept records who confirmed it.
+            agent and recorded in its history. Your edits are recorded as edits, and verifying a
+            concept records who confirmed it.
           </p>
           <SettingRow
             label="Learn on its own"
-            hint="Recheck concepts that have gone stale or whose type changed, refresh cached sources, and run any skills or agents that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off: schedules do not fire and nothing is rechecked."
+            hint="Recheck concepts that have gone stale or whose type changed, refresh cached sources, and run any skills or agents that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off by default: schedules do not fire and nothing is rechecked."
             checked={autoLearn}
             onChange={setAutoLearn}
           />

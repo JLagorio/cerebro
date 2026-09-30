@@ -19,9 +19,10 @@
 //! `verified` field and stamps `generated` server-side, so the model cannot
 //! self-certify — but `create_note`, `update_frontmatter` and `append_to_note`
 //! reached the same files with no such check, which made the refusal a
-//! formality anyone could route around. `guard_agent_write` closes the other
-//! three doors, so `write_concept` is what it always claimed to be: the only
-//! way into the bundle.
+//! formality anyone could route around. `guard_agent_write` closes those
+//! three doors, so the agent reaches the bundle through exactly two
+//! server-stamped tools: `write_concept` (a whole concept) and, since M49.7,
+//! `recheck_concept` (moves `stale_after` and nothing else).
 
 use serde_json::{Map, Value};
 
@@ -29,8 +30,121 @@ pub const KNOWLEDGE_DIR: &str = "knowledge";
 
 /// True for the bundle root and anything beneath it. The trailing slash
 /// matters: a sibling `knowledge-archive/` is NOT part of the bundle.
+///
+/// Judged on the path the filesystem will RESOLVE (M49.4, K17), not the raw
+/// argument: `./knowledge/x.md`, `records/../knowledge/x.md` and — on APFS,
+/// which folds case — `Knowledge/x.md` all land in the bundle, and each
+/// walked past the old prefix check into `update_frontmatter`. Mirrored by
+/// `isKnowledgePath` in src/engine/okf.ts.
 pub fn is_knowledge_path(path: &str) -> bool {
-    path == KNOWLEDGE_DIR || path.starts_with(&format!("{KNOWLEDGE_DIR}/"))
+    canonical_path(path).is_some()
+}
+
+/// The one staleness rule, as data (M49.8, K24) — shared with okf.ts's
+/// `staleFrom`, and both replay its cases.
+const STALENESS: &str = include_str!("../../shared/policy/staleness.v1.json");
+
+#[derive(serde::Deserialize)]
+struct Staleness {
+    inclusive: bool,
+    malformed_is_stale: bool,
+}
+
+fn staleness() -> &'static Staleness {
+    static RULE: std::sync::OnceLock<Staleness> = std::sync::OnceLock::new();
+    RULE.get_or_init(|| serde_json::from_str(STALENESS).expect("staleness.v1.json parses"))
+}
+
+/// The one well-formed spelling: exactly `YYYY-MM-DD`, and a real date.
+/// chrono alone also accepts `2027-7-1`, ` 2027-07-01` and `+2027-07-01`,
+/// which the rule — and okf.ts's `staleFrom` — read as malformed. The
+/// validator and the reader share this, so a date an agent was allowed to
+/// set is never one a reader calls stale on sight.
+fn well_formed(after: &str) -> Option<chrono::NaiveDate> {
+    let shape = after.len() == 10
+        && after.bytes().enumerate().all(|(i, b)| match i {
+            4 | 7 => b == b'-',
+            _ => b.is_ascii_digit(),
+        });
+    if !shape {
+        return None;
+    }
+    chrono::NaiveDate::parse_from_str(after, "%Y-%m-%d").ok()
+}
+
+/// The raw `stale_after` a reader judges: a string as written, and any
+/// other PRESENT value in its JSON spelling — a hand-typed `2027` or `true`
+/// is a horizon nobody can read, so it is malformed (stale), never "never".
+/// `None` only when the key is absent or null. Mirrors okf.ts's
+/// `staleAfterOf`.
+pub fn stale_after_of(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::Null => None,
+        Value::String(s) => Some(s.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// Is a concept with this `stale_after` stale on `today` (YYYY-MM-DD)?
+pub fn is_stale(stale_after: Option<&str>, today: &str) -> bool {
+    let Some(after) = stale_after else {
+        return false;
+    };
+    let rule = staleness();
+    if well_formed(after).is_none() {
+        return rule.malformed_is_stale;
+    }
+    if rule.inclusive {
+        today >= after
+    } else {
+        today > after
+    }
+}
+
+/// A `stale_after` an agent may set (M49.7, K37): a well-formed
+/// `YYYY-MM-DD` date later than `today`. A malformed value reads stale at
+/// once (staleness.v1.json) and a past one is due again at once — either
+/// way the recheck that set it bought nothing.
+pub fn validate_stale_after(value: &str, today: chrono::NaiveDate) -> Result<(), String> {
+    let date = well_formed(value)
+        .ok_or_else(|| format!("stale_after must be a YYYY-MM-DD date, got {value:?}"))?;
+    if date <= today {
+        return Err(format!(
+            "stale_after {value} is not after today ({today}) — a recheck date in the past makes \
+             the concept due again at once"
+        ));
+    }
+    Ok(())
+}
+
+/// The bundle path in its one canonical spelling (`knowledge/…`), or `None`
+/// when `path` does not resolve into the bundle. `.` segments drop, `..`
+/// pops (a path that climbs out of the vault is not in the bundle), and the
+/// bundle folder matches case-insensitively.
+pub fn canonical_path(path: &str) -> Option<String> {
+    let mut segments: Vec<&str> = Vec::new();
+    if path.starts_with('/') {
+        return None;
+    }
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop()?;
+            }
+            other => segments.push(other),
+        }
+    }
+    let (head, rest) = segments.split_first()?;
+    if !head.eq_ignore_ascii_case(KNOWLEDGE_DIR) {
+        return None;
+    }
+    Some(
+        std::iter::once(KNOWLEDGE_DIR)
+            .chain(rest.iter().copied())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
 }
 
 const READ_ONLY: &str = "knowledge/ is maintained by the AI knowledge base and is read-only here. \
@@ -205,12 +319,15 @@ pub fn guard_human_write(path: &str) -> Result<(), String> {
 }
 
 /// Reject an AGENT write that reaches into the bundle by any door other than
-/// `write_concept` (M17.1).
+/// the two server-stamped tools, `write_concept` and `recheck_concept`
+/// (M17.1; M49.7).
 ///
-/// `write_concept` is the only tool that refuses a `verified` field and stamps
-/// `generated` from the run's actor. Every guarantee the trust model makes —
-/// that a tier is derived, that provenance is server-side, that the human's
-/// stamp is the human's — rests on it being the ONLY writer. It was not:
+/// Those two are the only tools that stamp provenance from the run's actor
+/// server-side: `write_concept` refuses a `verified` field and stamps
+/// `generated`; `recheck_concept` takes no fields at all and moves only
+/// `stale_after`. Every guarantee the trust model makes — that a tier is
+/// derived, that provenance is server-side, that the human's stamp is the
+/// human's — rests on them being the ONLY writers. They were not:
 /// `update_frontmatter` could patch `verified` straight onto a concept,
 /// `create_note` could author one pre-stamped, and `append_to_note` could
 /// grow a body with no provenance at all.
@@ -222,8 +339,9 @@ pub fn guard_agent_write(path: &str) -> Result<(), String> {
 }
 
 const AGENT_USE_WRITE_CONCEPT: &str =
-    "knowledge/ is written through write_concept only, which records provenance. \
-Use write_concept for concepts; `verified` is the user's stamp and is never yours to set.";
+    "knowledge/ is written only through write_concept and recheck_concept, which record \
+provenance. Use recheck_concept to move only a concept's `stale_after`, and write_concept \
+otherwise; `verified` is the user's stamp and is never yours to set.";
 
 /// A move must be refused from BOTH sides: dragging a concept out would
 /// strip it of the boundary, dragging a note in would smuggle human content
@@ -424,11 +542,370 @@ pub fn is_concept(entry: &crate::vault::entry::Entry) -> bool {
     is_knowledge_path(&entry.path) && !RESERVED_FILENAMES.contains(&entry.filename.as_str())
 }
 
-/// The trust tier a reader should apply to a concept. Mirrors `trustTier` in
-/// src/engine/okf.ts: DERIVED from `verified`, never stored, because a tier
-/// written into a file goes stale the moment anything changes (OKF §5.3).
+/// What the vault's ledger records about each concept's review (M49.8,
+/// K21), by vault-relative path — read once per request from the cached
+/// fold. `None` for a vault with no ledger to ask.
+#[derive(Default)]
+pub struct LedgerReview {
+    reviews: std::collections::HashMap<String, Reviewed>,
+    governed: Governed,
+    /// The files that are not the ledger's — they differ from their
+    /// projection, or it never recorded them (`reconcile::quarantined_paths`,
+    /// what `LedgerStatus.quarantined` lists). Any stamp can have been typed
+    /// into one, so a review it claims reads `disputed`, as `listConcepts`
+    /// reads it in the UI.
+    quarantined: std::collections::HashSet<String>,
+    /// `(replacement, replaced)` supersessions a person approved on a card.
+    approved: std::collections::HashSet<(String, String)>,
+    /// Paths whose CURRENT review the ledger records as a person's
+    /// (`recorded_human`) — who reviewed is the ledger's answer too, never
+    /// the file's, or a `process:` → `human:` edit elsewhere would upgrade
+    /// a machine confirmation.
+    human: std::collections::HashSet<String>,
+    /// The vault HAS a ledger and it could not be read (corrupt, forked, a
+    /// second writer). Unavailable is never empty: no stamp is trusted
+    /// until the ledger can be asked again.
+    unreadable: bool,
+}
+
+/// Governed state the projection does not render (M49.8, K45): a
+/// human-approved supersede, archive or tombstone, and an open contest,
+/// by vault-relative path. The markdown never changes for these, so a
+/// reader of the file alone saw a retired or contested claim as current.
+#[derive(Default)]
+struct Governed {
+    retired: std::collections::HashMap<String, &'static str>,
+    contested: std::collections::HashSet<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Reviewed {
+    Current,
+    PredatesCurrent,
+    Unreviewed,
+}
+
+pub fn ledger_review(vault: &std::path::Path) -> Option<LedgerReview> {
+    let folded = match crate::ledger::shadow::state_of(vault) {
+        Ok(folded) => folded,
+        // Only a vault that was never armed answers from its files.
+        Err(_) if !crate::ledger::has_store(vault) => return None,
+        Err(_) => {
+            return Some(LedgerReview {
+                unreadable: true,
+                ..LedgerReview::default()
+            })
+        }
+    };
+    let state = &folded.state;
+    let mut governed = Governed::default();
+    for (krel, belief_id) in &state.projection_paths {
+        let Some(belief) = state.beliefs.get(belief_id) else {
+            continue;
+        };
+        let path = format!("{KNOWLEDGE_DIR}/{krel}");
+        let retired = match crate::dynamics::validity::lifecycle_of(belief) {
+            crate::dynamics::validity::Lifecycle::Active => None,
+            crate::dynamics::validity::Lifecycle::Superseded => Some("superseded"),
+            crate::dynamics::validity::Lifecycle::Archived => Some("archived"),
+            crate::dynamics::validity::Lifecycle::Tombstoned => Some("retired"),
+        };
+        if let Some(retired) = retired {
+            governed.retired.insert(path.clone(), retired);
+        }
+        if belief.open_contest_event.is_some() {
+            governed.contested.insert(path);
+        }
+    }
+    let reviews = state
+        .projection_paths
+        .iter()
+        .filter_map(|(krel, belief_id)| {
+            let belief = state.beliefs.get(belief_id)?;
+            let status = crate::dynamics::review::status_for(belief, &belief.current().event_id);
+            let reviewed = match status {
+                crate::dynamics::review::ReviewStatus::Current { .. } => Reviewed::Current,
+                crate::dynamics::review::ReviewStatus::PredatesCurrent { .. } => {
+                    Reviewed::PredatesCurrent
+                }
+                crate::dynamics::review::ReviewStatus::Unreviewed => Reviewed::Unreviewed,
+            };
+            Some((format!("{KNOWLEDGE_DIR}/{krel}"), reviewed))
+        })
+        .collect();
+    // A bundle that could not be compared is not "nothing quarantined":
+    // every stamp is disputed until it can be.
+    let (quarantined, unreadable) = match crate::ledger::reconcile::quarantined_paths(vault, state)
+    {
+        Ok(paths) => (paths.into_iter().collect(), false),
+        Err(_) => (Default::default(), true),
+    };
+    Some(LedgerReview {
+        reviews,
+        governed,
+        quarantined,
+        approved: approved_supersessions(state).into_iter().collect(),
+        human: recorded_human(state).into_iter().collect(),
+        unreadable,
+    })
+}
+
+/// The concepts whose CURRENT revision the ledger records as reviewed by a
+/// person: attested at the current revision, with a `human:` stamp in the
+/// ledger's own fields. What `about` gates supersession on, and — through
+/// `LedgerStatus.recorded_human` — what `listConcepts` gates it on, so the
+/// two answer from the same record.
+pub fn recorded_human(state: &crate::ledger::reduce::EpistemicState) -> Vec<String> {
+    state
+        .projection_paths
+        .iter()
+        .filter_map(|(krel, belief_id)| {
+            let belief = state.beliefs.get(belief_id)?;
+            let current = belief.current();
+            let reviewed = matches!(
+                crate::dynamics::review::status_for(belief, &current.event_id),
+                crate::dynamics::review::ReviewStatus::Current { .. }
+            );
+            let tier = tier_of(current.fields.as_object().and_then(|f| f.get("verified")));
+            (reviewed && tier == "human-reviewed").then(|| format!("{KNOWLEDGE_DIR}/{krel}"))
+        })
+        .collect()
+}
+
+/// The `(replacement, replaced)` supersessions a person AGREED to (M49.8,
+/// K22), as vault-relative paths: a live `supersedes` relation added either
+/// by an application whose proposal carries a human approval, or by the
+/// owner's own in-app edit (captured under `capture::OWNER_ACTOR`).
+/// Superseding a reviewed concept waits on a card, and approving that card
+/// is the agreement `about` and `listConcepts` gate on — before, the
+/// approved edge still read as a proposal until someone separately verified
+/// the replacement. An add some other hand made later (an out-of-band
+/// capture reuses the relation id) is not what the person agreed to.
+pub fn approved_supersessions(
+    state: &crate::ledger::reduce::EpistemicState,
+) -> Vec<(String, String)> {
+    use crate::ledger::schema::{
+        Decision, ProposalOp, ProposalState, RelationAction, RelationKind, SourceRegistration,
+    };
+    let path_of: std::collections::HashMap<&str, &str> = state
+        .projection_paths
+        .iter()
+        .map(|(krel, belief)| (belief.as_str(), krel.as_str()))
+        .collect();
+    // The batch each event committed in: an agreement counts only for the
+    // add it made.
+    let batch_of: std::collections::HashMap<&str, &str> = state
+        .batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .members
+                .iter()
+                .map(move |(event, _)| (event.as_str(), batch.batch_id.as_str()))
+        })
+        .collect();
+    let owner_batches: std::collections::HashSet<&str> = state
+        .observations
+        .values()
+        .filter(|observation| {
+            state
+                .sources
+                .get(&observation.source_id)
+                .is_some_and(|source| {
+                    matches!(
+                        &source.registration,
+                        SourceRegistration::HumanActor { actor_id, .. }
+                            if actor_id == crate::ledger::capture::OWNER_ACTOR
+                    )
+                })
+        })
+        .filter_map(|observation| batch_of.get(observation.event_id.as_str()).copied())
+        .collect();
+    let mut pairs: Vec<(String, String)> = state
+        .proposals
+        .values()
+        .filter(|row| {
+            row.state == ProposalState::Applied
+                && matches!(row.decision, Some((_, Decision::Approve)))
+        })
+        .filter_map(|row| match &row.proposal.op {
+            ProposalOp::EditRelation {
+                relation_id,
+                action: RelationAction::Add,
+                relation: RelationKind::Supersedes,
+                ..
+            } => Some((row, state.relations.get(relation_id)?)),
+            _ => None,
+        })
+        .filter(|(row, relation)| {
+            let applied_in = row
+                .applied_event_id
+                .as_deref()
+                .and_then(|event| batch_of.get(event));
+            relation.live
+                && applied_in.is_some()
+                && applied_in == batch_of.get(relation.last_add_event_id.as_str())
+        })
+        .map(|(_, relation)| relation)
+        .chain(state.relations.values().filter(|relation| {
+            // The owner's own capture batch: its observation is filed under
+            // the owner's registration.
+            relation.live
+                && relation.relation == RelationKind::Supersedes
+                && batch_of
+                    .get(relation.last_add_event_id.as_str())
+                    .is_some_and(|batch| owner_batches.contains(batch))
+        }))
+        .filter_map(|relation| {
+            Some((
+                format!("{KNOWLEDGE_DIR}/{}", path_of.get(relation.from.as_str())?),
+                format!("{KNOWLEDGE_DIR}/{}", path_of.get(relation.to.as_str())?),
+            ))
+        })
+        .collect();
+    pairs.sort();
+    pairs.dedup();
+    pairs
+}
+
+/// One concept a run's proposals named, and what became of the proposal.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RunWrite {
+    /// Vault-relative: `knowledge/…`.
+    pub path: String,
+    /// The proposal's ledger state: `submitted`, `queued`, `rejected`,
+    /// `applied` or `reverted`.
+    pub state: String,
+}
+
+/// What one run changed in Knowledge (M50.3), read back from the ledger.
+///
+/// A run's detail said "2 applied" and named nothing: the fleet counted what
+/// the ledger recorded, and the ledger held every proposal with its
+/// `run_id` all along. This is that join — each proposal the run submitted,
+/// the beliefs it named (by its op and by its targets), and the projection
+/// file each belief is. A belief with no file (a relation's end that was
+/// never projected) names nothing and is left out; one path named twice
+/// keeps the furthest state its proposals reached.
+pub fn run_writes(state: &crate::ledger::reduce::EpistemicState, run_id: &str) -> Vec<RunWrite> {
+    use crate::ledger::schema::{ProposalOp, ProposalState, TargetClass};
+    let path_of: std::collections::HashMap<&str, &str> = state
+        .projection_paths
+        .iter()
+        .map(|(krel, belief)| (belief.as_str(), krel.as_str()))
+        .collect();
+    let rank = |s: ProposalState| match s {
+        ProposalState::Applied => 4,
+        ProposalState::Queued => 3,
+        ProposalState::Submitted => 2,
+        ProposalState::Reverted => 1,
+        ProposalState::Rejected => 0,
+    };
+    let mut named: std::collections::BTreeMap<String, ProposalState> = Default::default();
+    for row in state.proposals.values() {
+        if row.proposal.run_id != run_id {
+            continue;
+        }
+        let mut beliefs: Vec<&str> = row
+            .proposal
+            .targets
+            .iter()
+            .filter(|target| target.target_class == TargetClass::Belief)
+            .map(|target| target.target_id.as_str())
+            .collect();
+        match &row.proposal.op {
+            ProposalOp::CreateBelief { belief_id, .. }
+            | ProposalOp::UpdateBelief { belief_id, .. }
+            | ProposalOp::PromoteDraft { belief_id, .. }
+            | ProposalOp::ContestBelief { belief_id, .. } => beliefs.push(belief_id),
+            ProposalOp::SupersedeBelief {
+                belief_id,
+                successor_id,
+            } => beliefs.extend([belief_id.as_str(), successor_id.as_str()]),
+            ProposalOp::EditRelation { from, to, .. } => {
+                beliefs.extend([from.as_str(), to.as_str()])
+            }
+            _ => {}
+        }
+        for belief in beliefs {
+            let Some(krel) = path_of.get(belief) else {
+                continue;
+            };
+            let path = format!("{KNOWLEDGE_DIR}/{krel}");
+            let keep = named
+                .get(&path)
+                .is_some_and(|had| rank(*had) >= rank(row.state));
+            if !keep {
+                named.insert(path, row.state);
+            }
+        }
+    }
+    named
+        .into_iter()
+        .map(|(path, state)| RunWrite {
+            path,
+            state: serde_json::to_value(state)
+                .ok()
+                .and_then(|v| v.as_str().map(String::from))
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// The trust label an agent reads (M49.8, K21).
+///
+/// With a ledger, the review is the LEDGER'S — an attestation pinned to the
+/// current revision — and a `verified` stamp in the file that the ledger
+/// never recorded reads `disputed`: typed into a file, it grants nothing.
+/// Before, every reader trusted the file, so a refused forged stamp still
+/// read as human-reviewed to the UI and to every agent. So does any review
+/// claimed by a file that is not the ledger's (quarantined) — its content
+/// is not what was reviewed — and every stamp while a ledger that exists
+/// cannot be read. Without a ledger (a vault never armed) the file's stamp
+/// is the only answer there is.
+pub fn trust_label(
+    entry: &crate::vault::entry::Entry,
+    ledger: Option<&LedgerReview>,
+) -> &'static str {
+    let recorded = review_label(entry, ledger);
+    let Some(ledger) = ledger else {
+        return recorded;
+    };
+    let disputable = ledger.unreadable || ledger.quarantined.contains(&entry.path);
+    if disputable && recorded != "unverified" {
+        return "disputed";
+    }
+    recorded
+}
+
+/// The review as RECORDED — the ledger's, before a quarantine disputes the
+/// file claiming it. Supersession is gated on this, as `listConcepts` gates
+/// on `recordedHuman`: an edit elsewhere to a reviewed concept must not
+/// let an unreviewed one retire it.
+fn review_label(entry: &crate::vault::entry::Entry, ledger: Option<&LedgerReview>) -> &'static str {
+    let file = trust_tier(entry);
+    let Some(ledger) = ledger.filter(|l| !l.unreadable) else {
+        return file;
+    };
+    match ledger.reviews.get(&entry.path) {
+        Some(Reviewed::Current) if ledger.human.contains(&entry.path) => "human-reviewed",
+        Some(Reviewed::Current) => "machine-confirmed",
+        Some(Reviewed::PredatesCurrent) => "reviewed-earlier-revision",
+        _ if file != "unverified" => "disputed",
+        _ => "unverified",
+    }
+}
+
+/// The trust tier a FILE claims — its `verified` stamps, read as written.
+/// What a reader should apply is `trust_label`, which asks the ledger first.
 pub fn trust_tier(entry: &crate::vault::entry::Entry) -> &'static str {
-    let Some(verified) = entry.properties.get("verified") else {
+    tier_of(entry.properties.get("verified"))
+}
+
+/// The tier a `verified` value claims, wherever it was read from — a file's
+/// own stamps, or the ledger's recorded fields.
+pub(crate) fn tier_of(verified: Option<&Value>) -> &'static str {
+    let Some(verified) = verified else {
         return "unverified";
     };
     let stamps: Vec<&Value> = match verified {
@@ -456,13 +933,44 @@ pub fn trust_tier(entry: &crate::vault::entry::Entry) -> &'static str {
 /// fields back in `relationships`, already bracket-stripped; a plain string
 /// is accepted too, because a concept that names its subject imprecisely
 /// still beats one that never names it. Mirrors `parseAbout`/`parseRelations`.
-fn link_field(entry: &crate::vault::entry::Entry, key: &str) -> Vec<String> {
+pub(crate) fn link_field(entry: &crate::vault::entry::Entry, key: &str) -> Vec<String> {
     if let Some(linked) = entry.relationships.get(key) {
         if !linked.is_empty() {
             return linked.clone();
         }
     }
-    match entry.properties.get(key) {
+    plain_targets(entry.properties.get(key))
+}
+
+/// The targets a RAW frontmatter value names, read exactly as a scanned
+/// file's would be (`link_field`): every `[[…]]` in any string or nested
+/// array, else the trimmed plain strings. A guard on a value an agent
+/// SENDS must read it this way, or it checks a spelling the readers never
+/// see.
+pub fn link_targets(value: &Value) -> Vec<String> {
+    match crate::vault::entry::relationship_targets(value) {
+        Some(linked) => linked,
+        None => plain_targets(Some(value)),
+    }
+}
+
+/// The concept each target names among `entries`, as the readers resolve it
+/// (`about`, and `resolveConcept` in okf.ts); unresolved targets drop.
+pub fn resolve_concepts(entries: &[crate::vault::entry::Entry], targets: &[String]) -> Vec<String> {
+    let index = crate::vault::link::TargetIndex::build(entries);
+    let concept_paths: std::collections::HashSet<&str> = entries
+        .iter()
+        .filter(|e| is_concept(e))
+        .map(|e| e.path.as_str())
+        .collect();
+    targets
+        .iter()
+        .filter_map(|target| resolve_concept(target, &concept_paths, &index))
+        .collect()
+}
+
+fn plain_targets(value: Option<&Value>) -> Vec<String> {
+    match value {
         Some(Value::Array(items)) => items
             .iter()
             .filter_map(|v| v.as_str())
@@ -508,6 +1016,13 @@ pub struct AboutConcept {
     /// purpose: a replaced concept is never rewritten to say so, so without
     /// the reverse pass a retired claim looks exactly like a current one.
     pub superseded_by: Vec<String>,
+    /// An open, governed contest on this concept (M49.8, K45) — a person
+    /// or run challenged it and nothing has resolved it.
+    pub contested: bool,
+    /// Concepts that CLAIM to replace this one without being able to retire
+    /// it (M49.8, K22): an unreviewed claim against a reviewed one, or two
+    /// claims that each replace the other. This one stays current.
+    pub replacement_proposed_by: Vec<String>,
     /// Disagreements touching this concept, in both directions —
     /// `contradicts` is symmetric (`RELATION_LABELS` in okf.ts says so), and
     /// the end that did not declare it has no way to know from its own file.
@@ -575,6 +1090,7 @@ pub fn about(
     target: &str,
     today: &str,
     limit: usize,
+    ledger: Option<&LedgerReview>,
 ) -> About {
     let index = crate::vault::link::TargetIndex::build(entries);
     let subject = entries
@@ -597,6 +1113,8 @@ pub fn about(
     // `contradicts` is symmetric — so a concept asked about itself would look
     // current and uncontested however retired it was.
     let mut replaced_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut replacement_proposed: std::collections::BTreeMap<String, Vec<String>> =
+        Default::default();
     let mut contradicted_by: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for other in &concepts {
         for (field, into) in [
@@ -613,6 +1131,46 @@ pub fn about(
             }
         }
     }
+
+    // M49.8 (K22): a `supersedes` edge RETIRES only when it could have
+    // passed review. An unreviewed concept claiming to replace a
+    // human-reviewed one is a PROPOSAL — the verified claim stays current
+    // until a person agrees — and two concepts that each claim to replace
+    // the other retire neither. Before, one unreviewed write retired a
+    // verified claim in the UI and in every agent's context, with no card.
+    let trust_of = |path: &str| {
+        concepts
+            .iter()
+            .find(|c| c.path == path)
+            .map(|c| review_label(c, ledger))
+            .unwrap_or("unverified")
+    };
+    let approved = |new: &str, old: &str| {
+        ledger.is_some_and(|l| l.approved.contains(&(new.to_string(), old.to_string())))
+    };
+    // Judged against the edges as DECLARED — a snapshot, so removing one
+    // end of a mutual pair cannot hide the other end's mutuality.
+    let declared = replaced_by.clone();
+    let pairs: Vec<(String, String)> = declared
+        .iter()
+        .flat_map(|(old, news)| news.iter().map(move |new| (old.clone(), new.clone())))
+        .collect();
+    for (old, new) in pairs {
+        let mutual = declared
+            .get(&new)
+            .is_some_and(|replacers| replacers.contains(&old));
+        // A person who approved the replacement on its card has agreed.
+        let outranked = trust_of(&old) == "human-reviewed"
+            && trust_of(&new) != "human-reviewed"
+            && !approved(&new, &old);
+        if mutual || outranked {
+            if let Some(replacers) = replaced_by.get_mut(&old) {
+                replacers.retain(|r| r != &new);
+            }
+            replacement_proposed.entry(old).or_default().push(new);
+        }
+    }
+    replaced_by.retain(|_, replacers| !replacers.is_empty());
 
     // The same key `listSubjects` groups by: an anchor that resolves is keyed
     // by the note it found, and one that does not is keyed by what it said.
@@ -634,11 +1192,7 @@ pub fn about(
     let out = matched
         .iter()
         .map(|entry| {
-            let stale_after = entry
-                .properties
-                .get("stale_after")
-                .and_then(Value::as_str)
-                .map(str::to_string);
+            let stale_after = stale_after_of(entry.properties.get("stale_after"));
             let mut contradicts: Vec<RelationTarget> = link_field(entry, "contradicts")
                 .into_iter()
                 .map(|target| RelationTarget {
@@ -677,16 +1231,26 @@ pub fn about(
                     .filter(|s| !s.is_empty())
                     .map(str::to_string),
                 concept_type: entry.entry_type.clone(),
-                lifecycle: match entry.properties.get("lifecycle").and_then(Value::as_str) {
-                    Some(raw @ ("draft" | "deprecated")) => raw.to_string(),
-                    _ => "stable".to_string(),
+                // A governed retirement outranks what the file says (K45):
+                // the projection never renders it.
+                lifecycle: match ledger.and_then(|l| l.governed.retired.get(&entry.path)) {
+                    Some(governed) => (*governed).to_string(),
+                    None => match entry.properties.get("lifecycle").and_then(Value::as_str) {
+                        Some(raw @ ("draft" | "deprecated")) => raw.to_string(),
+                        _ => "stable".to_string(),
+                    },
                 },
-                trust: trust_tier(entry),
+                contested: ledger.is_some_and(|l| l.governed.contested.contains(&entry.path)),
+                trust: trust_label(entry, ledger),
                 // `stale_after` is an ABSOLUTE date, so staleness is a plain
                 // comparison with no reference to when it was read (OKF §5.5).
-                stale: stale_after.as_deref().is_some_and(|after| today >= after),
+                stale: is_stale(stale_after.as_deref(), today),
                 stale_after,
                 superseded_by: replaced_by.get(&entry.path).cloned().unwrap_or_default(),
+                replacement_proposed_by: replacement_proposed
+                    .get(&entry.path)
+                    .cloned()
+                    .unwrap_or_default(),
                 contradicts,
             }
         })
@@ -714,9 +1278,10 @@ mod tests {
     const REL: &str = "knowledge/playbooks/cutover.md";
 
     #[test]
-    fn the_agent_reaches_the_bundle_through_write_concept_only() {
-        // write_concept refuses `verified` and stamps `generated` itself. That
-        // is only a guarantee while it is the ONLY writer (M17.1).
+    fn the_agent_reaches_the_bundle_through_its_two_stamped_tools_only() {
+        // write_concept refuses `verified` and stamps `generated` itself, and
+        // recheck_concept moves `stale_after` alone (M49.7). That is only a
+        // guarantee while those two are the ONLY writers (M17.1).
         assert!(guard_agent_write(REL).is_err());
         assert!(guard_agent_write("knowledge").is_err());
         assert!(guard_agent_write("knowledge/index.md").is_err());
@@ -912,6 +1477,24 @@ mod tests {
         assert!(!is_knowledge_path("knowledge-archive/old.md"));
         assert!(!is_knowledge_path("records/risks/r.md"));
         assert!(!is_knowledge_path("my-knowledge/x.md"));
+        // M49.4 (K17): the path the filesystem resolves, not the raw string.
+        // The same table is asserted against okf.ts's isKnowledgePath.
+        for (raw, canonical) in [
+            ("./knowledge/x.md", Some("knowledge/x.md")),
+            ("Knowledge/x.md", Some("knowledge/x.md")),
+            ("KNOWLEDGE/log.md", Some("knowledge/log.md")),
+            ("knowledge//a/./b.md", Some("knowledge/a/b.md")),
+            ("records/../knowledge/x.md", Some("knowledge/x.md")),
+            ("knowledge/../knowledge/x.md", Some("knowledge/x.md")),
+            ("knowledge/../records/x.md", None),
+            ("../knowledge/x.md", None),
+            ("/knowledge/x.md", None),
+            ("knowledge-archive/x.md", None),
+            ("", None),
+        ] {
+            assert_eq!(canonical_path(raw).as_deref(), canonical, "{raw}");
+            assert_eq!(is_knowledge_path(raw), canonical.is_some(), "{raw}");
+        }
     }
 
     #[test]
@@ -966,7 +1549,7 @@ mod tests {
     use crate::vault::entry::Entry;
 
     #[test]
-    fn trust_tier_matches_the_typescript_engine() {
+    fn trust_tier_reads_the_files_own_stamps() {
         let mut entry = Entry::empty_for_test("knowledge/a.md");
         assert_eq!(trust_tier(&entry), "unverified");
 
@@ -991,6 +1574,31 @@ mod tests {
             serde_json::json!({ "by": "human:josef", "at": "x" }),
         );
         assert_eq!(trust_tier(&entry), "human-reviewed");
+    }
+
+    // M49.8 (K24): the shared staleness cases — okf.test.ts replays the same
+    // file, so the two sides cannot drift.
+    #[test]
+    fn staleness_replays_the_shared_cases() {
+        let artifact: serde_json::Value = serde_json::from_str(STALENESS).unwrap();
+        for case in artifact["cases"].as_array().unwrap() {
+            let after = stale_after_of(Some(&case["stale_after"]));
+            let today = case["today"].as_str().unwrap();
+            assert_eq!(
+                is_stale(after.as_deref(), today),
+                case["stale"].as_bool().unwrap(),
+                "{case}"
+            );
+            // Every value the rule reads as malformed is one an agent may
+            // not set: before, chrono let `2027-7-1` through validation and
+            // the concept read stale the moment it was rechecked.
+            if let Some(after) = after.as_deref() {
+                if is_stale(Some(after), "0001-01-01") {
+                    let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 16).unwrap();
+                    assert!(validate_stale_after(after, today).is_err(), "{case}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1082,7 +1690,7 @@ mod tests {
             "RQ-84B-KESTREL",
             "RQ-84B Kestrel",
         ] {
-            let answer = about(&entries, target, TODAY, 20);
+            let answer = about(&entries, target, TODAY, 20, None);
             assert_eq!(
                 answer.subject.as_ref().map(|(p, _)| p.as_str()),
                 Some("records/reqs/rq-84b-kestrel.md"),
@@ -1092,7 +1700,7 @@ mod tests {
         }
         // A project is reached by its FOLDER — every project file is
         // project.md, so a stem match can never name one.
-        let answer = about(&entries, "atlas", TODAY, 20);
+        let answer = about(&entries, "atlas", TODAY, 20, None);
         assert_eq!(
             answer.subject.as_ref().map(|(p, _)| p.as_str()),
             Some("projects/atlas/project.md")
@@ -1105,12 +1713,12 @@ mod tests {
         let entries = corpus();
 
         // Written up, nothing distilled: a real subject, measured at zero.
-        let quiet = about(&entries, "projects/atlas/project.md", TODAY, 20);
+        let quiet = about(&entries, "projects/atlas/project.md", TODAY, 20, None);
         assert!(quiet.subject.is_some());
         assert_eq!(quiet.concepts.len(), 1);
 
         // A record the base has never touched.
-        let untouched = about(&entries, "knowledge/index.md", TODAY, 20);
+        let untouched = about(&entries, "knowledge/index.md", TODAY, 20, None);
         assert!(untouched.subject.is_some(), "the file exists");
         assert!(
             untouched.concepts.is_empty(),
@@ -1120,13 +1728,13 @@ mod tests {
         // An OPEN THREAD: no note carries the name, and the base is tracking
         // it anyway. Absent subject, present concepts — the two are separate
         // answers and neither is an error.
-        let thread = about(&entries, "mpm-410", TODAY, 20);
+        let thread = about(&entries, "mpm-410", TODAY, 20, None);
         assert!(thread.subject.is_none());
         assert_eq!(thread.key, "mpm-410");
         assert_eq!(thread.concepts.len(), 1);
 
         // And a name that is neither: empty, with no subject.
-        let nothing = about(&entries, "kos-3.2", TODAY, 20);
+        let nothing = about(&entries, "kos-3.2", TODAY, 20, None);
         assert!(nothing.subject.is_none());
         assert!(nothing.concepts.is_empty());
     }
@@ -1142,7 +1750,7 @@ mod tests {
     #[test]
     fn a_concept_reports_what_was_recorded_and_says_nothing_about_what_was_not() {
         let entries = corpus();
-        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20);
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20, None);
         let old = at(&answer, "knowledge/risks/thermal-margin.md");
         assert_eq!(
             old.description.as_deref(),
@@ -1165,7 +1773,7 @@ mod tests {
     #[test]
     fn the_graph_is_read_backwards_so_a_retired_claim_does_not_look_current() {
         let entries = corpus();
-        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20);
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20, None);
         let old = at(&answer, "knowledge/risks/thermal-margin.md");
         // The replaced concept's own frontmatter says nothing about being
         // replaced — the replacement is what knows.
@@ -1195,6 +1803,174 @@ mod tests {
         );
     }
 
+    // M49.8 (K22): an unreviewed concept cannot retire a human-reviewed
+    // one — it PROPOSES; and two concepts that each claim to replace the
+    // other retire neither.
+    #[test]
+    fn an_unreviewed_replacement_of_a_reviewed_claim_is_only_proposed() {
+        let mut entries = corpus();
+        let old = entries
+            .iter_mut()
+            .find(|e| e.path == "knowledge/risks/thermal-margin.md")
+            .unwrap();
+        old.properties.insert(
+            "verified".into(),
+            serde_json::json!({ "by": "human:josef", "at": "2026-08-01" }),
+        );
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20, None);
+        let old = at(&answer, "knowledge/risks/thermal-margin.md");
+        assert!(
+            old.superseded_by.is_empty(),
+            "the verified claim stays current"
+        );
+        assert_eq!(
+            old.replacement_proposed_by,
+            vec!["knowledge/risks/thermal-margin-rev-b.md".to_string()]
+        );
+
+        // Mutual replacement: each claims to replace the other.
+        let mut mutual = corpus();
+        let rev_b = mutual
+            .iter_mut()
+            .find(|e| e.path == "knowledge/risks/thermal-margin-rev-b.md")
+            .unwrap()
+            .clone();
+        let first = mutual
+            .iter_mut()
+            .find(|e| e.path == "knowledge/risks/thermal-margin.md")
+            .unwrap();
+        first
+            .relationships
+            .insert("supersedes".into(), vec!["thermal-margin-rev-b".into()]);
+        let answer = about(&mutual, "rq-84b-kestrel", TODAY, 20, None);
+        for path in [rev_b.path.as_str(), "knowledge/risks/thermal-margin.md"] {
+            let c = at(&answer, path);
+            assert!(c.superseded_by.is_empty(), "{path} is not retired");
+            assert_eq!(c.replacement_proposed_by.len(), 1, "{path}");
+        }
+    }
+
+    // A person who approved the replacement on its card has agreed: the
+    // reviewed claim retires, though the replacement is still unreviewed.
+    // An edit elsewhere to the reviewed claim does not let it retire either
+    // — the gate reads the review as RECORDED, not the disputed file.
+    #[test]
+    fn an_approved_replacement_retires_the_reviewed_claim() {
+        let mut entries = corpus();
+        let old_path = "knowledge/risks/thermal-margin.md".to_string();
+        let new_path = "knowledge/risks/thermal-margin-rev-b.md".to_string();
+        entries
+            .iter_mut()
+            .find(|e| e.path == old_path)
+            .unwrap()
+            .properties
+            .insert(
+                "verified".into(),
+                serde_json::json!({ "by": "human:josef", "at": "2026-08-01" }),
+            );
+        let mut ledger = LedgerReview {
+            reviews: [(old_path.clone(), Reviewed::Current)]
+                .into_iter()
+                .collect(),
+            human: [old_path.clone()].into_iter().collect(),
+            ..LedgerReview::default()
+        };
+        ledger.quarantined.insert(old_path.clone());
+        let proposed = about(&entries, "rq-84b-kestrel", TODAY, 20, Some(&ledger));
+        assert!(at(&proposed, &old_path).superseded_by.is_empty());
+
+        ledger.approved.insert((new_path.clone(), old_path.clone()));
+        let approved = about(&entries, "rq-84b-kestrel", TODAY, 20, Some(&ledger));
+        let old = at(&approved, &old_path);
+        assert_eq!(old.superseded_by, vec![new_path]);
+        assert!(old.replacement_proposed_by.is_empty());
+    }
+
+    // M49.8 (K21): with a ledger, the ledger decides the review. A file
+    // stamp the ledger never recorded is disputed; without a ledger, the
+    // file is all there is.
+    #[test]
+    fn trust_is_the_ledgers_review_and_a_stamp_it_never_recorded_is_disputed() {
+        let mut stamped = note("knowledge/risks/r.md", "R");
+        stamped.properties.insert(
+            "verified".into(),
+            serde_json::json!({ "by": "human:josef", "at": "2026-08-01" }),
+        );
+        let plain = note("knowledge/risks/p.md", "P");
+        assert_eq!(trust_label(&stamped, None), "human-reviewed");
+        let ledger = |r: Reviewed| LedgerReview {
+            reviews: [
+                ("knowledge/risks/r.md".to_string(), r),
+                ("knowledge/risks/p.md".to_string(), r),
+            ]
+            .into_iter()
+            .collect(),
+            human: ["knowledge/risks/r.md".to_string()].into_iter().collect(),
+            ..LedgerReview::default()
+        };
+        assert_eq!(
+            trust_label(&stamped, Some(&ledger(Reviewed::Unreviewed))),
+            "disputed"
+        );
+        assert_eq!(
+            trust_label(&plain, Some(&ledger(Reviewed::Unreviewed))),
+            "unverified"
+        );
+        assert_eq!(
+            trust_label(&stamped, Some(&ledger(Reviewed::Current))),
+            "human-reviewed"
+        );
+        assert_eq!(
+            trust_label(&stamped, Some(&ledger(Reviewed::PredatesCurrent))),
+            "reviewed-earlier-revision"
+        );
+        // A file the ledger does not record at all grants nothing either.
+        let empty = LedgerReview::default();
+        assert_eq!(trust_label(&stamped, Some(&empty)), "disputed");
+
+        // A reviewed concept whose FILE is not the ledger's reads disputed —
+        // its content is not what was reviewed (the TS twin reads
+        // `LedgerStatus.quarantined` the same way).
+        let mut edited = ledger(Reviewed::Current);
+        edited
+            .quarantined
+            .insert("knowledge/risks/r.md".to_string());
+        assert_eq!(trust_label(&stamped, Some(&edited)), "disputed");
+        // Who reviewed is the LEDGER's answer: p's current review is
+        // recorded as a machine's, whatever its file says.
+        assert_eq!(trust_label(&plain, Some(&edited)), "machine-confirmed");
+
+        // A ledger that exists and cannot be read trusts no stamp — it is
+        // never read as "no ledger".
+        let unreadable = LedgerReview {
+            unreadable: true,
+            ..LedgerReview::default()
+        };
+        assert_eq!(trust_label(&stamped, Some(&unreadable)), "disputed");
+        assert_eq!(trust_label(&plain, Some(&unreadable)), "unverified");
+    }
+
+    // M49.8 (K45): a governed retirement or an open contest reaches the
+    // agent even though the projected markdown never changes for it.
+    #[test]
+    fn governed_retirement_and_contest_reach_the_reader() {
+        let entries = corpus();
+        let path = "knowledge/risks/thermal-margin.md".to_string();
+        let mut governed = Governed::default();
+        governed.retired.insert(path.clone(), "archived");
+        governed.contested.insert(path.clone());
+        let ledger = LedgerReview {
+            governed,
+            ..LedgerReview::default()
+        };
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 20, Some(&ledger));
+        let c = at(&answer, &path);
+        assert_eq!(c.lifecycle, "archived");
+        assert!(c.contested);
+        let untouched = about(&entries, "rq-84b-kestrel", TODAY, 20, None);
+        assert_eq!(at(&untouched, &path).lifecycle, "stable");
+    }
+
     #[test]
     fn a_relation_naming_nothing_is_reported_as_unresolved_rather_than_dropped() {
         let mut entries = corpus();
@@ -1204,7 +1980,7 @@ mod tests {
             .insert("contradicts".into(), vec!["never-written".to_string()]);
         entries.push(orphan);
 
-        let answer = about(&entries, "mpm-410", TODAY, 20);
+        let answer = about(&entries, "mpm-410", TODAY, 20, None);
         let loose = answer
             .concepts
             .iter()
@@ -1218,11 +1994,14 @@ mod tests {
     #[test]
     fn a_limit_counts_what_it_cut_instead_of_absorbing_it() {
         let entries = corpus();
-        let answer = about(&entries, "rq-84b-kestrel", TODAY, 1);
+        let answer = about(&entries, "rq-84b-kestrel", TODAY, 1, None);
         assert_eq!(answer.concepts.len(), 1);
         assert_eq!(answer.omitted, 1);
         // And nothing is omitted when everything fits.
-        assert_eq!(about(&entries, "rq-84b-kestrel", TODAY, 20).omitted, 0);
+        assert_eq!(
+            about(&entries, "rq-84b-kestrel", TODAY, 20, None).omitted,
+            0
+        );
     }
 
     /// Regenerating the digest is a deliberate act, so it is a test you run by

@@ -8,6 +8,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import type { Entry } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
+import { askedAbout, TEMPLATE_FILL_LABEL } from '@/lib/prompts';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -435,7 +436,13 @@ export function FileTree({
         // declined or failed fill leaves an ordinary templated page.
         if (template !== null) {
           const fill = templateFill(template);
-          if (fill !== '') askAgent(templateFillPrompt(path, trimmed, fill), path);
+          if (fill !== '') {
+            askAgent(
+              templateFillPrompt(path, trimmed, fill),
+              path,
+              askedAbout(TEMPLATE_FILL_LABEL, trimmed),
+            );
+          }
         }
         return;
       }

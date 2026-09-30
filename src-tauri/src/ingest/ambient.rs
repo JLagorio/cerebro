@@ -625,7 +625,7 @@ fn maintain(
     };
     // The proposal switch (M26.3c registers, M26.9 flips), read per tick from
     // the SAME app-config file the MCP server's `tools/list` reads — the
-    // `config_dir` this supervisor was started with IS `app_config_dir`.
+    // `config_dir` this supervisor was started with IS `app_config::app_dir`.
     // Handed in as a bool because `schedule` deliberately holds no app
     // handle; every failure path of the load reads OFF.
     let proposals_enabled = crate::app_config::load(config_dir).agent_proposals_enabled;

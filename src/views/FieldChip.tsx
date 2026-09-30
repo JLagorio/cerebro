@@ -1,6 +1,7 @@
 import { resolveOptionColor } from '@/lib/swatch';
 import { Avatar } from '@/components/ui/Avatar';
 import type { ResolvedField } from '@/engine/types';
+import { TABLE_ANATOMY } from '@/views/tableAnatomy';
 
 function optionHollow(resolved: ResolvedField): boolean {
   const options = resolved.def?.options;
@@ -42,7 +43,7 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
     return (
       <span className="inline-flex flex-none items-center gap-1.5 text-xs text-n-700">
         <span
-          className="box-border h-[9px] w-[9px] flex-none rounded-full"
+          className={TABLE_ANATOMY.selectDot}
           style={
             hollow
               ? { border: `1.5px solid ${color}` }

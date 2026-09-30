@@ -1,15 +1,22 @@
 import { useMemo } from 'react';
+import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { buildDossier, isEmptyDossier, type Unsettled } from '@/engine/dossier';
-import { listConcepts, type Concept } from '@/engine/okf';
+import { listConcepts, recheckDue, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
 import { FacetLines } from '@/knowledge/FacetChips';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
 import type { BeliefChips } from '@/lib/ipc';
-import { askBasePrompt, distillPrompt } from '@/lib/prompts';
+import {
+  ASK_BASE_LABEL,
+  askBasePrompt,
+  askedAbout,
+  DISTILL_LABEL,
+  distillPrompt,
+} from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -30,7 +37,9 @@ import { useVaultStore } from '@/stores/vaultStore';
  * active thing on it is a button, pressed by a person.
  */
 
-const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
+// Inset like the rows beneath it (M52.3): flush left, the sub-labels read as
+// siblings of the groups they sit inside.
+const LABEL = 'px-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 function ConceptRow({
   concept,
@@ -64,17 +73,24 @@ function ConceptRow({
         {concept.description !== null && !retired && (
           <span className="block truncate text-xs text-n-500">{concept.description}</span>
         )}
-        {/* A retired row says one thing — that it is no longer believed. The
-            axes of something nobody believes are not what a reader is here
-            for, so they stay on the rows that are still standing. */}
+        {/* A retired row says one thing — that it was replaced or
+            deprecated. The axes of a claim nobody stands behind are not what
+            a reader is here for, so they stay on the rows still standing. */}
         {!retired && <FacetLines chips={chips} />}
       </span>
-      {!retired && <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />}
+      {/* M52.3 — the Concepts list's rule: only the review states worth
+          reading. "Unreviewed" on every row was a tag on none. */}
+      {!retired && concept.review !== 'unreviewed' && (
+        <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+      )}
     </button>
   );
 }
 
 function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string) => void }) {
+  // A horizon that is no date is stale all the same (M52.4) — said as such,
+  // never printed as one.
+  const due = recheckDue(item.concept);
   return (
     <li className="flex items-start gap-2 px-2 py-1">
       <span className="mt-[3px] flex-none text-warn-600">
@@ -115,7 +131,9 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
             >
               {item.concept.title}
             </button>{' '}
-            was due a recheck on {item.concept.staleAfter}.
+            {due === null
+              ? "is due a recheck — its recheck date can't be read."
+              : `was due a recheck on ${due}.`}
           </>
         )}
       </span>
@@ -128,8 +146,13 @@ export function EntityDossier({
   variant = 'section',
 }: {
   entry: Entry;
-  /** 'section' sits in a page; 'panel' is the narrower side-panel variant. */
-  variant?: 'section' | 'panel';
+  /**
+   * 'section' sits in a page; 'panel' is the narrower side-panel variant.
+   * 'embedded' is one group of a page's Knowledge (M52.3, `PageKnowledge`):
+   * the dossier itself, without the heading, the empty sentence or the asks
+   * its host already carries.
+   */
+  variant?: 'section' | 'panel' | 'embedded';
 }) {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -138,10 +161,12 @@ export function EntityDossier({
   const askAgent = useUiStore((s) => s.askAgent);
   const chipIndex = useBeliefChips(vaultPath);
 
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
   const today = todayIso();
   const dossier = useMemo(
-    () => buildDossier(entry.path, listConcepts(entries, today), entries),
-    [entries, entry.path, today],
+    () => buildDossier(entry.path, listConcepts(entries, today, quarantine, ledgerReview), entries),
+    [entries, entry.path, today, quarantine, ledgerReview],
   );
 
   const closeDetail = useUiStore((s) => s.closeDetail);
@@ -150,54 +175,67 @@ export function EntityDossier({
   // the concept body to nothing at laptop widths (M14.2).
   const openConcept = (path: string) => {
     closeDetail();
-    navigate({ kind: 'knowledge', nav: { tab: 'all' }, path });
+    navigate({ kind: 'doc', path });
   };
 
   const ask = () => {
     // The entity travels WITH the prompt (M17.6) — it becomes a context
     // chip, so the agent reads this record rather than whatever surface the
     // user happened to be standing on when they clicked.
-    askAgent(distillPrompt(entry.path, entry.title), entry.path);
+    askAgent(
+      distillPrompt(entry.path, entry.title),
+      entry.path,
+      askedAbout(DISTILL_LABEL, entry.title),
+    );
   };
 
   // The same question the list below already answers, handed to the assistant
   // so it can follow the threads this section only names (M33a.5) — it calls
   // `knowledge_about`, which resolves by anchor rather than by keyword.
   const askBase = () => {
-    askAgent(askBasePrompt(entry.path, entry.title), entry.path);
+    askAgent(
+      askBasePrompt(entry.path, entry.title),
+      entry.path,
+      askedAbout(ASK_BASE_LABEL, entry.title),
+    );
   };
 
   const since = relativeDay(dossier.firstLearned, today);
   const latest = relativeDay(dossier.lastLearned, today);
+  const embedded = variant === 'embedded';
 
   return (
     <section
       data-testid="entity-dossier"
       data-count={dossier.current.length}
-      className={variant === 'panel' ? '' : 'mt-8 border-t border-n-100 pt-5'}
+      className={variant === 'section' ? 'mt-8 border-t border-n-100 pt-5' : ''}
     >
-      <div className="flex items-center gap-2">
-        <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
-          What the assistant knows
-        </h3>
-        {/* Growth, stated once, in words. The alternative is a number that
-            ticks up somewhere permanent, which is the pattern these surfaces
-            are barred from. */}
-        {dossier.current.length > 0 && since !== null && (
-          <span className="text-2xs text-n-400">
-            {dossier.current.length} {dossier.current.length === 1 ? 'thing' : 'things'}, first
-            learned {since}
-            {latest !== null && latest !== since ? `, most recently ${latest}` : ''}
-          </span>
-        )}
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <Icon name="brain" size={14} color="var(--cortex-500)" />
+          <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
+            Knowledge
+          </h3>
+          {/* Growth, stated once, in words. The alternative is a number that
+              ticks up somewhere permanent, which is the pattern these surfaces
+              are barred from. */}
+          {dossier.current.length > 0 && since !== null && (
+            <span className="text-2xs text-n-400">
+              {dossier.current.length} {dossier.current.length === 1 ? 'thing' : 'things'}, first
+              learned {since}
+              {latest !== null && latest !== since ? `, most recently ${latest}` : ''}
+            </span>
+          )}
+        </div>
+      )}
 
       {isEmptyDossier(dossier) ? (
-        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
+        !embedded && (
+          <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
+        )
       ) : (
         <>
-          <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
+          <ul className={`m-0 flex list-none flex-col gap-px p-0 ${embedded ? '' : 'mt-2'}`}>
             {dossier.current.map((concept) => (
               <li key={concept.entry.path}>
                 <ConceptRow
@@ -255,7 +293,7 @@ export function EntityDossier({
 
           {dossier.retired.length > 0 && (
             <div className="mt-4" data-testid="dossier-retired">
-              <div className={LABEL}>No longer believed</div>
+              <div className={LABEL}>Replaced or deprecated</div>
               <ul className="m-0 mt-1 flex list-none flex-col gap-px p-0">
                 {dossier.retired.map((concept) => (
                   <li key={concept.entry.path}>
@@ -269,22 +307,26 @@ export function EntityDossier({
       )}
 
       {/* M33a.6 — both questions, on the surface that had neither of them.
-          `DetailPanel` renders this instead of `RelatedKnowledge` exactly when
-          the base holds concepts about the record, so the records it knows
-          MOST about were the ones with no way to ask it anything: they got
-          "read this page into the base" and not "what do you know that bears
-          on it". Two different acts — one writes, one only reads.
+          The dossier answers exactly when the base holds concepts about the
+          record, so the records it knows MOST about were the ones with no way
+          to ask it anything: they got "read this page into the base" and not
+          "what do you know that bears on it". Two different acts — one
+          writes, one only reads. Embedded in a page's Knowledge (M52.3) the
+          host's one action row carries both, so they are drawn only when the
+          dossier stands alone.
 
           Still passive, and deliberately still last on the section. Nothing
           here speaks first (M8.1); a person scrolls to it and presses. */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
-          Ask the base
-        </Button>
-        <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
-          Learn from this page
-        </Button>
-      </div>
+      {!embedded && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
+            {ASK_BASE_LABEL}
+          </Button>
+          <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
+            {DISTILL_LABEL}
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

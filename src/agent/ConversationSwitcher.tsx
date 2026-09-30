@@ -73,7 +73,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
               setConfirming(null);
               state.remove(c.id);
             }}
-            className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-xs font-medium text-danger-600 hover:bg-danger-50"
+            className="flex-none rounded-xs border-0 bg-transparent px-1 py-0.5 text-xs font-medium text-danger-600 hover:bg-danger-50"
           >
             Delete
           </button>
@@ -81,7 +81,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
             type="button"
             aria-label="Keep conversation"
             onClick={() => setConfirming(null)}
-            className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-100"
+            className="flex-none rounded-xs border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-100"
           >
             Keep
           </button>
@@ -97,7 +97,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
             if (e.key === 'Escape') setRenaming(null);
           }}
           aria-label={`Rename ${c.title}`}
-          className="min-w-0 flex-1 rounded border border-cortex-400 bg-n-0 px-1 py-0.5 text-xs outline-none"
+          className="min-w-0 flex-1 rounded-xs border border-cortex-400 bg-n-0 px-1 py-0.5 text-xs outline-none"
         />
       ) : (
         <>
@@ -132,7 +132,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                 setDraft(c.title);
                 setRenaming(c.id);
               }}
-              className="rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+              className="rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
             >
               <Icon name="pencil" size={11} />
             </button>
@@ -140,7 +140,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
               type="button"
               aria-label={`Delete ${c.title}`}
               onClick={() => setConfirming(c.id)}
-              className="rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-danger-500"
+              className="rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-danger-500"
             >
               <Icon name="trash-2" size={11} />
             </button>

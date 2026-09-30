@@ -249,7 +249,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Open ${file.path}`}
                       onClick={() => openPath(file.path)}
-                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-n-800 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="inline-flex flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-n-800 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="maximize-2" size={11} />
                     </button>
@@ -257,7 +257,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Discard changes to ${file.path}`}
                       onClick={() => void discard(file)}
-                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-danger-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="inline-flex flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-danger-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="undo-2" size={11} />
                     </button>

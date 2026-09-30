@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useLedgerStore } from '@/stores/ledgerStore';
+import type { LedgerStatus } from '@/lib/ipc';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
 const handlers: Array<(event: unknown) => void> = [];
@@ -80,10 +82,30 @@ async function startJob(): Promise<void> {
   });
 }
 
+/** A ledger status whose writer is held — the normal, recording state. */
+const recordingStatus: LedgerStatus = {
+  verdict: 'valid',
+  detail: 'valid',
+  head: null,
+  seq: null,
+  segments: 1,
+  anomalies: 0,
+  reconciliation_open: false,
+  divergences: [],
+  quarantined: [],
+  stopped: false,
+  history_unreadable: false,
+  approved_supersessions: [],
+  recorded_human: [],
+  writer: { state: 'held', detail: null },
+};
+
 /** Restore the ledger wire mocks to their defaults: hydration finds an empty
  * table, every claim is fresh. Called from each describe's beforeEach — the
  * mocks are module-level and a verdict one test scripted must not leak. */
 function resetLedgerMocks(): void {
+  // M49.2: the knowledge lanes run only while the vault is recording.
+  useLedgerStore.setState({ vault: '/vault', read: { kind: 'read', status: recordingStatus } });
   vi.mocked(ipc.jobLedgerRead).mockReset();
   vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
     attempts: {},
@@ -689,5 +711,78 @@ describe('useJobRunner durable ledgers', () => {
     // The database has been the arbiter since it existed — a non-empty table
     // means the era is over, and re-importing would resurrect stale answers.
     expect(vi.mocked(ipc.jobLedgerImport)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * M49.2: the stale and schema recheck lanes exist to rewrite `knowledge/`,
+ * and every one of those writes refuses while the vault is not recording
+ * (M49.1). They wait instead of spending a paid run on a certain refusal.
+ */
+describe('useJobRunner while the vault is not recording', () => {
+  const staleConcept = makeEntry({
+    path: 'knowledge/systems/old.md',
+    title: 'Old',
+    properties: {
+      generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' },
+      stale_after: '2026-07-01',
+    },
+  });
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    resetLedgerMocks();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [staleConcept],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      runs: [],
+      agentShellAccess: false,
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('runs the recheck while the writer is held', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['lost-lock', 'refused', 'fail-stopped', 'other-vault', 'inactive'] as const)(
+    'holds it while the writer is %s',
+    async (state) => {
+      useLedgerStore.setState({
+        vault: '/vault',
+        read: { kind: 'read', status: { ...recordingStatus, writer: { state, detail: 'why' } } },
+      });
+      renderHook(() => useJobRunner());
+      await startJob();
+      expect(agentIpc.runAgent).not.toHaveBeenCalled();
+    },
+  );
+
+  it('holds it when the status could not be read, or was read for another vault', async () => {
+    useLedgerStore.setState({ vault: '/vault', read: { kind: 'unavailable', error: 'ipc down' } });
+    const { unmount } = renderHook(() => useJobRunner());
+    await startJob();
+    unmount();
+    useLedgerStore.setState({ vault: '/other', read: { kind: 'read', status: recordingStatus } });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(agentIpc.runAgent).not.toHaveBeenCalled();
   });
 });

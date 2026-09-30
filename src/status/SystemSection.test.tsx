@@ -125,3 +125,27 @@ describe('the background concurrency ceiling', () => {
     expect(screen.queryByTestId('ambient-concurrency')).toBeNull();
   });
 });
+
+describe('a banner', () => {
+  // M52.5 — "Some items could not be read — two notes could not be parsed
+  // and were left alone — 2 items": a lowercase clause, and the count twice.
+  it('reads its detail as a sentence, and states the count once', async () => {
+    pipelineOverview.mockResolvedValue(
+      overview({
+        banners: [
+          {
+            kind: 'ingestion',
+            detail: 'items could not be read — they are skipped, not lost',
+            count: 3,
+          },
+        ],
+      }),
+    );
+    render(<SystemSection vaultPath={VAULT} />);
+    const banner = await screen.findByTestId('pipeline-banner');
+    expect(banner.querySelector('p')?.textContent).toBe(
+      'Items could not be read — they are skipped, not lost — 3 items',
+    );
+    expect(screen.getAllByTestId('banner-count')).toHaveLength(1);
+  });
+});

@@ -7,7 +7,7 @@ about:
   - "[[risk-rollback-unrehearsed]]"
 tags: [operations, phoenix]
 lifecycle: stable
-generated: { by: claude-code, at: 2026-07-28T09:26:00Z }
+generated: { by: process:knowledge, at: 2026-07-28T09:26:00Z }
 stale_after: 2026-08-15
 sources:
   - id: standup

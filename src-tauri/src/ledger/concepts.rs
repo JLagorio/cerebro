@@ -42,15 +42,16 @@
 //!   never hidden in a Belief patch. A rewrite that simply omits the
 //!   `aliases` key carries the registered aliases forward instead (the
 //!   agent tool cannot even express them);
-//! - relation wikilinks resolve against projection paths exactly as
-//!   migration resolved them; unresolvable targets stay in fields with no
-//!   event, never guessed.
+//! - relation wikilinks resolve against projection paths through
+//!   `migrate::resolve_link`, which migration uses too; a stem two concepts
+//!   share is refused (`ambiguous_link`), and an unresolvable target stays
+//!   in fields with no event, never guessed.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::manifest;
-use super::migrate::{stem_of, wikilinks};
+use super::migrate::wikilinks;
 use super::reduce::{project_belief, reduce, typed_from_value, EpistemicState, ProjectionResult};
 use super::schema::{
     self, Actor, BeliefBasis, PatchOp, ProposalOp, RelationAction, RelationKind, SubjectRef,
@@ -84,6 +85,25 @@ fn writer_unavailable(vault: &Path) -> String {
 /// Refused outright rather than written: only `knowledge/` is ledger-backed.
 fn outside_bundle(rel: &str) -> String {
     format!("only knowledge/ concepts are ledger-backed; {rel} is outside the bundle")
+}
+
+/// `write_concept` for the run that asked for it (M49.9, K25): its
+/// proposals and commit set carry that run's id, and the run's row books
+/// what was submitted, applied and rejected.
+pub fn write_concept_in_run(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+    run: &str,
+) -> Result<(), String> {
+    if !rel.starts_with("knowledge/") {
+        return Err(outside_bundle(rel));
+    }
+    shadow::with_writer(vault, |writer| {
+        write_concept_in_run_with(writer, vault, rel, frontmatter, body, Some(run))
+    })
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))
 }
 
 /// Ledger-first `write_concept`: a committed Belief transition whose file
@@ -121,17 +141,156 @@ pub fn append_log(
 /// through a normal `belief.revised`, then `belief.attested` pins the
 /// reviewed — now current — revision event and its projection hash, and
 /// the projection regenerates. Refuses without an active writer.
+///
+/// `viewed_body_hash` is the SHA-256 of the body the person read (M49.3,
+/// K6): the stamp attests THAT text, so a body that changed underneath the
+/// page refuses with `stale_view`, and a file that differs from recorded
+/// history refuses with `projection_disk_changed` — before, Verify attested
+/// the ledger's text and silently wrote it over what was on screen.
 pub fn verify_concept(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
+    viewed_body_hash: &str,
 ) -> Result<(), String> {
     if !rel.starts_with("knowledge/") {
         return Err(outside_bundle(rel));
     }
-    shadow::with_writer(vault, |writer| verify_with(writer, vault, rel, patch))
-        .unwrap_or_else(|| Err(writer_unavailable(vault)))
+    shadow::with_writer(vault, |writer| {
+        verify_with(writer, vault, rel, patch, viewed_body_hash)
+    })
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))
 }
+
+/// What a recheck did (M49.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rechecked {
+    /// The concept already carried this `stale_after`: nothing was written.
+    Unchanged,
+    /// Only `stale_after` moved.
+    Stamped,
+}
+
+/// "Still true — recheck again on `stale_after`" (M49.7, K19): a
+/// stamp-only revision of `stale_after` and nothing else.
+///
+/// The recheck lanes used to answer through `write_concept` — a FULL
+/// replace that restamped `generated.at`, added a log line, and floored at
+/// a HIGH review card on every verified concept, for a verdict that changed
+/// nothing. Here a no-op is a no-op (no event, no stamp, no log line), and a
+/// VERIFIED concept is refused: moving its recheck date is the person's, and
+/// an agent revision would also leave the review predating the concept. The
+/// stamp is an `update_belief` proposal like any revision, so the policy
+/// table decides it — it auto-applies on an ordinary concept and queues
+/// where an escalator (a hub's `lineage_fan_in`) says a person should see
+/// it; a hand-coded check here was policy written twice. It is not a claim,
+/// so it writes no log line.
+pub fn recheck_concept(
+    vault: &Path,
+    rel: &str,
+    stale_after: &str,
+    actor: &str,
+    run: Option<&str>,
+) -> Result<Rechecked, String> {
+    if !rel.starts_with("knowledge/") {
+        return Err(outside_bundle(rel));
+    }
+    shadow::with_writer(vault, |writer| {
+        recheck_with(writer, vault, rel, stale_after, actor, run)
+    })
+    .unwrap_or_else(|| Err(writer_unavailable(vault)))
+}
+
+fn recheck_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    rel: &str,
+    stale_after: &str,
+    actor: &str,
+    run: Option<&str>,
+) -> Result<Rechecked, String> {
+    let krel = rel
+        .strip_prefix("knowledge/")
+        .expect("checked by the caller");
+    let state = current_state(writer, vault)?;
+    let belief_id = state
+        .projection_paths
+        .get(krel)
+        .ok_or_else(|| format!("{rel} is not a recorded concept — nothing to recheck"))?
+        .clone();
+    let belief = state.beliefs.get(&belief_id).expect("path index");
+    let current = belief.current();
+    // A PERSON's verification is refused outright — moving its recheck date
+    // is theirs. A machine's goes to the table like any revision of an
+    // attested belief, which floors it at a card: a person sees the stamp
+    // that would leave the confirmation predating the concept.
+    let recorded =
+        crate::knowledge::tier_of(current.fields.as_object().and_then(|f| f.get("verified")));
+    if belief.attested.is_some() && recorded != "machine-confirmed" {
+        return Err(format!(
+            "{rel} is verified by a person: moving its recheck date is theirs, not an agent's — \
+             say what you found in your reply instead"
+        ));
+    }
+    let before = current
+        .fields
+        .as_object()
+        .and_then(|m| m.get("stale_after"))
+        .map(typed_from_value)
+        .unwrap_or(schema::TypedValue::Missing);
+    let after = schema::TypedValue::string(stale_after);
+    if before == after {
+        return Ok(Rechecked::Unchanged);
+    }
+    let before_label = current
+        .fields
+        .as_object()
+        .and_then(|m| m.get("stale_after"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("none")
+        .to_string();
+    manifest::ensure_writable(vault, rel, &state)?;
+    let stamp = ProposalOp::UpdateBelief {
+        belief_id: belief_id.clone(),
+        patch: vec![PatchOp {
+            field_path: "/fields/stale_after".to_string(),
+            before,
+            after,
+        }],
+        basis: current.basis.clone(),
+    };
+    let targets = vec![target(
+        &state,
+        schema::TargetClass::Belief,
+        &belief_id,
+        false,
+    )];
+    let actor = Actor {
+        id: actor.to_string(),
+    };
+    let door = Door {
+        tool: "recheck_concept",
+        reason: format!(
+            "recheck_concept {rel}: still holds — stale_after {} → {stale_after}, nothing else \
+             (actor {})",
+            before_label, actor.id
+        ),
+    };
+    route(
+        writer,
+        vault,
+        &state,
+        krel,
+        &actor,
+        vec![(stamp, targets)],
+        run,
+        door,
+    )?;
+    Ok(Rechecked::Stamped)
+}
+
+/// The refusal when the body a person verified is not the body on disk.
+pub const STALE_VIEW: &str = "stale_view";
 
 /// Honest event time only: a date-only stamp yields None, never a
 /// fabricated instant (the migration convention).
@@ -147,6 +306,7 @@ fn verify_with(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
+    viewed_body_hash: &str,
 ) -> Result<(), String> {
     let krel = rel
         .strip_prefix("knowledge/")
@@ -170,6 +330,13 @@ fn verify_with(
         .get(krel)
         .ok_or_else(|| format!("{rel} is not a committed projection — nothing to verify"))?
         .clone();
+    let on_disk = crate::vault::write::read_note(vault, rel)?;
+    if crate::ledger::sha256_hex(on_disk.as_bytes()) != viewed_body_hash {
+        return Err(format!(
+            "{STALE_VIEW}: {rel} changed since you opened it — reopen it and verify again"
+        ));
+    }
+    manifest::ensure_writable(vault, rel, &state)?;
     let belief = state.beliefs.get(&belief_id).expect("path index");
     let current = belief.current();
 
@@ -295,12 +462,8 @@ fn intended_relations(
     state: &EpistemicState,
     from_belief: &str,
     fields: &serde_json::Map<String, serde_json::Value>,
-) -> Vec<(String, RelationKind)> {
-    let stems: std::collections::BTreeMap<String, String> = state
-        .projection_paths
-        .iter()
-        .map(|(path, belief)| (stem_of(path).to_string(), belief.clone()))
-        .collect();
+) -> Result<Vec<(String, RelationKind)>, String> {
+    use super::migrate::{ambiguous_link, resolve_link, LinkTarget};
     let mut out = Vec::new();
     for (field, kind) in [
         ("supersedes", RelationKind::Supersedes),
@@ -308,14 +471,14 @@ fn intended_relations(
         ("contradicts", RelationKind::Contradicts),
     ] {
         for link in wikilinks(fields.get(field)) {
-            if let Some(target) = stems.get(&link) {
-                if target != from_belief {
-                    out.push((target.clone(), kind));
-                }
+            match resolve_link(&state.projection_paths, &link) {
+                LinkTarget::One(target) if target != from_belief => out.push((target, kind)),
+                LinkTarget::Ambiguous(paths) => return Err(ambiguous_link(&link, &paths)),
+                _ => {}
             }
         }
     }
-    out
+    Ok(out)
 }
 
 fn relation_op(from: &str, to: &str, kind: RelationKind, action: RelationAction) -> ProposalOp {
@@ -356,6 +519,18 @@ fn write_concept_with(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
+    write_concept_in_run_with(writer, vault, rel, frontmatter, body, None)
+}
+
+/// `write_concept_with`, booked under the run that made the write (M49.9).
+fn write_concept_in_run_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+    run: Option<&str>,
+) -> Result<(), String> {
     let krel = rel
         .strip_prefix("knowledge/")
         .ok_or("the adapter writes only knowledge/ projections")?;
@@ -375,9 +550,13 @@ fn write_concept_with(
         Some(belief_id) => revision_ops(&state, belief_id, &mut fields, body)?,
     };
 
+    // M49.3: a file changed outside the ledger is never written over — and
+    // the refusal comes BEFORE the transition commits, not after.
+    manifest::ensure_writable(vault, rel, &state)?;
+
     if ops.is_empty() {
-        // A byte-level no-op — the legacy path succeeded silently here, and
-        // so do we; the projection is refreshed, nothing is committed.
+        // A byte-level no-op: nothing is committed, and the projection is
+        // refreshed.
         if let Some(belief_id) = state.projection_paths.get(krel) {
             let projection = project_belief(&state, belief_id)?;
             write_projection(vault, rel, &projection)?;
@@ -388,7 +567,11 @@ fn write_concept_with(
     // THE DECISION IS THE TABLE'S NOW. Everything above this line is server
     // enrichment; everything below is the M24 commit-set protocol, which
     // owns the batch, the projection, and the acknowledgement.
-    route(writer, vault, &state, rel, krel, &actor, ops)?;
+    let door = Door {
+        tool: "write_concept",
+        reason: format!("write_concept {rel} (actor {})", actor.id),
+    };
+    route(writer, vault, &state, krel, &actor, ops, run, door)?;
 
     let state = current_state(writer, vault)?;
     let belief_id = state
@@ -412,16 +595,30 @@ fn write_concept_with(
 /// edits, and its new aliases describe one edit a person made in one file.
 /// Applying the Belief while a relation waited would leave the file saying
 /// something the graph does not.
+#[allow(clippy::too_many_arguments)] // each is a distinct fact of one write
+/// Which server-stamped door a routed write came through, and what the card
+/// a person may be asked about it should say — `write_concept`'s full
+/// replace and `recheck_concept`'s one-field stamp must never read alike.
+struct Door<'a> {
+    tool: &'a str,
+    reason: String,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn route(
     writer: &mut LedgerWriter,
     vault: &Path,
     state: &EpistemicState,
-    rel: &str,
     krel: &str,
     actor: &Actor,
     ops: Vec<(schema::ProposalOp, Vec<schema::ProposalTarget>)>,
+    run: Option<&str>,
+    door: Door<'_>,
 ) -> Result<(), String> {
     let table = crate::policy::table::PolicyTable::load()?;
+    // `write_concept` → `cerebro-write-concept`: the spelling every id below
+    // was derived under before `recheck_concept` came through here too.
+    let tag = format!("cerebro-{}", door.tool.replace('_', "-"));
     // Derived, not minted: a retry at the same head produces the same
     // proposal ids and the same commit-set id, so a lost acknowledgement
     // replays instead of duplicating.
@@ -430,9 +627,16 @@ fn route(
         .as_ref()
         .map(|head| head.hash.clone())
         .unwrap_or_else(|| "genesis".to_string());
-    let run_id = schema::sha256_first128(
-        format!("cerebro-write-concept-run-v1\0{krel}\0{head_hash}").as_bytes(),
-    );
+    // M49.9 (K25): the RUN the write belongs to, when one is known — so
+    // the proposals, the commit set and the Fleet's counters all name the
+    // run that made them. Before, every write was booked under an id
+    // derived from its path and the head, and no run could be traced to
+    // what it wrote. Proposal ids still derive from path and head too, so a
+    // retry at the same head replays rather than duplicating.
+    let run_id = match run {
+        Some(run) => run.to_string(),
+        None => schema::sha256_first128(format!("{tag}-run-v1\0{krel}\0{head_hash}").as_bytes()),
+    };
     // The head the search is minted against — derived from the chain head,
     // so the receipt's claim about WHERE it looked is recomputable by anyone
     // holding the ledger.
@@ -449,9 +653,12 @@ fn route(
             .op(op.kind())
             .ok_or_else(|| format!("{} is not in the policy table", op.kind()))?
             .base_risk;
-        let proposal_id = schema::sha256_first128(
-            format!("cerebro-write-concept-op-v1\0{run_id}\0{index}").as_bytes(),
-        );
+        let proposal_id = match run {
+            Some(_) => schema::sha256_first128(
+                format!("{tag}-op-v2\0{run_id}\0{krel}\0{head_hash}\0{index}").as_bytes(),
+            ),
+            None => schema::sha256_first128(format!("{tag}-op-v1\0{run_id}\0{index}").as_bytes()),
+        };
         let receipt = match &op {
             schema::ProposalOp::CreateBelief {
                 subject,
@@ -505,7 +712,7 @@ fn route(
                 absence_claim: false,
             },
             declared_risk,
-            reason: format!("write_concept {rel} (actor {})", actor.id),
+            reason: door.reason.clone(),
             candidate_search_receipt: receipt,
         };
         crate::policy::commit::submit_proposal(&table, writer, actor, &proposal)
@@ -515,10 +722,13 @@ fn route(
 
     let outcome = crate::policy::commit::commit_proposals(&table, writer, vault, &run_id, &ordered)
         .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    if run.is_some() {
+        outcome.book(&run_id);
+    }
     match outcome.transition {
         crate::policy::commit::TransitionCode::Apply => Ok(()),
         crate::policy::commit::TransitionCode::InitialQueue => Err(queued_detail(&outcome)),
-        _ => Err(rejected_detail(&outcome)),
+        _ => Err(rejected_detail(&outcome, door.tool)),
     }
 }
 
@@ -548,7 +758,7 @@ fn queued_detail(outcome: &crate::policy::commit::CommitOutcome) -> String {
     )
 }
 
-fn rejected_detail(outcome: &crate::policy::commit::CommitOutcome) -> String {
+fn rejected_detail(outcome: &crate::policy::commit::CommitOutcome, tool: &str) -> String {
     let code = outcome
         .results
         .iter()
@@ -559,7 +769,7 @@ fn rejected_detail(outcome: &crate::policy::commit::CommitOutcome) -> String {
             _ => None,
         })
         .unwrap_or_else(|| "atomic_set_refused".to_string());
-    format!("{code}: write_concept was refused by policy")
+    format!("{code}: {tool} was refused by policy")
 }
 
 /// Did the committed transition actually apply? The projected content must
@@ -641,7 +851,7 @@ fn creation_ops(
         },
         vec![target(state, schema::TargetClass::Belief, &belief_id, true)],
     )];
-    for (to, kind) in intended_relations(state, &belief_id, fields) {
+    for (to, kind) in intended_relations(state, &belief_id, fields)? {
         let op = relation_op(&belief_id, &to, kind, RelationAction::Add);
         let relation_id = schema::derive_relation_id(&belief_id, &to, kind);
         staged.push((
@@ -721,7 +931,7 @@ fn revision_ops(
     }
 
     // Relation diff against the live relation state.
-    let intended: BTreeSet<(String, RelationKind)> = intended_relations(state, belief_id, fields)
+    let intended: BTreeSet<(String, RelationKind)> = intended_relations(state, belief_id, fields)?
         .into_iter()
         .collect();
     let live: BTreeSet<(String, RelationKind)> = state
@@ -824,6 +1034,70 @@ fn write_projection(vault: &Path, rel: &str, projection: &ProjectionResult) -> R
     Ok(())
 }
 
+/// Retire every override on the knowledge log (M49.5, K11). The log is a
+/// derived, system-owned view (the 2026-09 owner decision): an override —
+/// a hand edit captured before that decision (live vault, seq 179) — pins
+/// the body, so every later entry was committed to the ledger and never
+/// appeared in log.md. Nothing emitted `OverrideChange::Clear` until this.
+/// `Ok(false)` when there was nothing to clear.
+pub(crate) fn clear_log_overrides_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+) -> Result<bool, String> {
+    let state = current_state(writer, vault)?;
+    let Some(belief_id) = state.projection_paths.get("log.md") else {
+        return Ok(false);
+    };
+    let belief = state.beliefs.get(belief_id).expect("path index");
+    if belief.overrides.is_empty() {
+        return Ok(false);
+    }
+    let current = belief.current();
+    let before = super::reduce::projected_bytes(&state, belief);
+    let mut cleared = belief.clone();
+    cleared.overrides.clear();
+    let after = super::reduce::projected_bytes(&state, &cleared);
+    let (schema_v, batch_id, idempotency_key, actor) = common_body(Actor {
+        id: "system:knowledge-log".to_string(),
+    });
+    let body = schema::ProjectionOverridden {
+        schema: schema_v,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        belief_id: belief_id.clone(),
+        path: "log.md".to_string(),
+        base_belief_revision: current.revision,
+        base_belief_revision_event: current.event_id.clone(),
+        base_generating_event: belief.projection_head_event.clone(),
+        before_projection_hash: crate::ledger::sha256_hex(before.as_bytes()),
+        after_projection_hash: crate::ledger::sha256_hex(after.as_bytes()),
+        origin: schema::OverrideOrigin::InApp,
+        change: schema::OverrideChange::Clear {
+            override_event_ids: belief
+                .overrides
+                .iter()
+                .map(|o| o.event_id.clone())
+                .collect(),
+            reason: "the knowledge log is a derived view — overrides retired".to_string(),
+        },
+    };
+    writer.append(
+        schema::KIND_PROJECTION_OVERRIDDEN,
+        serde_json::to_value(&body).map_err(|e| e.to_string())?,
+    )?;
+    Ok(true)
+}
+
+/// Test seam for other ledger modules' tests.
+#[cfg(test)]
+pub(crate) fn tests_append_log(writer: &mut LedgerWriter, vault: &Path, rel: &str, title: &str) {
+    append_log_with(writer, vault, rel, title, false).unwrap();
+}
+
 fn append_log_with(
     writer: &mut LedgerWriter,
     vault: &Path,
@@ -831,6 +1105,7 @@ fn append_log_with(
     title: &str,
     existed: bool,
 ) -> Result<(), String> {
+    clear_log_overrides_with(writer, vault)?;
     let store = writer.store_id().to_string();
     let state = current_state(writer, vault)?;
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -922,6 +1197,16 @@ mod tests {
     use super::super::{manifest as manifest_mod, LedgerHead};
     use super::*;
     use crate::vault::testutil;
+
+    /// The pin the Verify button sends (M49.3): the hash of the body the
+    /// person read — here, what is on disk.
+    fn viewed(vault: &Path, rel: &str) -> String {
+        crate::ledger::sha256_hex(
+            crate::vault::write::read_note(vault, rel)
+                .unwrap()
+                .as_bytes(),
+        )
+    }
 
     fn fm(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
         pairs
@@ -1101,6 +1386,283 @@ mod tests {
     }
 
     #[test]
+    fn approving_a_supersession_card_is_read_as_the_persons_agreement() {
+        // A verified concept, then an agent's replacement: the supersede
+        // queues (M49.8, K22). Approving the card is the agreement — the
+        // readers must retire the old claim then, not only once someone
+        // separately verifies the replacement.
+        let vault = corpus_copy("concepts-approved-supersession");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let old = "knowledge/systems/status-model.md";
+        let new = "knowledge/systems/status-model-v2.md";
+        let mut frontmatter = concept_frontmatter();
+        frontmatter.insert("supersedes".into(), serde_json::json!(["[[status-model]]"]));
+        let queued = write_concept_with(
+            &mut writer,
+            &vault,
+            new,
+            &frontmatter,
+            "# Status model v2\n",
+        )
+        .unwrap_err();
+        assert!(queued.starts_with("queued_for_review"), "{queued}");
+        let pair = (new.to_string(), old.to_string());
+        let state = current_state(&writer, &vault).unwrap();
+        assert!(
+            !crate::knowledge::approved_supersessions(&state).contains(&pair),
+            "a queued card is not an agreement"
+        );
+
+        approve_and_resolve(&mut writer, &vault);
+        let state = current_state(&writer, &vault).unwrap();
+        assert!(crate::knowledge::approved_supersessions(&state).contains(&pair));
+
+        // The person later drops the edge, and some other hand puts it back
+        // in the file: the approval was for the add IT made, not this one.
+        let approved_file = std::fs::read_to_string(vault.join(new)).unwrap();
+        let link = "supersedes:\n  - \"[[status-model]]\"\n";
+        assert!(approved_file.contains(link), "{approved_file}");
+        std::fs::write(vault.join(new), approved_file.replace(link, "")).unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, new).unwrap();
+        std::fs::write(vault.join(new), &approved_file).unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, new).unwrap();
+        let state = current_state(&writer, &vault).unwrap();
+        assert!(!crate::knowledge::approved_supersessions(&state).contains(&pair));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_concept_deleted_outside_cerebro_is_not_brought_back_by_a_write() {
+        let vault = testutil::temp_vault("concepts-deleted-stays-deleted");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let rel = "knowledge/concepts/acme.md";
+        write_concept_with(&mut writer, &vault, rel, &concept_frontmatter(), "# Acme\n").unwrap();
+        std::fs::remove_file(vault.join(rel)).unwrap();
+
+        let head = writer.head();
+        let err = write_concept_with(
+            &mut writer,
+            &vault,
+            rel,
+            &concept_frontmatter(),
+            "# Again\n",
+        )
+        .unwrap_err();
+        assert!(err.contains("was deleted outside Cerebro"), "{err}");
+        assert_eq!(writer.head(), head, "refused before anything committed");
+        assert!(!vault.join(rel).exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_link_that_became_ambiguous_later_does_not_lock_its_concept() {
+        // X links [[churn]] while one concept has that stem; a second one
+        // arrives later. X's own edits must still be keepable — only a link
+        // an edit ADDS has to name exactly one concept.
+        let vault = testutil::temp_vault("concepts-late-ambiguity");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        write_concept_with(
+            &mut writer,
+            &vault,
+            "knowledge/systems/churn.md",
+            &concept_frontmatter(),
+            "# Churn\n",
+        )
+        .unwrap();
+        let x = "knowledge/concepts/x.md";
+        let mut linking = concept_frontmatter();
+        linking.insert("supersedes".into(), serde_json::json!(["[[churn]]"]));
+        write_concept_with(&mut writer, &vault, x, &linking, "# X\n").unwrap();
+        write_concept_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/churn.md",
+            &concept_frontmatter(),
+            "# Churn, the metric\n",
+        )
+        .unwrap();
+        let live = |writer: &LedgerWriter| {
+            let state = current_state(writer, &vault).unwrap();
+            state.relations.values().filter(|r| r.live).count()
+        };
+        let relations = live(&writer);
+
+        // A body-only edit in another editor is captured.
+        let file = std::fs::read_to_string(vault.join(x)).unwrap();
+        std::fs::write(vault.join(x), format!("{file}\nA person's line.\n")).unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap();
+        // Adding a path link beside the kept ambiguous one relates it; its
+        // later removal cannot be told apart from what `[[churn]]` keeps,
+        // so it refuses rather than keep the relation live silently.
+        let file = std::fs::read_to_string(vault.join(x)).unwrap();
+        let both = file.replace("[[churn]]\"", "[[churn]]\"\n  - \"[[metrics/churn]]\"");
+        std::fs::write(vault.join(x), &both).unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap();
+        assert_eq!(live(&writer), relations + 1);
+        std::fs::write(vault.join(x), &file).unwrap();
+        let err =
+            crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap_err();
+        assert!(err.contains("names more than one concept"), "{err}");
+        assert_eq!(live(&writer), relations + 1, "nothing recorded");
+        std::fs::write(vault.join(x), &both).unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap();
+
+        // Respelling the kept link by path names the same concept: no change.
+        let file = std::fs::read_to_string(vault.join(x)).unwrap();
+        std::fs::write(
+            vault.join(x),
+            file.replace("[[churn]]", "[[systems/churn]]"),
+        )
+        .unwrap();
+        crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap();
+        assert_eq!(live(&writer), relations + 1);
+
+        // ADDING the ambiguous link still refuses.
+        let file = std::fs::read_to_string(vault.join(x)).unwrap();
+        let added = file.replacen("---\n", "---\nrefines:\n  - \"[[churn]]\"\n", 1);
+        std::fs::write(vault.join(x), added).unwrap();
+        let err =
+            crate::ledger::capture::capture_out_of_band_with(&mut writer, &vault, x).unwrap_err();
+        assert!(err.contains("names more than one concept"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_approved_set_keeps_a_file_made_by_hand_meanwhile_and_is_still_applied() {
+        // The post-commit half of the guard: a queued creation is approved
+        // after a person hand-made a file at its path. The set is applied
+        // (the ledger records it), the file is kept, and the outcome names
+        // it — it is not reported as refused.
+        use crate::policy::commit;
+        let vault = corpus_copy("concepts-approved-over-hand-made");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let verified = "knowledge/metrics/sync-error-rate.md";
+        verify_with(
+            &mut writer,
+            &vault,
+            verified,
+            &fm(&[(
+                "verified",
+                serde_json::json!({ "by": "human:me", "at": "2026-09-27T10:00:00Z" }),
+            )]),
+            &viewed(&vault, verified),
+        )
+        .unwrap();
+        let new = "knowledge/metrics/sync-error-rate-v2.md";
+        let mut frontmatter = concept_frontmatter();
+        frontmatter.insert(
+            "supersedes".into(),
+            serde_json::json!(["[[sync-error-rate]]"]),
+        );
+        let queued =
+            write_concept_with(&mut writer, &vault, new, &frontmatter, "# v2\n").unwrap_err();
+        assert!(queued.starts_with("queued_for_review"), "{queued}");
+        std::fs::write(vault.join(new), "# Mine\n").unwrap();
+
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let state = current_state(&writer, &vault).unwrap();
+        let set = commit::pending_sets(&state).into_iter().next().unwrap();
+        for proposal_id in &set.ordered_proposal_ids {
+            commit::record_decision(
+                &mut writer,
+                &vault,
+                proposal_id,
+                schema::Decision::Approve,
+                "human:me",
+                None,
+                "2026-09-28T11:00:00Z",
+            )
+            .unwrap();
+        }
+        let outcome = commit::resolve_commit_set(
+            &table,
+            &mut writer,
+            &vault,
+            &set.run_id,
+            &set.ordered_proposal_ids,
+        )
+        .unwrap();
+        assert_eq!(outcome.transition, commit::TransitionCode::Apply);
+        assert_eq!(outcome.kept, vec![new.to_string()]);
+        assert_eq!(
+            std::fs::read_to_string(vault.join(new)).unwrap(),
+            "# Mine\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_deleted_concept_is_not_rewritten_in_a_vault_that_never_armed() {
+        // No manifest, so no entry proves a write: the writer still refuses
+        // a RECORDED concept whose file is gone.
+        let vault = corpus_copy("concepts-deleted-no-manifest");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        assert!(manifest_mod::load(&vault).unwrap().is_none());
+        let rel = "knowledge/systems/pick-queue-drain.md";
+        std::fs::remove_file(vault.join(rel)).unwrap();
+        let head = writer.head();
+        let err = write_concept_with(&mut writer, &vault, rel, &concept_frontmatter(), "# Back\n")
+            .unwrap_err();
+        assert!(err.contains("was deleted outside Cerebro"), "{err}");
+        assert_eq!(writer.head(), head);
+        assert!(!vault.join(rel).exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_governed_apply_never_replaces_a_file_the_manifest_never_recorded() {
+        // The no-manifest state (migrated, never armed — what a refused
+        // `build_initial` leaves): every path is entry-less, so the write-time
+        // guard has nothing recorded to judge by.
+        let vault = corpus_copy("concepts-no-manifest-apply");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        assert!(manifest_mod::load(&vault).unwrap().is_none());
+
+        // A person edits one concept in another editor...
+        let edited = "knowledge/systems/pick-queue-drain.md";
+        let mut bytes = std::fs::read_to_string(vault.join(edited)).unwrap();
+        bytes.push_str("\nA line only the person wrote.\n");
+        std::fs::write(vault.join(edited), &bytes).unwrap();
+        // ...and hand-makes a file at the path an agent is about to claim.
+        let claimed = "knowledge/concepts/acme.md";
+        std::fs::create_dir_all(vault.join("knowledge/concepts")).unwrap();
+        std::fs::write(vault.join(claimed), "# Acme\n\nMine.\n").unwrap();
+
+        // An unrelated agent write commits, and leaves the edited file alone.
+        write_concept_with(
+            &mut writer,
+            &vault,
+            "knowledge/concepts/churn.md",
+            &concept_frontmatter(),
+            "# Churn\n",
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join(edited)).unwrap(), bytes);
+
+        // Claiming the hand-made path refuses before anything commits.
+        let head = writer.head();
+        let err = write_concept_with(
+            &mut writer,
+            &vault,
+            claimed,
+            &concept_frontmatter(),
+            "# Acme\n",
+        )
+        .unwrap_err();
+        assert!(err.contains(manifest_mod::PROJECTION_DISK_CHANGED), "{err}");
+        assert_eq!(writer.head(), head);
+        assert_eq!(
+            std::fs::read_to_string(vault.join(claimed)).unwrap(),
+            "# Acme\n\nMine.\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
     fn dropping_a_live_alias_is_the_typed_refusal_and_omission_carries_forward() {
         let vault = testutil::temp_vault("concepts-alias");
         let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
@@ -1192,7 +1754,7 @@ mod tests {
             "verified",
             serde_json::json!({ "by": "human:me", "at": "2026-08-09T10:00:00Z" }),
         )]);
-        verify_with(&mut writer, &vault, rel, &patch).unwrap();
+        verify_with(&mut writer, &vault, rel, &patch, &viewed(&vault, rel)).unwrap();
 
         let state = current_state(&writer, &vault).unwrap();
         let belief_id = schema::migrate_id(&store, "belief", "metrics/sync-error-rate.md");
@@ -1211,7 +1773,7 @@ mod tests {
 
         // The identical stamp is a no-op: no revision, no re-attestation.
         let head = writer.head();
-        verify_with(&mut writer, &vault, rel, &patch).unwrap();
+        verify_with(&mut writer, &vault, rel, &patch, &viewed(&vault, rel)).unwrap();
         assert_eq!(writer.head(), head, "an identical verify appends nothing");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -1232,6 +1794,7 @@ mod tests {
                 "verified",
                 serde_json::json!({ "by": "human:me", "at": "2026-08-09T10:00:00Z" }),
             )]),
+            &viewed(&vault, rel),
         )
         .unwrap();
 
@@ -1370,6 +1933,478 @@ mod tests {
                 .any(|f| f.kind == schema::KIND_OBSERVATION_RECORDED),
             "zero human assertions fabricated from the crash"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.3 (K6): files win. A concept changed outside the ledger is never
+    // written over — an agent rewrite and a Verify both refuse BEFORE
+    // anything commits, and the hand edit survives byte for byte.
+    #[test]
+    fn a_hand_edited_concept_refuses_rewrite_and_verify_and_keeps_the_edit() {
+        let vault = corpus_copy("concepts-hand-edited");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        // An armed vault's state: the manifest records every projection.
+        let armed = current_state(&writer, &vault).unwrap();
+        let recorded = manifest::build_initial(&vault, writer.store_id(), &armed)
+            .unwrap()
+            .expect("the corpus byte-matches its projections");
+        manifest::save(&vault, &recorded).unwrap();
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let edited = format!(
+            "{}\nA line someone added in another editor.\n",
+            std::fs::read_to_string(vault.join(rel)).unwrap()
+        );
+        std::fs::write(vault.join(rel), &edited).unwrap();
+        let head = writer.head();
+
+        let rewrite = write_concept_with(
+            &mut writer,
+            &vault,
+            rel,
+            &fm(&[
+                ("type", serde_json::json!("Metric")),
+                ("title", serde_json::json!("Sync error rate")),
+                ("description", serde_json::json!("Rewritten by an agent.")),
+            ]),
+            "The agent's version.",
+        )
+        .unwrap_err();
+        assert!(
+            rewrite.starts_with(manifest::PROJECTION_DISK_CHANGED),
+            "{rewrite}"
+        );
+
+        let stamp = fm(&[(
+            "verified",
+            serde_json::json!({ "by": "human:me", "at": "2026-09-26T10:00:00Z" }),
+        )]);
+        // Verifying the edited body the person is looking at: it is not the
+        // recorded text, so the ledger's version is not attested over it.
+        let verify = verify_with(&mut writer, &vault, rel, &stamp, &viewed(&vault, rel));
+        assert!(
+            verify
+                .unwrap_err()
+                .starts_with(manifest::PROJECTION_DISK_CHANGED),
+            "verify refuses a file that differs from recorded history"
+        );
+
+        assert_eq!(writer.head(), head, "nothing committed");
+        assert_eq!(std::fs::read_to_string(vault.join(rel)).unwrap(), edited);
+
+        // The Restore exit is the one deliberate overwrite.
+        let state = current_state(&writer, &vault).unwrap();
+        let belief = state.projection_paths["metrics/sync-error-rate.md"].clone();
+        let projection = project_belief(&state, &belief).unwrap();
+        assert!(manifest::write_projection(&vault, rel, &projection)
+            .unwrap_err()
+            .starts_with(manifest::PROJECTION_DISK_CHANGED));
+        manifest::restore_projection(&vault, rel, &projection).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault.join(rel)).unwrap(),
+            projection.bytes
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.3 (K6): the stamp attests the body the person READ.
+    #[test]
+    fn verify_refuses_a_body_that_changed_since_it_was_read() {
+        let vault = corpus_copy("concepts-stale-view");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let read_before = viewed(&vault, rel);
+        let head = writer.head();
+        let stamp = fm(&[(
+            "verified",
+            serde_json::json!({ "by": "human:me", "at": "2026-09-26T10:00:00Z" }),
+        )]);
+        let err =
+            verify_with(&mut writer, &vault, rel, &stamp, "not-the-body-on-disk").unwrap_err();
+        assert!(err.starts_with(STALE_VIEW), "{err}");
+        assert_eq!(writer.head(), head);
+        // The body that IS on disk verifies.
+        verify_with(&mut writer, &vault, rel, &stamp, &read_before).unwrap();
+        assert_ne!(writer.head(), head);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The log is a derived, system-owned view (the 2026-09 owner decision):
+    // regenerated over a hand edit rather than guarded.
+    #[test]
+    fn the_knowledge_log_is_regenerated_over_a_hand_edit() {
+        let vault = corpus_copy("concepts-log-derived");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let log = vault.join(crate::knowledge::LOG_PATH);
+        if log.exists() {
+            let hand = format!("{}\nhand edit\n", std::fs::read_to_string(&log).unwrap());
+            std::fs::write(&log, hand).unwrap();
+        }
+        append_log_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/sync-error-rate.md",
+            "Sync",
+            true,
+        )
+        .unwrap();
+        assert!(!std::fs::read_to_string(&log).unwrap().contains("hand edit"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.7 (K19): "still true" is a stamp, not a rewrite. A no-op writes
+    // nothing; a new date moves stale_after and nothing else — no log line,
+    // no restamped `generated`; a verified concept is the person's.
+    #[test]
+    fn a_recheck_moves_only_stale_after_and_a_no_op_writes_nothing() {
+        let vault = corpus_copy("concepts-recheck");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let rel = "knowledge/systems/pick-queue-drain.md";
+        let log = vault.join(crate::knowledge::LOG_PATH);
+        let log_before = std::fs::read_to_string(&log).ok();
+        let before = std::fs::read_to_string(vault.join(rel)).unwrap();
+
+        let head = writer.head();
+        assert_eq!(
+            recheck_with(
+                &mut writer,
+                &vault,
+                rel,
+                "2027-01-15",
+                "agent:recheck",
+                None
+            )
+            .unwrap(),
+            Rechecked::Stamped
+        );
+        assert_ne!(writer.head(), head);
+        let after = std::fs::read_to_string(vault.join(rel)).unwrap();
+        assert!(after.contains("stale_after: 2027-01-15"), "{after}");
+        // Only that line moved.
+        let changed: Vec<(&str, &str)> = before
+            .lines()
+            .zip(after.lines())
+            .filter(|(a, b)| a != b)
+            .collect();
+        assert!(
+            changed.iter().all(|(_, b)| b.starts_with("stale_after:")),
+            "{changed:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&log).ok(),
+            log_before,
+            "no log line"
+        );
+
+        let head = writer.head();
+        assert_eq!(
+            recheck_with(
+                &mut writer,
+                &vault,
+                rel,
+                "2027-01-15",
+                "agent:recheck",
+                None
+            )
+            .unwrap(),
+            Rechecked::Unchanged
+        );
+        assert_eq!(writer.head(), head, "a no-op appends nothing");
+
+        // A verified concept refuses, and nothing is appended.
+        let verified = "knowledge/metrics/sync-error-rate.md";
+        verify_with(
+            &mut writer,
+            &vault,
+            verified,
+            &fm(&[(
+                "verified",
+                serde_json::json!({ "by": "human:me", "at": "2026-09-27T10:00:00Z" }),
+            )]),
+            &viewed(&vault, verified),
+        )
+        .unwrap();
+        let head = writer.head();
+        let err = recheck_with(
+            &mut writer,
+            &vault,
+            verified,
+            "2027-01-15",
+            "agent:recheck",
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("is verified"), "{err}");
+        assert_eq!(writer.head(), head);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // A machine's confirmation is not a person's: the recheck goes to the
+    // table, which floors an attested belief at a card, instead of being
+    // refused and leaving the concept stale for good.
+    #[test]
+    fn a_recheck_of_a_machine_confirmed_concept_waits_for_a_person() {
+        let vault = testutil::temp_vault("concepts-recheck-machine");
+        let dir = vault.join("knowledge");
+        std::fs::create_dir_all(dir.join("metrics")).unwrap();
+        std::fs::write(
+            dir.join("metrics/nightly.md"),
+            concat!(
+                "---\n",
+                "type: Metric\n",
+                "title: Nightly\n",
+                "verified: { by: \"process:metrics-nightly\", at: 2026-08-01 }\n",
+                "---\n",
+                "\n# Nightly\n"
+            ),
+        )
+        .unwrap();
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &dir).unwrap();
+        // The file as the ledger renders it, so the disk is the ledger's.
+        let state = current_state(&writer, &vault).unwrap();
+        let belief = &state.projection_paths["metrics/nightly.md"];
+        let bytes = project_belief(&state, belief).unwrap().bytes;
+        std::fs::write(dir.join("metrics/nightly.md"), bytes).unwrap();
+        let err = recheck_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/nightly.md",
+            "2099-01-01",
+            "agent:recheck",
+            None,
+        )
+        .unwrap_err();
+        assert!(err.starts_with("queued_for_review"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The stamp is a proposal like any revision: on a hub the table's
+    // `lineage_fan_in` escalator queues it for a person, where a hand-coded
+    // "unattested, so auto-apply" check let it straight through.
+    #[test]
+    fn a_recheck_of_a_hub_waits_for_a_person() {
+        let vault = testutil::temp_vault("concepts-recheck-hub");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let hub = "knowledge/concepts/hub.md";
+        write_concept_with(&mut writer, &vault, hub, &concept_frontmatter(), "# Hub\n").unwrap();
+        for n in 0..6 {
+            let mut refining = concept_frontmatter();
+            refining.insert("refines".into(), serde_json::json!(["[[hub]]"]));
+            write_concept_with(
+                &mut writer,
+                &vault,
+                &format!("knowledge/concepts/spoke-{n}.md"),
+                &refining,
+                "# Spoke\n",
+            )
+            .unwrap();
+        }
+        let before = std::fs::read_to_string(vault.join(hub)).unwrap();
+        let err = recheck_with(
+            &mut writer,
+            &vault,
+            hub,
+            "2099-01-01",
+            "agent:recheck",
+            None,
+        )
+        .unwrap_err();
+        assert!(err.starts_with("queued_for_review"), "{err}");
+        assert_eq!(std::fs::read_to_string(vault.join(hub)).unwrap(), before);
+        // M50.3: the card names the concept it would change, so it can open.
+        let state = current_state(&writer, &vault).unwrap();
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let cards = crate::policy::review::needs_review(&table, &state);
+        assert!(
+            cards
+                .iter()
+                .flat_map(|card| &card.targets)
+                .any(|target| target.path.as_deref() == Some(hub)),
+            "{cards:#?}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.8 (K22): `supersedes` against a human-verified concept is a change
+    // TO that concept, so it floors at HIGH and waits for a person — it used
+    // to auto-apply at MEDIUM and retire the verified claim with no card.
+    #[test]
+    fn superseding_a_verified_concept_waits_for_a_person() {
+        let vault = corpus_copy("concepts-supersede-verified");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let store = writer.store_id().to_string();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        let verified = "knowledge/metrics/sync-error-rate.md";
+        verify_with(
+            &mut writer,
+            &vault,
+            verified,
+            &fm(&[(
+                "verified",
+                serde_json::json!({ "by": "human:me", "at": "2026-09-27T10:00:00Z" }),
+            )]),
+            &viewed(&vault, verified),
+        )
+        .unwrap();
+
+        let queued = write_concept_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/sync-error-rate-v2.md",
+            &fm(&[
+                ("type", serde_json::json!("Metric")),
+                ("title", serde_json::json!("Sync error rate, v2")),
+                ("supersedes", serde_json::json!(["[[sync-error-rate]]"])),
+                (
+                    "generated",
+                    serde_json::json!({ "by": "agent:run-9", "at": "2026-09-27" }),
+                ),
+            ]),
+            "# Sync error rate, v2\n\nA newer claim.",
+        )
+        .unwrap_err();
+        assert!(queued.starts_with("queued_for_review:"), "{queued}");
+        assert!(queued.contains("HIGH"), "{queued}");
+        let state = current_state(&writer, &vault).unwrap();
+        let old = schema::migrate_id(&store, "belief", "metrics/sync-error-rate.md");
+        assert!(
+            !state
+                .relations
+                .values()
+                .any(|r| r.live && r.to == old && r.relation == RelationKind::Supersedes),
+            "nothing retires the verified claim while it waits"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M50.3: a run's detail names what it changed, read back from the
+    // ledger's own proposals — it used to say "1 applied" and name nothing.
+    #[test]
+    fn a_run_names_the_concepts_it_changed() {
+        const RUN: &str = "98888888888888888888888888888888";
+        let vault = corpus_copy("concepts-run-writes");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+        write_concept_in_run_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/named.md",
+            &fm(&[
+                ("type", serde_json::json!("Metric")),
+                ("title", serde_json::json!("Named")),
+                ("description", serde_json::json!("A concept a run wrote.")),
+            ]),
+            "# Named\n\nWritten inside a run.",
+            Some(RUN),
+        )
+        .unwrap();
+
+        let state = current_state(&writer, &vault).unwrap();
+        assert_eq!(
+            crate::knowledge::run_writes(&state, RUN),
+            vec![crate::knowledge::RunWrite {
+                path: "knowledge/metrics/named.md".into(),
+                state: "applied".into(),
+            }],
+        );
+        // Another run changed nothing here — measured, and said as empty.
+        assert!(
+            crate::knowledge::run_writes(&state, "97777777777777777777777777777777").is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.9 (K25): a write made inside a run is booked on that run — its
+    // proposals carry the run's id and its row counts what was applied.
+    // The counters were inserted as 0 and never written.
+    #[test]
+    fn a_write_in_a_run_is_booked_on_that_runs_row() {
+        let _sink = crate::runtime::sink::test_lock();
+        let vault = corpus_copy("concepts-booked");
+        crate::runtime::sink::arm(&vault).unwrap();
+        // Opened the way production opens an attended run's row: before the
+        // CLI starts, so the writes it makes are booked on it.
+        crate::runtime::sink::with_sink(|conn| {
+            crate::runtime::dispatch::begin_attended(
+                conn,
+                "99999999999999999999999999999999",
+                None,
+                None,
+                None,
+                None,
+                chrono::Utc::now(),
+            )
+        })
+        .unwrap()
+        .unwrap();
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+
+        write_concept_in_run_with(
+            &mut writer,
+            &vault,
+            "knowledge/metrics/booked.md",
+            &fm(&[
+                ("type", serde_json::json!("Metric")),
+                ("title", serde_json::json!("Booked")),
+                ("description", serde_json::json!("A concept a run wrote.")),
+            ]),
+            "# Booked\n\nWritten inside a run.",
+            Some("99999999999999999999999999999999"),
+        )
+        .unwrap();
+
+        let (submitted, applied, rejected): (i64, i64, i64) =
+            crate::runtime::sink::with_sink(|conn| {
+                conn.query_row(
+                    "SELECT proposals_submitted, applied, rejected FROM runs WHERE run_id = '99999999999999999999999999999999'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+            })
+            .unwrap()
+            .unwrap();
+        assert!(submitted >= 1, "submitted {submitted}");
+        assert_eq!((applied, rejected), (submitted, 0));
+
+        // A recheck in the same run is a proposal too, and counts on the
+        // same row — it used to be filed under an id derived from the path.
+        assert_eq!(
+            recheck_with(
+                &mut writer,
+                &vault,
+                "knowledge/metrics/booked.md",
+                "2099-01-01",
+                "agent:recheck",
+                Some("99999999999999999999999999999999"),
+            )
+            .unwrap(),
+            Rechecked::Stamped
+        );
+        let after: (i64, i64) = crate::runtime::sink::with_sink(|conn| {
+            conn.query_row(
+                "SELECT proposals_submitted, applied FROM runs WHERE run_id = '99999999999999999999999999999999'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(after, (submitted + 1, applied + 1));
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert!(read
+            .frames
+            .iter()
+            .filter(|f| f.kind.starts_with("proposal."))
+            .any(|f| f
+                .body
+                .to_string()
+                .contains("\"99999999999999999999999999999999\"")));
+        crate::runtime::sink::disarm();
         let _ = std::fs::remove_dir_all(&vault);
     }
 }

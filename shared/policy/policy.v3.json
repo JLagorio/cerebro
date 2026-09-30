@@ -62,6 +62,7 @@
     "candidate_receipt_stale": "ledger",
     "candidate_unconsidered": "ledger",
     "capability_unavailable": "operational",
+    "capture_refused": "operational",
     "contradiction_edge_stale": "ledger",
     "contradiction_preservation_required": "ledger",
     "equivalence_not_proven": "ledger",
@@ -73,9 +74,12 @@
     "independence_not_confirmable": "ledger",
     "internal_cas_race": "operational",
     "invalid_reference": "ledger",
+    "ledger_writer_unavailable": "operational",
     "malformed_arguments": "operational",
     "policy_precondition_stale": "ledger",
+    "projection_disk_changed": "operational",
     "qualification_missing": "ledger",
+    "reconciliation_suspended": "operational",
     "revert_not_current": "ledger",
     "revert_not_supported": "ledger",
     "risk_lowered": "ledger",
@@ -85,6 +89,7 @@
     "semantic_search_unavailable": "operational",
     "silence_transition_forbidden": "ledger",
     "stale_target_version": "ledger",
+    "stale_view": "operational",
     "subject_resolution_mismatch": "ledger",
     "subject_resolution_stale": "ledger",
     "target_set_mismatch": "ledger",
@@ -103,8 +108,13 @@
     "schema_invalid"
   ],
   "writer_rejections": [
+    "capture_refused",
     "idempotency_key_reused",
-    "internal_cas_race"
+    "internal_cas_race",
+    "ledger_writer_unavailable",
+    "projection_disk_changed",
+    "reconciliation_suspended",
+    "stale_view"
   ],
   "mint_rejections": [
     "semantic_search_unavailable"

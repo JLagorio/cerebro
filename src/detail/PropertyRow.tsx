@@ -112,18 +112,17 @@ export function PropertyRow({
   const watcher = useRef<ResizeObserver | null>(null);
   /**
    * A CALLBACK ref, not an effect over a ref object, because the node this
-   * measures is REPLACED by the very state it sets.
+   * measures can be REPLACED without the label changing — a row that gains
+   * or loses its menu swaps the span for a button.
    *
-   * `Tooltip` renders its child bare while disabled and inside a fragment
-   * once enabled, so React unmounts the old name element and mounts a new one
-   * the moment `clipped` turns true. An effect keyed on the label never
-   * re-runs across that swap: it kept observing the detached node, which
-   * reports `0/0`, and the next callback set `clipped` straight back to false
-   * — for good, since nothing would ever measure the live node again.
-   *
-   * Measured in the browser at M46.2 Task 8, on the two demo-vault labels the
-   * 84px name box newly clips ("Key result count", "Current value"): the
-   * tooltip was silent on both. Re-attaching per node is the whole fix.
+   * Until M52 the state it sets replaced it too: `Tooltip` rendered its child
+   * bare while disabled and inside a fragment once enabled, so the name
+   * element was remounted the moment `clipped` turned true. An effect keyed
+   * on the label never re-ran across that swap: it kept observing the
+   * detached node, which reports `0/0`, and the next callback set `clipped`
+   * straight back to false — for good. Measured in the browser at M46.2 Task
+   * 8 on "Key result count" and "Current value": the tooltip was silent on
+   * both. Re-attaching per node is what keeps any swap from doing that again.
    */
   const nameNode = useRef<HTMLElement | null>(null);
   const nameRef = useCallback((el: HTMLElement | null) => {

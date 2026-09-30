@@ -295,7 +295,7 @@ export function TimeTable({
                   aria-expanded={!isCollapsed(row.key)}
                   aria-label={`${isCollapsed(row.key) ? 'Expand' : 'Collapse'} ${row.entry.title}`}
                   onClick={() => onToggle(row.key)}
-                  className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100"
+                  className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100"
                 >
                   <Icon name={isCollapsed(row.key) ? 'chevron-right' : 'chevron-down'} size={12} />
                 </button>

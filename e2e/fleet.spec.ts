@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
+import { boot, openAgents, seedBeforeBoot } from './boot';
 
 /**
  * The fleet section: who works here (M33b.3) and the run history behind them
@@ -64,7 +64,7 @@ type Detail = { run: Run; cost_components: unknown[] | null; assembly: unknown |
 async function openFleet(page: Page, runs: Run[] | null, details: Record<string, Detail> = {}) {
   await seedBeforeBoot(page, '__cerebroSeedFleet', runs, details);
   await boot(page);
-  await openKnowledgeTab(page, 'Agent work');
+  await openAgents(page);
   return page.locator('[data-section="fleet"]');
 }
 
@@ -85,7 +85,13 @@ test('fleet: runs come back newest first, attributed to whoever ran them', async
   await expect(rows).toHaveCount(2);
   // Newest first, whatever order they were seeded in.
   await expect(rows.first()).toHaveAttribute('data-run', 'run-2');
-  await expect(rows.first()).toContainText('agent:m26-ingest');
+  // In words (M52.3); the stamp the runtime recorded is a hover away.
+  await expect(rows.first()).toContainText('Background ingest');
+  await expect(rows.first()).not.toContainText('agent:m26-ingest');
+  await expect(rows.first().getByTestId('fleet-actor')).toHaveAttribute(
+    'title',
+    'agent:m26-ingest',
+  );
   await expect(rows.first()).toContainText('1 applied');
   // And the run nobody attributed says so rather than rendering blank.
   await expect(rows.nth(1)).toContainText('unattributed');
@@ -103,7 +109,10 @@ test('fleet: filtering by actor narrows the list', async ({ page }) => {
   const section = await openFleet(page, [LOST, RUN]);
   await expect(section.getByTestId('fleet-row')).toHaveCount(2);
 
-  await section.getByTestId('fleet-filter-actor').selectOption('agent:m26-ingest');
+  // The option READS as words and still filters by the stamp (M52.3).
+  const filter = section.getByTestId('fleet-filter-actor');
+  await expect(filter.locator('option[value="agent:m26-ingest"]')).toHaveText('Background ingest');
+  await filter.selectOption('agent:m26-ingest');
   await expect(section.getByTestId('fleet-row')).toHaveCount(1);
   await expect(section.getByTestId('fleet-row')).toHaveAttribute('data-run', 'run-2');
 });
@@ -208,18 +217,16 @@ test('fleet: a genuinely quiet fleet says nothing has run', async ({ page }) => 
 
 // --- Who works here (M33b.3 / M33b.4) ---------------------------------------
 
-test('fleet: the surface lists agents, and says which of them is a description', async ({
-  page,
-}) => {
+test('fleet: the surface lists agents, and says which of them is off duty', async ({ page }) => {
   // demo-vault ships both agents with their `schedule:` deliberately off,
   // which is exactly D6's case: activation is a human act, and an Agent
-  // record without a schedule is a description rather than a daemon.
+  // record without a schedule is off duty — it runs only when asked.
   const section = await openFleet(page, [RUN]);
   await expect(section.getByTestId('agent-row')).toHaveCount(2);
   const scout = agentCell(section, 'Release scout').row;
   await expect(scout).toHaveAttribute('data-actor', 'process:release-scout');
   await expect(scout).toContainText('Release scout');
-  await expect(scout.getByTestId('agent-duty')).toContainText('description, not a daemon');
+  await expect(scout.getByTestId('agent-duty')).toContainText('Off duty — runs only when you ask');
   // M35.2 — the knowledge agent is the corpus's second record, resolved off
   // the vault like any other: judgement got a face, not a special case.
   const knowledge = agentCell(section, 'Knowledge').row;
@@ -239,24 +246,29 @@ test('fleet: work that no agent record owns is named, not given a face', async (
   // The internal constructs run work and are not standing agents. They stay
   // visible in the history and get no roster row.
   const section = await openFleet(page, [RUN, LOST]);
-  await expect(section.getByTestId('roster-unowned')).toContainText('agent:m26-ingest');
+  // Named in words (M52.3), never the raw `agent:m26-…` stamp.
+  await expect(section.getByTestId('roster-unowned')).toContainText('Background ingest');
+  await expect(section.getByTestId('roster-unowned')).not.toContainText('agent:m26-');
   await expect(section.getByTestId('agent-row')).toHaveCount(2);
 });
 
-test('fleet: clicking an agent narrows the history to its runs', async ({ page }) => {
+// M50.5: the fleet lives on Agents alone, where an agent is a destination —
+// clicking one opens its page, whose history is its runs. The filtering copy
+// lived on a Knowledge tab that is gone; the actor chip still filters here.
+test('fleet: clicking an agent opens it, with only its runs', async ({ page }) => {
   const scoutRun = { ...RUN, run_id: 'run-scout', actor: 'process:release-scout' };
-  const section = await openFleet(page, [scoutRun, LOST]);
+  const section = await openFleet(page, [scoutRun, LOST], {
+    'run-scout': { run: scoutRun, cost_components: null, assembly: null },
+  });
   await expect(section.getByTestId('fleet-row')).toHaveCount(2);
 
   await agentCell(section, 'Release scout').row.click();
-  await expect(section.getByTestId('fleet-row')).toHaveCount(1);
-  await expect(section.getByTestId('fleet-row')).toHaveAttribute('data-run', 'run-scout');
-  // The chip and the selection are one filter, so the chip says so too.
-  await expect(section.getByTestId('fleet-filter-actor')).toHaveValue('process:release-scout');
-
-  // And clicking again lets go of it: a filter you cannot clear is a trap.
-  await agentCell(section, 'Release scout').row.click();
-  await expect(section.getByTestId('fleet-row')).toHaveCount(2);
+  const runs = page.getByTestId('agent-runs').getByTestId('agent-run');
+  await expect(runs).toHaveCount(1);
+  await expect(runs).toHaveAttribute('data-run', 'run-scout');
+  // And a run opens where it is listed (M50.3).
+  await runs.click();
+  await expect(page.getByTestId('run-detail')).toHaveAttribute('data-run', 'run-scout');
 });
 
 // --- Pause and resume, per agent (M33b.5) -----------------------------------
@@ -265,8 +277,8 @@ test('fleet: clicking an agent narrows the history to its runs', async ({ page }
 // release-scout's proposals and "waiting on you" outranks any pause — pausing
 // does not un-queue a decision somebody still owes — so these seed the queue
 // EMPTY to get at the states underneath. And demo-vault ships its one agent
-// deliberately WITHOUT a `schedule:`, so its resting state here is "not
-// activated"; the `background-paused` wording, which needs an activated agent,
+// deliberately WITHOUT a `schedule:`, so its resting state here is "off
+// duty"; the `background-paused` wording, which needs an activated agent,
 // is proved in `AgentRoster.test.tsx` rather than by editing the golden vault.
 //
 // Two init scripts before one boot, which is fine; what the note above forbids
@@ -288,7 +300,7 @@ test('fleet: an agent can be stopped without deleting it', async ({ page }) => {
 
   await pause.click();
 
-  // The pause outranks "not activated": it is a human act on this row, and a
+  // The pause outranks "off duty": it is a human act on this row, and a
   // row that declined to mention it would be the hidden button spec §6 warns
   // about.
   await expect(chip).toHaveAttribute('data-state', 'paused');
@@ -298,7 +310,7 @@ test('fleet: an agent can be stopped without deleting it', async ({ page }) => {
   // here, which is the whole point of a pause over deleting the record.
   await expect(row).toHaveCount(1);
   await expect(row).toContainText('Release scout');
-  await expect(row.getByTestId('agent-duty')).toContainText('description, not a daemon');
+  await expect(row.getByTestId('agent-duty')).toContainText('Off duty');
 
   await pause.click();
   await expect(chip).toHaveAttribute('data-state', 'inactive');

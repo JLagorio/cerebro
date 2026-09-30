@@ -173,7 +173,9 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
         // Reap at the terminal event, mirroring the reader thread's finish().
         if (event.kind === 'Done') mockRuns.delete(run);
       },
-      { onUiAction: emitUiAction },
+      // The system prompt rides along (M52.3) so a scripted answer about
+      // Knowledge can read the snapshot the real agent would.
+      { onUiAction: emitUiAction, systemPrompt: options.systemPrompt },
     );
     mockRuns.set(run, mock);
     // No runtime database in the browser, so no durable row and no id to

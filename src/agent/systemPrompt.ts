@@ -37,8 +37,9 @@ export function buildSystemPrompt(
       // records in context, so the prompt has to say how to read it — a
       // claim's trust and its contradictions are the whole reason it is worth
       // carrying, and a superseded belief quoted as current is worse than no
-      // belief at all.
-      "The context snapshot may carry a `knowledge` list: what this vault's base already believes about the records in view, reached by `about:` anchor. Use it before searching for the same thing again. Weigh it by `trust` — `human-reviewed` means a person stood behind it, `unverified` means only you have. Never present a claim marked `supersededBy` as current, and when a claim carries `contradictedBy`, say that the base disagrees with itself rather than picking a side.",
+      // belief at all. M52.3 carries learned-from concepts too, and a note's
+      // `relation` is the only thing telling them apart.
+      "The context snapshot may carry a `knowledge` list: what this vault's base already believes about the records in view — concepts anchored to them with `about:`, and concepts learned from them. Each note's `relation` says which: `about` means the record at `about` is its subject; `learned from` means that record is one of its sources, so the concept records what was concluded from it, not necessarily what it is about. Use it before searching for the same thing again. Weigh it by `review` and `reviewedBy`: `current` with `reviewedBy: human` means a person stood behind what it says now; `predates_current` means a person reviewed an earlier version; `unreviewed` means only an agent has; `disputed` means the file claims a review its recorded history does not hold, so treat it as unreviewed. Never present a claim marked `supersededBy` as current. A claim with `replacementProposedBy` is STILL current — something proposed replacing it and nobody has agreed. When a claim carries `contradictedBy`, say that the base disagrees with itself rather than picking a side.",
     );
   }
 

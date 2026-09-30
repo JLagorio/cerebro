@@ -1,6 +1,6 @@
 import '@blocknote/mantine/style.css';
 import './editor.css';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BlockNoteSchema,
   createCodeBlockSpec,
@@ -8,7 +8,7 @@ import {
   defaultInlineContentSpecs,
   type PartialBlock,
 } from '@blocknote/core';
-import { SideMenuExtension } from '@blocknote/core/extensions';
+import { SideMenuExtension, SuggestionMenu } from '@blocknote/core/extensions';
 import { BlockGrip } from './BlockDragLayer';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
@@ -30,6 +30,7 @@ import {
 } from '@blocknote/react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
+import { parseSources } from '@/engine/okf';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
 import { readNote } from '@/lib/ipc';
@@ -44,14 +45,17 @@ import {
   DatabaseBlock,
   MermaidBlock,
 } from './blocks';
-import { AssigneeChip, DueChip, WikilinkChip } from './chips';
+import { AssigneeChip, CitationChip, DueChip, WikilinkChip } from './chips';
+import { citationPasteHandler, citationTextInput, insertCitation } from './citationInput';
+import { citationChoices, citationIndexOf } from './citations';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
+import { NotePathContext } from './notePath';
 
 // Default schema with the fully-featured code block (shiki highlighting,
 // full language list) swapped in, plus the Cerebro custom blocks (callout,
-// mermaid, database) and inline chips: wikilinks, assignees, and dates
-// (M2.x, M47.2).
+// mermaid, database) and inline chips: wikilinks, assignees, dates, and
+// footnote citations (M2.x, M47.2, M51.5).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
@@ -68,6 +72,7 @@ export const cerebroSchema = BlockNoteSchema.create({
     wikilink: WikilinkChip,
     assignee: AssigneeChip,
     due: DueChip,
+    citation: CitationChip,
   },
 });
 
@@ -86,13 +91,35 @@ function filterItems(
   query: string,
 ): DefaultReactSuggestionItem[] {
   const q = query.trim().toLowerCase();
-  if (q === '') return items;
-  return items.filter(
-    (i) =>
-      i.title.toLowerCase().includes(q) ||
-      (typeof i.subtext === 'string' && i.subtext.toLowerCase().includes(q)) ||
-      (Array.isArray(i.aliases) && i.aliases.some((a) => a.toLowerCase().includes(q))),
+  if (q === '') return distinctTitles(items);
+  return distinctTitles(
+    items.filter(
+      (i) =>
+        i.title.toLowerCase().includes(q) ||
+        (typeof i.subtext === 'string' && i.subtext.toLowerCase().includes(q)) ||
+        (Array.isArray(i.aliases) && i.aliases.some((a) => a.toLowerCase().includes(q))),
+    ),
   );
+}
+
+/**
+ * One title per menu row (M52.1).
+ *
+ * BlockNote keys a suggestion row by its TITLE, so two pages with one title —
+ * the demo vault's knowledge index and its Knowledge agent — were two rows
+ * with one key, and React, reconciling the list as it changed, left one
+ * behind. MEASURED: typing `[^` on a concept showed a stale "Knowledge" link
+ * row above the sources it offered, and clicking it would have linked a page.
+ * A repeat takes an invisible suffix: the rows read the same, and their
+ * subtext already tells them apart.
+ */
+function distinctTitles(items: DefaultReactSuggestionItem[]): DefaultReactSuggestionItem[] {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const repeats = seen.get(item.title) ?? 0;
+    seen.set(item.title, repeats + 1);
+    return repeats === 0 ? item : { ...item, title: item.title + '\u200B'.repeat(repeats) };
+  });
 }
 
 /** Inline items of a checklist block, split into existing chips and the rest. */
@@ -242,7 +269,20 @@ export function MarkdownEditor({
   readOnly = false,
   onDirty,
 }: MarkdownEditorProps) {
-  const editor = useCreateBlockNote({ schema: cerebroSchema });
+  // Filled in below, once the editor exists: the typed-citation rule needs the
+  // editor to close the link menu a marker's `[` opened, and it is handed to
+  // TipTap before there is an editor to close anything on.
+  const closeLinkMenu = useRef(() => {});
+  const editor = useCreateBlockNote({
+    schema: cerebroSchema,
+    // M52.1: a hand-typed `[^id]` becomes a chip as its `]` lands.
+    _tiptapOptions: {
+      editorProps: { handleTextInput: citationTextInput(() => closeLinkMenu.current()) },
+    },
+    // M52.4: pasted markdown keeps its footnotes as the markers they are.
+    pasteHandler: citationPasteHandler,
+  });
+  closeLinkMenu.current = () => editor.getExtension(SuggestionMenu)?.closeMenu();
   // M48.4 — what the block drag measures against. The editor's own host
   // element, so a drop can be resolved against every rendered block including
   // the ones inside columns.
@@ -258,6 +298,15 @@ export function MarkdownEditor({
   const peopleSet = useMemo(() => peopleTypes(schema, entries), [schema, entries]);
   const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
   const toast = useUiStore((s) => s.toast);
+  // The note this body belongs to, for the sources its frontmatter lists — what
+  // the `[^` menu offers first (M52.1). Null outside a NoteBodyEditor, where
+  // the page's own footnotes are all there is to cite.
+  const notePath = useContext(NotePathContext);
+  const noteEntry = notePath === null ? undefined : entries.find((e) => e.path === notePath);
+  const sources = useMemo(
+    () => (noteEntry === undefined ? [] : parseSources(noteEntry)),
+    [noteEntry],
+  );
   const [loaded, setLoaded] = useState(false);
   /**
    * Ask AI on the selection (M17.16), opened with Cmd/Ctrl-K.
@@ -424,6 +473,24 @@ export function MarkdownEditor({
         icon: <Icon name="file-text" size={14} />,
         onItemClick: () => insertChip({ type: 'wikilink', props: { target: stem(e), alias: '' } }),
       }));
+
+  /**
+   * The `[^` menu (M52.1): cite one of the note's sources, or an id the page
+   * already uses, numbered as the chip will be. Rides the `[` menu rather than
+   * a trigger of its own — BlockNote reads a trigger one typed character at a
+   * time, so `[^` could never open a menu that `[` had not already opened.
+   */
+  const citeItems = (): DefaultReactSuggestionItem[] =>
+    citationChoices(sources, citationIndexOf(editor), entries).map(({ id, number, name }) => ({
+      title: `${number} · ${name}`,
+      subtext: id,
+      group: 'Cite a source',
+      icon: <Icon name="quote" size={14} />,
+      onItemClick: () => {
+        insertCitation(editor.prosemirrorView, id);
+        editor.focus();
+      },
+    }));
 
   const personItems = (): DefaultReactSuggestionItem[] =>
     entries.filter(isPerson).map((e) => ({
@@ -840,9 +907,18 @@ export function MarkdownEditor({
           />
           <SuggestionMenuController
             triggerCharacter="["
-            getItems={async (query) =>
+            getItems={async (query) => {
+              if (query.startsWith('^')) {
+                const cites = filterItems(citeItems(), query.slice(1));
+                // Nothing to cite — a page with no sources and no footnotes,
+                // or an id nobody has used yet. Closed rather than shown empty:
+                // an open menu swallows Enter, and the author is typing a
+                // marker that its `]` will turn into a chip.
+                if (cites.length === 0) closeLinkMenu.current();
+                return cites;
+              }
               // The user is mid-`[[`: the second bracket lands in the query.
-              filterItems(
+              return filterItems(
                 docItems().map((item) => ({
                   ...item,
                   onItemClick: () => {
@@ -851,8 +927,8 @@ export function MarkdownEditor({
                   },
                 })),
                 query.replace(/^\[/, ''),
-              )
-            }
+              );
+            }}
           />
           <SuggestionMenuController
             triggerCharacter="/"

@@ -1499,7 +1499,7 @@ export function StructuralEditor({
                 setLinkOpen(false);
                 setShapeOpen(true);
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="shapes" size={13} color="var(--n-600)" />
             </button>
@@ -1545,7 +1545,7 @@ export function StructuralEditor({
                 setLinkOpen(false);
                 setStyleOpen(true);
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="palette" size={13} color="var(--n-600)" />
             </button>
@@ -1576,7 +1576,7 @@ export function StructuralEditor({
                 setLinkOpen(false);
                 setIconOpen(true);
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="sparkles" size={13} color="var(--n-600)" />
             </button>
@@ -1607,7 +1607,7 @@ export function StructuralEditor({
                 setIconOpen(false);
                 setLinkOpen(true);
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="link" size={13} color="var(--n-600)" />
             </button>
@@ -1632,7 +1632,7 @@ export function StructuralEditor({
                 const added = addNodeForMode(model);
                 apply(addEdge(added.model, validSelected, added.id));
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="plus" size={13} color="var(--n-600)" />
             </button>
@@ -1645,7 +1645,7 @@ export function StructuralEditor({
                 setSelected(null);
                 setToolbarPos(null);
               }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+              className="rounded-xs border-0 bg-transparent p-1 hover:bg-danger-50"
             >
               <Icon name="trash-2" size={13} color="var(--danger-600)" />
             </button>

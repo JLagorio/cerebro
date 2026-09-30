@@ -308,11 +308,11 @@ function Card({
               <span
                 key={tag.label}
                 data-testid="library-tag"
-                className={`inline-flex max-w-full items-center truncate rounded border px-1.5 py-0.5 text-2xs ${
+                className={`inline-flex max-w-full items-center truncate rounded-xs border px-1.5 py-0.5 text-2xs ${
                   tag.tone === 'warn'
                     ? 'border-warn-300 text-warn-700'
                     : tag.tone === 'on'
-                      ? 'border-ok-500 text-ok-700'
+                      ? 'border-success-500 text-success-700'
                       : 'border-n-200 text-n-500'
                 }`}
               >

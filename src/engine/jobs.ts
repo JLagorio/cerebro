@@ -5,7 +5,8 @@ import { SOURCES_DIR } from './ingest';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
 import { firstMatch, parseTriggers } from './triggers';
 import { resolveTarget } from './wikilink';
-import type { Concept } from './okf';
+import { isKnowledgePath, type Concept } from './okf';
+import { sha256Hex } from '@/lib/sha256';
 import type { Entry } from './types';
 
 /**
@@ -37,6 +38,14 @@ import type { Entry } from './types';
  */
 
 export type JobKind = 'scheduled' | 'agent' | 'refresh' | 'stale' | 'schema';
+
+/**
+ * The job kinds whose whole purpose is rewriting `knowledge/` (M49.2): the
+ * stale and schema recheck lanes. They are held while the vault is not
+ * recording — every write they exist to make would be refused (M49.1), so
+ * running them only spends money.
+ */
+export const KNOWLEDGE_JOB_KINDS: ReadonlySet<JobKind> = new Set<JobKind>(['stale', 'schema']);
 
 /**
  * How long an event-triggered agent must wait before another event can fire
@@ -88,8 +97,15 @@ export interface AgentJob {
    */
   key: string;
   title: string;
-  /** What the ledger records at start: the note's modifiedAt for learn jobs,
-   * the schedule's fire key for scheduled runs. */
+  /**
+   * What the ledger records at start, per kind (M49.7):
+   * - `refresh` — the source note's modifiedAt (the only mtime key);
+   * - `stale` — `stale:<stale_after>`, the recheck date;
+   * - `schema` — `schema:<hash of the anchoring Type docs>`, plus
+   *   `|stale:<stale_after>` when the concept is also stale;
+   * - `scheduled` / `agent` — the schedule's fire key; an event-triggered
+   *   `agent` run — `event:<kind>:<path>@<modifiedAt>`.
+   */
   runKey: string;
   /**
    * WHICH ledger suppresses this job — decided here, where each kind's
@@ -123,6 +139,32 @@ export interface JobQueueInput {
   /** Connectors enabled (uiStore.agentConnectors). A stale cached source is
    * only work when the agent can actually reach the system it came from. */
   connectors?: boolean;
+}
+
+/** An attempt recorded as an mtime — the run key before M49.7. */
+function isLegacyAttempt(key: string | undefined): key is string {
+  return key !== undefined && /^\d{4}-\d{2}-\d{2}T/.test(key);
+}
+
+/** A stable key for the schema a set of Type docs declares: their paths and
+ * frontmatter, key-sorted, hashed — content, never a timestamp (M49.7). */
+function schemaKey(docs: readonly Entry[]): string {
+  const sorted = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(sorted)
+      : value !== null && typeof value === 'object'
+        ? Object.fromEntries(
+            Object.keys(value as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, sorted((value as Record<string, unknown>)[k])]),
+          )
+        : value;
+  const canonical = JSON.stringify(
+    [...docs]
+      .sort((a, b) => a.path.localeCompare(b.path))
+      .map((d) => [d.path, sorted(d.properties)]),
+  );
+  return sha256Hex(canonical).slice(0, 16);
 }
 
 export function jobQueue(
@@ -160,10 +202,18 @@ export function jobQueue(
   }
   // Re-synthesis is staleness (M13.5): when a Type doc changes after a
   // concept was generated, every concept `about` records of that type is due
-  // a recheck — lazily, one at a time, never as a bulk reprocess. The run
-  // key is max(concept mtime, newest relevant type-doc mtime): recorded on
-  // attempt, it suppresses both triggers at once, and a LATER type edit or
-  // concept edit raises it again.
+  // a recheck — lazily, one at a time, never as a bulk reprocess.
+  //
+  // M49.7 (K18) narrowed what counts, after creating a `Decision` Type doc
+  // re-queued three concepts on the live vault for $5.20 of paid runs:
+  // - only anchors OUTSIDE the bundle — a concept `about` another concept
+  //   (or itself: gcs-5 anchored to gcs-5) describes knowledge, not the
+  //   shape of a record, so no Type edit can make it stale;
+  // - the run key is the SCHEMA it was checked against (a hash of the
+  //   anchoring Type docs' frontmatter), never an mtime — a Restore that
+  //   pushed `generated.at` back re-queued the same three concepts;
+  // - the stale lane is keyed on the recheck DATE, so a recheck that did
+  //   not move it cannot run again until something does (K19's loop).
   const typeDocs = new Map<string, Entry>();
   for (const e of entries) {
     if (e.type === 'Type') typeDocs.set(e.title, e);
@@ -173,26 +223,40 @@ export function jobQueue(
   for (const concept of concepts) {
     if (concept.supersededBy !== null || concept.lifecycle === 'deprecated') continue;
     const generatedAt = concept.generated?.at ?? null;
-    let newestTypeChange: string | null = null;
+    const changed = new Map<string, Entry>();
     if (generatedAt !== null) {
       for (const target of concept.about) {
         const entry = resolveTarget(target, all);
         if (entry === null || entry.type === null) continue;
+        if (entry.path === concept.entry.path || isKnowledgePath(entry.path)) continue;
         const doc = typeDocs.get(entry.type);
         if (doc === undefined || doc.modifiedAt <= generatedAt) continue;
-        if (newestTypeChange === null || doc.modifiedAt > newestTypeChange) {
-          newestTypeChange = doc.modifiedAt;
-        }
+        changed.set(doc.path, doc);
       }
     }
-    if (!concept.stale && newestTypeChange === null) continue;
+    if (!concept.stale && changed.size === 0) continue;
+    // A stale concept's key carries its recheck date even on the schema
+    // lane: `recheck_concept` moves only `stale_after` (never
+    // `generated.at`), so the schema change stays "newer than generated"
+    // for good, and a key without the date would suppress every later
+    // stale recheck of that concept (review fix).
+    const staleKey = `stale:${String(concept.entry.properties.stale_after ?? '')}`;
     const runKey =
-      newestTypeChange !== null && newestTypeChange > concept.entry.modifiedAt
-        ? newestTypeChange
-        : concept.entry.modifiedAt;
-    if (attempts[concept.entry.path] === runKey) continue;
+      changed.size > 0
+        ? `schema:${schemaKey([...changed.values()])}${concept.stale ? `|${staleKey}` : ''}`
+        : staleKey;
+    const attempted = attempts[concept.entry.path];
+    if (attempted === runKey) continue;
+    // An attempt recorded under the OLD mtime key (before M49.7) still
+    // answers the question if nothing it would have seen has moved since:
+    // honoring it keeps an upgrade from re-running every stale concept
+    // once, at a cost nobody asked for.
+    const newest = [concept.entry.modifiedAt, ...[...changed.values()].map((d) => d.modifiedAt)]
+      .sort()
+      .at(-1);
+    if (isLegacyAttempt(attempted) && newest !== undefined && attempted >= newest) continue;
     recheck.push({
-      kind: newestTypeChange !== null ? 'schema' : 'stale',
+      kind: changed.size > 0 ? 'schema' : 'stale',
       path: concept.entry.path,
       key: concept.entry.path,
       title: concept.title,
@@ -261,9 +325,17 @@ export function jobQueue(
   }
 
   // Every kind has a DISTINCT rank, and that is load-bearing for the tie-
-  // break below: recheck runKeys are ISO timestamps, scheduled runKeys are
-  // fire keys, and the two formats only ever compare within their own kind.
-  // Give two kinds one rank and the sort silently orders by format.
+  // break below: it sorts runKey DESCENDING as a string, and each kind's
+  // keys have their own format (see `AgentJob.runKey`), so they only ever
+  // compare within their own kind. Give two kinds one rank and the sort
+  // silently orders by format. What the descending tie-break yields:
+  // - `refresh`: the most recently modified source first;
+  // - `stale`: the LATEST recheck date first, so the longest-overdue
+  //   concept goes last;
+  // - `schema`: hash order — stable, but meaningless;
+  // - `scheduled` / `agent`: the latest fire first; within `agent`, which
+  //   mixes the two formats, every `event:` key sorts before every fire key.
+  // Equal keys fall back to path order.
   // Refresh sits before stale on purpose: a concept recheck reads its
   // sources, and rechecking against a copy about to be replaced is wasted.
   const RANK: Record<JobKind, number> = {

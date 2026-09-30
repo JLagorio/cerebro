@@ -463,29 +463,66 @@ describe('DetailPanel', () => {
       ],
     });
     render(<DetailPanel />);
-    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    // M50.2: open by default when Knowledge holds something about the record.
+    expect(screen.getByTestId('detail-knowledge-toggle').getAttribute('aria-expanded')).toBe(
+      'true',
+    );
     expect(screen.getByTestId('entity-dossier')).toBeTruthy();
     expect(screen.queryByTestId('related-knowledge')).toBeNull();
+    // And a person's own toggle still wins.
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.queryByTestId('entity-dossier')).toBeNull();
   });
 
   it('keeps the related list when the base only knows around the record', async () => {
     const user = userEvent.setup();
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        // About the record's assignee, not the record: knowledge AROUND it.
+        makeEntry({
+          path: 'knowledge/people/ana.md',
+          title: 'Ana owns field onboarding',
+          relationships: { about: ['ana-rios'] },
+        }),
+      ],
+    });
     render(<DetailPanel />);
+    // Nothing is about the record, and nothing was learned from it: closed.
+    expect(screen.getByTestId('detail-knowledge-toggle').getAttribute('aria-expanded')).toBe(
+      'false',
+    );
     await user.click(screen.getByTestId('detail-knowledge-toggle'));
     expect(screen.getByTestId('related-knowledge')).toBeTruthy();
+    expect(screen.getByText('Related to this page')).toBeTruthy();
     expect(screen.queryByTestId('entity-dossier')).toBeNull();
   });
 
+  // M52.3 — the peek and the page tab read Knowledge the same way: one empty
+  // sentence when there is nothing, never a heading per sub-surface.
+  it('says Knowledge holds nothing once, when it holds nothing', async () => {
+    const user = userEvent.setup();
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('page-knowledge-empty').textContent).toBe(
+      'Knowledge holds nothing about this page yet.',
+    );
+    expect(screen.queryByText('Not in Knowledge')).toBeNull();
+    expect(screen.queryByText('Nothing yet about this.')).toBeNull();
+  });
+
   // M33a.6 — the gate above decides WHICH surface answers, and for a while it
-  // also decided whether you could ask anything at all: `Ask the base` shipped
-  // on the related list only, so the records the base knew most about were
-  // exactly the ones with no way to question it. Asserted on both arms of the
-  // gate, because that is what let the two drift apart.
+  // also decided whether you could ask anything at all: asking the base
+  // shipped on the related list only, so the records the base knew most about
+  // were exactly the ones with no way to question it. Asserted on both arms
+  // of the gate, because that is what let the two drift apart.
   it('offers Ask the base on whichever knowledge surface the gate picked', async () => {
     const user = userEvent.setup();
     render(<DetailPanel />);
     await user.click(screen.getByTestId('detail-knowledge-toggle'));
-    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'What does Knowledge say about this?' }),
+    ).toBeTruthy();
 
     cleanup();
     useVaultStore.setState({
@@ -499,11 +536,14 @@ describe('DetailPanel', () => {
       ],
     });
     render(<DetailPanel />);
-    await user.click(screen.getByTestId('detail-knowledge-toggle'));
     expect(screen.getByTestId('entity-dossier')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeTruthy();
-    // Still distinct from the write-side act it used to sit alone beside.
-    expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'What does Knowledge say about this?' }),
+    ).toBeTruthy();
+    // Still distinct from the write-side act it used to sit alone beside —
+    // and there is ONE of that act now, not one per sub-surface (M52.3).
+    expect(screen.getAllByRole('button', { name: 'Learn from this page' })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: "What's missing?" })).toBeTruthy();
   });
 
   // M45.1 — the type's `layout.heading` renders as the key-property strip

@@ -1,68 +1,177 @@
-import { test, expect } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { test, expect, type Page } from '@playwright/test';
+import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot';
 
 const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
+
+/** A concept is a page (M50.1): open it from the list, and wait until the
+ *  body has loaded — Verify pins the body on screen (M49.3). */
+async function openConcept(page: Page, title: string) {
+  await openKnowledgeTab(page, 'all');
+  await page.getByTestId('concept-row').filter({ hasText: title }).first().click();
+  await expect(page.getByTestId('doc-page')).toBeVisible();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible();
+  return page.getByTestId('concept-review-bar');
+}
+
+const verify = (page: Page) => page.getByRole('button', { name: /^Verify$/ });
 
 test('knowledge: browse the bundle, read provenance, and verify a concept', async ({ page }) => {
   await boot(page);
 
-  await page.getByRole('button', { name: 'Open base' }).click();
+  await openKnowledgeTab(page, 'all');
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
-  // M33a.3 — the tab opens on the heaviest THREAD now, not the flat list, so
-  // a spec about the whole bundle has to ask for the whole bundle.
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
   // Counts come from the seed and change whenever it does. Assert the
   // relationships instead: the review queue is a proper subset of the bundle.
   const all = await page.getByTestId('concept-row').count();
   expect(all).toBeGreaterThan(2);
 
-  // -- The review queue is the unverified/stale/deprecated set -----------
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }).click();
-  const queued = page.getByTestId('concept-row');
+  // -- The review queue: each row says why it is there (M51.2) ------------
+  await openKnowledgeTab(page, 'review');
+  const queued = page.getByTestId('queue-row');
   const queuedCount = await queued.count();
   expect(queuedCount).toBeGreaterThan(0);
   expect(queuedCount).toBeLessThan(all);
   // Human-reviewed, in date, not deprecated — nothing to act on.
   await expect(queued.filter({ hasText: 'The offline guarantee' })).toHaveCount(0);
+  const sync = queued.filter({ hasText: 'Sync error rate' });
+  // Never reviewed, so it leads with that, as its page does (M52.5); the
+  // recheck it is also due, and how late, is the reason's sentence on hover.
+  await expect(sync).toHaveAttribute('data-reason', 'new');
+  await expect(sync.getByTestId('queue-reason')).toHaveText('Unreviewed');
+  await expect(sync.getByTestId('queue-reason')).toHaveAttribute(
+    'title',
+    'New from Assistant · 9d ago — Due a recheck · 2 days overdue',
+  );
 
-  // -- Provenance is shown, not summarised into a score ------------------
-  await queued.filter({ hasText: 'Sync error rate' }).click();
+  // -- A concept opens as a page, its review in a bar under the title -----
+  await sync.click();
+  await expect(page.getByTestId('concept-title')).toHaveValue('Sync error rate');
+  const bar = page.getByTestId('concept-review-bar');
+  // Written by the attended assistant — said in the app's words (M50.3).
+  await expect(bar.getByTestId('review-bar-author')).toHaveAttribute('data-author', 'assistant');
+  // M27.5c: whether a review covers what this says NOW, and who did it.
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-by', 'nobody');
+  // The evidence is a click away, not a column wide.
+  await expect(page.getByTestId('knowledge-panel')).toHaveCount(0);
+  await bar.getByTestId('review-bar-sources').click();
   const panel = page.getByTestId('knowledge-panel');
-  await expect(panel).toContainText('claude-code');
   await expect(panel).toContainText('Nobody yet');
   await expect(panel).toContainText('42,000 uses');
-  // M27.5c: the chip answers whether a review covers what this says NOW, and
-  // names who did it beside the status rather than ranking a person above a
-  // process. `data-tier` and its three rungs are gone.
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-by', 'nobody');
 
   // -- Verify writes an OKF stamp and the review becomes current ---------
-  await page.getByRole('button', { name: /^Verify$/ }).click();
+  await expect(verify(page)).toBeEnabled();
+  await verify(page).click();
   await expect.poll(async () => readMockFile(page, CONCEPT)).toContain('human:me');
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-by', 'human');
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-by', 'human');
+  // Verification and freshness are INDEPENDENT signals: confirming a claim
+  // does not move its stale_after date.
+  // How late, in the words the table's hover used (M52.5); the date on hover.
+  await expect(bar).toContainText('Due a recheck · 2 days overdue');
 
-  // Still queued — and that is the point. Verification and freshness are
-  // INDEPENDENT signals: confirming a claim does not move its stale_after
-  // date, so a reviewed-but-expired concept still wants attention.
-  await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount);
-  await expect(panel).toContainText('Stale since 2026-07-26');
+  // M52.3 — but a person read it once it was due, so the row is cleared: a
+  // row Verify could not clear kept the Review count from ever reaching zero.
+  await openKnowledgeTab(page, 'review');
+  await expect(page.getByTestId('queue-row')).toHaveCount(queuedCount - 1);
+  await expect(page.getByTestId('queue-row').filter({ hasText: 'Sync error rate' })).toHaveCount(0);
 
-  // A concept whose only flag was "unverified" does leave the queue.
-  await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
-  await page.getByRole('button', { name: /^Verify$/ }).click();
-  await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
+  // A concept whose only flag was "unverified" leaves the queue too.
+  await page.getByTestId('queue-row').filter({ hasText: 'Warehouse cutover' }).click();
+  await expect(page.getByTestId('markdown-editor')).toBeVisible();
+  await expect(verify(page)).toBeEnabled();
+  await verify(page).click();
+  await expect
+    .poll(async () => readMockFile(page, 'knowledge/playbooks/warehouse-cutover.md'))
+    .toContain('human:me');
+  await openKnowledgeTab(page, 'review');
+  await expect(page.getByTestId('queue-row')).toHaveCount(queuedCount - 2);
+});
+
+test('knowledge: the queue is walkable from inside it (M51.2)', async ({ page }) => {
+  await boot(page);
+  await openKnowledgeTab(page, 'review');
+  const first = page.getByTestId('queue-row').first();
+  const second = await page.getByTestId('queue-row').nth(1).getAttribute('data-path');
+  await first.click();
+  await expect(page.getByTestId('review-pager')).toContainText('Review 1 of');
+  await page.getByTestId('review-next').click();
+  await expect(page.getByTestId('review-pager')).toContainText('Review 2 of');
+  await expect(page.getByTestId('doc-page')).toBeVisible();
+  const title = await page.getByTestId('concept-title').inputValue();
+  await openKnowledgeTab(page, 'review');
+  await expect(page.locator(`[data-testid="queue-row"][data-path="${second}"]`)).toContainText(
+    title,
+  );
+});
+
+// M52.5 — the whole queue went round from "9 of 9" to 1 while a folder's
+// walk stopped; both end now, and Done goes back where the walk began.
+test('knowledge: the queue ends at its last concept, and Done returns to Review', async ({
+  page,
+}) => {
+  await boot(page);
+  await openKnowledgeTab(page, 'review');
+  const rows = page.getByTestId('queue-row');
+  const total = await rows.count();
+  await rows.last().click();
+  const pager = page.getByTestId('review-pager');
+  await expect(pager.getByRole('button', { name: `Review ${total} of ${total}` })).toBeVisible();
+  await expect(page.getByTestId('review-next')).toHaveCount(0);
+  await pager.getByTestId('review-done').click();
+  await expect(page.getByTestId('knowledge-tab-review')).toHaveAttribute('aria-current', 'page');
+});
+
+// M52.5 — verifying the whole queue's last concept left its page with no
+// pager at all, where a folder's walk said "Nothing left to review in
+// Systems · Done". The whole queue's walk ends the same way, at Review.
+test('knowledge: verifying through the whole queue ends the walk at Review', async ({ page }) => {
+  await boot(page);
+  await openKnowledgeTab(page, 'review');
+  const total = await page.getByTestId('queue-row').count();
+  expect(total).toBeGreaterThan(1);
+  await page.getByTestId('knowledge-start-review').click();
+  const pager = page.getByTestId('review-pager');
+  for (let left = total; left > 0; left--) {
+    await expect(page.getByTestId('markdown-editor')).toBeVisible();
+    // Each verified concept leaves the queue, so the next is always its first.
+    await expect(pager.getByRole('button', { name: `Review 1 of ${left}` })).toBeVisible();
+    await verify(page).click();
+    if (left > 1) {
+      await expect(page.getByTestId('review-next')).toHaveText('Next to review');
+      await page.getByTestId('review-next').click();
+    }
+  }
+  await expect(pager).toContainText('Nothing left to review');
+  await pager.getByTestId('review-done').click();
+  await expect(page.getByTestId('knowledge-tab-review')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('queue-row')).toHaveCount(0);
+});
+
+test("knowledge: a page's strip opens what waits for review, and the queue takes over (M52.3)", async ({
+  page,
+}) => {
+  await boot(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('phoenix warehouse rollout');
+  await page
+    .getByTestId('quick-open-result')
+    .filter({ hasText: 'Phoenix warehouse rollout' })
+    .first()
+    .click();
+  await page.getByRole('button', { name: 'Open in full page' }).click();
+  const waiting = page.getByTestId('knowledge-strip').getByTestId('knowledge-strip-waiting');
+  await expect(waiting).toContainText('to review');
+  await waiting.click();
+  // A concept page, with the pager saying where it sits in the queue.
+  await expect(page.getByTestId('concept-review-bar')).toBeVisible();
+  await expect(page.getByTestId('review-pager')).toContainText(/Review \d+ of \d+/);
 });
 
 test('knowledge: a verified concept revised later shows the predating notice (M23.4)', async ({
   page,
 }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open base' }).click();
-  // The flat list, because the two concepts this walks between sit in
-  // different threads (M33a.3 moved the default off `all`).
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'All concepts' }).click();
 
   // The agent revised a previously verified concept: the projection renders
   // the review notice instead of silently reverting to "Nobody yet".
@@ -75,60 +184,43 @@ test('knowledge: a verified concept revised later shows the predating notice (M2
   }, CONCEPT);
   // The mock has no watcher; a store write (verifying another concept)
   // triggers the rescan that picks the projection up.
-  await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
-  await page.getByRole('button', { name: /^Verify$/ }).click();
+  await openConcept(page, 'Warehouse cutover');
+  await expect(verify(page)).toBeEnabled();
+  await verify(page).click();
+  await expect
+    .poll(async () => readMockFile(page, 'knowledge/playbooks/warehouse-cutover.md'))
+    .toContain('human:me');
 
-  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
-  const panel = page.getByTestId('knowledge-panel');
+  const bar = await openConcept(page, 'Sync error rate');
+  const panel = await showConceptDetails(page);
   await expect(panel.getByTestId('verified-notice')).toContainText(
     'verified at r2; current is r3 — attestation predates revision',
   );
-  // The stale review does NOT count as verification of the current content —
-  // and M27.5c says which of the two it is. `predates_current` keeps the fact
-  // that somebody looked, which `unverified` used to throw away.
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'predates_current');
+  // `predates_current` keeps the fact that somebody looked, which
+  // `unverified` used to throw away.
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-review', 'predates_current');
 });
 
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open base' }).click();
+  await page.getByRole('button', { name: 'Open Knowledge' }).click();
 
-  // M37.3: the one nav column keeps the item world inline — what makes the
-  // bundle's axes ITS OWN is that they nest under the Base row rather than
-  // borrowing Collections or Types, which stay put as their own sections.
+  // M51: the section's rows are the bundle's folders, then Review — and the
+  // page opens on every concept, filed under the same folders.
   await expect(page.getByTestId('sidebar-type').first()).toBeVisible();
-
   const nav = page.getByTestId('knowledge-nav-row');
-  await expect(nav.first()).toBeVisible();
-
-  // -- Threads lead, and the tab opens on the heaviest one (M33a.3) -------
-  // Not a fixed name: the demo bundle anchors three concepts to the offline
-  // sync work and two to Phoenix, so the winner is a fact about the seed. What
-  // is under test is that a THREAD is where you land, not the flat list.
-  const landed = nav.filter({ hasText: 'Offline sync hardening' });
-  await expect(landed).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByTestId('knowledge-heading')).toHaveText('Offline sync hardening');
-
-  // -- And it reads the thread, not the first concept in it (M33a.4) ------
-  // What the base believes about a subject is the whole thread; opening
-  // whichever concept sorted first answered a question nobody asked.
-  const thread = page.getByTestId('thread-view');
-  await expect(thread).toBeVisible();
-  await expect(page.getByTestId('knowledge-panel')).toHaveCount(0);
-  // Contested leads, and it names what replaced what. The pilot's week-long
-  // window lost to the 72-hour decision, and the seed says so in a field.
-  await expect(page.locator('[data-section="thread-contested"]')).toContainText(
-    'replaced by The offline guarantee',
-  );
-  await expect(page.locator('[data-section="thread-stale"]')).toContainText('Sync error rate');
-  await expect(page.locator('[data-section="thread-sources"]')).toContainText('cited by');
-
-  await nav.filter({ hasText: 'All concepts' }).click();
+  await expect(nav.first()).toHaveAttribute('data-tab', 'section');
+  await expect(nav.last()).toHaveAttribute('data-tab', 'review');
+  await expect(page.getByTestId('knowledge-tab-all')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('knowledge-heading')).toHaveText('Knowledge');
   const total = await page.getByTestId('concept-row').count();
 
-  // -- Folders: the directories knowledge/index.md has always declared ----
-  await nav.filter({ hasText: 'Metrics' }).click();
-  await expect(page.getByTestId('knowledge-heading')).toHaveText('Metrics');
+  // -- A folder row narrows Concepts to that folder, and lights ------------
+  const metrics = nav.filter({ hasText: 'Metrics' });
+  await metrics.click();
+  await expect(metrics).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('knowledge-heading')).toContainText('Metrics');
+  await expect(page.getByTestId('knowledge-tab-all')).toHaveAttribute('aria-current', 'page');
   const inMetrics = await page.getByTestId('concept-row').count();
   expect(inMetrics).toBeGreaterThan(0);
   expect(inMetrics).toBeLessThan(total);
@@ -137,54 +229,252 @@ test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ 
     .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
   expect(metricPaths.every((p) => p.startsWith('knowledge/metrics/'))).toBe(true);
 
-  // -- By entity: the join `about:` exists to make ------------------------
-  await nav.filter({ hasText: 'Offline sync hardening' }).click();
-  await expect(page.getByTestId('knowledge-heading')).toHaveText('Offline sync hardening');
-  const aboutPaths = await page
-    .getByTestId('concept-row')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
-  // Knowledge about one project, gathered from across the bundle's folders —
-  // which a section-only nav could never assemble.
-  expect(aboutPaths).toContain('knowledge/metrics/sync-error-rate.md');
-  expect(aboutPaths).toContain('knowledge/systems/offline-guarantee.md');
+  // -- A concept is its page, and its details lead back into the vault -----
+  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
+  await expect(page.getByTestId('concept-title')).toHaveValue('Sync error rate');
+  // M52.3 — reading one of its concepts, you are still in Knowledge: the
+  // concept's folder stays lit, and nothing else does.
+  await expect(metrics).toHaveAttribute('aria-current', 'page');
+  await expect(nav.and(page.locator('[aria-current="page"]'))).toHaveCount(1);
+  const panel = await showConceptDetails(page);
+  await expect(panel.getByTestId('about-entity').first()).toBeVisible();
 
-  // The anchor is followable in both directions: the panel gets you from a
-  // concept back to the entity it is about. Opened by name, because a thread
-  // no longer auto-selects one (M33a.4) — and the way back to the whole thread
-  // is the row above the list.
-  await page.getByTestId('concept-row').first().click();
-  await expect(
-    page.getByTestId('knowledge-panel').getByTestId('about-entity').first(),
-  ).toBeVisible();
-  await page.getByTestId('thread-overview-row').click();
-  await expect(page.getByTestId('thread-view')).toBeVisible();
-
-  // -- The log: what the agent has actually done -------------------------
-  await nav.filter({ hasText: 'Update log' }).click();
+  // -- The log: what the agent has actually done, under Activity ----------
+  await openKnowledgeTab(page, 'activity');
   await expect(page.getByTestId('knowledge-log')).toBeVisible();
-  await expect(page.getByTestId('log-day').first()).toContainText('2026-07-28');
+  // The day as the table's Updated says it, the date itself kept on it (M52.5).
+  const day = page.getByTestId('log-day').first().locator('time');
+  await expect(day).toHaveText('Today');
+  await expect(day).toHaveAttribute('datetime', '2026-07-28');
   await expect(page.getByTestId('log-entry').first()).toHaveAttribute('data-kind', 'creation');
+  // A replacement reads as one: its tag and its sentence say the same thing.
+  const replaced = page
+    .getByTestId('log-entry')
+    .filter({ has: page.getByTestId('log-entry-label').getByText('Replaced', { exact: true }) });
+  await expect(replaced).toHaveCount(1);
+  await expect(replaced).toContainText('The offline window was replaced by The offline guarantee');
 
-  // An entry names the concept it touched, and that name is a way back to it.
-  await page.getByTestId('log-concept-link').filter({ hasText: 'Warehouse cutover' }).click();
-  await expect(page.getByTestId('knowledge-panel')).toBeVisible();
-  await expect(page.getByTestId('concept-body')).toContainText('Go-live night');
+  // An entry names the concept it touched — by its title now, not the words
+  // logged on the day (M52.5) — and that name is a way back to it.
+  await page
+    .getByTestId('log-concept-link')
+    .filter({ hasText: 'Warehouse cutover: go-live and rollback' })
+    .click();
+  await expect(page.getByTestId('concept-title')).toHaveValue(
+    'Warehouse cutover: go-live and rollback',
+  );
+  await expect(page.getByTestId('markdown-editor')).toContainText('Go-live night');
 });
 
-test('knowledge: the Base section carries no review badge', async ({ page }) => {
+// M52.5 — "Table, like collections": one row per concept under its folder's
+// band, one status each, and a front door into the queue.
+test('knowledge: Concepts is a table filed by folder, and Start review opens the queue', async ({
+  page,
+}) => {
+  // Wide enough for every column: a narrower table sets Sources and Written by
+  // aside for the summary, and then the summary.
+  await page.setViewportSize({ width: 1800, height: 1000 });
+  await boot(page);
+  await openKnowledgeTab(page, 'review');
+  const first = await page.getByTestId('queue-row').first().getAttribute('data-path');
+  await openKnowledgeTab(page, 'all');
+
+  const table = page.getByTestId('concept-list');
+  await expect(table.getByRole('columnheader')).toHaveText([
+    'Concept',
+    'Summary',
+    'Status',
+    'Sources',
+    'Written by',
+    'Updated',
+  ]);
+  // Every row sits in its folder's band, and each band is a way into it.
+  const rows = page.getByTestId('concept-row');
+  const total = await rows.count();
+  let filed = 0;
+  for (const section of await page.getByTestId('concept-section').all()) {
+    const folder = await section.getAttribute('data-folder');
+    const paths = await section
+      .getByTestId('concept-row')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
+    expect(paths.every((p) => p.startsWith(`knowledge/${folder}/`))).toBe(true);
+    filed += paths.length;
+  }
+  expect(filed).toBe(total);
+  // One status per row — a view's select value, a dot and a word.
+  for (const row of await rows.all()) {
+    await expect(row.getByTestId('concept-status').locator('[data-status-value]')).toHaveCount(1);
+  }
+  // Absent is never zero: the concept whose file keeps no sources list.
+  await expect(
+    page
+      .locator('[data-testid="concept-row"][data-path="knowledge/systems/status-model.md"]')
+      .locator('[data-column="sources"]'),
+  ).toHaveText('not recorded');
+
+  // M52.5 — the title outranks the summary: no title is cut while a summary
+  // is drawn beside it.
+  const cut = await table
+    .locator('[data-concept-title-box]')
+    .evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).length);
+  expect(cut).toBe(0);
+
+  // A reviewed concept with a change waiting on it says what its page says,
+  // and marks the change beside it (M52.5) — never a second status.
+  const guarantee = page.locator(
+    '[data-testid="concept-row"][data-path="knowledge/systems/offline-guarantee.md"]',
+  );
+  await expect(guarantee.locator('[data-status-value]')).toHaveText('Reviewed');
+  await expect(guarantee.getByTestId('concept-proposal')).toHaveText('+1 change');
+  // And a retired one stays retired, with its card marked beside it.
+  const webinar = page.locator(
+    '[data-testid="concept-row"][data-path="knowledge/metrics/webinar-attendance.md"]',
+  );
+  await expect(webinar.locator('[data-status-value]')).toHaveText('Deprecated');
+  await expect(webinar.getByTestId('concept-proposal')).toHaveText('+1 change');
+  // A queued one keeps saying why it is queued, and marks the card beside
+  // it (M52.5): the demo's link card names both of its concepts, as Rust's
+  // `edit_relation` cards do — so each end says "+1 link", the two marks
+  // read as the one card the header counts, and the hover names the other end.
+  for (const [path, other] of [
+    ['knowledge/systems/pick-queue-drain.md', 'this concept refines Warehouse cutover'],
+    ['knowledge/playbooks/warehouse-cutover.md', 'Pick queue drain time refines this concept'],
+  ]) {
+    const linked = page.locator(`[data-testid="concept-row"][data-path="${path}"]`);
+    await expect(linked.locator('[data-status-value]')).toHaveText('Unreviewed');
+    const mark = linked.getByTestId('concept-proposal');
+    await expect(mark).toHaveText('+1 link');
+    await expect(mark.locator('[title]')).toHaveAttribute(
+      'title',
+      new RegExp(`^Add a link: ${other}`),
+    );
+  }
+
+  // The count beside the title, as a view's; Review counts both of its queues.
+  await expect(page.getByTestId('knowledge-count')).toHaveText(String(total));
+  const queued = Number(await page.getByTestId('knowledge-start-count').textContent());
+  await expect(page.getByTestId('knowledge-summary')).toContainText(
+    `${queued} to verify · 3 proposals`,
+  );
+  await expect(page.getByTestId('knowledge-tab-review')).toHaveText(`Review${queued + 3}`);
+
+  // Narrower, the summary steps aside once it would get under 200px, and the
+  // rest still fit.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await expect(table.getByRole('columnheader', { name: 'Summary' })).toBeHidden();
+  await expect(table.getByRole('columnheader', { name: 'Status' })).toBeVisible();
+  // …and its room goes to the titles (M52.5): the row reaches the table's
+  // end — no empty strip after the last column — and no title is cut.
+  await expect
+    .poll(() =>
+      table.evaluate((t) => {
+        const header = t.querySelector('[role="row"]');
+        const box = t.parentElement;
+        if (header?.lastElementChild == null || box === null) return null;
+        const end = header.lastElementChild.getBoundingClientRect().right;
+        return Math.round(box.getBoundingClientRect().left + box.clientWidth - end);
+      }),
+    )
+    .toBe(0);
+  expect(
+    await table
+      .locator('[data-concept-title-box]')
+      .evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).length),
+  ).toBe(0);
+
+  await page.getByTestId('knowledge-start-review').click();
+  await expect(page.getByTestId('review-pager')).toContainText('Review 1 of');
+  await expect(page.getByTestId('doc-page')).toBeVisible();
+  expect(first).not.toBeNull();
+  await openKnowledgeTab(page, 'review');
+  await expect(page.getByTestId('queue-row').first()).toHaveAttribute('data-path', first ?? '');
+});
+
+// M52.5 — in wrap mode the row's Open pill sat centred over the cell and
+// covered the words of the title it opens. It floats at the end of the first
+// line now, and the lines flow around it.
+test('knowledge: a wrapped title keeps its Open pill off its words', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await boot(page);
+  await openKnowledgeTab(page, 'all');
+  // The Assistant beside it leaves the table too narrow for the longest
+  // titles, with Updated already gone: they wrap.
+  await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();
+  const table = page.getByTestId('concept-list');
+  await expect(table.getByRole('columnheader', { name: 'Updated' })).toHaveCount(0);
+  const wrapped = table.locator('[data-testid="concept-row"]').filter({
+    has: page.locator('[data-concept-title-box] > [data-testid="concept-open"]'),
+  });
+  await expect(wrapped.first()).toBeVisible();
+
+  // The row whose title takes the most lines.
+  const lines = (row: typeof wrapped) =>
+    row.evaluate((r) => {
+      const range = document.createRange();
+      range.selectNodeContents(r.querySelector('[data-concept-title]') as Node);
+      return range.getClientRects().length;
+    });
+  let most = wrapped.first();
+  for (const row of await wrapped.all()) if ((await lines(row)) > (await lines(most))) most = row;
+  expect(await lines(most)).toBeGreaterThan(1);
+
+  await most.hover();
+  const pill = most.getByTestId('concept-open');
+  await expect(pill).toHaveCSS('opacity', '1');
+  const overlaps = await most.evaluate((r) => {
+    const box = (
+      r.querySelector('[data-testid="concept-open"]') as HTMLElement
+    ).getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(r.querySelector('[data-concept-title]') as Node);
+    return [...range.getClientRects()].filter(
+      (line) =>
+        line.left < box.right &&
+        line.right > box.left &&
+        line.top < box.bottom &&
+        line.bottom > box.top,
+    ).length;
+  });
+  expect(overlaps).toBe(0);
+});
+
+// M52.5 — a folder's view counts the folder, and its Start review walks the
+// folder: "Review 2 of 3" from a folder with one waiting, and Next walking
+// into another folder, were the bundle's numbers under a folder's name.
+test("knowledge: a folder's view counts the folder and walks only it", async ({ page }) => {
+  await boot(page);
+  await page.getByRole('button', { name: 'Open Knowledge' }).click();
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Systems' }).click();
+  await expect(page.getByTestId('knowledge-heading')).toContainText('Systems');
+  // The crumb names the folder: no band repeats it, and no tab counts the
+  // bundle beside it.
+  await expect(page.getByTestId('concept-group')).toHaveCount(0);
+  await expect(page.getByTestId('knowledge-tab-all')).toHaveText('Concepts');
+  const rows = await page.getByTestId('concept-row').count();
+  await expect(page.getByTestId('knowledge-count')).toHaveText(String(rows));
+  await expect(page.getByTestId('knowledge-start-count')).toHaveText('1');
+
+  await page.getByTestId('knowledge-start-review').click();
+  const pager = page.getByTestId('review-pager');
+  await expect(pager.getByRole('button', { name: 'Review 1 of 1 in Systems' })).toBeVisible();
+  // The walk ends at its last concept: Done, not a Next into another folder.
+  await expect(page.getByTestId('review-next')).toHaveCount(0);
+  await pager.getByTestId('review-done').click();
+  await expect(page.getByTestId('knowledge-heading')).toContainText('Systems');
+});
+
+test('knowledge: the Knowledge section carries no review badge', async ({ page }) => {
   await boot(page);
 
   // A count in the chrome is the app nagging you to drain a queue. The same
-  // number lives on the "Needs review" row, where it describes a destination.
-  // M43.10: Base is a SECTION — its header wears no badge, and its rows
-  // stand on every surface.
-  const base = page.getByRole('button', { name: 'Base', exact: true });
-  await expect(base).toBeVisible();
-  await expect(base.getByTestId('nav-badge')).toHaveCount(0);
+  // number lives on the Review row, where it describes a destination.
+  const section = page.locator('button[aria-expanded]', { hasText: /^Knowledge$/ });
+  await expect(section).toBeVisible();
+  await expect(section.getByTestId('nav-badge')).toHaveCount(0);
 
-  await expect(
-    page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }),
-  ).toContainText(/\d/);
+  await expect(page.getByTestId('knowledge-nav-row').filter({ hasText: 'Review' })).toContainText(
+    /\d/,
+  );
 });
 
 test('knowledge: the bundle stays out of the surfaces you author', async ({ page }) => {
@@ -267,10 +557,10 @@ const AXES = [
           stale_after: '2026-07-08T00:00:00Z',
         },
         review: { status: 'unreviewed' },
-        support_text: 'unsupported',
-        coverage_text: 'blind coverage',
+        support_text: 'no evidence offered',
+        coverage_text: 'sources not observed',
         validity_text: 'stale and contested',
-        line: 'unsupported, blind coverage, stale and contested',
+        line: 'no evidence offered, sources not observed, stale and contested',
       },
       {
         key: {
@@ -302,10 +592,10 @@ const AXES = [
           stale_after: '2026-07-28T15:00:00Z',
         },
         review: { status: 'unreviewed' },
-        support_text: 'corroborated by 2 independent',
-        coverage_text: 'observed coverage',
+        support_text: 'corroborated by 2 independent sources',
+        coverage_text: 'sources observed',
         validity_text: 'fresh',
-        line: 'corroborated by 2 independent, observed coverage, fresh',
+        line: 'corroborated by 2 independent sources, sources observed, fresh',
       },
     ],
   },
@@ -317,10 +607,8 @@ test('knowledge: the three axes render per facet, and review is not one of them'
   await boot(page);
   await page.evaluate((rows) => window.__cerebroSeedChips(rows), AXES);
 
-  await page.getByRole('button', { name: 'Open base' }).click();
-  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
-
-  const panel = page.getByTestId('knowledge-panel');
+  const bar = await openConcept(page, 'Sync error rate');
+  const panel = await showConceptDetails(page);
   const rows = panel.getByTestId('facet-chips');
   await expect(rows).toHaveCount(2);
 
@@ -328,25 +616,32 @@ test('knowledge: the three axes render per facet, and review is not one of them'
   // belief" would have to pick one and be wrong about the other.
   await expect(rows.nth(0)).toHaveAttribute('data-facet', 'bill_of_materials at shipping');
   await expect(rows.nth(1)).toHaveAttribute('data-facet', 'ci_status at implemented');
+  // The key stays on the element; the reader gets Activity's words (M52.5).
+  await expect(rows.nth(1).getByTestId('facet-scope')).toHaveText(
+    'CI status, at the implemented stage',
+  );
 
   const bom = rows.nth(0).getByTestId('axis-chip');
   await expect(bom).toHaveCount(3);
-  await expect(bom.nth(0)).toHaveText('unsupported');
-  await expect(bom.nth(1)).toHaveText('blind coverage');
+  await expect(bom.nth(0)).toHaveText('no evidence offered');
+  await expect(bom.nth(1)).toHaveText('sources not observed');
   await expect(bom.nth(2)).toHaveText('stale and contested');
 
   const ci = rows.nth(1).getByTestId('axis-chip');
-  await expect(ci.nth(0)).toHaveText('corroborated by 2 independent');
-  await expect(ci.nth(1)).toHaveText('observed coverage');
+  await expect(ci.nth(0)).toHaveText('corroborated by 2 independent sources');
+  await expect(ci.nth(1)).toHaveText('sources observed');
   await expect(ci.nth(2)).toHaveText('fresh');
 
-  // The review chip is beside the axes and stays out of them. Verifying the
-  // concept moves it to `current` and moves NOTHING on the Support chip —
-  // an attestation says a person looked, not that anything rests underneath.
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
-  await page.getByRole('button', { name: /^Verify$/ }).click();
-  await expect(panel.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
-  await expect(rows.nth(0).getByTestId('axis-chip').nth(0)).toHaveText('unsupported');
+  // The review chip is apart from the axes — in the bar, not the details.
+  // Verifying the concept moves it to `current` and moves NOTHING on the
+  // Support chip — an attestation says a person looked, not that anything
+  // rests underneath.
+  await expect(panel.getByTestId('review-chip')).toHaveCount(0);
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-review', 'unreviewed');
+  await expect(verify(page)).toBeEnabled();
+  await verify(page).click();
+  await expect(bar.getByTestId('review-chip')).toHaveAttribute('data-review', 'current');
+  await expect(rows.nth(0).getByTestId('axis-chip').nth(0)).toHaveText('no evidence offered');
 });
 
 test('knowledge: a vault with no ledger shows no axes rather than empty ones', async ({ page }) => {
@@ -354,11 +649,9 @@ test('knowledge: a vault with no ledger shows no axes rather than empty ones', a
   // nobody folded would be inventing an answer, and an empty chip row would
   // read as "we looked and found nothing".
   await boot(page);
-  await page.getByRole('button', { name: 'Open base' }).click();
-  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
-
-  const panel = page.getByTestId('knowledge-panel');
-  await expect(panel.getByTestId('review-chip')).toBeVisible();
+  const bar = await openConcept(page, 'Sync error rate');
+  await expect(bar.getByTestId('review-chip')).toBeVisible();
+  const panel = await showConceptDetails(page);
   await expect(panel.getByTestId('belief-axes')).toHaveCount(0);
   await expect(panel.getByTestId('axis-chip')).toHaveCount(0);
 });

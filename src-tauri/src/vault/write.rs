@@ -258,22 +258,16 @@ fn json_to_yaml(value: &serde_json::Value) -> serde_yaml::Value {
     }
 }
 
-/// Shadow-record one committed write (M21.8). Best-effort and invisible:
-/// shadow mode observes writes, it never gates them — see ledger::shadow.
+/// Record one committed write's hash in runtime.db's `vault_writes` (M21.8;
+/// moved out of the epistemic ledger in M49.10) — see
+/// `runtime::vault_writes`. Best-effort and invisible: it observes writes,
+/// it never gates them.
 fn shadow_write(vault: &Path, rel: &str, content: &str, kind: &str, actor: Option<&str>) {
-    let mut body = serde_json::json!({
-        "path": rel,
-        "content_hash": crate::ledger::sha256_hex(content.as_bytes()),
-    });
-    if let Some(actor) = actor {
-        body["actor"] = serde_json::Value::String(actor.to_string());
-    }
-    crate::ledger::shadow::record(vault, kind, body);
+    // Operational, not epistemic (M49.10, Q4): runtime.db, not the ledger.
+    let hash = crate::ledger::sha256_hex(content.as_bytes());
+    crate::runtime::vault_writes::record(vault, kind, rel, None, Some(&hash), actor);
 }
 
-/// The shared patch → composed-file step behind `update_frontmatter` and
-/// `verify_frontmatter` — same bytes on disk either way; only the shadow
-/// event kind differs.
 /// The exact bytes `update_frontmatter` will write for a patch.
 ///
 /// Public for the same reason as `compose_new_note`: a guard has to read what
@@ -344,8 +338,9 @@ pub fn verify_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
+    viewed_body_hash: &str,
 ) -> Result<(), String> {
-    crate::ledger::concepts::verify_concept(vault, rel, patch)
+    crate::ledger::concepts::verify_concept(vault, rel, patch, viewed_body_hash)
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
@@ -601,6 +596,17 @@ pub fn write_concept(
     body: &str,
 ) -> Result<(), String> {
     crate::ledger::concepts::write_concept(vault, rel, frontmatter, body)
+}
+
+/// `write_concept`, booked under the run that asked for it (M49.9).
+pub fn write_concept_in_run(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+    run: &str,
+) -> Result<(), String> {
+    crate::ledger::concepts::write_concept_in_run(vault, rel, frontmatter, body, run)
 }
 
 /// The exact-path writer behind `write_source`.
@@ -938,11 +944,7 @@ pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
     std::fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))?;
     super::watcher::note_own_write(&src);
     super::watcher::note_own_write(&dst);
-    crate::ledger::shadow::record(
-        vault,
-        "vault.rename",
-        serde_json::json!({ "from": from, "to": to }),
-    );
+    crate::runtime::vault_writes::record(vault, "vault.rename", from, Some(to), None, None);
     Ok(())
 }
 
@@ -955,7 +957,7 @@ pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
     }
     trash::delete(&abs).map_err(|e| e.to_string())?;
     super::watcher::note_own_write(&abs);
-    crate::ledger::shadow::record(vault, "vault.delete", serde_json::json!({ "path": rel }));
+    crate::runtime::vault_writes::record(vault, "vault.delete", rel, None, None, None);
     Ok(())
 }
 

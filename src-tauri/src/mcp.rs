@@ -13,9 +13,10 @@
 //! agent from loading any other server.
 //!
 //! The bundle is the agent's to write and the human's to verify — but the
-//! agent writes it through `write_concept` and nothing else (M17.1). That tool
-//! refuses a `verified` field and stamps `generated` from the run's actor, so
-//! it is where provenance comes from; `create_note`, `update_frontmatter` and
+//! agent writes it through its two server-stamped tools and nothing else
+//! (M17.1, M49.7): `write_concept`, which refuses a `verified` field and
+//! stamps `generated` from the run's actor, so it is where provenance comes
+//! from, and `recheck_concept`, which moves only `stale_after`; `create_note`, `update_frontmatter` and
 //! `append_to_note` therefore call `knowledge::guard_agent_write` and refuse
 //! the bundle outright. This module used to say the agent's tools were "NOT
 //! subject to the knowledge/ guard" and treat that as the design — it was the
@@ -876,6 +877,14 @@ fn base_tools() -> Vec<Value> {
             }), &["path", "type", "title", "description", "body"])
         }),
         json!({
+            "name": "recheck_concept",
+            "description": "Record that a concept you rechecked STILL HOLDS, and when to check it next. Moves `stale_after` and nothing else — no rewrite, no new timestamp, no log entry. Use this, not write_concept, for the 'still true' verdict; use write_concept only when the content itself changes. Refused for a concept a person has verified: say what you found in your reply instead. On a concept a machine confirmed, or a heavily referenced one, the stamp waits for a person's approval.",
+            "inputSchema": schema(json!({
+                "path": { "type": "string", "description": "The concept's path under knowledge/" },
+                "stale_after": { "type": "string", "description": "YYYY-MM-DD, later than today: when this should be rechecked next" }
+            }), &["path", "stale_after"])
+        }),
+        json!({
             "name": "cache_source",
             "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. ALWAYS call this after fetching through a connector. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
             "inputSchema": schema(json!({
@@ -1185,9 +1194,7 @@ pub fn proposal_tools(table: &crate::policy::table::PolicyTable) -> Result<Vec<V
 /// launch. Every failure path — no config dir, no file, corrupt JSON —
 /// resolves to OFF.
 fn proposals_enabled(app: &AppHandle) -> bool {
-    use tauri::Manager;
-    app.path()
-        .app_config_dir()
+    crate::app_config::app_dir(app)
         .ok()
         .map(|dir| crate::app_config::load(&dir).agent_proposals_enabled)
         .unwrap_or(false)
@@ -1232,6 +1239,183 @@ pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
 
 fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
     args.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// The `about` item that names the concept at `path` itself, if any: a bare
+/// wikilink (`[[stem]]`, `[[stem|label]]`) whose stem is the concept's own,
+/// or a path that IS the concept's — vault-relative, or bundle-relative
+/// with a leading `/` (OKF §6.1). A path to a record that merely shares the
+/// stem (`records/people/jane-doe.md`) names that record, and is the way to
+/// anchor to one.
+fn self_anchor(path: &str, about: &Value) -> Option<String> {
+    let own = path.rsplit('/').next()?.strip_suffix(".md")?.to_lowercase();
+    // Read the way the scanner reads the file this becomes
+    // (`knowledge::link_targets`): every `[[…]]` in any string or nested
+    // array — "see [[x]]" and "[[a]] [[x]]" included — else plain strings.
+    crate::knowledge::link_targets(about)
+        .into_iter()
+        .find_map(|target| {
+            let target = target.trim();
+            if target.contains('/') {
+                let named = match target.strip_prefix('/') {
+                    Some(bundle) => format!("knowledge/{bundle}"),
+                    None => target.to_string(),
+                };
+                let named = if named.ends_with(".md") {
+                    named
+                } else {
+                    format!("{named}.md")
+                };
+                return named.eq_ignore_ascii_case(path).then(|| target.to_string());
+            }
+            let stem = target.strip_suffix(".md").unwrap_or(target).to_lowercase();
+            (stem == own).then(|| target.to_string())
+        })
+}
+
+/// `recheck_concept` (M49.7, K19) — see `ledger::concepts::recheck_concept`.
+fn tool_recheck_concept(
+    vault: &Path,
+    args: &Map<String, Value>,
+    actor: &str,
+    run: Option<&str>,
+) -> Result<Value, String> {
+    let raw = arg_str(args, "path").ok_or("recheck_concept needs a path")?;
+    let path = crate::knowledge::canonical_path(&raw).ok_or_else(|| {
+        format!("recheck_concept only rechecks knowledge/ concepts; {raw} is not one")
+    })?;
+    let stale_after = arg_str(args, "stale_after")
+        .ok_or("recheck_concept needs the next stale_after, as YYYY-MM-DD")?;
+    crate::knowledge::validate_stale_after(&stale_after, chrono::Utc::now().date_naive())?;
+    Ok(text_result(match crate::ledger::concepts::recheck_concept(
+        vault,
+        &path,
+        &stale_after,
+        actor,
+        run,
+    )? {
+        crate::ledger::concepts::Rechecked::Unchanged => {
+            format!("Nothing changed: {path} is already due for a recheck on {stale_after}.")
+        }
+        crate::ledger::concepts::Rechecked::Stamped => format!(
+            "Recorded: {path} still holds; next recheck {stale_after}. Nothing else changed."
+        ),
+    }))
+}
+
+/// M49.4 (K23) — REPLACING a concept is reading it first. write_concept is
+/// exempt from the write scope (recording what a run found is its job), but
+/// a run that may not read a concept must not overwrite it: a
+/// `read-scope: []` agent could otherwise replace any unattested concept
+/// unseen. A NEW concept reads nothing, so it stays open — but retiring one
+/// is replacing it too: a `supersedes` link that ADDS a concept the run may
+/// not read is refused the same way (`unreadable_supersession`), or the
+/// rule is one field away from moot.
+fn unreadable_replacement(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Option<String> {
+    if name != "write_concept" && name != "recheck_concept" {
+        return None;
+    }
+    if name == "write_concept" {
+        if let Some(target) = unreadable_supersession(vault, grant, args) {
+            return Some(format!(
+                "This run cannot read {target}, so it cannot retire it — `supersedes` may name \
+                 only a concept the run has read."
+            ));
+        }
+    }
+    let path = crate::knowledge::canonical_path(&arg_str(args, "path")?)?;
+    // A recorded concept whose file is gone still exists: writing it is
+    // replacing it (and the writer refuses that over a deletion anyway).
+    let recorded = || {
+        crate::ledger::shadow::state_of(vault).is_ok_and(|folded| {
+            path.strip_prefix("knowledge/")
+                .is_some_and(|krel| folded.state.projection_paths.contains_key(krel))
+        })
+    };
+    if grant.may_read(&path) || !(crate::vault::write::concept_exists(vault, &path) || recorded()) {
+        return None;
+    }
+    Some(format!(
+        "This run cannot read {path}, so it cannot replace it — write a new concept instead, or \
+         ask for read access to it."
+    ))
+}
+
+/// The first concept a `supersedes` value ADDS that `grant` may not read.
+///
+/// Resolved both ways a retirement can land: the ledger's
+/// (`migrate::resolve_link`, which records the edge) and the readers'
+/// (`knowledge::link_targets` + `resolve_concepts`, which retire a concept
+/// from the file whatever the ledger recorded — case, titles, plain strings
+/// included). A target the concept ALREADY supersedes retires nothing new:
+/// a full-replace rewrite must resend it, and refusing it would force the
+/// run to un-retire a concept it cannot read.
+fn unreadable_supersession(
+    vault: &Path,
+    grant: &RunGrant,
+    args: &Map<String, Value>,
+) -> Option<String> {
+    use crate::ledger::migrate::{resolve_link, wikilinks, LinkTarget};
+    let value = args.get("supersedes")?;
+    let own = arg_str(args, "path").and_then(|p| crate::knowledge::canonical_path(&p));
+    let folded = crate::ledger::shadow::state_of(vault).ok();
+    let entries = vault::scan::scan_vault(vault).unwrap_or_default();
+
+    let mut named: Vec<String> =
+        crate::knowledge::resolve_concepts(&entries, &crate::knowledge::link_targets(value));
+    let mut already: std::collections::HashSet<String> = own
+        .as_deref()
+        .and_then(|own| entries.iter().find(|e| e.path == own))
+        .map(|entry| {
+            crate::knowledge::resolve_concepts(
+                &entries,
+                &crate::knowledge::link_field(entry, "supersedes"),
+            )
+            .into_iter()
+            .collect()
+        })
+        .unwrap_or_default();
+    if let Some(folded) = &folded {
+        let paths = &folded.state.projection_paths;
+        let path_of = |belief: &str| {
+            paths
+                .iter()
+                .find(|(_, b)| b.as_str() == belief)
+                .map(|(krel, _)| format!("knowledge/{krel}"))
+        };
+        for link in wikilinks(Some(value)) {
+            if let LinkTarget::One(belief) = resolve_link(paths, &link) {
+                named.extend(path_of(&belief));
+            }
+        }
+        let own_belief = own
+            .as_deref()
+            .and_then(|own| own.strip_prefix("knowledge/"))
+            .and_then(|krel| paths.get(krel));
+        if let Some(own_belief) = own_belief {
+            already.extend(
+                folded
+                    .state
+                    .relations
+                    .values()
+                    .filter(|r| {
+                        r.live
+                            && &r.from == own_belief
+                            && r.relation == crate::ledger::schema::RelationKind::Supersedes
+                    })
+                    .filter_map(|r| path_of(&r.to)),
+            );
+        }
+    }
+    named
+        .into_iter()
+        .filter(|target| Some(target) != own.as_ref() && !already.contains(target))
+        .find(|target| !grant.may_read(target))
 }
 
 /// The vault path a write tool is aimed at, for the scope check (M17.13).
@@ -1328,10 +1512,12 @@ fn call_tool(
     // M17.13 — scope is enforced HERE, before the tool runs, and it is a
     // refusal rather than a request. An agent bound to `projects/atlas` cannot
     // write outside it even if its instructions, or a note it just read, tell
-    // it to. `write_concept` and `cache_source` are deliberately exempt: the
-    // knowledge bundle and the source cache have their own guards (M17.1) and
-    // an agent's whole job may be to record what it found, which is not the
-    // same permission as editing the user's records.
+    // it to. `write_concept` and `cache_source` are deliberately exempt: an
+    // agent's whole job may be to record what it found, which is not the same
+    // permission as editing the user's records. What bounds write_concept is
+    // the ledger (every write is a governed transition, M24), the tool
+    // allowlist (`tools:` may omit it), and — to REPLACE a concept — read
+    // access to it (M49.4, below).
     if let Some(target) = write_target(name, args) {
         if !grant.may_write(&target) {
             return Ok(error_result(format!(
@@ -1389,6 +1575,10 @@ fn call_tool(
         }
     }
 
+    if let Some(refusal) = unreadable_replacement(Path::new(&vault), grant, name, args) {
+        return Ok(error_result(refusal));
+    }
+
     if writes_preferences(&grant.actor, name, args) {
         return Ok(error_result(PREFERENCES_REFUSAL.to_string()));
     }
@@ -1404,7 +1594,10 @@ fn call_tool(
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
-        "write_concept" => tool_write_concept(&vault, args, actor),
+        "write_concept" => tool_write_concept_in(&vault, args, actor, Some(&grant.run_id)),
+        // The run's id, as for write_concept (M49.9, K25): the stamp is a
+        // proposal now, and the run's counters must include it.
+        "recheck_concept" => tool_recheck_concept(&vault, args, actor, Some(&grant.run_id)),
         "cache_source" => tool_cache_source(&vault, args, actor),
         "propose_organize" => tool_propose_organize(app, args),
         "report_window_outcome" => tool_report_window_outcome(args, grant),
@@ -1718,13 +1911,20 @@ fn tool_commit_proposals(
         vault,
         |writer| match crate::policy::commit::commit_proposals(&table, writer, vault, &run_id, &ids)
         {
-            Ok(outcome) => Ok(json!({
-                "commit_set_id": outcome.commit_set_id,
-                "transition": outcome.transition.as_str(),
-                "results": outcome.results,
-                "batch_id": outcome.batch_id,
-                "replayed": outcome.replayed,
-            })),
+            Ok(outcome) => Ok({
+                // Booked on the run's row (M49.9, K25).
+                outcome.book(&run_id);
+                json!({
+                    "commit_set_id": outcome.commit_set_id,
+                    "transition": outcome.transition.as_str(),
+                    "results": outcome.results,
+                    "batch_id": outcome.batch_id,
+                    "replayed": outcome.replayed,
+                    // Applied, but these files changed on disk and were kept
+                    // as they are (files win) — a person reconciles them.
+                    "kept_files": outcome.kept,
+                })
+            }),
             Err(error) => Ok(json!({
                 "outcome": "refused",
                 "code": error.code,
@@ -1911,6 +2111,42 @@ fn tool_search(vault: &Path, args: &Map<String, Value>, grant: &RunGrant) -> Res
     )))
 }
 
+/// M49.6 (K27): a concept whose file is not the one the ledger recorded is
+/// said to be so to the agent reading it — the file is what a person or
+/// another tool left there, and its stamps (verified, generated) are not the
+/// recorded ones. `None` when the file matches, or the vault was never armed.
+/// A ledger that exists and cannot be read disputes every file — it is not
+/// "no ledger".
+fn disputed_concept(vault: &Path, path: &str) -> Option<&'static str> {
+    let canonical = crate::knowledge::canonical_path(path)?;
+    let krel = canonical.strip_prefix("knowledge/")?;
+    if canonical == crate::knowledge::LOG_PATH {
+        return None;
+    }
+    let folded = match crate::ledger::shadow::state_of(vault) {
+        Ok(folded) => folded,
+        Err(_) if !crate::ledger::has_store(vault) => return None,
+        Err(_) => return Some(DISPUTED_UNREADABLE),
+    };
+    let disk = std::fs::read(vault.join(&canonical)).ok()?;
+    let recorded = match folded.state.projection_paths.get(krel) {
+        Some(belief) => crate::ledger::reduce::project_belief(&folded.state, belief).ok()?,
+        None => return Some(DISPUTED_UNRECORDED),
+    };
+    (disk != recorded.bytes.as_bytes()).then_some(DISPUTED_DIFFERS)
+}
+
+const DISPUTED_DIFFERS: &str = "Disputed: this file differs from its recorded history — it was \
+changed outside Cerebro and has not been reconciled. Treat its content and its stamps as \
+unverified, and do not build on it until the person keeps or restores it.\n";
+
+const DISPUTED_UNREADABLE: &str = "Disputed: the bundle's recorded history cannot be read \
+right now, so nothing about this file can be checked. Treat its content and its stamps as \
+unverified.\n";
+
+const DISPUTED_UNRECORDED: &str = "Disputed: Cerebro never recorded this file — it is not part \
+of the bundle's history. Treat it as unverified.\n";
+
 fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("get_note needs a path")?;
     let entries = vault::scan::scan_vault(vault)?;
@@ -1930,7 +2166,14 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
             .unwrap_or_else(|| "(untyped)".into())
     );
     if crate::knowledge::is_knowledge_path(&path) {
-        header.push_str(&format!("Trust: {}\n", crate::knowledge::trust_tier(entry)));
+        let ledger = crate::knowledge::ledger_review(vault);
+        header.push_str(&format!(
+            "Trust: {}\n",
+            crate::knowledge::trust_label(entry, ledger.as_ref())
+        ));
+        if let Some(disputed) = disputed_concept(vault, &path) {
+            header.push_str(disputed);
+        }
     }
     if !entry.properties.is_empty() {
         header.push_str(&format!(
@@ -1947,7 +2190,8 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
 /// The same question `conceptsAbout` answers for the surfaces beside a
 /// record — `RelatedKnowledge`, `EntityDossier` — served as a tool so a run
 /// can ask it before it starts guessing. A READ, end to end: it opens no
-/// write path into the bundle, which stays `write_concept`'s alone.
+/// write path into the bundle, which stays the server-stamped tools' alone
+/// (`write_concept`, `recheck_concept`).
 ///
 /// Three answers, and keeping them apart is the point. A subject with
 /// concepts is what the base holds. A subject with none is a MEASUREMENT —
@@ -1979,7 +2223,8 @@ fn tool_knowledge_about(
         .filter(|e| grant.may_read(&e.path))
         .collect();
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let answer = crate::knowledge::about(&entries, &target, &today, limit);
+    let ledger = crate::knowledge::ledger_review(vault);
+    let answer = crate::knowledge::about(&entries, &target, &today, limit, ledger.as_ref());
 
     let subject = match &answer.subject {
         Some((path, title)) => format!("{path} (\"{title}\")"),
@@ -2049,6 +2294,15 @@ is tracking something nobody has written up yet. That is legitimate, not a broke
             out.push_str(&format!(
                 "  Superseded by: {}\n",
                 concept.superseded_by.join(", ")
+            ));
+        }
+        if concept.contested {
+            out.push_str("  Contested: a challenge to this concept is open and unresolved\n");
+        }
+        if !concept.replacement_proposed_by.is_empty() {
+            out.push_str(&format!(
+                "  Replacement proposed (not accepted — this concept is still current): {}\n",
+                concept.replacement_proposed_by.join(", ")
             ));
         }
         if !concept.contradicts.is_empty() {
@@ -2443,17 +2697,31 @@ fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     Ok(text_result(format!("Appended to {path}")))
 }
 
+/// The run-less form tests call; the server always books a run.
+#[cfg(test)]
 fn tool_write_concept(
     vault: &Path,
     args: &Map<String, Value>,
     actor: &str,
 ) -> Result<Value, String> {
-    let path = arg_str(args, "path").ok_or("write_concept needs a path")?;
-    if !crate::knowledge::is_knowledge_path(&path) {
+    tool_write_concept_in(vault, args, actor, None)
+}
+
+/// `write_concept`, booked under the calling run when there is one (M49.9).
+fn tool_write_concept_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    actor: &str,
+    run: Option<&str>,
+) -> Result<Value, String> {
+    let raw = arg_str(args, "path").ok_or("write_concept needs a path")?;
+    // One spelling per concept (M49.4): `./knowledge/x.md` and
+    // `Knowledge/x.md` are the same file, and must be the same Belief.
+    let Some(path) = crate::knowledge::canonical_path(&raw) else {
         return Err(format!(
-            "write_concept only writes into the knowledge/ bundle; {path} is outside it"
+            "write_concept only writes into the knowledge/ bundle; {raw} is outside it"
         ));
-    }
+    };
     // A concept typed "Type" would scan as schema and one typed "Agent" would
     // scan as an addressable agent (the scanner reads the frontmatter, not the
     // folder) — knowledge/ is no shelter for either.
@@ -2478,6 +2746,16 @@ fn tool_write_concept(
     // join that lets knowledge reach a project page instead of only ever
     // being reachable from inside the bundle.
     if let Some(about) = args.get("about") {
+        // M49.7 (K37): never to itself. A self-anchor describes nothing and
+        // made the schema lane recheck the concept whenever its own TYPE
+        // changed — gcs-5 on the live vault.
+        if let Some(own) = self_anchor(&path, about) {
+            return Err(format!(
+                "`about` names the concept itself ({own}) — anchor it to the records it is \
+                 knowledge OF, not to its own page (a record that shares its name is named by \
+                 its path, e.g. records/people/jane-doe.md)"
+            ));
+        }
         frontmatter.insert("about".into(), about.clone());
     }
     if let Some(tags) = args.get("tags") {
@@ -2503,6 +2781,7 @@ fn tool_write_concept(
         frontmatter.insert("sources".into(), sources.clone());
     }
     if let Some(stale_after) = arg_str(args, "stale_after") {
+        crate::knowledge::validate_stale_after(&stale_after, chrono::Utc::now().date_naive())?;
         frontmatter.insert("stale_after".into(), json!(stale_after));
     }
     // `verified` is deliberately never accepted from the agent — see the
@@ -2536,7 +2815,10 @@ fn tool_write_concept(
         )
     };
 
-    vault::write::write_concept(vault, &path, &frontmatter, &body)?;
+    match run {
+        Some(run) => vault::write::write_concept_in_run(vault, &path, &frontmatter, &body, run)?,
+        None => vault::write::write_concept(vault, &path, &frontmatter, &body)?,
+    }
 
     // The log is appended by us, on every write, rather than left to the agent
     // to remember — see knowledge::insert_log_entry. A failure here must not
@@ -3664,7 +3946,12 @@ mod tests {
         let exempt: std::collections::BTreeMap<&str, &str> = [
             (
                 "write_concept",
-                "knowledge/ has its own guard (knowledge.rs)",
+                "records findings into knowledge/ through the ledger; replacing a concept needs \
+                 read access to it (M49.4)",
+            ),
+            (
+                "recheck_concept",
+                "stamps one concept's stale_after through the ledger; needs read access to it (M49.7)",
             ),
             (
                 "cache_source",
@@ -4529,5 +4816,266 @@ mod tests {
             !is_capture(&concept),
             "the bundle is reviewed, not organized"
         );
+    }
+
+    // K23 through retirement: `supersedes` names only what the run has read
+    // — however it is spelled, since readers retire from the file — and a
+    // link the concept already carries retires nothing new.
+    #[test]
+    fn retiring_a_concept_needs_read_access_to_it() {
+        let dir = crate::vault::testutil::temp_vault("mcp-unreadable-supersession");
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
+        let write = |path: &str, title: &str, supersedes: Option<Value>| {
+            let mut args = Map::new();
+            args.insert("path".into(), json!(path));
+            args.insert("title".into(), json!(title));
+            args.insert("description".into(), json!("A claim."));
+            args.insert("body".into(), json!(format!("# {title}\n\nBody.")));
+            if let Some(supersedes) = supersedes {
+                args.insert("supersedes".into(), supersedes);
+            }
+            tool_write_concept(&dir, &args, DEFAULT_ACTOR).unwrap();
+        };
+        write("knowledge/metrics/old.md", "Old metric", None);
+        write(
+            "knowledge/systems/a.md",
+            "A",
+            Some(json!(["[[metrics/old]]"])),
+        );
+
+        let blind = RunGrant {
+            read_scope: Some(vec!["knowledge/systems".into()]),
+            ..RunGrant::unrestricted("agent:blind")
+        };
+        let aimed = |path: &str, supersedes: Value| {
+            let mut args = Map::new();
+            args.insert("path".into(), json!(path));
+            args.insert("supersedes".into(), supersedes);
+            args
+        };
+        for spelling in [
+            json!(["[[old]]"]),
+            json!(["[[Old]]"]),
+            json!(["[[Old metric]]"]),
+            json!("[[old]]"),
+            json!(["old"]),
+            json!(["see [[old]]"]),
+            json!([["[[old]]"]]),
+        ] {
+            let refusal = unreadable_replacement(
+                &dir,
+                &blind,
+                "write_concept",
+                &aimed("knowledge/systems/new.md", spelling.clone()),
+            );
+            assert!(
+                refusal
+                    .as_deref()
+                    .is_some_and(|r| r.contains("cannot retire it")),
+                "{spelling}: {refusal:?}"
+            );
+        }
+        // Rewriting a.md must resend the link it already carries.
+        assert!(unreadable_replacement(
+            &dir,
+            &blind,
+            "write_concept",
+            &aimed("knowledge/systems/a.md", json!(["[[old]]"]))
+        )
+        .is_none());
+        let reader = RunGrant {
+            read_scope: Some(vec!["knowledge".into()]),
+            ..RunGrant::unrestricted("agent:reader")
+        };
+        assert!(unreadable_replacement(
+            &dir,
+            &reader,
+            "write_concept",
+            &aimed("knowledge/systems/new.md", json!(["[[old]]"]))
+        )
+        .is_none());
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M49.4 (K23): a run cannot replace a concept it may not read.
+    #[test]
+    fn replacing_a_concept_needs_read_access_to_it() {
+        let dir = crate::vault::testutil::temp_vault("mcp-unreadable-replacement");
+        crate::vault::testutil::write(&dir, "knowledge/systems/kept.md", "# Kept\n");
+        let blind = RunGrant {
+            read_scope: Some(vec![]),
+            ..RunGrant::unrestricted("agent:blind")
+        };
+        let replace = |path: &str| {
+            let mut args = Map::new();
+            args.insert("path".into(), json!(path));
+            args
+        };
+        for spelling in ["knowledge/systems/kept.md", "./Knowledge/systems/kept.md"] {
+            let refusal = unreadable_replacement(&dir, &blind, "write_concept", &replace(spelling));
+            assert!(refusal.unwrap().contains("cannot replace"), "{spelling}");
+        }
+        // A new concept reads nothing; a run that may read it may replace it.
+        assert!(unreadable_replacement(
+            &dir,
+            &blind,
+            "write_concept",
+            &replace("knowledge/systems/new.md")
+        )
+        .is_none());
+        let reader = RunGrant {
+            read_scope: Some(vec!["knowledge".into()]),
+            ..RunGrant::unrestricted("agent:reader")
+        };
+        assert!(unreadable_replacement(
+            &dir,
+            &reader,
+            "write_concept",
+            &replace("knowledge/systems/kept.md")
+        )
+        .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M49.6 (K27): an agent reading a concept whose file is not the ledger's
+    // is told so, and a matching one carries no such line.
+    #[test]
+    fn get_note_marks_a_concept_whose_file_is_not_the_recorded_one() {
+        let dir = crate::vault::testutil::temp_vault("mcp-disputed");
+        crate::vault::testutil::write(&dir, "knowledge/systems/x.md", "# X\n");
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
+        let mut wc = Map::new();
+        wc.insert("path".into(), json!("knowledge/systems/y.md"));
+        wc.insert("title".into(), json!("Y"));
+        wc.insert("description".into(), json!("A recorded concept."));
+        wc.insert("body".into(), json!("Recorded."));
+        tool_write_concept(&dir, &wc, DEFAULT_ACTOR).unwrap();
+        let read = |path: &str| {
+            let mut args = Map::new();
+            args.insert("path".into(), json!(path));
+            tool_get_note(&dir, &args).unwrap().to_string()
+        };
+        assert!(!read("knowledge/systems/y.md").contains("Disputed"));
+        let y = dir.join("knowledge/systems/y.md");
+        let edited = format!(
+            "{}\nEdited elsewhere.\n",
+            std::fs::read_to_string(&y).unwrap()
+        );
+        std::fs::write(&y, edited).unwrap();
+        assert!(read("knowledge/systems/y.md").contains("differs from its recorded history"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // An unreadable ledger is not "no ledger": a stamp typed into a file is
+    // trusted only where no ledger was ever armed.
+    #[test]
+    fn a_ledger_that_cannot_be_read_trusts_no_stamp_and_none_is_the_file() {
+        let read = |dir: &Path, path: &str| {
+            let mut args = Map::new();
+            args.insert("path".into(), json!(path));
+            tool_get_note(dir, &args).unwrap().to_string()
+        };
+        let stamped = "---\ntype: Reference\nverified: { by: \"human:someone\", at: 2026-08-01 }\n---\n\n# Z\n";
+
+        // Never armed: the file is all there is.
+        let bare = crate::vault::testutil::temp_vault("mcp-no-ledger");
+        crate::vault::testutil::write(&bare, "knowledge/systems/z.md", stamped);
+        let answer = read(&bare, "knowledge/systems/z.md");
+        assert!(answer.contains("Trust: human-reviewed"), "{answer}");
+        assert!(!answer.contains("Disputed"), "{answer}");
+        let _ = std::fs::remove_dir_all(&bare);
+
+        // Armed, then broken: a record rewritten without rehashing.
+        let dir = crate::vault::testutil::temp_vault("mcp-unreadable-ledger");
+        {
+            let _shadow = crate::ledger::shadow::testing::activated(&dir);
+            for name in ["y", "w"] {
+                let mut wc = Map::new();
+                wc.insert("path".into(), json!(format!("knowledge/systems/{name}.md")));
+                wc.insert("title".into(), json!(name));
+                wc.insert("description".into(), json!("A recorded concept."));
+                wc.insert("body".into(), json!("Recorded."));
+                tool_write_concept(&dir, &wc, DEFAULT_ACTOR).unwrap();
+            }
+            crate::ledger::shadow::deactivate();
+        }
+        let segment = walkdir::WalkDir::new(crate::ledger::ledger_dir(&dir))
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|e| e.path().to_path_buf())
+            .find(|p| {
+                std::fs::read_to_string(p).is_ok_and(|t| {
+                    t.lines().filter(|l| l.starts_with('{')).count() > 2
+                        && crate::ledger::frame::Frame::from_line(t.lines().next().unwrap()).is_ok()
+                })
+            })
+            .expect("a segment with records");
+        let text = std::fs::read_to_string(&segment).unwrap();
+        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let mut evil = crate::ledger::frame::Frame::from_line(&lines[1]).unwrap();
+        evil.body = json!({ "planted": true });
+        lines[1] = evil.to_line().unwrap();
+        std::fs::write(&segment, format!("{}\n", lines.join("\n"))).unwrap();
+        crate::vault::testutil::write(&dir, "knowledge/systems/y.md", stamped);
+
+        let answer = read(&dir, "knowledge/systems/y.md");
+        assert!(answer.contains("Trust: disputed"), "{answer}");
+        assert!(answer.contains("cannot be read"), "{answer}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M49.7 (K37): write_concept refuses a self-anchor and a recheck date
+    // that is not a future YYYY-MM-DD.
+    #[test]
+    fn write_concept_refuses_a_self_anchor_and_a_past_or_malformed_stale_after() {
+        let dir = crate::vault::testutil::temp_vault("mcp-k37");
+        let base = || {
+            let mut args = Map::new();
+            args.insert("path".into(), json!("knowledge/decisions/gcs-5.md"));
+            args.insert("title".into(), json!("GCS-5"));
+            args.insert("description".into(), json!("A decision."));
+            args.insert("body".into(), json!("b"));
+            args
+        };
+        for anchor in [
+            json!(["[[gcs-5]]"]),
+            json!(["[[GCS-5|the ratio]]"]),
+            json!(["knowledge/decisions/gcs-5.md"]),
+            json!(["/decisions/gcs-5.md"]),
+            // Read as the scanner reads the file: a string, text around the
+            // link, several links, a nested array.
+            json!("[[gcs-5]]"),
+            json!(["see [[gcs-5]]"]),
+            json!("[[records/x]] [[gcs-5]]"),
+            json!([["[[gcs-5]]"]]),
+        ] {
+            let mut args = base();
+            args.insert("about".into(), anchor.clone());
+            let err = tool_write_concept(&dir, &args, DEFAULT_ACTOR).unwrap_err();
+            assert!(err.contains("names the concept itself"), "{anchor}: {err}");
+        }
+        // A record that shares the stem, named by its path, is not the
+        // concept — that is how a dossier anchors to its subject.
+        assert_eq!(
+            self_anchor(
+                "knowledge/people/jane-doe.md",
+                &json!(["records/people/jane-doe.md"])
+            ),
+            None
+        );
+        for stale in [
+            "someday",
+            "2026-13-40",
+            "2020-01-01",
+            "2027-7-1",
+            "+2027-07-01",
+        ] {
+            let mut args = base();
+            args.insert("stale_after".into(), json!(stale));
+            let err = tool_write_concept(&dir, &args, DEFAULT_ACTOR).unwrap_err();
+            assert!(err.contains("stale_after"), "{stale}: {err}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

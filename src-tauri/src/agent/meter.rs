@@ -176,6 +176,61 @@ impl Tally {
     }
 }
 
+/// Open an attended run's row before its child spawns (M49.9). The other
+/// two modes run on a row the claim already opened, so this is a no-op for
+/// them. Never fails a run: a row that could not open leaves the finish to
+/// insert one, stamped not-booked (see `dispatch::meter_attended`).
+pub fn begin(meter: &Meter) {
+    if meter.mode != Mode::Attended {
+        return;
+    }
+    let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
+        return;
+    };
+    if let Err(detail) = dispatch::begin_attended(
+        &conn,
+        &meter.run_id,
+        meter.vault_id.as_deref(),
+        meter.store_uuid.as_deref(),
+        meter.actor.as_deref(),
+        meter.parent_run_id.as_deref(),
+        meter.started_at,
+    ) {
+        eprintln!(
+            "runtime meter: run {} could not be opened: {detail}",
+            meter.run_id
+        );
+    }
+}
+
+/// Take back what [`begin`] opened for a child that never spawned.
+pub fn discard(meter: &Meter) {
+    if meter.mode != Mode::Attended {
+        return;
+    }
+    if let Ok(conn) = runtime::open_existing(&meter.data_dir) {
+        let _ = dispatch::discard_unstarted_attended(&conn, &meter.run_id);
+    }
+}
+
+/// Close the attended rows a dead process left `running` (M49.9) — the
+/// attended half of what `ingest::ambient`'s lease sweep does for ambient
+/// runs. `started_before` is this process's start, so nothing it opened is
+/// touched. Never fatal, and never silent.
+pub fn recover_orphaned(data_dir: &std::path::Path, started_before: DateTime<Utc>) {
+    let Ok(conn) = runtime::open_existing(data_dir) else {
+        return;
+    };
+    match dispatch::recover_orphaned_attended(&conn, started_before, Utc::now()) {
+        Ok(0) => {}
+        Ok(closed) => eprintln!(
+            "runtime meter: closed {closed} attended run(s) a previous process left running — \
+             their usage is recorded as unknown, which is not zero"
+        ),
+        Err(detail) => eprintln!("runtime meter: orphaned attended runs not swept: {detail}"),
+    }
+}
+
 /// Close a run's books. Never fails a run: metering records what happened and
 /// must not become a second way for the run to go wrong.
 pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {

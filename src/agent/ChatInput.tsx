@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useEscapeLayer } from '@/components/ui/Popover';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { argumentHint, listSkills, type SkillRef } from '@/engine/skills';
 import { isAgentEntry, listAgents } from '@/engine/agents';
@@ -53,6 +54,26 @@ interface Menu {
   items: MenuItem[];
 }
 
+/**
+ * The open menu, on the layer stack (M52).
+ *
+ * The textarea took its own Escape, in React's bubble phase — after every
+ * layer's capture-phase listener on window had already had it. So with a
+ * page's side panel open as a drawer, Escape in the `[[` menu closed the
+ * drawer and left the menu open, and beside a record it closed the record.
+ * A menu on the stack is the innermost surface, and Escape closes it first.
+ */
+function MenuLayer({
+  onEscape,
+  menuRef,
+}: {
+  onEscape: () => void;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  useEscapeLayer(onEscape, { contains: (node) => menuRef.current?.contains(node) === true });
+  return null;
+}
+
 export function ChatInput({
   value,
   onChange,
@@ -81,6 +102,7 @@ export function ChatInput({
   const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
   // Escape dismisses the MENU, not the draft (M15). The draft is never
   // touched, which is the whole point — Escape used to append `]]` at the END
@@ -331,7 +353,20 @@ export function ChatInput({
   return (
     <div className="relative">
       {menu !== null && (
+        <MenuLayer
+          // Dismiss the menu and NOTHING else. This used to append `]]` to the
+          // end of the draft — committing a link you were abandoning, at the
+          // wrong place if the caret was mid-message — or a space, in the
+          // slash case. A draft that still reads `/name` still invokes on
+          // send; to send it literally, start with a space (see
+          // AiPanel.submit).
+          onEscape={() => setDismissed(menu.anchor)}
+          menuRef={menuRef}
+        />
+      )}
+      {menu !== null && (
         <div
+          ref={menuRef}
           data-testid={menu.testid}
           className="absolute bottom-full left-0 z-20 mb-1 max-h-[240px] w-full overflow-y-auto rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
         >
@@ -390,17 +425,8 @@ export function ChatInput({
               (menu.items[active] ?? menu.items[0]).run();
               return;
             }
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              // Dismiss the menu and NOTHING else. This used to append `]]` to
-              // the end of the draft — committing a link you were abandoning,
-              // at the wrong place if the caret was mid-message — or a space,
-              // in the slash case. A draft that still reads `/name` still
-              // invokes on send; to send it literally, start with a space
-              // (see AiPanel.submit).
-              setDismissed(menu.anchor);
-              return;
-            }
+            // Escape is MenuLayer's: it reaches the stack before it reaches
+            // this textarea.
           }
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();

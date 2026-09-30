@@ -64,10 +64,11 @@ export function verifyConcept(
   vault: string,
   path: string,
   patch: Record<string, unknown>,
+  viewedBodyHash: string,
 ): Promise<void> {
   return inTauri()
-    ? invokeTauri('verify_concept', { vault, path, patch })
-    : mock.verifyConcept(vault, path, patch);
+    ? invokeTauri('verify_concept', { vault, path, patch, viewedBodyHash })
+    : mock.verifyConcept(vault, path, patch, viewedBodyHash);
 }
 
 /**
@@ -269,8 +270,10 @@ export function exportSvg(defaultName: string, svg: string): Promise<string | nu
 }
 
 /** The ledger chain head, as `{ seq, hash }` — or null when the vault has no
- * readable ledger. Best-effort by design (M21.7): checkpoint trailers are
- * periodic anchoring, and a missing head must change nothing about a commit. */
+ * readable ledger. Best-effort by design (M21.7): a checkpoint trailer joins a
+ * commit to the ledger head it was made at — a join key, not rewind
+ * detection (M49.10) — and a missing head must change nothing about a
+ * commit. */
 export interface LedgerHead {
   seq: number | null;
   hash: string;
@@ -280,29 +283,20 @@ export function ledgerHead(vault: string): Promise<LedgerHead | null> {
   return inTauri() ? invokeTauri('ledger_head', { vault }) : mock.ledgerHead(vault);
 }
 
-/** Shadow-mode diagnostics (M21.8): the live verdict on a vault's ledger.
- * Verdict tags are the Rust recovery states (kebab-case); no UI consumes
- * this yet — it exists so a human can ask. */
-export interface LedgerStatus {
-  verdict: string;
-  detail: string;
-  head: string | null;
-  seq: number | null;
-  segments: number;
-  anomalies: number;
-  /** The M23.6 circuit breaker: the named reconciliation mode is open. */
-  reconciliation_open: boolean;
-  /** Unresolved divergence detection keys while the mode is open. */
-  divergences: string[];
-}
+// The ledger status shapes live in mockIpc (the module graph stays a tree:
+// ipc imports the mock, never the reverse), re-exported here because the app
+// imports its IPC types from the IPC module.
+import type { LedgerStatus, QuarantinedPath, WriterStatus } from './mockIpc';
+export type { LedgerStatus, QuarantinedPath, WriterStatus };
 
-/** The M23.7 reconciliation exits. `action` is `accept_current_files` or
- * `restore_ledger_authority`; only the Tauri backend can resolve (the
- * browser has no ledger). */
-export function resolveReconciliation(vault: string, action: string): Promise<void> {
+/** The M23.7 reconciliation exits. Whole vault: `action` is
+ * `accept_current_files` or `restore_ledger_authority`. One file (M49.5):
+ * pass its `path` with `keep` or `restore`. Only the Tauri backend can
+ * resolve (the browser has no ledger). */
+export function resolveReconciliation(vault: string, action: string, path?: string): Promise<void> {
   return inTauri()
-    ? invokeTauri('resolve_reconciliation', { vault, action })
-    : mock.resolveReconciliation(vault, action);
+    ? invokeTauri('resolve_reconciliation', { vault, action, path: path ?? null })
+    : mock.resolveReconciliation(vault, action, path);
 }
 
 export function ledgerStatus(vault: string): Promise<LedgerStatus> {
@@ -317,6 +311,7 @@ export function ledgerStatus(vault: string): Promise<LedgerStatus> {
 // imports its IPC types from the IPC module.
 import type {
   BeliefChips,
+  CardLink,
   CardTarget,
   ChangesView,
   LanesView,
@@ -324,7 +319,7 @@ import type {
   RevertableApplication,
 } from './mockIpc';
 
-export type { CardTarget, ReviewCard, RevertableApplication };
+export type { CardLink, CardTarget, ReviewCard, RevertableApplication };
 export type {
   AuthorityScope,
   BeliefChips,
@@ -475,6 +470,7 @@ import type {
   FleetRunDetail,
   FleetActorSummary,
   FleetFilter,
+  RunWrite,
 } from './mockIpc';
 
 export type {
@@ -484,6 +480,7 @@ export type {
   FleetRunDetail,
   FleetActorSummary,
   FleetFilter,
+  RunWrite,
 };
 
 /**
@@ -499,6 +496,15 @@ export function fleetRuns(filter: FleetFilter = {}): Promise<FleetRun[]> {
 
 /** One run and whatever the governance tables recorded about it. An unknown
  * id is refused, so a typo and an unmetered run never look the same. */
+/** What one run changed in Knowledge (M50.3): the concepts its proposals
+ * named and what became of each. `null` is NOT RECORDED — a vault that keeps
+ * no ledger — never "changed nothing", which is `[]`. */
+export function runKnowledgeWrites(vault: string, runId: string): Promise<RunWrite[] | null> {
+  return inTauri()
+    ? invokeTauri('run_knowledge_writes', { vault, runId })
+    : mock.runKnowledgeWrites(vault, runId);
+}
+
 export function fleetRunDetail(runId: string): Promise<FleetRunDetail> {
   return inTauri() ? invokeTauri('fleet_run_detail', { runId }) : mock.fleetRunDetail(runId);
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -15,12 +16,24 @@ import {
   type ContextChip,
 } from '@/agent/contextChips';
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
+import { MessageText } from '@/agent/MessageMarkdown';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
 import { listSkills, matchSkillInvocation, skillPrompt } from '@/engine/skills';
 import { buildSystemPrompt } from '@/agent/systemPrompt';
-import { listConcepts } from '@/engine/okf';
+import { isKnowledgePath, listConcepts, type Concept } from '@/engine/okf';
+import type { Entry } from '@/engine/types';
+import {
+  ASK_BASE_LABEL,
+  askBasePrompt,
+  askedAbout,
+  AUGMENT_LABEL,
+  augmentDocPrompt,
+  conceptAsk,
+  DISTILL_LABEL,
+  distillPrompt,
+} from '@/lib/prompts';
 import { placeOf, samePlace } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
@@ -32,7 +45,8 @@ import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
 import { useNavStore } from '@/stores/navStore';
-import { RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
+import { dragCeiling, fitWidth } from '@/app/shellLayout';
+import { AI_WIDTH_MAX, AI_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -42,36 +56,6 @@ import { useVaultStore } from '@/stores/vaultStore';
  * goes through cerebro's own MCP tools, so the panel shows the tool calls
  * inline: an agent that edits your vault should not do it invisibly.
  */
-
-/** Renders assistant text with `[[wikilinks]]` and **bold** made real. */
-export function MessageText({ text, onOpen }: { text: string; onOpen: (target: string) => void }) {
-  const entries = useVaultStore((s) => s.entries);
-  const parts = useMemo(() => text.split(/(\[\[[^\]]+\]\]|\*\*[^*]+\*\*)/g), [text]);
-  return (
-    <>
-      {parts.map((part, i) => {
-        const link = /^\[\[([^\]]+)\]\]$/.exec(part);
-        if (link !== null) {
-          const [target, alias] = link[1].split('|');
-          const entry = resolveTarget(target, entries);
-          return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => onOpen(target)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
-            >
-              {alias ?? entry?.title ?? target}
-            </button>
-          );
-        }
-        const bold = /^\*\*([^*]+)\*\*$/.exec(part);
-        if (bold !== null) return <strong key={i}>{bold[1]}</strong>;
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
-}
 
 /** Past this, a prompt is a wall rather than a question, so it is collapsed
  * to a predictable slice of the transcript with a way to see the rest. */
@@ -177,39 +161,6 @@ function Message({
   );
 }
 
-/**
- * The panel's own width (M15).
- *
- * Every other panel in the shell drags; this one was a fixed 380px you could
- * only toggle, which made tool-call JSON unreadable on a wide screen and made
- * the assistant impossible to give ground on a narrow one. Kept local and in
- * localStorage rather than in uiStore: nothing else in the app reads it, and
- * the floor is the store's own RIGHT_PANEL_MIN_WIDTH.
- */
-const AI_WIDTH_KEY = 'cerebro.aiPanelWidth';
-export const AI_WIDTH_DEFAULT = 380;
-export const AI_WIDTH_MIN = RIGHT_PANEL_MIN_WIDTH;
-export const AI_WIDTH_MAX = 720;
-
-function loadAiWidth(): number {
-  try {
-    const raw = window.localStorage.getItem(AI_WIDTH_KEY);
-    const parsed = raw === null ? NaN : Number(raw);
-    if (!Number.isFinite(parsed)) return AI_WIDTH_DEFAULT;
-    return Math.min(AI_WIDTH_MAX, Math.max(AI_WIDTH_MIN, Math.round(parsed)));
-  } catch {
-    return AI_WIDTH_DEFAULT;
-  }
-}
-
-function saveAiWidth(width: number): void {
-  try {
-    window.localStorage.setItem(AI_WIDTH_KEY, String(width));
-  } catch {
-    // Storage unavailable (private mode): the width stays session-only.
-  }
-}
-
 /** jsdom has no element scrolling, and a missing method must not take the
  * transcript down with it. */
 function scrollToLatest(el: HTMLDivElement | null): void {
@@ -217,13 +168,65 @@ function scrollToLatest(el: HTMLDivElement | null): void {
   el.scrollTo({ top: el.scrollHeight });
 }
 
-const SUGGESTIONS = [
-  'What is at risk right now?',
-  'Help me clear the Inbox',
-  'What do you know about this vault?',
+const SUGGESTIONS: Suggestion[] = [
+  { label: 'What is at risk right now?' },
+  { label: 'Help me clear the Inbox' },
+  { label: 'What do you know about this vault?' },
 ];
 
-export function AiPanel() {
+/** A starter: what the button says, and — when it is not the same — what is
+ *  sent (a structured prompt the chip label summarizes) and what the bubble
+ *  says it was (M52.3: the act and the page, as every surface names it). */
+interface Suggestion {
+  label: string;
+  prompt?: string;
+  asked?: string;
+}
+
+/** A page's starter: the act's one label on the button, the page's title in
+ *  the bubble it leaves — the same words the surface's own button sends. */
+function pageAct(page: Entry, label: string, prompt: string): Suggestion {
+  return { label, prompt, asked: askedAbout(label, page.title) };
+}
+
+/**
+ * Starters from the page you are on (M50.4). The panel offered the same three
+ * everywhere, so opening it beside a concept asked about the Inbox. A page
+ * gets the questions its own surfaces already ask — what Knowledge says about
+ * it, what it is missing, learning from it — and a concept gets its own:
+ * the one ask its review bar offers (M52.3 — a recheck only when it is due,
+ * and none once it has been replaced).
+ */
+function pageSuggestions(page: Entry | null, concept: Concept | null): Suggestion[] {
+  if (page === null) return SUGGESTIONS;
+  if (concept !== null) {
+    const act =
+      concept.supersededBy === null
+        ? conceptAsk({ path: page.path, title: concept.title, stale: concept.stale })
+        : null;
+    return [
+      pageAct(
+        page,
+        'What supports this concept?',
+        `What in this vault supports or contradicts the concept at ${page.path} ("${concept.title}")? Cite the pages.`,
+      ),
+      ...(act === null ? [] : [pageAct(page, act.label, act.text)]),
+      { label: 'What do you know about this vault?' },
+    ];
+  }
+  return [
+    pageAct(page, ASK_BASE_LABEL, askBasePrompt(page.path, page.title)),
+    pageAct(page, AUGMENT_LABEL, augmentDocPrompt(page.path, page.title)),
+    pageAct(page, DISTILL_LABEL, distillPrompt(page.path, page.title)),
+  ];
+}
+
+export function AiPanel({
+  room = null,
+}: {
+  /** The widest the shell can draw the panel, measured; null until it has. */
+  room?: number | null;
+} = {}) {
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const shell = useUiStore((s) => s.agentShellAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
@@ -244,9 +247,12 @@ export function AiPanel() {
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   // M15: the panel is resizable like every other panel in the shell. The
-  // width lives here rather than in uiStore because it is nobody else's
-  // business, and it persists the same way the store's widths do.
-  const [width, setWidth] = useState(loadAiWidth);
+  // stored width is the one it keeps beside a record; it gives only once the
+  // record has given all it can (app/shellLayout.ts). `drawn` is that width
+  // as measured, for the drag handle — CSS is what draws it.
+  const width = useUiStore((s) => s.aiPanelWidth);
+  const setWidth = useUiStore((s) => s.setAiPanelWidth);
+  const drawn = room === null ? width : fitWidth(width, room);
   // Auto-scroll is STICKY, not unconditional: `patchActive` mints a new
   // message array per streamed token, so the old effect yanked you back to
   // the bottom mid-token every time you tried to read anything above.
@@ -261,8 +267,15 @@ export function AiPanel() {
   // M13.1: the skill catalog — names and descriptions only; a body loads when
   // one is invoked, so the vault can hold many skills at no per-turn cost.
   const skills = useMemo(() => listSkills(entries), [entries]);
-  // M17.20: the knowledge bundle, for the `about:` lookup in the snapshot.
-  const concepts = useMemo(() => listConcepts(entries, todayIso()), [entries]);
+  // M17.20: the knowledge bundle — for the snapshot, which carries the
+  // concepts about what is in context (by `about:` anchor) or learned from it
+  // (by `sources`, M52.3), and for the asks a concept's own page offers.
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
+  const concepts = useMemo(
+    () => listConcepts(entries, todayIso(), quarantine, ledgerReview),
+    [entries, quarantine, ledgerReview],
+  );
 
   // The turn's context is read through a ref at send (M17.6). It has to be
   // built from the CONVERSATION's chips, and the conversation list is built on
@@ -359,9 +372,62 @@ export function AiPanel() {
 
   const recordChips = chips.filter((c) => c.kind === 'record');
   const activeChipPath = recordChips.some((c) => c.path === detailPath) ? detailPath : null;
+  // M50.4: a page you are standing on IS the active note. Only the record
+  // peek used to count, so beside an open doc or concept the agent got the
+  // path as a sentence and none of what Knowledge holds about it.
+  const activePath =
+    activeChipPath ?? (contextSelection?.kind === 'doc' ? contextSelection.path : null);
+  const activeEntry = useMemo(
+    () => (activePath === null ? null : (entries.find((e) => e.path === activePath) ?? null)),
+    [activePath, entries],
+  );
 
   // Context is a system-prompt suffix, not a hidden first message: it must
   // travel with every turn, because a resumed session re-reads it.
+  const snapshot = useMemo(
+    () =>
+      buildSnapshot({
+        selection: contextSelection ?? undefined,
+        entries,
+        schema,
+        activePath,
+        visible: collection?.entries,
+        // M11: the open TAB's filters — what the person is actually looking at.
+        filters:
+          activeView === null || contextSelection === null
+            ? null
+            : resolveView(
+                activeView.definition,
+                contextSelection.kind === 'list' ? (contextSelection.view ?? null) : null,
+              ).filters,
+        references: extractReferences(draft),
+        attached: recordChips.map((c) => c.path),
+        // Where this conversation began, when the user has since walked. Given
+        // to the agent as a FACT rather than turned into a question for the
+        // user — it already has the transcript, so "we were on the Roadmap and
+        // you are now in the Inbox" is a sentence it can act on.
+        startedIn: conversations.startedElsewhere,
+        // M17.20: the bundle reaches the turn, by `about:` anchor and (M52.3)
+        // by `sources`. Derived here rather than inside buildSnapshot so the
+        // O(entries) pass is memoized with the rest of the prompt instead of
+        // running per render.
+        concepts,
+      }),
+    // `draft` is deliberately excluded: rebuilding the prompt on every
+    // keystroke would thrash, and `send` reads the references it needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      contextSelection,
+      entries,
+      schema,
+      activePath,
+      collection?.entries,
+      activeView,
+      recordChips,
+      conversations.startedElsewhere,
+      concepts,
+    ],
+  );
   const systemPrompt = useMemo(() => {
     const base = buildSystemPrompt(contextSelection ?? { kind: 'none' }, {
       connectors,
@@ -372,50 +438,27 @@ export function AiPanel() {
       // from the panel.
       capabilities: ['knowledge'],
     });
-    const snapshot = buildSnapshot({
-      selection: contextSelection ?? undefined,
-      entries,
-      schema,
-      activePath: activeChipPath,
-      visible: collection?.entries,
-      // M11: the open TAB's filters — what the person is actually looking at.
-      filters:
-        activeView === null || contextSelection === null
-          ? null
-          : resolveView(
-              activeView.definition,
-              contextSelection.kind === 'list' ? (contextSelection.view ?? null) : null,
-            ).filters,
-      references: extractReferences(draft),
-      attached: recordChips.map((c) => c.path),
-      // Where this conversation began, when the user has since walked. Given
-      // to the agent as a FACT rather than turned into a question for the
-      // user — it already has the transcript, so "we were on the Roadmap and
-      // you are now in the Inbox" is a sentence it can act on.
-      startedIn: conversations.startedElsewhere,
-      // M17.20: the bundle reaches the turn, by `about:` anchor. Derived here
-      // rather than inside buildSnapshot so the O(entries) pass is memoized
-      // with the rest of the prompt instead of running per render.
-      concepts,
-    });
     return `${base}${renderSnapshot(snapshot)}`;
-    // `draft` is deliberately excluded: rebuilding the prompt on every
-    // keystroke would thrash, and `send` reads the references it needs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    connectors,
-    issuePrefixes,
-    skills,
-    contextSelection,
-    entries,
-    schema,
-    activeChipPath,
-    collection?.entries,
-    activeView,
-    recordChips,
-    conversations.startedElsewhere,
-    concepts,
-  ]);
+  }, [connectors, issuePrefixes, skills, contextSelection, snapshot]);
+  // M50.4: what Knowledge the turn carries, shown with the other context —
+  // an answer that leaned on a concept should be traceable to it. M52.4: the
+  // chip counts what STANDS, as the page's own strip does; a replaced concept
+  // still travels (the agent must not quote it as current) and is listed
+  // last, marked as replaced.
+  const contextKnowledge = snapshot.knowledge ?? [];
+  const standing = contextKnowledge.filter((k) => k.supersededBy === undefined);
+  const replaced = contextKnowledge.filter((k) => k.supersededBy !== undefined);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const suggestions = useMemo(
+    () =>
+      pageSuggestions(
+        activeEntry,
+        activeEntry !== null && isKnowledgePath(activeEntry.path)
+          ? (concepts.find((c) => c.entry.path === activeEntry.path) ?? null)
+          : null,
+      ),
+    [activeEntry, concepts],
+  );
   // Handed to the chat hook through a ref rather than an argument — see
   // getTurn above. Assigned during render, like every other latest-value ref
   // in this codebase. The run list files a task under where the CONVERSATION
@@ -458,10 +501,10 @@ export function AiPanel() {
   // render-time capture and not an effect (PR #7 review).
   useFocusRestore();
 
-  // A prompt handed over from elsewhere in the app ("Ask the agent to
-  // revise" on a concept) is sent once and then cleared. Held while a turn
-  // is streaming — sending mid-turn would be dropped by the hook's
-  // one-turn guard — and delivered when the stream ends (PR #5 review).
+  // A prompt handed over from elsewhere in the app ("Ask to revise" on a
+  // concept) is sent once and then cleared. Held while a turn is streaming —
+  // sending mid-turn would be dropped by the hook's one-turn guard — and
+  // delivered when the stream ends (PR #5 review).
   const streaming = chat.streaming;
   useEffect(() => {
     if (pendingPrompt === null || streaming) return;
@@ -476,7 +519,7 @@ export function AiPanel() {
     // existed — the exact staleness this milestone is about.
     if (pendingPrompt.subject !== null) {
       const chip = recordChip(pendingPrompt.subject, entries);
-      setPendingPrompt({ text: pendingPrompt.text, subject: null });
+      setPendingPrompt({ ...pendingPrompt, subject: null });
       if (chip !== null) {
         const id = chipId(chip);
         setDismissed((prev) => prev.filter((d) => d !== id));
@@ -485,7 +528,10 @@ export function AiPanel() {
       return;
     }
     setPendingPrompt(null);
-    ask(pendingPrompt.text);
+    // M52.3: a labelled handoff goes the way a suggestion does — the label is
+    // the bubble and the thread's title, the prompt is what the agent reads.
+    if (pendingPrompt.label === null) ask(pendingPrompt.text);
+    else ask(pendingPrompt.label, pendingPrompt.text);
   }, [ask, entries, pendingPrompt, setPendingPrompt, streaming]);
 
   const submit = () => {
@@ -539,7 +585,8 @@ export function AiPanel() {
     const index = chat.messages.findIndex((m) => m.id === assistantId);
     const question = index > 0 ? chat.messages[index - 1] : undefined;
     if (question === undefined || question.role !== 'user') return;
-    ask(question.text);
+    // A labelled ask retries its prompt, not its label (M52.4).
+    ask(question.text, question.prompt);
   };
 
   const onListScroll = () => {
@@ -560,22 +607,25 @@ export function AiPanel() {
     <aside
       aria-label="AI panel"
       data-testid="ai-panel"
-      // `relative` hosts the drag handle; `min-w-0` + a 100% ceiling let the
-      // panel SHRINK inside the shell's right-hand slot instead of having its
-      // close button clipped off the edge (M15 layout contract).
-      className="relative flex min-w-0 flex-none flex-col border-l border-n-200 bg-n-0"
-      style={{ width, maxWidth: '100%' }}
+      // `relative` hosts the drag handle. `flex-none`: beside a record the
+      // RECORD gives ground, never this (M52). `max-w-full` is what makes it
+      // give at all, against the frame App draws it in — the slot, less the
+      // record's floor when there is one. A class, not a style, so the frame
+      // can lift it when it parks the panel (shellLayout `SHELL_CLASSES`).
+      // CSS, so it gives in the same layout pass as the window — sized from
+      // a measurement it was a frame late, and for that frame the slot's
+      // overflow cut off Send and the close button (M15 layout contract).
+      className="relative flex min-w-0 max-w-full flex-none flex-col border-l border-n-200 bg-n-0"
+      style={{ width }}
     >
       <ResizeHandle
         label="Resize AI panel"
         side="left"
-        width={width}
+        width={drawn}
+        preferred={width}
         min={AI_WIDTH_MIN}
-        max={AI_WIDTH_MAX}
-        onResize={(next) => {
-          setWidth(next);
-          saveAiWidth(next);
-        }}
+        max={dragCeiling(room, AI_WIDTH_MAX)}
+        onResize={setWidth}
       />
       <header className="flex flex-none items-center gap-2 border-b border-n-200 px-3 py-2">
         <Icon name="sparkles" size={14} color="var(--synapse-500)" />
@@ -610,17 +660,18 @@ export function AiPanel() {
             <p className="m-0 text-sm leading-[18px] text-n-500">
               {status?.installed === false
                 ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
-                : 'I can read and write this vault through cerebro. I maintain the Knowledge bundle; you verify it.'}
+                : 'I can read and write this vault. What I learn goes into Knowledge, where you verify it.'}
             </p>
             {status?.installed !== false &&
-              SUGGESTIONS.map((suggestion) => (
+              suggestions.map((suggestion) => (
                 <button
-                  key={suggestion}
+                  key={suggestion.label}
                   type="button"
-                  onClick={() => ask(suggestion)}
+                  data-testid="ai-suggestion"
+                  onClick={() => ask(suggestion.asked ?? suggestion.label, suggestion.prompt)}
                   className="rounded-lg border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
-                  {suggestion}
+                  {suggestion.label}
                 </button>
               ))}
           </div>
@@ -679,13 +730,55 @@ export function AiPanel() {
                   type="button"
                   aria-label={`Remove ${chip.label} from context`}
                   onClick={() => removeChip(chip)}
-                  className="flex-none rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+                  className="flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
                 >
                   <Icon name="x" size={9} />
                 </button>
               </span>
             ))}
+            {/* M50.4 — the Knowledge this turn carries: the concepts about,
+                or learned from, what is in context. Not removable on its own
+                — it follows the chips above, and taking one of those out takes
+                its knowledge with it. Opens to the concepts, each one a page. */}
+            {standing.length > 0 && (
+              <button
+                type="button"
+                data-testid="context-knowledge"
+                aria-expanded={knowledgeOpen}
+                onClick={() => setKnowledgeOpen(!knowledgeOpen)}
+                className="inline-flex items-center gap-1 rounded-md border border-n-200 bg-n-25 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-300"
+              >
+                <Icon name="brain" size={10} color="var(--synapse-500)" />
+                Knowledge · {standing.length}
+              </button>
+            )}
           </div>
+        )}
+        {knowledgeOpen && standing.length > 0 && (
+          <ul
+            data-testid="context-knowledge-list"
+            className="m-0 mb-1.5 flex list-none flex-col gap-px p-0"
+          >
+            {[...standing, ...replaced].map((k) => (
+              <li key={k.path}>
+                <button
+                  type="button"
+                  onClick={() => openPath(k.path)}
+                  className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-left text-2xs text-n-700 hover:bg-n-50"
+                >
+                  <Icon name="lightbulb" size={10} color="var(--n-400)" />
+                  <span className="min-w-0 truncate">{k.title}</span>
+                  {k.supersededBy !== undefined ? (
+                    <span className="flex-none text-n-400">· replaced</span>
+                  ) : (
+                    k.review !== 'current' && (
+                      <span className="flex-none text-n-400">· unreviewed</span>
+                    )
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
         {/* M9.5: `[[` completes against the vault, and the note you name
             travels into the snapshot with its content rather than as a word

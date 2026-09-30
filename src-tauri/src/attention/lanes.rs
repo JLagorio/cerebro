@@ -20,9 +20,15 @@
 //! **Reliance gates the debt lane and only orders the blindness one.** §89
 //! defines epistemic debt as a *materially relied-upon* thing carrying one of
 //! six weaknesses, so reliance is a filter there. Blindness is a fact about
-//! what nobody has looked at, and filtering that by reliance would hide
-//! exactly the gaps nobody has noticed yet — so there it sorts and never
-//! excludes.
+//! evidence that was looked at and found blind, and filtering that by
+//! reliance would hide exactly the gaps nobody has noticed yet — so there it
+//! sorts and never excludes.
+//!
+//! **Unassessed is counted, not listed (M49.10, K31).** Coverage nobody has
+//! assessed is not a blind spot, and with no assessor shipped it was every
+//! belief, pinned in a protected lane. It is kept out of the lane's items and
+//! carried as [`Lanes::unassessed`] instead, so the lane says coverage was
+//! not assessed rather than "no gaps" — absent is never zero.
 //!
 //! **Reliance is a proxy, and a declared one.** This base has no `depends_on`
 //! relation, so "materially relied upon" is spelled as the three deterministic
@@ -384,6 +390,18 @@ pub struct Item {
 pub struct Lanes {
     pub rule_version: String,
     pub items: Vec<Item>,
+    /// How many beliefs carry a facet whose coverage nobody has assessed
+    /// (M49.10, K31). Kept OUT of the protected blindness lane — no assessor
+    /// has shipped, so it would pin every belief there — but counted, so the
+    /// surface can say coverage was not assessed rather than let an empty
+    /// lane read as "no gaps". Absent is never zero.
+    pub unassessed: usize,
+    /// How many facets each belief holds, by belief id (M52.5). A row about
+    /// a belief's only facet leaves its scope unsaid — that facet's scope is
+    /// the whole belief's, the rule the concept's chips already follow — and
+    /// only the lanes know it: an item carries its own facet, not how many
+    /// others its belief has.
+    pub facets: BTreeMap<String, usize>,
 }
 
 impl Lanes {
@@ -419,9 +437,12 @@ pub fn lanes(
     let findings = crate::dynamics::hygiene::scan(state);
     let hygiene = crate::dynamics::hygiene::by_belief(&findings);
     let mut items = Vec::new();
+    let mut unassessed: BTreeSet<&str> = BTreeSet::new();
+    let mut facets: BTreeMap<String, usize> = BTreeMap::new();
 
     items.extend(contradiction(state));
     for belief in &chips {
+        facets.insert(belief.belief_id.clone(), belief.facets.len());
         let relied = reliance
             .get(belief.belief_id.as_str())
             .cloned()
@@ -434,6 +455,12 @@ pub fn lanes(
             None => continue,
         };
         for facet in &belief.facets {
+            if matches!(
+                facet.coverage,
+                crate::dynamics::coverage::Coverage::NoAssessments { .. }
+            ) {
+                unassessed.insert(belief.belief_id.as_str());
+            }
             items.extend(blindness(belief, facet, &relied, &entity_id));
             items.extend(staleness(belief, facet, &relied, &entity_id));
             items.extend(debt(
@@ -481,6 +508,8 @@ pub fn lanes(
     Lanes {
         rule_version: definitions.rule_version.clone(),
         items,
+        unassessed: unassessed.len(),
+        facets,
     }
 }
 
@@ -623,10 +652,16 @@ fn blindness(
     if facet.coverage.summary() != Summary::Blind {
         return Vec::new();
     }
-    // "Nobody has assessed this" and "the assessments fold to blind" are
-    // different sentences with the same summary, and the lane says which.
+    // M49.10 (K31): only an ASSESSED blind spot belongs in this protected
+    // lane. No coverage assessor has ever shipped, so "nobody assessed
+    // this" was every belief in the vault, pinned in a protected lane the
+    // person could not clear — a fact about the build, not about a belief.
+    // It is not dropped: `lanes` counts it into `Lanes::unassessed`, and the
+    // view says so in place of "no gaps". `coverage_unassessed` stays
+    // declared for the day an assessor exists and leaves some beliefs
+    // unassessed.
     let reason = match facet.coverage {
-        Coverage::NoAssessments { .. } => Reason::CoverageUnassessed,
+        Coverage::NoAssessments { .. } => return Vec::new(),
         Coverage::Assessed { .. } => Reason::CoverageBlindAssessed,
     };
     vec![facet_item(
@@ -857,7 +892,60 @@ pub(crate) mod tests {
             state.assertion_facets.insert(event.into(), assertion);
         }
         state.beliefs.get_mut(B_ONE).unwrap().qualification = Qualification::Qualified;
+        assess_blind(&mut state);
         state
+    }
+
+    /// Every belief ASSESSED blind: each source behind the fixture's
+    /// observations reports every coverage dimension `no` for each belief's
+    /// subject (M49.10). An unassessed belief no longer lands in the
+    /// protected blindness lane, so a fixture that wants that lane populated
+    /// has to say what was assessed.
+    pub(crate) fn assess_blind(state: &mut EpistemicState) {
+        use crate::ledger::schema::{DimensionAssessment, DimensionState, Dimensions};
+        let no = || DimensionAssessment {
+            state: DimensionState::No,
+            basis_event_ids: vec![],
+            as_of: "2026-08-01T00:00:00Z".into(),
+        };
+        let subjects: BTreeSet<String> = state
+            .beliefs
+            .values()
+            .map(|b| b.entity_id.clone())
+            .collect();
+        let sources: BTreeSet<String> = state
+            .observations
+            .values()
+            .map(|o| o.source_id.clone())
+            .collect();
+        for (i, (subject, source)) in subjects
+            .iter()
+            .flat_map(|s| sources.iter().map(move |src| (s.clone(), src.clone())))
+            .enumerate()
+        {
+            let id = format!("{i:032x}");
+            state.coverage_assessments.insert(
+                id.clone(),
+                crate::ledger::reduce::CoverageAssessment {
+                    assessment_id: id,
+                    subject_id: Some(subject),
+                    predicate_class: None,
+                    scope: crate::ledger::schema::Scope::empty(),
+                    source_id: source,
+                    dimensions: Dimensions {
+                        source_connected: no(),
+                        source_healthy: no(),
+                        scope_known: no(),
+                        scope_accessible: no(),
+                        retention_known: no(),
+                        index_current: no(),
+                        retrieval_attempted: no(),
+                    },
+                    retrieval_receipt: None,
+                    superseded: false,
+                },
+            );
+        }
     }
 
     #[test]
@@ -942,29 +1030,28 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn blindness_detects_without_asking_whether_anybody_relies_on_it() {
-        // The filter that must not exist. A blind spot nobody is standing on
-        // is exactly the one nobody has noticed.
+    fn an_unassessed_belief_is_not_pinned_in_the_protected_blindness_lane() {
+        // M49.10 (K31): no coverage assessor exists, so every belief was
+        // "unassessed" — and every one sat in a PROTECTED lane nobody could
+        // clear. Unassessed is a fact about the build, not a blind spot.
         let mut state = standing();
+        state.coverage_assessments.clear();
         state.beliefs.get_mut(B_ONE).unwrap().qualification = Qualification::Draft;
         let out = run(&state, &[]);
-        let blind: Vec<&Item> = out.of(Lane::Blindness).collect();
-        assert!(!blind.is_empty(), "an unrelied-upon blind spot still shows");
-        assert!(blind.iter().all(|item| item.reliance.is_empty()));
-        assert_eq!(blind[0].reasons, vec![Reason::CoverageUnassessed]);
-    }
-
-    #[test]
-    fn reliance_orders_the_blindness_lane_rather_than_filtering_it() {
-        let state = standing(); // B_ONE qualified, B_TWO not
-        let out = run(&state, &[]);
-        let blind: Vec<&Item> = out.of(Lane::Blindness).collect();
-        assert_eq!(blind.len(), 2, "both beliefs are blind");
+        assert_eq!(out.of(Lane::Blindness).count(), 0);
+        state.beliefs.get_mut(B_ONE).unwrap().qualification = Qualification::Qualified;
         assert_eq!(
-            blind[0].belief_id, B_ONE,
-            "the one something stands on sorts first"
+            run(&state, &[]).of(Lane::Blindness).count(),
+            0,
+            "relied upon or not"
         );
-        assert!(blind[1].reliance.is_empty());
+        // An ASSESSED blind spot is still detected, relied upon or not.
+        let assessed = run(&standing(), &[]);
+        let blind: Vec<&Item> = assessed.of(Lane::Blindness).collect();
+        assert!(!blind.is_empty());
+        assert!(blind
+            .iter()
+            .all(|item| item.reasons == vec![Reason::CoverageBlindAssessed]));
     }
 
     #[test]

@@ -184,6 +184,7 @@ export function writtenPath(tool: string, input: string | null): string | null {
     // honest and does not pretend to know the slug the writer chose.
     case 'create_note':
     case 'write_concept':
+    case 'recheck_concept':
       return str('path') ?? str('folder');
     case 'cache_source':
       return str('path') ?? str('id');

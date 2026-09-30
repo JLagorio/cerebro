@@ -3,6 +3,7 @@ import { onAgentEvent } from '@/agent/agentIpc';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { agentRef, isAgentEntry } from '@/engine/agents';
+import { actorLabel } from '@/engine/authors';
 import { agentActive, agentDraft } from '@/engine/libraryDraft';
 import { nextFire, parseSchedule } from '@/engine/skills';
 import { localStamp, relativeWhen } from '@/engine/whenText';
@@ -24,8 +25,8 @@ import { useVaultStore } from '@/stores/vaultStore';
  * **An idle agent still appears (D6).** A fleet that only showed working
  * agents would answer "what is happening" and not "who works here", and the
  * second is the question a person actually has. So does an agent nothing can
- * fire: activation is a human act, an Agent record without a `schedule:` is a
- * description rather than a daemon, and the row SAYS which it is instead of
+ * fire: activation is a human act, an Agent record without a `schedule:` runs
+ * only when somebody asks it to, and the row SAYS so — "off duty" — instead of
  * being quietly omitted.
  *
  * **Nothing here is stored.** Identity, brief, schedule and scope come off the
@@ -38,8 +39,9 @@ import { useVaultStore } from '@/stores/vaultStore';
  * siblings run work and are not standing agents with memory and judgment
  * (M26's name-discipline trap). They are not rows. They are also not hidden:
  * one line under the roster names every actor that has run here without a
- * record behind it, so "who works here" has a complete answer without the
- * surface inventing three colleagues.
+ * record behind it — in words, "Background ingest", never the raw stamp
+ * (M52.3) — so "who works here" has a complete answer without the surface
+ * inventing three colleagues.
  *
  * **A row can be stopped without being deleted (M33b.5).** Each row carries
  * its own pause, which is the cheapest answer to a misbehaving agent that is
@@ -91,16 +93,16 @@ type RunFacts =
  * - **waiting on you** outranks both pauses, because pausing does not un-queue
  *   a decision somebody still owes.
  * - **paused** — this ONE agent, by somebody pressing the button on this row —
- *   outranks everything below it, including "not activated". A human act on
+ *   outranks everything below it, including "off duty". A human act on
  *   this agent is the fact the row exists to report, and a pause the row
  *   declined to mention would be the hidden button spec §6 warns about. It
  *   also outranks the background pause: an agent stopped twice reads as
  *   stopped by the control with a button next to it, and pressing that button
  *   flips the row to `background-paused` — which is exactly the lesson, since
  *   resuming one agent under a global pause starts nothing.
- * - **not activated** outranks the BACKGROUND pause, unchanged from M33b.4:
- *   an agent nothing can fire was never started by anybody, and calling that
- *   "the background is paused" would blame the wrong control.
+ * - **off duty** (`inactive`) outranks the BACKGROUND pause, unchanged from
+ *   M33b.4: an agent nothing can fire was never started by anybody, and
+ *   calling that "the background is paused" would blame the wrong control.
  * - **background paused** is the global pause, and is a different sentence
  *   from `paused`. "Everything is stopped" and "this colleague is stopped"
  *   want different actions, and one word for both would hide which is true.
@@ -143,7 +145,9 @@ export function liveState(facts: {
 const STATE_TEXT: Record<AgentState, string> = {
   working: 'working now',
   waiting: 'waiting on you',
-  inactive: 'not activated',
+  // "Not activated" read as broken (M52.3). Nothing is wrong with an agent
+  // that runs only when asked: it is off duty.
+  inactive: 'off duty',
   paused: 'paused',
   'background-paused': 'background paused',
   unknown: 'state unknown',
@@ -191,10 +195,12 @@ function waitingText(waiting: number | null): string {
  *
  * The schedule if one fires it, the next fire time if that schedule parses,
  * and the plain fact otherwise. "Activation is a human act" is a promise the
- * roster keeps by saying, on the row, that this record is a description.
+ * roster keeps by saying, on the row, that nothing fires this one by itself —
+ * in words a reader acts on (M52.3), where "a description, not a daemon"
+ * explained the architecture instead.
  */
 function dutyText(schedule: string, onDuty: boolean, now: Date): string {
-  if (!onDuty) return 'A description, not a daemon — nothing can fire it.';
+  if (!onDuty) return 'Off duty — runs only when you ask';
   const parsed = parseSchedule(schedule);
   if (parsed === null) {
     // On duty with no readable schedule means a trigger fires it — or the
@@ -353,13 +359,15 @@ export function AgentRoster({
    * an agent under a global pause that it is now running would be a lie the
    * chip beside it immediately contradicts.
    */
-  const setAgentPause = (actor: string, next: boolean) => {
+  const setAgentPause = (actor: string, title: string, next: boolean) => {
     if (busy || vaultPath === null) return;
     setBusy(true);
     void ipc
       .setAgentPaused(vaultPath, actor, next)
       .then(
-        () => toast(next ? `${actor} paused` : `${actor} resumed`),
+        // By name, not by stamp (M52.3): the row the button sits on says
+        // "Release scout", so the toast does too.
+        () => toast(next ? `${title} paused` : `${title} resumed`),
         (e: unknown) => toast(e instanceof Error ? e.message : 'That did not take'),
       )
       .finally(() => {
@@ -504,7 +512,7 @@ export function AgentRoster({
                 size="sm"
                 disabled={busy}
                 testId="agent-pause"
-                onClick={() => setAgentPause(ref.actor, !agentPaused)}
+                onClick={() => setAgentPause(ref.actor, ref.title, !agentPaused)}
               >
                 {agentPaused ? 'Resume' : 'Pause'}
               </Button>
@@ -515,8 +523,14 @@ export function AgentRoster({
 
       {unowned.length > 0 && (
         <p data-testid="roster-unowned" className="text-2xs text-n-500">
-          Also ran here, with no record in this vault: {unowned.join(', ')}. Internal work and
-          retired names, not standing agents — their runs are in the history below.
+          Also ran here, with no record in this vault:{' '}
+          {unowned.map((actor, i) => (
+            <span key={actor} title={actor}>
+              {i > 0 && ', '}
+              {actorLabel(actor, entries).text}
+            </span>
+          ))}
+          . Not standing agents — their runs are in the history below.
         </p>
       )}
     </div>

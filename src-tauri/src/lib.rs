@@ -38,7 +38,7 @@ use vault::watcher::WatcherState;
 use vault::write::{CollectionYaml, ViewYaml};
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| e.to_string())
+    app_config::app_dir(app)
 }
 
 fn remember_vault(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
@@ -92,7 +92,8 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
 // The write commands below are the HUMAN path — every one of them is
 // reachable from the UI, so each guards the knowledge/ bundle (M5). The
 // agent's MCP tools have their own, narrower boundary (M17.1): they reach
-// the bundle through `write_concept` alone. See mcp.rs.
+// the bundle through the two server-stamped tools alone, `write_concept` and
+// `recheck_concept` (M49.7). See mcp.rs.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
     // The M23.7 capture valve: an in-app body edit to a knowledge
@@ -253,6 +254,23 @@ fn fleet_run_detail(
 ) -> Result<runtime::fleet::RunDetail, String> {
     let conn = runtime::open_existing(&config_dir(&app)?)?;
     runtime::fleet::run_detail(&conn, &run_id)
+}
+
+/// What one run changed in Knowledge (M50.3): the concepts its proposals
+/// named and what became of each, joined from the ledger by `run_id`.
+/// `None` when the vault keeps no ledger — not recorded, never "changed
+/// nothing".
+#[tauri::command(async)]
+fn run_knowledge_writes(
+    vault: String,
+    run_id: String,
+) -> Result<Option<Vec<knowledge::RunWrite>>, String> {
+    let vault = Path::new(&vault);
+    if !ledger::has_store(vault) {
+        return Ok(None);
+    }
+    let folded = ledger::shadow::state_of(vault)?;
+    Ok(Some(knowledge::run_writes(&folded.state, &run_id)))
 }
 
 /// What one actor's runs add up to (M33.6).
@@ -590,10 +608,14 @@ fn converge(
     };
     // Read aloud on the way out (M27.8a). The stored row keeps the structured
     // `Output` — its bytes are content-hashed and a prose field would change
-    // every one already on disk — so the sentences are composed per call, in
-    // the module that owns the surface's whole vocabulary.
-    let output = convergence::over(&read.frames, &store_uuid, window)?;
-    Ok(attention::status::change_sections(&output))
+    // every one already on disk — so the sentences, and the file each line's
+    // subject projects to (M52.4), are composed per call, in the module that
+    // owns the surface's whole vocabulary.
+    let (output, now) = convergence::over_with_now(&read.frames, &store_uuid, window)?;
+    Ok(attention::status::change_sections(
+        &output,
+        &attention::status::Subjects::of(&now),
+    ))
 }
 
 /// The three axes, per belief facet (M27.5b).
@@ -914,14 +936,31 @@ fn resolve_held_items(
     }
 }
 
-/// The M23.7 reconciliation exits: `accept_current_files` adopts every
-/// representable diff through the capture valve in one logical batch;
-/// `restore_ledger_authority` regenerates every projection and closes the
-/// mode with the unbatched resolution.
+/// The M23.7 reconciliation exits, per path since M49.5.
+/// `accept_current_files` keeps every quarantined file: each is adopted on
+/// its own capture, and once none is left quarantined a closing batch that
+/// holds only the resolution closes the mode. `restore_ledger_authority`
+/// regenerates every projection, moves the files the ledger cannot explain
+/// into `.cerebro/reconcile-backup/`, and closes the mode with the
+/// unbatched resolution. With a `path`, `keep` or `restore` exits one file.
 #[tauri::command(async)]
-fn resolve_reconciliation(vault: String, action: String) -> Result<(), String> {
-    ledger::reconcile::resolve(Path::new(&vault), &action).unwrap_or_else(|| {
-        Err("no active ledger writer for this vault — reconciliation is unavailable".to_string())
+fn resolve_reconciliation(
+    vault: String,
+    action: String,
+    path: Option<String>,
+) -> Result<(), String> {
+    // M49.5: a `path` makes it one file's exit (`keep` | `restore`);
+    // without one, the whole-vault exits.
+    let vault = Path::new(&vault);
+    match path {
+        Some(path) => ledger::reconcile::resolve_path(vault, &path, &action),
+        None => ledger::reconcile::resolve(vault, &action),
+    }
+    .unwrap_or_else(|| {
+        Err(format!(
+            "{}: no active ledger writer for this vault — reconciliation is unavailable",
+            ledger::concepts::LEDGER_WRITER_UNAVAILABLE
+        ))
     })
 }
 
@@ -932,11 +971,13 @@ fn verify_concept(
     vault: String,
     path: String,
     patch: serde_json::Map<String, serde_json::Value>,
+    viewed_body_hash: String,
 ) -> Result<(), String> {
     knowledge::guard_verify(&path, &patch)?;
     // A field revision plus its attestation through the ledger writer
-    // (M23.4); refused, not written, when no writer is active (M49.1).
-    vault::write::verify_frontmatter(Path::new(&vault), &path, &patch)
+    // (M23.4); refused, not written, when no writer is active (M49.1) or
+    // when the body on disk is not the one the person read (M49.3).
+    vault::write::verify_frontmatter(Path::new(&vault), &path, &patch, &viewed_body_hash)
 }
 
 /// The M23.5 capture boundary: a structured in-app edit to a knowledge
@@ -1262,6 +1303,14 @@ fn run_agent(
     // child was gone — where the outgoing run's trailing writes stamped as
     // the incoming run (PR #5 security review).
     let mut request = request;
+    // M49.4 (K7): the knowledge recheck lanes are Cerebro's own work, not a
+    // person's grant, and they exist to rewrite `knowledge/` — which they
+    // may do only through the server-stamped write_concept and
+    // recheck_concept. Never shell, whatever the Settings
+    // toggle or the job says, so the built-in writers stay denied.
+    if matches!(request.lane.as_deref(), Some("stale" | "schema")) {
+        request.shell = Some(false);
+    }
     // M25.2: attended chat is METERED and never gated. The run is recorded
     // with its tokens; no reservation, no lease, and no ceiling can refuse it.
     let scope = runtime::open_vault(Path::new(&vault));
@@ -1350,7 +1399,9 @@ fn run_agent(
     // meter carry the SAME one — an attended run used to hold two (the meter's
     // here, a token-derived hash in the grant), and everything that joins runs
     // to proposals, answers, or costs needs them to be one. A leased run's id
-    // was minted by the CLAIM, which already booked its row.
+    // was minted by the CLAIM, which already opened its row; an attended
+    // run's row is opened by `agent::stream` just before the child spawns
+    // (M49.9), so what the run books during its life has a row to land on.
     let run_id = lease
         .as_ref()
         .map(|l| l.run_id.clone())
@@ -1448,9 +1499,10 @@ fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64
     state.stop_all()
 }
 
-/// The ledger chain head for git cross-attestation trailers (M21.7).
-/// Best-effort by design: any absent or unreadable ledger is `None`, never
-/// an error — checkpoints are periodic anchoring, not a ledger dependency.
+/// The ledger chain head for git checkpoint trailers (M21.7) — a join key
+/// from a commit to the ledger head it was made at, not rewind detection
+/// (M49.10; see `ledger::head`). Best-effort by design: any absent or
+/// unreadable ledger is `None`, never an error.
 #[tauri::command(async)]
 fn ledger_head(vault: String) -> Option<ledger::LedgerHead> {
     ledger::head(Path::new(&vault))
@@ -1486,11 +1538,18 @@ fn start_watcher(
         if let Err(e) = runtime::sink::arm(&dir) {
             eprintln!("runtime db unavailable, operational refusals go unrecorded: {e}");
         }
+        // M49.9: after the arm, which migrated the database. An attended row
+        // a previous process left `running` has no finisher left; the cutoff
+        // is this process's start, so a run it opened is never touched.
+        agent::meter::recover_orphaned(&dir, process_started());
         // M25.1: one database serves every vault, so an opening vault
         // registers itself before anything writes a row that has to say
         // which folder it belongs to. Failing here is degraded, not fatal,
         // for the same reason the line above is.
-        let _ = runtime::open_vault(&vault_path);
+        // M49.9 (K25): and the session records which PROCESS has it open.
+        if let Some(scope) = runtime::open_vault(&vault_path) {
+            runtime::sessions::track(&scope);
+        }
         // M26.4i: the ambient ingest supervisor. It reads its own switch,
         // which defaults OFF — starting the loop is not the same as
         // enabling the work, and nothing here turns it on.
@@ -1499,8 +1558,17 @@ fn start_watcher(
     vault::watcher::start(app, state.inner(), vault_path)
 }
 
+/// The instant this process started (M49.9) — the line between attended
+/// rows this process may still finish and rows a dead one left behind.
+/// Pinned at the top of `run`, before anything can spawn a run.
+fn process_started() -> chrono::DateTime<chrono::Utc> {
+    static STARTED: std::sync::OnceLock<chrono::DateTime<chrono::Utc>> = std::sync::OnceLock::new();
+    *STARTED.get_or_init(chrono::Utc::now)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = process_started();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::default())
@@ -1525,6 +1593,7 @@ pub fn run() {
             pipeline_overview,
             fleet_runs,
             fleet_run_detail,
+            run_knowledge_writes,
             fleet_actor_summary,
             fleet_actor_summaries,
             job_ledger_read,
@@ -1613,8 +1682,15 @@ pub fn run() {
             roots_commands::list_dir,
             roots_commands::read_file_text
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // M49.9: a clean exit closes the session exactly; anything else
+            // leaves its last heartbeat as the honest lower bound.
+            if let tauri::RunEvent::Exit = event {
+                runtime::sessions::close_current();
+            }
+        });
 }
 
 #[cfg(test)]

@@ -31,13 +31,18 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   `views/`, `pages/`, `app/`, `detail/`, `knowledge/`, `agent/`, `editor/`,
   `git/`, `library/`, `workspace/`, `status/` are surfaces; `stores/` is
   Zustand; `lib/` holds IPC + browser mocks.
-- **Knowledge is one tab made of sections** (M33.3–M33.5, folded in M33a.2).
-  What the base HOLDS and what it knows about ITSELF were two rail buttons
-  describing one subject; they are two groups of one nav now.
-  `knowledge/KnowledgeNav.tsx` is the nav and `knowledge/BaseItself.tsx`
-  composes the epistemic tabs from the section components in `src/status/`,
-  each owning its own read and its own failure. `ReviewPage`, `PipelinePage`
-  and `EpistemicStatusPage` are all gone. **The shell is ONE nav column that
+- **Knowledge is three tabs, and a concept is a page** (M50–M51). The page
+  (`pages/KnowledgePage.tsx`) is Concepts (every concept, filed by folder),
+  Review (the queue — `engine/okf.ts` `reviewQueue` orders it and names each
+  row's reason — then the proposal cards under "Waiting on you") and Activity
+  (what changed, the attention lanes, the update log, and the machinery
+  folded under System). `knowledge/BaseItself.tsx` supplies those status
+  sections from `src/status/`, each owning its own read and its own failure.
+  A concept opens in `DocPage` like any page: its review is the bar under its
+  title (`knowledge/ConceptReviewBar.tsx`, which alone may Verify), and its
+  evidence is the side panel's Details tab, closed until asked.
+  `ReviewPage`, `PipelinePage` and `EpistemicStatusPage` are all gone.
+  **The shell is ONE nav column that
   IS the chrome** (M37.3 flattened the rail and per-surface sidebar into
   `app/Sidebar.tsx`; M43 dissolved the Topbar into it): header (vault tile ·
   wordmark · Assistant zap · search · collapse), the New button, then the
@@ -47,8 +52,8 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   selection KINDS stay `knowledge`/`workspace`, labels only, plus M43's
   `mywork`), then the sections — Collections, Pages, **Work** (M43.10: each
   mounted repo is a row; ↗ opens the surface; empty says "No repositories
-  mounted"), **Base** (M43.10: KnowledgeNav's rows stand on every surface;
-  ↗ opens the base home), Agents (M43 turned M41's destination into a roster
+  mounted"), **Knowledge** (M50.5 renamed Base; M51: `KnowledgeNav`'s rows
+  are the bundle's folders, then Review; ↗ opens Concepts), Agents (M43 turned M41's destination into a roster
   section whose ↗ opens the fleet), **Databases** (M39 — the label; `type:`
   and every internal identifier keep the old word), and Favorites (pinned
   paths, `cerebro.favorites`, pruned when a pointer dies) — all wearing
@@ -62,8 +67,9 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   destination clicks to `nav-surfaces` (nested rows live OUTSIDE those
   containers precisely because they share accessible names with
   destinations). Sections are addressed by `data-section`, never
-  by a per-section testid, and `KnowledgeNav` carries the tab (plus `run`,
-  for one fleet detail) so a section is a place the back button returns to.
+  by a per-section testid, and the `KnowledgeNav` selection type carries the
+  tab (plus `run`, for one fleet detail) so a tab is a place the back button
+  returns to.
 - `src-tauri/src/` — Rust: `vault/` (scan/parse/write), `git/`, `mcp.rs`
   (loopback MCP server), `agent.rs` (CLI spawn), `knowledge.rs` (OKF guards),
   `connectors.rs`, `runtime/fleet.rs` (SELECT-only run history — it writes
@@ -120,9 +126,9 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
   operational. Promoting a code into the ledger needs a
   coverage-materiality argument in review.
 - **Knowledge is guarded**: `knowledge/` is agent-written, human-VERIFIED.
-  Writes go through `write_concept`/`verify_concept` only; the mock backend
-  (`src/lib/mockIpc.ts`) must mirror every Rust-side guard, and that parity is
-  itself tested.
+  Writes go through `write_concept`/`recheck_concept`/`verify_concept`
+  only; the mock backend (`src/lib/mockIpc.ts`) must mirror every Rust-side
+  guard, and that parity is itself tested.
 - **No type special-casing**: behavior is capability-gated (a record with a
   status field is task-like; a record the base holds concepts about gets a
   dossier). Do not route on type names.

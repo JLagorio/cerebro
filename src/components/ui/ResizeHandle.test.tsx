@@ -153,3 +153,120 @@ describe('ResizeHandle Escape (M46.2)', () => {
     expect(onResize).toHaveBeenLastCalledWith(312);
   });
 });
+
+/**
+ * A panel drawn narrower than its stored width (M52): the record peek beside
+ * the assistant is capped by the room left, so what the handle sits on and
+ * what the store holds differ.
+ */
+describe('ResizeHandle on a capped panel (M52)', () => {
+  function capped(onResize = vi.fn()) {
+    render(
+      <ResizeHandle
+        label="Resize panel"
+        side="left"
+        width={400}
+        preferred={1000}
+        min={360}
+        max={500}
+        onResize={onResize}
+      />,
+    );
+    return { onResize, el: screen.getByTestId('resize-left') };
+  }
+
+  it('drags from the width it is drawn at, so there is no dead zone', () => {
+    const { onResize, el } = capped();
+    fireEvent(el, at('pointerdown', 500));
+    fireEvent(window, at('pointermove', 480));
+    // 400 drawn + 20 leftwards. Measured from the stored 1000 it jumped
+    // straight to the ceiling, and a narrowing drag did nothing for 500px.
+    expect(onResize).toHaveBeenLastCalledWith(420);
+  });
+
+  it('cannot widen past its ceiling, the room left beside the assistant', () => {
+    const { onResize, el } = capped();
+    fireEvent(el, at('pointerdown', 500));
+    fireEvent(window, at('pointermove', 0));
+    fireEvent(window, at('pointerup', 0));
+    expect(onResize).toHaveBeenLastCalledWith(500);
+  });
+
+  it('puts the stored preference back on Escape, not the capped width', () => {
+    const { onResize, el } = capped();
+    fireEvent(el, at('pointerdown', 500));
+    fireEvent(window, at('pointermove', 480));
+    escape();
+    expect(onResize).toHaveBeenLastCalledWith(1000);
+  });
+
+  it('reports the width it is drawn at', () => {
+    const { el } = capped();
+    expect(el.getAttribute('aria-valuenow')).toBe('400');
+  });
+});
+
+/**
+ * A panel capped AT its ceiling (M52): drawn at the room it has, which is under
+ * its stored width. Verified at 1280 beside a record and the assistant: the
+ * sidebar's ceiling was 180 with 264 stored, and a drag to widen it wrote 180
+ * — the one width the ceiling allowed — and kept it once the room came back.
+ */
+describe('ResizeHandle at a ceiling under the stored width (M52)', () => {
+  function atCeiling(onResize = vi.fn()) {
+    render(
+      <ResizeHandle
+        label="Resize sidebar"
+        side="right"
+        width={180}
+        preferred={264}
+        min={180}
+        max={180}
+        onResize={onResize}
+      />,
+    );
+    return { onResize, el: screen.getByTestId('resize-right') };
+  }
+
+  it('keeps the stored width through a drag that cannot widen the panel', () => {
+    const { onResize, el } = atCeiling();
+    fireEvent(el, at('pointerdown', 180));
+    fireEvent(window, at('pointermove', 600));
+    fireEvent(window, at('pointerup', 900));
+    expect(onResize).toHaveBeenLastCalledWith(264);
+    expect(onResize).not.toHaveBeenCalledWith(180);
+  });
+
+  it('keeps it through a key or a double-click that lands where it is drawn', () => {
+    const { onResize, el } = atCeiling();
+    fireEvent.keyDown(el, { key: 'ArrowRight' });
+    fireEvent.keyDown(el, { key: 'ArrowLeft' });
+    fireEvent.doubleClick(el);
+    expect(onResize.mock.calls.every(([w]) => w === 264)).toBe(true);
+  });
+
+  it('still stores a narrower width when the drag draws one', () => {
+    const onResize = vi.fn();
+    render(
+      <ResizeHandle
+        label="Resize sidebar"
+        side="right"
+        width={340}
+        preferred={460}
+        min={180}
+        max={340}
+        onResize={onResize}
+      />,
+    );
+    const el = screen.getByTestId('resize-right');
+    fireEvent(el, at('pointerdown', 340));
+    fireEvent(window, at('pointermove', 300));
+    fireEvent(window, at('pointerup', 300));
+    expect(onResize).toHaveBeenLastCalledWith(300);
+    // And back out to where it started: the stored width again, not 340.
+    fireEvent(el, at('pointerdown', 340));
+    fireEvent(window, at('pointermove', 900));
+    fireEvent(window, at('pointerup', 900));
+    expect(onResize).toHaveBeenLastCalledWith(460);
+  });
+});

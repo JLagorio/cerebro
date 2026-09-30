@@ -49,7 +49,7 @@ describe('placeOf — a place is a subject, not a lens', () => {
   it("collapses Knowledge's filter tabs but keeps sections and dossiers apart", () => {
     const all = selectionKey({ kind: 'knowledge', nav: { tab: 'all' } });
     expect(selectionKey({ kind: 'knowledge', nav: { tab: 'review' } })).toBe(all);
-    expect(selectionKey({ kind: 'knowledge', nav: { tab: 'log' } })).toBe(all);
+    expect(selectionKey({ kind: 'knowledge', nav: { tab: 'activity' } })).toBe(all);
     expect(selectionKey({ kind: 'knowledge' })).toBe(all);
     expect(selectionKey({ kind: 'knowledge', nav: { tab: 'entity', key: 'acme' } })).not.toBe(all);
     expect(selectionKey({ kind: 'knowledge', nav: { tab: 'section', folder: 'ops' } })).not.toBe(
@@ -99,6 +99,22 @@ describe('placeLabel', () => {
     const entries = [makeEntry({ path: 'docs/spec.md', title: 'The spec' })];
     expect(placeLabel({ kind: 'doc', path: 'docs/spec.md' }, { entries })).toBe('The spec');
     expect(placeLabel({ kind: 'doc', path: 'docs/gone.md' }, { entries })).toBe('gone');
+  });
+
+  it('names a Knowledge place the way its page does, never by a raw path (M51.5)', () => {
+    const entries = [makeEntry({ path: 'projects/phoenix.md', title: 'Phoenix rollout' })];
+    const knowledge = (nav: Parameters<typeof placeLabel>[0] & { kind: 'knowledge' }) =>
+      placeLabel(nav, { entries });
+    expect(knowledge({ kind: 'knowledge', nav: { tab: 'section', folder: 'key-results' } })).toBe(
+      'Knowledge / Key results',
+    );
+    expect(
+      knowledge({ kind: 'knowledge', nav: { tab: 'entity', key: 'projects/phoenix.md' } }),
+    ).toBe('Knowledge / Phoenix rollout');
+    // A subject nobody has written a page for keeps what the agent typed.
+    expect(knowledge({ kind: 'knowledge', nav: { tab: 'entity', key: 'kestrel' } })).toBe(
+      'Knowledge / kestrel',
+    );
   });
 
   it('names a List by its definition and falls back to its id', () => {

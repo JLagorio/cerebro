@@ -15,16 +15,32 @@
 /**
  * A wall-clock stamp, in the timezone the reader is in.
  *
- * LOCAL, deliberately, and only for times the vault wrote in local terms.
- * `parseSchedule`/`lastFireKey` have always read `daily 09:00` as nine in the
- * morning where the person is, so rendering the next fire through
- * `toISOString()` would show a UTC stamp for a local-time rule — "09:00" on
- * the record and "16:00" on the dossier, for the same moment. The formatting
- * mirrors `lastFireKey`'s for the same reason.
+ * LOCAL, deliberately. Two kinds of time come through here:
+ *
+ * - **Local-time schedules.** `parseSchedule`/`lastFireKey` have always read
+ *   `daily 09:00` as nine in the morning where the person is, so rendering
+ *   the next fire through `toISOString()` would show a UTC stamp for a
+ *   local-time rule — "09:00" on the record and "16:00" on the dossier, for
+ *   the same moment. The formatting mirrors `lastFireKey`'s for that reason.
+ * - **Recorded UTC instants**, shown on the reader's clock through
+ *   `instantText` — a run's Started and Ended in `RunDetailPanel`, and the
+ *   Agents page's run rows.
+ *   The runtime writes them with a `Z`, so the conversion is exact, and each
+ *   caller keeps the raw ISO in a `title`.
  */
 export function localStamp(at: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/**
+ * A recorded instant on the reader's clock — ONE reading for a run's row and
+ * the detail it opens, so they never show two times for one run (M52.4). A
+ * stamp that will not parse is shown as itself.
+ */
+export function instantText(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? iso : localStamp(at);
 }
 
 /**

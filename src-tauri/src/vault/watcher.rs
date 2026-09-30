@@ -253,11 +253,15 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
             pending = false;
             last_event = None;
             // M23.7: live out-of-band capture for knowledge projections.
-            // Hash-based and best-effort — a file equal to its projection
-            // no-ops, a half-saved file errors quietly and the next event
-            // (or the launch scan) retries; mtime is never consulted.
+            // Hash-based — a file equal to its projection no-ops; mtime is
+            // never consulted. A refusal is logged and escalated to a
+            // recorded divergence now (M49.3, K15), not dropped until the
+            // next launch.
             for rel in std::mem::take(&mut knowledge_pending) {
-                let _ = crate::ledger::capture::capture_out_of_band(&vault, &rel);
+                if let Some(Err(reason)) = crate::ledger::capture::capture_out_of_band(&vault, &rel)
+                {
+                    crate::ledger::capture::escalate_refused_capture(&vault, &rel, &reason);
+                }
             }
             let _ = app.emit(VAULT_CHANGED_EVENT, ());
         }

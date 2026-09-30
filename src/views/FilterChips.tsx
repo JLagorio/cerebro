@@ -110,7 +110,7 @@ export function FilterChips({
                 onClick={() =>
                   onChange(conjunction === 'and' ? { any: [...children] } : { all: [...children] })
                 }
-                className="rounded border-0 bg-transparent px-1 text-2xs text-n-500 hover:bg-n-100 hover:text-n-800"
+                className="rounded-xs border-0 bg-transparent px-1 text-2xs text-n-500 hover:bg-n-100 hover:text-n-800"
               >
                 {conjunction}
               </button>

@@ -51,6 +51,26 @@ import { useUiStore } from '@/stores/uiStore';
  * applies: they catch, toast, and reload rather than propagating.
  */
 
+/**
+ * What each background lane does, as the sentence a person turns on or off
+ * (M52.5). The toggles printed the lane's code — "filed", "behind", "schema"
+ * — beside "priority 3", which named the table and told nobody what they were
+ * stopping. Keyed by `runtime/schema.rs`'s `LANES`; a lane this build has no
+ * words for is shown as its code rather than guessed at, and the code rides
+ * on the row's hover either way.
+ */
+const LANE_WORDS: Record<string, string> = {
+  filed: 'Read notes as they are filed',
+  scheduled: 'Run agents and skills on their schedules',
+  agent: 'Run agents when something they watch changes',
+  behind: 'Catch up on notes that changed while the app was closed',
+  refresh: 'Refresh saved copies of sources when they expire',
+  stale: 'Recheck concepts that fall due',
+  schema: 'Recheck concepts when the types they describe change',
+};
+
+const laneWords = (lane: string) => LANE_WORDS[lane] ?? lane;
+
 const BANNER_TITLE: Record<string, string> = {
   runtime_health: 'Claude Code is not answering',
   source_health: 'A source is not answering',
@@ -77,12 +97,15 @@ function Meter({ overview }: { overview: PipelineOverview }) {
     <section className="rounded-lg border border-n-200 p-4" data-testid="budget-meter">
       <div className="flex items-baseline justify-between">
         <h3 className="text-sm font-semibold">Today, across every vault</h3>
+        {/* Sentence case, as every label on Activity (M52.5); the code rides
+            on `data-state`. */}
         <span
-          className="text-xs uppercase tracking-wide text-n-500"
+          className="text-xs text-n-500"
           data-testid="ceiling-state"
           data-state={meter.ceiling_state}
         >
-          {meter.ceiling_state.replace('_', ' ')}
+          {meter.ceiling_state.charAt(0).toUpperCase() +
+            meter.ceiling_state.slice(1).replaceAll('_', ' ')}
         </span>
       </div>
       {meter.accounting_state !== 'exact' && (
@@ -98,9 +121,9 @@ function Meter({ overview }: { overview: PipelineOverview }) {
               {used.toLocaleString()}{' '}
               <span className="text-n-400">/ {ceiling.toLocaleString()}</span>
             </dd>
-            <div className="mt-1 h-1 rounded bg-n-100">
+            <div className="mt-1 h-1 rounded-xs bg-n-100">
               <div
-                className="h-1 rounded bg-synapse-500"
+                className="h-1 rounded-xs bg-synapse-500"
                 style={{ width: `${ceiling === 0 ? 100 : Math.min(100, (used / ceiling) * 100)}%` }}
               />
             </div>
@@ -209,7 +232,7 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
         <select
           id="ambient-concurrency"
           data-testid="ambient-concurrency"
-          className="rounded border border-n-200 px-2 py-1 text-sm"
+          className="rounded-xs border border-n-200 px-2 py-1 text-sm"
           value={overview.ambient_concurrency}
           disabled={busy}
           onChange={(e) => {
@@ -238,8 +261,11 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
           data-kind={banner.kind}
         >
           <strong className="font-medium">{BANNER_TITLE[banner.kind] ?? banner.kind}</strong>
+          {/* The wire's detail is a lowercase clause; under its title it is
+              a sentence (M52.5). The count follows it once, so a detail
+              must not state it too. */}
           <p className="text-n-600">
-            {banner.detail}
+            {banner.detail.charAt(0).toUpperCase() + banner.detail.slice(1)}
             {banner.count > 0 && (
               <span data-testid="banner-count">
                 {' '}
@@ -298,27 +324,39 @@ export function SystemSection({ vaultPath }: { vaultPath: string | null }) {
 
       <section className="rounded-lg border border-n-200 p-4" data-testid="lane-toggles">
         <h3 className="text-sm font-semibold">What may run in this vault</h3>
+        {/* The priority is the order, said once — "priority 0" on each row
+            was the table's column, not a reason to turn one off. */}
+        <p className="mt-0.5 text-xs text-n-500">
+          When more than one is waiting, the one higher up runs first.
+        </p>
         <ul className="mt-2 flex flex-col gap-1">
-          {overview.lanes.map((lane) => (
-            <li key={lane.lane} className="flex items-center gap-2" data-testid="lane">
-              <label className="flex flex-1 items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={lane.enabled}
-                  disabled={busy}
-                  data-testid={`lane-${lane.lane}`}
-                  onChange={() =>
-                    act(
-                      () => ipc.setLaneEnabled(vault, lane.lane, !lane.enabled),
-                      lane.enabled ? `${lane.lane} paused` : `${lane.lane} resumed`,
-                    )
-                  }
-                />
-                {lane.lane}
-              </label>
-              <span className="text-xs text-n-400">priority {lane.priority}</span>
-            </li>
-          ))}
+          {[...overview.lanes]
+            .sort((a, b) => a.priority - b.priority)
+            .map((lane) => (
+              <li
+                key={lane.lane}
+                className="flex items-center gap-2"
+                data-testid="lane"
+                data-lane={lane.lane}
+                title={`${lane.lane} · priority ${lane.priority}`}
+              >
+                <label className="flex flex-1 items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={lane.enabled}
+                    disabled={busy}
+                    data-testid={`lane-${lane.lane}`}
+                    onChange={() =>
+                      act(
+                        () => ipc.setLaneEnabled(vault, lane.lane, !lane.enabled),
+                        `${laneWords(lane.lane)} — ${lane.enabled ? 'turned off' : 'turned on'}`,
+                      )
+                    }
+                  />
+                  {laneWords(lane.lane)}
+                </label>
+              </li>
+            ))}
         </ul>
       </section>
     </div>

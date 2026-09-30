@@ -1,5 +1,6 @@
-import { addDays } from './dates';
-import type { Entry, KnowledgeNav } from './types';
+import { addDays, toIsoDate } from './dates';
+import STALENESS from '../../shared/policy/staleness.v1.json';
+import type { Entry } from './types';
 import { resolveTarget } from './wikilink';
 
 /**
@@ -27,8 +28,35 @@ export const KNOWLEDGE_DIR = 'knowledge';
 /** OKF §3.1 — reserved filenames that are structure, not concepts. */
 export const RESERVED_FILENAMES = ['index.md', 'log.md'];
 
+/**
+ * True for the bundle root and anything beneath it — judged on the path the
+ * filesystem resolves (M49.4), not the raw string: `./knowledge/x.md`,
+ * `records/../knowledge/x.md` and, on case-folding APFS, `Knowledge/x.md`
+ * are all the bundle. Mirrors `knowledge::is_knowledge_path` in Rust; both
+ * assert the same case table.
+ */
 export function isKnowledgePath(path: string): boolean {
-  return path === KNOWLEDGE_DIR || path.startsWith(`${KNOWLEDGE_DIR}/`);
+  return canonicalKnowledgePath(path) !== null;
+}
+
+/** The bundle path in its one canonical spelling (`knowledge/…`), or null
+ * when `path` does not resolve into the bundle. Mirrors `canonical_path`. */
+export function canonicalKnowledgePath(path: string): string | null {
+  if (path.startsWith('/')) return null;
+  const segments: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      if (segments.pop() === undefined) return null;
+      continue;
+    }
+    segments.push(segment);
+  }
+  const [head, ...rest] = segments;
+  // ASCII-only folding, as Rust's eq_ignore_ascii_case: toLowerCase would
+  // also fold the Kelvin sign into `k`, and the two backends must agree.
+  if (head === undefined || !/^knowledge$/i.test(head)) return null;
+  return [KNOWLEDGE_DIR, ...rest].join('/');
 }
 
 /** True for notes inside the bundle — excluded from Docs, Inbox, and the
@@ -125,6 +153,17 @@ export function parseSources(entry: Entry): Source[] {
   return sources;
 }
 
+/**
+ * How many sources a concept cites — or null when its file keeps no
+ * `sources` list at all (M52.5). `parseSources` answers both with `[]`, which
+ * is right for walking them and wrong for counting them: a list written
+ * empty is measured at zero, and a key nobody wrote is not recorded, so a
+ * count column that printed 0 for both would say the second is the first.
+ */
+export function sourceCount(entry: Entry): number | null {
+  return Array.isArray(entry.properties.sources) ? parseSources(entry).length : null;
+}
+
 // --- Trust (§5.2, §5.3) ----------------------------------------------------
 
 export interface Stamp {
@@ -179,13 +218,25 @@ export function verifiedNotice(entry: Entry): string | null {
  * It is NEVER Support. An attestation says a human looked; Support says what
  * rests underneath, and a concept can be reviewed and unsupported at once.
  */
-export type ReviewState = 'unreviewed' | 'current' | 'predates_current';
+export type ReviewState = 'unreviewed' | 'current' | 'predates_current' | 'disputed';
 
+/** Each review state's word — the page's review chip, and the word a queued
+ * concept's row wears for the same state (M52.5), so a row and the page it
+ * opens name it once. */
 export const REVIEW_LABELS: Record<ReviewState, string> = {
   unreviewed: 'Unreviewed',
   current: 'Reviewed',
-  predates_current: 'Review predates this revision',
+  predates_current: 'Changed since review',
+  disputed: 'Review disputed',
 };
+
+/**
+ * What a concept only an agent has confirmed is called, wherever it is shown
+ * (M52.5): the Review queue's reason and the concept's own review chip. It is
+ * still waiting — an agent's confirmation keeps it in the queue — so it is
+ * never "Reviewed" in green on its page while the table calls it waiting.
+ */
+export const AGENT_ONLY_LABEL = 'Needs a person';
 
 export function reviewStatus(entry: Entry): ReviewState {
   if (parseVerified(entry).length > 0) return 'current';
@@ -206,6 +257,36 @@ export function reviewedBy(entry: Entry): 'human' | 'agent' | null {
   const verified = parseVerified(entry);
   if (verified.length === 0) return null;
   return verified.some((v) => v.by.kind === 'human') ? 'human' : 'agent';
+}
+
+/** The quarantined knowledge paths — or `unknown` when the status could not
+ * be read or the bundle could not be compared, in which case no file's own
+ * review claim is trusted (unavailable is never empty). */
+export type Quarantine = ReadonlySet<string> | 'unknown';
+
+/** No quarantine known — the browser mock, or before the status is read. */
+export const NO_QUARANTINE: ReadonlySet<string> = new Set();
+
+/**
+ * What the ledger says about review that supersession is gated on (M49.8) —
+ * the same record Rust's `knowledge::about` reads, so the UI and the agent
+ * retire the same concepts.
+ */
+export interface LedgerReviewView {
+  /** `supersessionKey(replacement, replaced)` of every card-approved one. */
+  approved: ReadonlySet<string>;
+  /** Concepts whose current review the LEDGER records as a person's —
+   * `null` when no readable ledger answers, and the file's own stamp is
+   * all there is. */
+  recordedHuman: ReadonlySet<string> | null;
+}
+
+/** No ledger answer (the browser mock, or before the status is read). */
+export const NO_LEDGER_REVIEW: LedgerReviewView = { approved: new Set(), recordedHuman: null };
+
+/** The key `approvalsOf` files a person-approved supersession under. */
+export function supersessionKey(replacement: string, replaced: string): string {
+  return `${replacement}\u0000${replaced}`;
 }
 
 /**
@@ -246,12 +327,68 @@ export function lifecycleOf(entry: Entry): Lifecycle {
 /** `stale_after` is an ABSOLUTE date, so staleness is a plain comparison
  * with no reference to when the concept was read (§5.5). */
 export function staleAfter(entry: Entry): string | null {
-  return asString(entry.properties.stale_after);
+  const raw = entry.properties.stale_after;
+  return typeof raw === 'string' ? asString(raw) : staleAfterOf(raw);
+}
+
+/**
+ * When a concept is stale — ONE rule, as data (M49.8, K24):
+ * shared/policy/staleness.v1.json, read by this and by Rust's
+ * `knowledge::is_stale`, and both replay its cases. It was a lexical
+ * `today >= after` written twice, so `2027-7-1` sorted after every 2027
+ * date and `never` was never stale.
+ */
+export function staleFrom(after: string | null, today: string): boolean {
+  if (after === null) return false;
+  if (!readableHorizon(after)) return STALENESS.malformed_is_stale;
+  return STALENESS.inclusive ? today >= after : today > after;
+}
+
+/**
+ * Whether a raw `stale_after` reads as a date at all: exactly `YYYY-MM-DD`,
+ * and a day the calendar has (`2026-02-30` is not). One test, because the
+ * staleness rule, the queue's "a person already rechecked it" and every line
+ * that prints the date must agree on which horizons can be read (M52.4).
+ */
+export function readableHorizon(after: string | null): boolean {
+  return (
+    after !== null &&
+    /^\d{4}-\d{2}-\d{2}$/.test(after) &&
+    !Number.isNaN(Date.parse(`${after}T00:00:00Z`)) &&
+    new Date(`${after}T00:00:00Z`).toISOString().slice(0, 10) === after
+  );
+}
+
+/**
+ * The local calendar day a stamp's `at` fell on, as `todayIso` names today —
+ * `null` when `at` is no instant at all (M52.4).
+ *
+ * A date-only `at` is already a day and is kept as written: `Date.parse` reads
+ * one as UTC midnight, which west of Greenwich is the evening before. An
+ * instant is placed in the reader's zone, so a person in Sydney who verified at
+ * 08:00 on the 26th verified on the 26th, not on the UTC 25th.
+ */
+export function localDayOf(at: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(at)) return at;
+  const ms = Date.parse(at);
+  return Number.isNaN(ms) ? null : toIsoDate(new Date(ms));
+}
+
+/**
+ * The raw `stale_after` a reader judges: a string as written, and any other
+ * PRESENT value in its JSON spelling — a hand-typed `2027` or `true` is a
+ * horizon nobody can read, so it is malformed (stale), never "never". `null`
+ * only when the key is absent or null. Mirrors Rust's `stale_after_of`.
+ */
+export function staleAfterOf(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  return typeof raw === 'string' ? raw : JSON.stringify(raw);
 }
 
 export function isStale(entry: Entry, today: string): boolean {
-  const after = staleAfter(entry);
-  return after !== null && today >= after;
+  // The RAW value, as Rust's `is_stale` reads it: an empty or padded string
+  // is a malformed horizon (stale), where `staleAfter` would trim it away.
+  return staleFrom(staleAfterOf(entry.properties.stale_after), today);
 }
 
 // --- Entity anchors (M8.1) -------------------------------------------------
@@ -337,7 +474,16 @@ export function parseRelations(entry: Entry): Record<RelationKind, string[]> {
  * author already chose. Top level only: `knowledge/a/b/c.md` is in `a`.
  */
 export function sectionOf(entry: Entry): string {
-  const rest = entry.path.slice(KNOWLEDGE_DIR.length + 1);
+  return sectionOfPath(entry.path);
+}
+
+/**
+ * `sectionOf` for a bare path (M52.3) — what the sidebar has when a concept
+ * is open as a page: a `doc` selection carries a path, not an entry, and the
+ * folder row it lights has to be the one `listSections` filed it under.
+ */
+export function sectionOfPath(path: string): string {
+  const rest = path.slice(KNOWLEDGE_DIR.length + 1);
   const cut = rest.indexOf('/');
   return cut === -1 ? '' : rest.slice(0, cut);
 }
@@ -349,7 +495,8 @@ export interface Section {
   count: number;
 }
 
-const humanizeFolder = (folder: string): string =>
+/** A bundle folder as its heading reads — `key-results` is "Key results". */
+export const folderLabel = (folder: string): string =>
   folder === '' ? 'Ungrouped' : folder.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 export function listSections(concepts: Concept[]): Section[] {
@@ -359,7 +506,7 @@ export function listSections(concepts: Concept[]): Section[] {
   }
   return (
     [...counts.entries()]
-      .map(([folder, count]) => ({ folder, label: humanizeFolder(folder), count }))
+      .map(([folder, count]) => ({ folder, label: folderLabel(folder), count }))
       // Root-level concepts sort last: they are the leftovers, not a section.
       .sort((a, b) => (a.folder === '' ? 1 : b.folder === '' ? -1 : a.label.localeCompare(b.label)))
   );
@@ -428,23 +575,6 @@ export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
   );
 }
 
-/**
- * Where the Knowledge tab opens when nothing has said otherwise (M33a.3).
- *
- * The heaviest thread, not the flat list. `all` is the search fallback — a tab
- * that opens on every concept the base holds, undifferentiated, makes the
- * reader redo the grouping the base already did. A vault whose bundle anchors
- * nothing has no thread to open, and falls back to the list.
- *
- * One function because two callers need the same answer: the page renders it
- * and the nav highlights it, and a default computed twice is a default that
- * eventually disagrees with itself.
- */
-export function defaultKnowledgeNav(subjects: Subject[]): KnowledgeNav {
-  const heaviest = subjects[0];
-  return heaviest === undefined ? { tab: 'all' } : { tab: 'entity', key: heaviest.key };
-}
-
 /** Concepts anchored to a vault path — what a project page asks for. */
 export function conceptsAbout(path: string, concepts: Concept[], entries: Entry[]): Concept[] {
   return concepts.filter((c) =>
@@ -469,6 +599,32 @@ const normalizeResource = (resource: string): string => resource.replace(/^\.?\/
  */
 export function conceptsFrom(path: string, concepts: readonly Concept[]): Concept[] {
   return concepts.filter((c) => c.sources.some((s) => normalizeResource(s.resource) === path));
+}
+
+/**
+ * Everything Knowledge holds that bears on one page (M52.3): the concepts
+ * ABOUT it (it is their subject) and the concepts learned FROM it (it is
+ * their source), each concept once — a concept that both cites a page and
+ * is anchored to it is about it, and counted there.
+ *
+ * One function because two readers ask it: the strip under a page's header
+ * and the AI panel's context snapshot. The strip counted both directions and
+ * the snapshot only `about`, so a capture the base had learned from said
+ * "Knowledge · 1" on the page and nothing to the assistant reading it.
+ *
+ * Replaced concepts are left in: what a reader does with one differs (the
+ * strip drops it, the snapshot carries it so the agent never quotes it as
+ * current), and deciding that here would decide it for both.
+ */
+export function knowledgeOf(
+  path: string,
+  concepts: Concept[],
+  entries: Entry[],
+): { about: Concept[]; from: Concept[] } {
+  const about = conceptsAbout(path, concepts, entries);
+  const anchored = new Set(about.map((c) => c.entry.path));
+  const from = conceptsFrom(path, concepts).filter((c) => !anchored.has(c.entry.path));
+  return { about, from };
 }
 
 export type CommitState =
@@ -591,6 +747,9 @@ export interface Concept {
    * only where someone remembered to check it is not a rule.
    */
   supersededBy: string | null;
+  /** A concept that CLAIMS to replace this one but cannot retire it (M49.8):
+   * unreviewed against reviewed, or a mutual claim. This one stays current. */
+  replacementProposedBy: string | null;
 }
 
 export function toConcept(entry: Entry, today: string): Concept {
@@ -621,24 +780,93 @@ export function toConcept(entry: Entry, today: string): Concept {
     // Resolved by listConcepts, which is the only caller that can see the
     // rest of the bundle.
     supersededBy: null,
+    replacementProposedBy: null,
   };
 }
 
-export function listConcepts(entries: Entry[], today: string): Concept[] {
+/**
+ * When a concept last changed, as far as anything recorded it (M52.5): the
+ * newest of its writing, its reviews and the file's own modification time.
+ * The stamps are what the bundle says happened; the file time catches an
+ * edit that wrote no stamp. An instant that cannot be read is skipped, so a
+ * garbled stamp never outranks a real one — and the file time is always
+ * there to fall back on.
+ */
+export function updatedAt(concept: Concept): string {
+  let newest = concept.entry.modifiedAt;
+  let newestMs = Date.parse(newest);
+  for (const at of [concept.generated?.at ?? null, ...concept.verified.map((v) => v.at)]) {
+    if (at === null) continue;
+    const ms = Date.parse(at);
+    if (!Number.isNaN(ms) && (Number.isNaN(newestMs) || ms > newestMs)) {
+      newest = at;
+      newestMs = ms;
+    }
+  }
+  return newest;
+}
+
+/**
+ * `quarantined` (M49.8, K21): the knowledge files that differ from their
+ * recorded history (`LedgerStatus.quarantined`). A file that MATCHES its
+ * projection carries exactly the review the ledger rendered into it, so
+ * reading its stamp reads the ledger. One that does not can carry any stamp
+ * at all — typed in another editor, planted by a tool — so a review it
+ * claims reads `disputed`, and is never trusted as `current`.
+ */
+export function listConcepts(
+  entries: Entry[],
+  today: string,
+  quarantined: Quarantine = NO_QUARANTINE,
+  ledger: LedgerReviewView = NO_LEDGER_REVIEW,
+): Concept[] {
   const concepts = entries
     .filter(isConcept)
     .map((e) => toConcept(e, today))
     .sort((a, b) => a.id.localeCompare(b.id));
+  // Supersession is gated on the review as RECORDED — the ledger's answer
+  // (`LedgerStatus.recorded_human`), as Rust's `about` reads it, and the
+  // file's stamp only where no ledger answers. Gating on the disputed flag
+  // would let an unreviewed concept retire a verified one just because its
+  // file was edited elsewhere; gating on the file would let a stamp typed
+  // into it shield a concept the ledger never saw a person review.
+  const recordedHuman =
+    ledger.recordedHuman ?? new Set(concepts.filter(humanReviewed).map((c) => c.entry.path));
+  for (const concept of concepts) {
+    if (
+      concept.review !== 'unreviewed' &&
+      (quarantined === 'unknown' || quarantined.has(concept.entry.path))
+    ) {
+      concept.review = 'disputed';
+    }
+  }
 
   // Second pass: supersession is declared by the replacement, so a concept
   // cannot know it has been retired from its own frontmatter alone.
+  //
+  // M49.8 (K22) — and a declaration RETIRES only when it could have passed
+  // review: an unreviewed concept claiming to replace a human-reviewed one
+  // PROPOSES (the verified claim stays current until a person agrees), and
+  // two concepts that each claim to replace the other retire neither.
+  // Mirrors `knowledge::about`, which agents read.
+  const declared: [Concept, Concept][] = [];
   for (const concept of concepts) {
     for (const target of concept.relations.supersedes) {
       const replaced = resolveConcept(target, concepts, entries);
       if (replaced !== null && replaced.entry.path !== concept.entry.path) {
-        replaced.supersededBy = concept.entry.path;
+        declared.push([concept, replaced]);
       }
     }
+  }
+  for (const [by, replaced] of declared) {
+    const mutual = declared.some(([a, b]) => a === replaced && b === by);
+    // A person who approved the replacement on its card has agreed.
+    const outranked =
+      recordedHuman.has(replaced.entry.path) &&
+      !recordedHuman.has(by.entry.path) &&
+      !ledger.approved.has(supersessionKey(by.entry.path, replaced.entry.path));
+    if (mutual || outranked) replaced.replacementProposedBy = by.entry.path;
+    else replaced.supersededBy = by.entry.path;
   }
   return concepts;
 }
@@ -696,13 +924,166 @@ export function reviewReasons(concept: Concept): ReviewReason[] {
   if (concept.supersededBy !== null) return [];
   const reasons: ReviewReason[] = [];
   if (!humanReviewed(concept)) reasons.push('unverified');
-  if (concept.stale) reasons.push('stale');
-  if (concept.lifecycle === 'deprecated') reasons.push('deprecated');
+  if (concept.stale && !recheckedByPerson(concept)) reasons.push('stale');
+  // M51.2 — only until a person has looked at it retired. Nothing a reviewer
+  // can do clears `lifecycle`, so a deprecated concept they had already
+  // verified sat in the queue for good, and a queue that cannot empty is one
+  // people learn to ignore.
+  if (concept.lifecycle === 'deprecated' && !humanReviewed(concept)) reasons.push('deprecated');
   return reasons;
+}
+
+/**
+ * Whether a person's review ALREADY covers the recheck (M52.3): the review is
+ * current and a person's, and one of their stamps falls on or after the
+ * concept's `stale_after` — they read it once it was due. The stamp's day is
+ * taken on the reader's calendar (`localDayOf`), the one today is counted on;
+ * a stamp whose `at` is no instant covers nothing.
+ *
+ * The queue asks this, and only the queue. `concept.stale` stays true, so the
+ * lists and the review bar still say "Due a recheck": a person looking at the
+ * claim is not the claim's horizon moving, and only `recheck_concept` (or an
+ * edit to `stale_after`) moves that. What changes is whose move it is. A
+ * verified stale concept used to stay in the queue forever — Verify was the
+ * only thing on its page a person could press, and it could not clear the row
+ * — so the Review count could never reach zero. Mirrors M51.2's deprecated
+ * rule, for the same reason.
+ *
+ * Deliberately NOT the audit's "rank awaiting-recheck last": a row a person
+ * cannot clear is still a row, and counted anywhere it keeps the queue from
+ * ever emptying. A horizon nobody can read as a date is never covered — no
+ * review date can be compared with it — so that concept stays queued until
+ * the file is fixed.
+ */
+function recheckedByPerson(concept: Concept): boolean {
+  const due = recheckDue(concept);
+  if (due === null || !humanReviewed(concept)) return false;
+  return concept.verified.some((stamp) => {
+    if (stamp.by.kind !== 'human') return false;
+    const day = stamp.at === null ? null : localDayOf(stamp.at);
+    return day !== null && day >= due;
+  });
+}
+
+/**
+ * A concept's recheck date, when its file gives one that can be read — the
+ * RAW `stale_after`, as `isStale` judges it, so a padded `" 2026-07-01"` the
+ * trimmed `concept.staleAfter` would tidy up is unreadable here too. `null`
+ * for an absent horizon and for one that is no date (M52.4).
+ */
+export function recheckDue(concept: Concept): string | null {
+  const due = staleAfterOf(concept.entry.properties.stale_after);
+  return due !== null && readableHorizon(due) ? due : null;
+}
+
+/** How far past its recheck date a concept is, in words: "2 days overdue".
+ * Null when either day cannot be read, or the date is today or later. */
+function overdue(due: string, today: string): string | null {
+  const then = Date.parse(`${due}T00:00:00Z`);
+  const now = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(then) || Number.isNaN(now)) return null;
+  const days = Math.round((now - then) / 86_400_000);
+  if (days <= 0) return null;
+  if (days === 1) return '1 day overdue';
+  if (days < 60) return `${days} days overdue`;
+  if (days < 730) return `${Math.floor(days / 30)} months overdue`;
+  return `${Math.floor(days / 365)} years overdue`;
+}
+
+/**
+ * The line a stale concept wears, wherever it is shown — the table's hover,
+ * the review bar, a subject's thread (M52.4, one format since M52.5: the page
+ * said "since 2026-07-26" where the table said "2 days overdue"). How late,
+ * never the ISO date: the date itself is the line's hover where it is shown.
+ *
+ * An unreadable horizon is stale by the shared rule, and printing it as a
+ * date said "Due a recheck since null" — or "since true" — about a file whose
+ * date nobody can read; the sentence says that instead.
+ */
+export function recheckLine(concept: Concept, today: string): string {
+  const due = recheckDue(concept);
+  if (due === null) return "Due a recheck — its recheck date can't be read";
+  const late = overdue(due, today);
+  return late === null ? 'Due a recheck today' : `Due a recheck · ${late}`;
 }
 
 export function needsReview(concept: Concept): boolean {
   return reviewReasons(concept).length > 0;
+}
+
+/**
+ * The ONE reason a queued concept leads with (M51.2) — what the row says and
+ * what decides its place in the queue. A list of thirteen rows all reading
+ * "Unreviewed" told a person nothing about where to start, and a deprecated
+ * concept a person had already reviewed sat in "Needs review" with nothing on
+ * the row saying why.
+ *
+ * Membership is `needsReview`'s, unchanged; this only ranks it. The order is
+ * what a person would do first: a file that no longer matches its recorded
+ * history, then a review that no longer covers the text, then a claim past
+ * its recheck date, then what was retired, then what nobody has read, and
+ * last what only a process has confirmed.
+ *
+ * A concept nobody has ever reviewed leads with that (M52.5), even when it is
+ * also due a recheck or retired: its page leads with "Unreviewed", and a row
+ * that said "Due a recheck" about it named a second state for one concept.
+ * What else is outstanding is its reason's sentence (`reasonText`).
+ */
+export type QueueReason = 'disputed' | 'changed' | 'stale' | 'deprecated' | 'new' | 'agent-only';
+
+const QUEUE_ORDER: readonly QueueReason[] = [
+  'disputed',
+  'changed',
+  'stale',
+  'deprecated',
+  'new',
+  'agent-only',
+];
+
+export function queueReason(concept: Concept): QueueReason | null {
+  if (!needsReview(concept)) return null;
+  if (concept.review === 'disputed') return 'disputed';
+  if (concept.review === 'predates_current') return 'changed';
+  if (concept.review === 'unreviewed') return 'new';
+  if (concept.stale) return 'stale';
+  if (concept.lifecycle === 'deprecated') return 'deprecated';
+  return 'agent-only';
+}
+
+export interface QueuedConcept {
+  concept: Concept;
+  reason: QueueReason;
+}
+
+/**
+ * The review queue, in the order it should be worked (M51.2). One function
+ * because three surfaces walk it — the Review tab, the sidebar count and a
+ * concept page's "3 of 13 · Next" — and a queue ordered twice is a Next
+ * button that skips the row you expected.
+ *
+ * Within a reason: the newest writing first for `new` (what just arrived is
+ * what the writer still remembers), the longest-overdue first for `stale`,
+ * and the title otherwise, so the order is stable between renders.
+ */
+export function reviewQueue(concepts: readonly Concept[]): QueuedConcept[] {
+  const queued: QueuedConcept[] = [];
+  for (const concept of concepts) {
+    const reason = queueReason(concept);
+    if (reason !== null) queued.push({ concept, reason });
+  }
+  return queued.sort((a, b) => {
+    const rank = QUEUE_ORDER.indexOf(a.reason) - QUEUE_ORDER.indexOf(b.reason);
+    if (rank !== 0) return rank;
+    if (a.reason === 'new') {
+      const at = (b.concept.generated?.at ?? '').localeCompare(a.concept.generated?.at ?? '');
+      if (at !== 0) return at;
+    }
+    if (a.reason === 'stale') {
+      const due = (a.concept.staleAfter ?? '').localeCompare(b.concept.staleAfter ?? '');
+      if (due !== 0) return due;
+    }
+    return a.concept.title.localeCompare(b.concept.title);
+  });
 }
 
 // --- The concept graph (M8.7) ----------------------------------------------
@@ -715,7 +1096,7 @@ export function needsReview(concept: Concept): boolean {
  * everywhere else, and `/systems/pick-queue-drain.md` is what OKF §6.1
  * recommends. Refusing either would lose a real edge over punctuation.
  */
-function resolveConcept(
+export function resolveConcept(
   target: string,
   concepts: readonly Concept[],
   entries: Entry[],

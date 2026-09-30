@@ -97,7 +97,7 @@ export function EdgeEditor({
             }
             if (e.key === 'Escape') onClose();
           }}
-          className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+          className="w-32 rounded-xs border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
         />
         <button
           type="button"
@@ -106,7 +106,7 @@ export function EdgeEditor({
             apply(deleteEdge(model, edgeEditor.edge));
             onClose();
           }}
-          className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+          className="rounded-xs border-0 bg-transparent p-1 hover:bg-danger-50"
         >
           <Icon name="trash-2" size={13} color="var(--danger-600)" />
         </button>
@@ -179,7 +179,7 @@ export function EdgeEditor({
             apply(setEdgeAnimate(model, edgeEditor.edge, !edgeIsAnimated));
             onClose();
           }}
-          className="rounded border-0 bg-transparent p-1 hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-xs border-0 bg-transparent p-1 hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Icon name="play" size={13} color="var(--n-600)" />
         </button>

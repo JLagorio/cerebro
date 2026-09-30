@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, readMockFile } from './boot';
+import { boot, openKnowledgeTab, readMockFile, showConceptDetails } from './boot';
 
 /**
  * The M8.2/M8.3 pipeline: ingest → distil → augment.
@@ -68,14 +68,13 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   page,
 }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open base' }).click();
-
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
+  await openKnowledgeTab(page, 'all');
+  // A concept opens as its page (M50.1), its evidence in Details (M51.3).
   await page.locator(`[data-testid="concept-row"][data-path="${CONCEPT}"]`).click();
+  const panel = await showConceptDetails(page);
 
   // Both inlets show up as sources on the same concept: a dropped transcript
   // and a fetched ticket are the same kind of object by the time they get here.
-  const panel = page.getByTestId('knowledge-panel');
   await expect(panel).toContainText('Phoenix cutover standup');
   await expect(panel).toContainText('PHX-421');
   // And it is anchored back to the work it describes.
@@ -96,17 +95,21 @@ test('commit: any note says what the base took from it, not just Inbox captures'
   await page.getByTestId('quick-open-result').filter({ hasText: 'Rehearse' }).first().click();
 
   // M12: the cached ticket is a Source RECORD — it opens in the record
-  // panel, where the knowledge loop lives collapsed until asked.
+  // panel. M50.2: Knowledge learned from it, so its Knowledge section is
+  // open already — what the agents made of a record is not a click away.
   const panel = page.getByTestId('detail-panel');
   await expect(panel).toBeVisible();
-  await panel.getByTestId('detail-knowledge-toggle').click();
+  await expect(panel.getByTestId('detail-knowledge-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
   const commit = panel.getByTestId('knowledge-commit');
   await expect(commit).toHaveAttribute('data-state', 'committed');
   await expect(commit.getByTestId('committed-concept')).toContainText(['Pick queue drain time']);
 
-  // Following it lands on the concept it produced.
+  // Following it lands on the concept it produced — its page (M50.1).
   await commit.getByTestId('committed-concept').first().click();
-  await expect(page.getByTestId('concept-body')).toContainText('40 minutes in staging');
+  await expect(page.getByTestId('markdown-editor')).toContainText('40 minutes in staging');
 
   // The same fact, visible without opening anything: the transcript row in
   // the queue carries what was distilled from it.
@@ -122,7 +125,7 @@ test('commit: any note says what the base took from it, not just Inbox captures'
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
   const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
   await expect(organize).toHaveAttribute('data-state', 'uncommitted');
-  await expect(organize.getByRole('button', { name: 'Learn from this' })).toBeVisible();
+  await expect(organize.getByRole('button', { name: 'Learn from this page' })).toBeVisible();
 });
 
 test('augment: knowledge surfaces beside the PRD, and only when asked', async ({ page }) => {
@@ -153,10 +156,10 @@ test('augment: knowledge surfaces beside the PRD, and only when asked', async ({
   // The PRD never names the concept; it is found through the project it lives in.
   await expect(related.getByTestId('related-concept')).toContainText(['Pick queue drain time']);
 
-  // Following it lands on that concept, not on the head of the bundle.
+  // Following it lands on that concept's page, not on the head of the bundle.
   await related.getByTestId('related-concept').first().click();
-  await expect(page.getByTestId('knowledge-page')).toBeVisible();
-  await expect(page.getByTestId('concept-body')).toContainText('40 minutes in staging');
+  await expect(page.getByTestId('concept-title')).toHaveValue('Pick queue drain time');
+  await expect(page.getByTestId('markdown-editor')).toContainText('40 minutes in staging');
 });
 
 test('augment: Home volunteers at most a few unconfirmed things, and forgets what you dismiss', async ({
@@ -239,21 +242,29 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   // and the write that organized it is on disk, which is the whole handover.
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('warehouse cutover');
-  await page.getByTestId('quick-open-result').first().click();
+  // By its own title: the concept of the same name answers the query too,
+  // since M50.1 titles a concept by its frontmatter rather than its first H1.
+  await page
+    .getByTestId('quick-open-result')
+    .filter({ hasText: 'rollback rehearsal' })
+    .first()
+    .click();
   await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-knowledge').click();
-  const panel = page.getByTestId('doc-side-panel').getByTestId('knowledge-commit');
+  const panel = page.getByTestId('doc-side-panel').getByTestId('page-knowledge');
   await expect(panel).toBeVisible();
   // Nothing has been distilled from it yet, and the panel says so plainly
-  // rather than implying work is under way that this backend cannot do.
-  await expect(panel).toHaveAttribute('data-state', 'uncommitted');
-  await expect(panel.getByRole('button', { name: 'Learn from this' })).toBeEnabled();
+  // rather than implying work is under way that this backend cannot do —
+  // one sentence for the page (M52.3), and the one Learn button, ready.
+  await expect(panel.getByTestId('knowledge-commit')).toHaveAttribute('data-state', 'uncommitted');
+  await expect(panel.getByTestId('learn-queued')).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Learn from this page' })).toBeEnabled();
   const organized = await readMockFile(page, 'inbox/warehouse-cutover-thought.md');
   expect(organized).toContain('organized: true');
 });
 
 test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {
   await boot(page);
-  await page.getByRole('button', { name: 'Open base' }).click();
+  await openKnowledgeTab(page, 'all');
 
   // The pilot's week-long offline window was replaced by the 72-hour decision.
   const replaced = page.locator(
@@ -261,26 +272,33 @@ test('retire: a replaced concept says so, and stops asking to be verified', asyn
   );
   await replaced.click();
 
+  // M52.3 — its bar offers no Verify and no ask, only the way to what won.
+  const bar = page.getByTestId('concept-review-bar');
+  await expect(bar).toContainText('Replaced');
+  await expect(bar.getByRole('button', { name: /Verify/ })).toHaveCount(0);
+  await expect(bar.getByTestId('revise-concept')).toHaveCount(0);
+  await expect(bar.getByTestId('open-replacement')).toHaveText('Open The offline guarantee');
+
   // It carries the edge it never declared: the REPLACEMENT is what knows.
-  const relation = page
-    .getByTestId('knowledge-panel')
+  const relation = (await showConceptDetails(page))
     .getByTestId('concept-relation')
     .filter({ hasText: 'The offline guarantee' });
   await expect(relation).toHaveAttribute('data-label', 'Replaced by');
 
   // Following it lands on the concept that won.
   await relation.click();
-  await expect(page.getByTestId('concept-body')).toContainText('72 hours');
+  await expect(page.getByTestId('markdown-editor')).toContainText('72 hours');
   await expect(
     page.getByTestId('knowledge-panel').getByTestId('concept-relation').first(),
   ).toHaveAttribute('data-label', 'Replaces');
 
   // And the retired one is out of the review queue — verifying a claim that
   // something newer already overrode is busywork.
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }).click();
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Review' }).click();
+  await expect(page.getByTestId('queue-row').first()).toBeVisible();
   await expect(
     page.locator(
-      '[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]',
+      '[data-testid="queue-row"][data-path="knowledge/systems/offline-window-pilot.md"]',
     ),
   ).toHaveCount(0);
 });
@@ -298,7 +316,7 @@ test('dossier: a project record says what the base believes, doubts, and no long
   // ABOUT this record, which is what swaps the panel's related list for the
   // full dossier — capability, not type, decides.
   await expect(page.getByTestId('detail-panel')).toBeVisible();
-  await page.getByTestId('detail-knowledge-toggle').click();
+  // M50.2: open already, because Knowledge holds concepts about it.
 
   const dossier = page.getByTestId('entity-dossier');
   await expect(dossier).toBeVisible();
@@ -320,8 +338,8 @@ test('dossier: a project record says what the base believes, doubts, and no long
   // And what it read to get there — the reading list behind the claims.
   await expect(dossier.getByTestId('dossier-source').first()).toBeVisible();
 
-  // Following a concept lands on it in the bundle.
+  // Following a concept lands on its page (M50.1).
   await dossier.getByTestId('dossier-concept').first().click();
-  await expect(page.getByTestId('knowledge-page')).toBeVisible();
-  await expect(page.getByTestId('concept-body')).toBeVisible();
+  await expect(page.getByTestId('concept-heading')).toBeVisible();
+  await expect(page.getByTestId('concept-review-bar')).toBeVisible();
 });

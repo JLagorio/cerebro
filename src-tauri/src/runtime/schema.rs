@@ -1211,3 +1211,39 @@ pub const SCHEMA_V16: &str = "
         PRIMARY KEY (vault_id, ledger, key)
     );
 ";
+
+/// The M49.10 step (the 2026-09 owner decision, Q4): ordinary vault writes
+/// — a note saved, patched, renamed, deleted — are OPERATIONAL history, not
+/// epistemic. They were appended to the vault ledger's tamper-evident chain
+/// as `vault.*` shadow events that nothing read (write amplification, F96);
+/// they are recorded here instead.
+pub const SCHEMA_V17: &str = "
+    CREATE TABLE vault_writes (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        kind TEXT NOT NULL CHECK (kind IN ('vault.write', 'vault.rename', 'vault.delete')),
+        path TEXT NOT NULL CHECK (length(path) > 0),
+        to_path TEXT CHECK (to_path IS NULL OR length(to_path) > 0),
+        content_hash TEXT CHECK (content_hash IS NULL OR length(content_hash) = 64),
+        actor TEXT,
+        recorded_at TEXT NOT NULL CHECK (recorded_at LIKE '____-__-__T%Z'),
+        CHECK ((kind = 'vault.rename') = (to_path IS NOT NULL))
+    );
+    CREATE INDEX vault_writes_by_path ON vault_writes (vault_id, path);
+";
+
+/// M49.9 (K25): `runs.counters_booked`. Before M49.9 nothing wrote
+/// `proposals_submitted`/`applied`/`rejected` — they were inserted as 0 and
+/// stayed there, so a legacy row's zeros are NOT a measurement. Every row
+/// that exists at this migration keeps the default 0 and reads as "not
+/// recorded". From here on a row is stamped 1 only if it stands WHILE its run
+/// writes, which is the promise that the policy commit path
+/// (`CommitOutcome::book`) and the human decision path (`book_decision`)
+/// count against it: the ambient claim's INSERT, and the attended row
+/// `dispatch::begin_attended` opens before the child spawns. An attended row
+/// the meter could only write at the END (`meter_attended` with nothing
+/// opened) is stamped 0 — no booking could have reached it. Its own version
+/// rather than part of v17, because a dev database may already stand at 17.
+pub const SCHEMA_V18: &str = "
+    ALTER TABLE runs ADD COLUMN counters_booked INTEGER NOT NULL DEFAULT 0
+        CHECK (counters_booked IN (0, 1));
+";

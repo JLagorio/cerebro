@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { localStamp } from '@/engine/whenText';
 import { __seedFleet, resetMockFs, type FleetRun } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -82,20 +83,70 @@ describe('AgentsPage', () => {
     render(<AgentsPage selection={{ kind: 'agents', actor: 'process:release-scout' }} />);
     // The root's row, with its hop indented beneath and the billing stated.
     await waitFor(() => expect(screen.getByTestId('agent-run')).toBeTruthy());
-    expect(screen.getByTestId('agent-run-hop').textContent).toContain('process:knowledge');
+    // Named as its record names it (M52.3), the stamp a hover away.
+    const hop = screen.getByTestId('agent-run-hop');
+    expect(hop.textContent).toContain('Knowledge agent');
+    expect(hop.textContent).not.toContain('process:knowledge');
+    expect(hop.querySelector('[title="process:knowledge"]')).toBeTruthy();
     expect(screen.getByText(/billed to this run's ceiling/)).toBeTruthy();
     cleanup();
 
     // From the hop's side: its page says which run it hopped from.
     render(<AgentsPage selection={{ kind: 'agents', actor: 'process:knowledge' }} />);
     await waitFor(() => expect(screen.getByTestId('agent-run-parent')).toBeTruthy());
-    expect(screen.getByTestId('agent-run-parent').textContent).toContain('process:release-scout');
+    const parent = screen.getByTestId('agent-run-parent');
+    expect(parent.textContent).toContain('a hop from Release scout');
+    expect(parent.textContent).not.toContain('process:release-scout');
   });
 
-  it('a construct page says it is permanently internal instead of offering an editor', async () => {
+  it('a construct page says it is internal, in plain words, instead of offering an editor', async () => {
     render(<AgentsPage selection={{ kind: 'agents', actor: 'agent:m26-ingest' }} />);
-    expect(await screen.findByTestId('agent-construct')).toBeTruthy();
+    const page = await screen.findByTestId('agent-construct');
     expect(screen.queryByTestId('agent-edit')).toBeNull();
+    // M52.3: its name, not its stamp, and no milestone jargon.
+    expect(page.textContent).toContain('Ingest is work Cerebro runs itself');
+    expect(page.textContent).not.toContain('agent:m26-ingest');
+    expect(page.textContent).not.toContain('M35');
+  });
+
+  it('the Knowledge agent page tells the same story as its concepts and its run (M52.3)', async () => {
+    // The corpus: two concepts stamped `process:knowledge`, one addressed run
+    // that applied them. Its page, its run and each concept's byline agree.
+    render(<AgentsPage selection={{ kind: 'agents', actor: 'process:knowledge' }} />);
+    expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe('Knowledge agent');
+    const wrote = await screen.findAllByTestId('agent-wrote');
+    expect(wrote.map((w) => w.getAttribute('data-path')).sort()).toEqual([
+      'knowledge/playbooks/warehouse-cutover.md',
+      'knowledge/systems/pick-queue-drain.md',
+    ]);
+    await waitFor(() => expect(screen.getAllByTestId('agent-run')).toHaveLength(1));
+    expect(screen.getByTestId('agent-run').getAttribute('data-run')).toBe('run-ingest-2');
+    expect(screen.getByTestId('agent-grants').textContent).toContain('off duty');
+  });
+
+  it('a run row shows its start on the reader clock, as its detail does (M52.4)', async () => {
+    const started = '2026-07-28T09:00:00Z';
+    __seedFleet([run({ run_id: 'root-1', actor: 'process:release-scout', started_at: started })]);
+    render(<AgentsPage selection={{ kind: 'agents', actor: 'process:release-scout' }} />);
+    const row = await screen.findByTestId('agent-run');
+    // The run detail's Started reads `localStamp` too; the ISO a hover away.
+    expect(within(row).getByTitle(started).textContent).toBe(localStamp(new Date(started)));
+  });
+
+  it('an agent with triggers and no schedule is not called off duty (M52.4)', async () => {
+    const entries = useVaultStore
+      .getState()
+      .entries.map((e) =>
+        e.path === 'records/agents/release-scout.md'
+          ? { ...e, properties: { ...e.properties, when: ['created'] } }
+          : e,
+      );
+    useVaultStore.setState({ entries });
+    render(<AgentsPage selection={{ kind: 'agents', actor: 'process:release-scout' }} />);
+    const grants = await screen.findByTestId('agent-grants');
+    expect(grants.textContent).toContain('none — its triggers fire it');
+    expect(grants.textContent).not.toContain('off duty');
+    expect(grants.textContent).toContain('1 standing');
   });
 
   it('a dangling actor is absent, said as absent', async () => {

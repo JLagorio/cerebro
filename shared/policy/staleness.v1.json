@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "rule": "A concept is stale from its stale_after date on (inclusive). A stale_after that is not exactly a YYYY-MM-DD date — including a value that is not a string at all — reads as stale: its recheck horizon is unknown, and unknown is surfaced, never treated as 'never'. Absent or null is no horizon declared, and is not stale.",
+  "inclusive": true,
+  "malformed_is_stale": true,
+  "cases": [
+    { "today": "2026-08-16", "stale_after": "2026-08-15", "stale": true },
+    { "today": "2026-08-16", "stale_after": "2026-08-16", "stale": true },
+    { "today": "2026-08-16", "stale_after": "2026-08-17", "stale": false },
+    { "today": "2026-08-16", "stale_after": null, "stale": false },
+    { "today": "2026-08-16", "stale_after": "2027-7-1", "stale": true },
+    { "today": "2026-08-16", "stale_after": "never", "stale": true },
+    { "today": "2026-08-16", "stale_after": "2026-13-40", "stale": true },
+    { "today": "2026-08-16", "stale_after": "", "stale": true },
+    { "today": "2026-08-16", "stale_after": " 2027-07-01", "stale": true },
+    { "today": "2026-08-16", "stale_after": "+2027-07-01", "stale": true },
+    { "today": "2026-08-16", "stale_after": 2027, "stale": true },
+    { "today": "2026-08-16", "stale_after": true, "stale": true }
+  ]
+}

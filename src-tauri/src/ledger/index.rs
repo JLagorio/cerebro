@@ -261,6 +261,24 @@ impl Index {
         Ok(Index { conn, path })
     }
 
+    /// Open an EXISTING index read-only (M49.10, K35): no delete, no DDL, no
+    /// file created. For `ledger_status`, which is documented read-only and
+    /// used to go through `open` — deleting and recreating an index it
+    /// judged unhealthy, from what should have been a question. `Ok(None)`
+    /// when there is no index to read.
+    pub fn open_read_only(config_dir: &Path, store_id: &str) -> Result<Option<Index>, String> {
+        let path = index_path(config_dir, store_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(Some(Index { conn, path }))
+    }
+
     /// Replay committed frames into the index, incrementally by seq, and
     /// remember the ledger's head. Refuses a ledger BEHIND the index or one
     /// whose history disagrees at the cursor — the cache must never smooth
@@ -354,8 +372,9 @@ impl Index {
         Ok(index)
     }
 
-    /// Update only the remembered head — the cheap per-append path (shadow
-    /// mode calls it after every commit). The events table catches up on
+    /// Update only the remembered head — the cheap per-append path
+    /// (`shadow::with_writer`'s `remember_head` calls it after every closure
+    /// that may have appended, M49.10). The events table catches up on
     /// the next activate replay; a briefly stale events table is fine in a
     /// cache whose meta is the anchor that matters.
     pub fn remember(&mut self, remembered: &Remembered, writer_id: &str) -> Result<(), String> {

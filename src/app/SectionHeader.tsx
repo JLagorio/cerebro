@@ -51,7 +51,7 @@ export function SectionHeader({
           title={a.label}
           data-testid={a.testId}
           onClick={a.onClick}
-          className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent text-n-400 opacity-0 hover:bg-n-200 hover:text-n-700 focus-visible:opacity-100 group-hover/sec:opacity-100"
+          className="flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent text-n-400 opacity-0 hover:bg-n-200 hover:text-n-700 focus-visible:opacity-100 group-hover/sec:opacity-100"
         >
           <Icon name={a.icon} size={13} />
         </button>

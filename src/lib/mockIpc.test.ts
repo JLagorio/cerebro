@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runAgent, stopAllAgents } from '@/agent/agentIpc';
 import * as mock from './mockIpc';
+import { sha256Hex } from './sha256';
 
 beforeEach(() => {
   mock.resetMockFs();
@@ -389,6 +390,44 @@ describe('mockIpc', () => {
           aliases: [],
         }),
       ).rejects.toThrow(/unsupported_alias_removal/);
+      // M49.6 (K28): compared normalized, as Rust does — a case and spacing
+      // change keeps the same alias and is not a removal.
+      await mock.updateFrontmatter('/demo-vault', 'knowledge/systems/status-model.md', {
+        aliases: ['the  status model'],
+      });
+    });
+
+    it('refuses a relation link two concepts share, as Rust does (M49.10)', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      fs.set('knowledge/metrics/churn.md', '---\ntype: Metric\n---\n\n# Churn\n');
+      fs.set('knowledge/systems/churn.md', '---\ntype: Reference\n---\n\n# Churn\n');
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'knowledge/systems/status-model.md', {
+          supersedes: ['[[churn]]'],
+        }),
+      ).rejects.toThrow(
+        '[[churn]] names more than one concept (knowledge/metrics/churn.md, knowledge/systems/churn.md) — link by path, e.g. [[metrics/churn]]',
+      );
+      // A path names exactly one.
+      await mock.updateFrontmatter('/demo-vault', 'knowledge/systems/status-model.md', {
+        supersedes: ['[[metrics/churn]]'],
+      });
+      // A link the file already carries is not re-judged: it may have become
+      // ambiguous after it was written, and that must not lock the concept.
+      fs.set(
+        'knowledge/systems/legacy.md',
+        '---\ntype: Reference\nrefines:\n  - "[[churn]]"\n---\n\n# Legacy\n',
+      );
+      await mock.updateFrontmatter('/demo-vault', 'knowledge/systems/legacy.md', {
+        refines: ['[[churn]]', '[[metrics/churn]]'],
+      });
+      // Removing that path link beside the kept ambiguous one refuses: it
+      // cannot be told apart from what `[[churn]]` keeps.
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'knowledge/systems/legacy.md', {
+          refines: ['[[churn]]'],
+        }),
+      ).rejects.toThrow('[[churn]] names more than one concept');
     });
 
     it('refuses a delete (M17.1)', async () => {
@@ -419,18 +458,39 @@ describe('mockIpc', () => {
 
     it('allows verifyConcept, scoped to the verified key', async () => {
       const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
-      await mock.verifyConcept('/demo-vault', CONCEPT, {
-        verified: [{ by: 'human:josef', at: '2026-07-28T10:00:00Z' }],
-      });
+      const viewed = sha256Hex(await mock.readNote('/demo-vault', CONCEPT));
+      await mock.verifyConcept(
+        '/demo-vault',
+        CONCEPT,
+        { verified: [{ by: 'human:josef', at: '2026-07-28T10:00:00Z' }] },
+        viewed,
+      );
       expect(fs.get(CONCEPT)).toContain('human:josef');
 
       // Must not become a general-purpose bypass of the guard above.
       await expect(
-        mock.verifyConcept('/demo-vault', CONCEPT, { verified: [], description: 'rewritten' }),
+        mock.verifyConcept(
+          '/demo-vault',
+          CONCEPT,
+          { verified: [], description: 'rewritten' },
+          viewed,
+        ),
       ).rejects.toThrow(/may only write/);
       await expect(
-        mock.verifyConcept('/demo-vault', 'inbox/welcome.md', { verified: [] }),
+        mock.verifyConcept('/demo-vault', 'inbox/welcome.md', { verified: [] }, viewed),
       ).rejects.toThrow(/only applies to/);
+    });
+
+    it('refuses to verify a body that changed since it was read (M49.3)', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      const viewed = sha256Hex(await mock.readNote('/demo-vault', CONCEPT));
+      const before = fs.get(CONCEPT) ?? '';
+      fs.set(CONCEPT, `${before}\nEdited underneath the page.\n`);
+      const edited = fs.get(CONCEPT);
+      await expect(
+        mock.verifyConcept('/demo-vault', CONCEPT, { verified: [{ by: 'human:josef' }] }, viewed),
+      ).rejects.toThrow(/^stale_view: /);
+      expect(fs.get(CONCEPT)).toBe(edited);
     });
   });
 
@@ -690,10 +750,10 @@ describe('mockIpc', () => {
               stale_after: '2026-08-01T06:00:00Z',
             },
             review: { status: 'unreviewed' },
-            support_text: 'single-source',
-            coverage_text: 'coverage unassessed',
+            support_text: 'one source',
+            coverage_text: 'sources not yet assessed',
             validity_text: 'stale and contested',
-            line: 'single-source, coverage unassessed, stale and contested',
+            line: 'one source, sources not yet assessed, stale and contested',
           },
         ],
       },
@@ -701,7 +761,7 @@ describe('mockIpc', () => {
     const rows = await mock.beliefChips('/demo-vault');
     expect(rows).toHaveLength(1);
     expect(rows[0]?.facets[0]?.line).toBe(
-      'single-source, coverage unassessed, stale and contested',
+      'one source, sources not yet assessed, stale and contested',
     );
     mock.__seedChips([]);
   });

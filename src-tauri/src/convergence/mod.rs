@@ -13,6 +13,7 @@ pub mod diff;
 pub mod store;
 
 use crate::ledger::frame::Frame;
+use crate::ledger::reduce::EpistemicState;
 
 /// Compute one window's output from a store's frames.
 pub fn over(
@@ -20,9 +21,24 @@ pub fn over(
     store_uuid: &str,
     window: diff::Window,
 ) -> Result<diff::Output, String> {
+    over_with_now(frames, store_uuid, window).map(|(output, _)| output)
+}
+
+/// [`over`], plus the fold at the window's end.
+///
+/// For the attended answer, which names each line's subject by the file that
+/// projects it (M52.4). The name is not part of `Output` — that is
+/// content-hashed and stored — so the caller that reads the output aloud gets
+/// the fold it was computed from instead of reducing the ledger a third time.
+pub fn over_with_now(
+    frames: &[Frame],
+    store_uuid: &str,
+    window: diff::Window,
+) -> Result<(diff::Output, EpistemicState), String> {
     let (then, now) = diff::states(frames, store_uuid, window)?;
     let routes = crate::policy::authority::resolvable()?;
-    Ok(diff::compute(&then, &now, window, &routes))
+    let output = diff::compute(&then, &now, window, &routes);
+    Ok((output, now))
 }
 
 /// The window a scheduled run should cover: from wherever the last stored run

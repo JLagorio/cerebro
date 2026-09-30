@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
+import { Icon } from '@/components/ui/Icon';
+import { recheckLine, type Concept } from '@/engine/okf';
+import { actorLabel } from '@/engine/authors';
+import { useConcepts } from '@/knowledge/useConcepts';
 import * as ipc from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import type {
   ChangesView,
   LanesView,
@@ -11,39 +16,32 @@ import { AgentRoster } from '@/status/AgentRoster';
 import { FleetSection } from '@/status/FleetSection';
 import { NeedsYouSection } from '@/status/NeedsYouSection';
 import { SystemSection } from '@/status/SystemSection';
+import { useNavStore } from '@/stores/navStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 /**
- * What the base knows about ITSELF — the Status hub's five sections, moved
- * here as Knowledge tabs (M33a.2, from `pages/EpistemicStatusPage.tsx`).
- *
- * **Why the scroll column died.** The hub stacked every section in one
- * column: 5,799px in an 844px viewport, seven screens to reach the last one.
- * `Deferral gates` alone was 3,225px — 55% of the page — of cards reading
- * "Never evaluated here." A nav that could only scroll you past four sections
- * to reach the fifth is not navigation, and the sections were never one
- * reading. Each is a tab now, and the Knowledge sidebar is the nav — and the
- * gate board sits behind its own count, because giving 3,225px of
- * build-planning bookkeeping a tab of its own only MOVES it.
- *
- * **Why it lives under Knowledge.** What the base HOLDS and what it knows
- * about itself were two rail buttons describing one subject. A bundle that
- * cannot say what it is unsure of is not a knowledge base, it is a folder.
+ * What Knowledge says about itself — the Activity and System sections of the
+ * Knowledge page (M51.1), plus the proposal cards its Review tab holds. Each
+ * section is its own mount that owns its own read and its own failure.
  *
  * **Nothing here computes an epistemic answer.** Lane names, the sentence
  * under each lane, the reason on every item and every line of what changed
  * arrive composed from Rust, beside the rules that produced them. This file
- * chooses layout and says the empty cases out loud.
+ * chooses layout, says the empty cases out loud, and puts a concept's title
+ * where the wire sent its id (M52.3) — a reader follows "Sync error rate",
+ * not `metrics/sync-error-rate.md`. The one sentence it swaps is a recheck
+ * the concept's own file dates (M52.5): "Due a recheck · 2 days overdue",
+ * `recheckLine`'s words on its row and its page, where Rust's "past its
+ * recheck date" was a third way of saying it.
  *
- * **Six tabs, six independent failures.** The feeds are deliberately separate
- * calls, and each tab now reads only its own: a vault with no ledger can
- * still show its review queue and its budget, and a section whose read failed
- * says so instead of rendering the empty state. "Nothing is contested" and
- * "we could not tell you whether anything is contested" are opposite
- * sentences.
+ * **Separate reads, separate failures.** A vault with no ledger can still
+ * show its review queue and its budget, and a section whose read failed says
+ * so instead of rendering the empty state. "No open contradictions" and "we
+ * could not tell you whether anything is contested" are opposite sentences.
  *
- * **No counts in the nav chrome.** A badge would be the chrome nagging somebody to
- * drain a queue — the same rule that kept a review count off Knowledge (M8.1)
- * and a commit count off History (M9.4).
+ * **No counts in the nav chrome.** A badge would be the chrome nagging somebody
+ * to drain a queue — the same rule that kept a review count off Knowledge
+ * (M8.1) and a commit count off History (M9.4).
  */
 
 /** One feed's three states. `loading` is distinct from `unavailable` so a
@@ -104,16 +102,17 @@ function Section({
     <section data-testid="base-section" data-section={id} className="flex flex-col gap-1.5">
       <div className="flex items-baseline gap-2">
         <h2 className="text-sm font-semibold text-n-800">{title}</h2>
-        {/* §33 made visible. The guarantee that no preference can hide this
-            lane is worth more on screen than in a comment. */}
+        {/* §33 made visible — as a quiet lock beside the name, with the
+            guarantee in words for a hover and a screen reader. An uppercase
+            ALWAYS SHOWN tag read as a setting's name, not as a promise. */}
         {protectedLane && (
           <span
             data-testid="protected-badge"
-            className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em] text-n-500"
-            style={{ border: '1px solid var(--n-200)' }}
-            title="Always shown. No preference can hide this."
+            className="inline-flex items-center self-center text-n-400"
+            title="Always listed — no setting can hide this"
           >
-            always shown
+            <Icon name="lock" size={11} />
+            <span className="sr-only">Always listed — no setting can hide this</span>
           </span>
         )}
       </div>
@@ -146,41 +145,157 @@ function Loading() {
   return <p className="text-xs text-n-400">Reading…</p>;
 }
 
-/** The title of a lane row: the file if one projects this belief, the entity
- * otherwise. A belief id would be honest and unreadable. */
-function titleOf(item: { path: string | null; entity_id: string }): string {
-  return item.path ?? item.entity_id;
+const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/i, '');
+
+/**
+ * The concept a lane item or a change line is about (M52.3): the file the
+ * wire names as its subject's projection (bundle-relative, so under
+ * `knowledge/`; a change line carries one since M52.4), else the ONE concept
+ * whose file name is the entity id — two would be a guess. Null when nothing
+ * in the bundle answers.
+ */
+function conceptNamed(
+  concepts: Concept[],
+  path: string | null,
+  entityId: string | null,
+): Concept | null {
+  if (path !== null) {
+    const projected = concepts.find((c) => c.entry.path === `knowledge/${path}`);
+    if (projected !== undefined) return projected;
+  }
+  if (entityId === null) return null;
+  const named = concepts.filter((c) => stem(c.entry.path) === entityId);
+  return named.length === 1 ? named[0] : null;
+}
+
+/**
+ * What a row is about, by name (M52.3). A concept is its title, and opens its
+ * page — the same act as every other concept link on the Knowledge page. A
+ * subject no concept answers to reads as the neutral "A claim" (M52.4): the
+ * ids are the ledger's 32 hex characters, not slugs, so there are no words in
+ * one to recover, and a humanized id is a raw id in costume. The raw id stays
+ * in the `title`.
+ */
+function ConceptName({
+  concept,
+  id,
+  className,
+}: {
+  concept: Concept | null;
+  /** The ledger id the row carries, for the tooltip only. */
+  id: string;
+  /** Size and layout only — the colour is what tells a link from a name. */
+  className: string;
+}) {
+  const navigate = useNavStore((s) => s.navigate);
+  if (concept === null) {
+    return (
+      <span data-testid="activity-claim" title={id} className={`text-n-800 ${className}`}>
+        A claim
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="activity-concept"
+      data-path={concept.entry.path}
+      title={id}
+      onClick={() => navigate({ kind: 'doc', path: concept.entry.path })}
+      className={`cursor-pointer border-0 bg-transparent p-0 text-left text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500 ${className}`}
+    >
+      {concept.title}
+    </button>
+  );
+}
+
+/** A line that leads — a change line with no subject, or a lane item's
+ * reason — starts with a capital. Rust composes a subjectless change line as
+ * a whole sentence (`ChangeLine`'s rule in `status.rs`) and a reason as the
+ * end of one; the capital is set here, so neither reads as a fragment. */
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** The default attention setting's per-list cap (`preferences.rs`,
+ * `Verbosity::Normal`) — only for choosing the sentence that explains a
+ * withheld count; the cap itself is applied in Rust. */
+const LANE_CAP = 10;
+
+/**
+ * A lane item's reason line. A recheck whose only reason is the concept's own
+ * date reads as the concept's row and page read it (`recheckLine`); every
+ * other reason is Rust's sentence, capitalised.
+ */
+function reasonLine(item: LaneView['items'][number], concept: Concept | null, today: string) {
+  const onlyStale = item.reasons.length === 1 && item.reasons[0] === 'freshness_stale';
+  return onlyStale && concept?.stale === true
+    ? recheckLine(concept, today)
+    : sentence(item.reason_text);
 }
 
 function Lane({ lane }: { lane: LaneView }) {
+  const concepts = useConcepts();
+  const today = todayIso();
   return (
     <Section id={lane.id} title={lane.label} blurb={lane.blurb} protectedLane={lane.protected}>
       {lane.items.length === 0 ? (
         <Quiet text={lane.empty_text} />
       ) : (
-        lane.items.map((item) => (
-          <div
-            key={`${item.belief_id}:${item.predicate ?? ''}:${item.edge_id ?? item.relation_id ?? ''}`}
-            data-testid="lane-item"
-            data-lane={lane.id}
-            data-reasons={item.reasons.join(' ')}
-            className="flex flex-col gap-0.5 rounded border border-n-200 px-2.5 py-2"
-          >
-            <span className="truncate text-xs font-medium text-n-800">{titleOf(item)}</span>
-            <span className="text-2xs text-n-600">
-              {item.scope_text === null
-                ? item.reason_text
-                : `${item.scope_text} — ${item.reason_text}`}
-            </span>
-            {item.reliance_text !== null && (
-              <span className="text-2xs text-n-500">{item.reliance_text}</span>
-            )}
-          </div>
-        ))
+        // Rows between rules that run the tab's width, as the update log's
+        // day rules do (M52.5): one measure for Activity. The 880px boxes
+        // stopped halfway across beside rules that ran to the edge.
+        <div
+          data-testid="lane-items"
+          className="flex flex-col divide-y divide-n-100 border-y border-n-100"
+        >
+          {lane.items.map((item) => {
+            const concept = conceptNamed(concepts, item.path, item.entity_id);
+            return (
+              <div
+                key={`${item.belief_id}:${item.predicate ?? ''}:${item.edge_id ?? item.relation_id ?? ''}`}
+                data-testid="lane-item"
+                data-lane={lane.id}
+                data-reasons={item.reasons.join(' ')}
+                className="flex flex-col gap-0.5 py-2"
+              >
+                {/* What it is, then which of its claims (M52.5): the scope is
+                    a quiet qualifier on the name — only for a belief with
+                    more than one — and the reason leads its own line. */}
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  <ConceptName
+                    concept={concept}
+                    id={item.belief_id}
+                    className="min-w-0 truncate text-xs font-medium"
+                  />
+                  {item.scope_text !== null && (
+                    <span data-testid="lane-scope" className="min-w-0 truncate text-2xs text-n-500">
+                      · {item.scope_text}
+                    </span>
+                  )}
+                </span>
+                <span data-testid="lane-reason" className="text-2xs text-n-600">
+                  {reasonLine(item, concept, today)}
+                </span>
+                {item.reliance_text !== null && (
+                  <span className="text-2xs text-n-500">{item.reliance_text}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
+      {/* A cap nobody can see reads as "there is nothing else" — so the
+          count is said, and so is why. The default attention setting shows
+          ten per list (`preferences.rs`), and nothing on screen changes it
+          yet, so a full list names that rule; a shorter one was held back by
+          the only other ways `present` withholds — a dismissal, or an item
+          already shown recently. "2 more not shown — each list shows its
+          first ten" under ONE row was a sentence contradicting its list. */}
       {lane.withheld > 0 && (
         <p data-testid="lane-withheld" className="text-2xs text-n-500">
-          {lane.withheld} more held back by a preference.
+          {lane.withheld} more not shown —{' '}
+          {lane.items.length >= LANE_CAP
+            ? 'each list shows its first ten.'
+            : 'dismissed, or shown recently.'}
         </p>
       )}
     </Section>
@@ -188,6 +303,7 @@ function Lane({ lane }: { lane: LaneView }) {
 }
 
 function Changes({ feed }: { feed: Feed<ChangesView> }) {
+  const concepts = useConcepts();
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') return <Unavailable what="What changed" />;
   const view = feed.data;
@@ -203,14 +319,31 @@ function Changes({ feed }: { feed: Feed<ChangesView> }) {
         .filter((section) => section.lines.length > 0)
         .map((section) => (
           <div key={section.id} data-testid="change-section" data-change={section.id}>
-            <span className="text-2xs uppercase tracking-[0.06em] text-n-500">{section.label}</span>
+            {/* Sentence case, as every other label on the page (M52.5). */}
+            <span className="text-xs font-medium text-n-600">{section.label}</span>
+            {/* The thing that moved, by name, then what happened to it — Rust
+                composes a subject's line to follow its name (M52.4). Never a
+                raw id: a line about a belief or an entity names the concept
+                its `path` projects, or "A claim"; a line about neither is
+                just its sentence. */}
             {section.lines.map((line, index) => (
               <p
                 key={`${line.belief_id ?? line.entity_id ?? ''}:${index}`}
                 data-testid="change-line"
                 className="text-xs text-n-700"
               >
-                {line.entity_id ?? line.belief_id ?? ''} {line.text}
+                {line.belief_id === null && line.entity_id === null ? (
+                  sentence(line.text)
+                ) : (
+                  <>
+                    <ConceptName
+                      concept={conceptNamed(concepts, line.path, line.entity_id)}
+                      id={line.belief_id ?? line.entity_id ?? ''}
+                      className="font-medium"
+                    />{' '}
+                    {line.text}
+                  </>
+                )}
               </p>
             ))}
           </div>
@@ -257,13 +390,13 @@ function GateRow({ gate }: { gate: ipc.TriggerGateStatus }) {
       data-testid="gate-row"
       data-gate={gate.gate}
       data-result={gate.latest?.result ?? 'never'}
-      className={`flex flex-col gap-0.5 rounded border px-2.5 py-1.5 ${
+      className={`flex flex-col gap-0.5 rounded-xs border px-2.5 py-1.5 ${
         fired ? 'border-warn-700' : 'border-n-200'
       }`}
     >
       <span className="flex items-baseline gap-2">
         <span className="text-xs font-medium text-n-800">{gate.gate}</span>
-        <span className="text-2xs uppercase tracking-[0.06em] text-n-500">{gate.variant}</span>
+        <span className="text-2xs text-n-500">{gate.variant.replaceAll('_', ' ')}</span>
       </span>
       <span className="text-2xs text-n-600">
         {gate.latest === null
@@ -347,35 +480,45 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
   };
 
   const field =
-    'rounded border border-n-200 bg-transparent px-2 py-1 text-xs text-n-800 placeholder:text-n-400';
+    'rounded-xs border border-n-200 bg-transparent px-2 py-1 text-xs text-n-800 placeholder:text-n-400';
 
   return (
-    <div data-testid="r7-scope" className="flex flex-col gap-1.5 rounded border border-n-200 p-2.5">
+    // The gate's name and the ledger's nouns ride on the hover and the data
+    // attribute (M52.5): "R7 verification scope" and "predicate classes" were
+    // the registry talking, as a heading.
+    <div
+      data-testid="r7-scope"
+      data-gate="R7"
+      title="R7 verification scope"
+      className="flex flex-col gap-1.5 rounded-xs border border-n-200 p-2.5"
+    >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-n-800">R7 verification scope</span>
+        <span className="text-xs font-semibold text-n-800">What to cross-check</span>
         {!editing && (
           <button
             type="button"
             data-testid="r7-scope-open"
             onClick={openForm}
-            className="rounded border border-n-200 px-2 py-0.5 text-2xs text-n-800 hover:bg-n-50"
+            className="rounded-xs border border-n-200 px-2 py-0.5 text-2xs text-n-800 hover:bg-n-50"
           >
-            {declared.kind === 'ready' && declared.data !== null ? 'Edit' : 'Declare'}
+            {declared.kind === 'ready' && declared.data !== null ? 'Edit' : 'Choose'}
           </button>
         )}
       </div>
       {declared.kind === 'loading' && <Loading />}
-      {declared.kind === 'unavailable' && <Unavailable what="The R7 verification scope" />}
+      {declared.kind === 'unavailable' && <Unavailable what="What to cross-check" />}
       {declared.kind === 'ready' && !editing && declared.data === null && (
         <p data-testid="r7-scope-none" className="text-2xs text-n-500">
-          No scope is declared, so R7 has no question to count. Declare which subjects and predicate
-          classes it should verify.
+          Nothing is chosen to cross-check yet, so there is nothing to count. Choose which subjects,
+          and which kinds of claim, to check against more than one source.
         </p>
       )}
       {declared.kind === 'ready' && !editing && declared.data !== null && (
         <div data-testid="r7-scope-declared" className="flex flex-col gap-0.5 text-2xs text-n-600">
           <span>Subjects: {declared.data.subjects.join(', ')}</span>
-          <span>Predicate classes: {declared.data.predicate_classes.join(', ')}</span>
+          <span title="Predicate classes">
+            Kinds of claim: {declared.data.predicate_classes.join(', ')}
+          </span>
           {(declared.data.stage !== null ||
             declared.data.environment !== null ||
             declared.data.geography !== null) && (
@@ -406,8 +549,8 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
               className={field}
             />
           </label>
-          <label className="flex flex-col gap-0.5 text-2xs text-n-600">
-            Predicate classes, one per line
+          <label className="flex flex-col gap-0.5 text-2xs text-n-600" title="Predicate classes">
+            Kinds of claim, one per line
             <textarea
               data-testid="r7-scope-classes"
               value={classes}
@@ -441,9 +584,9 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
               data-testid="r7-scope-save"
               onClick={save}
               disabled={saving}
-              className="rounded border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
+              className="rounded-xs border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
             >
-              {saving ? 'Declaring…' : 'Declare scope'}
+              {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               type="button"
@@ -466,7 +609,7 @@ function R7Scope({ vaultPath }: { vaultPath: string | null }) {
       )}
       {digest !== null && (
         <p data-testid="r7-scope-digest" className="text-2xs text-n-500">
-          Declared. Evaluations under this scope will carry digest {digest.slice(0, 12)}….
+          Saved. Checks made under this choice carry the digest {digest.slice(0, 12)}….
         </p>
       )}
     </div>
@@ -508,11 +651,16 @@ function Gates({
 }) {
   const [expanded, setExpanded] = useState(false);
   if (feed.kind === 'loading') return <Loading />;
-  if (feed.kind === 'unavailable') return <Unavailable what="The trigger registry" />;
+  if (feed.kind === 'unavailable') return <Unavailable what="The list of held-back features" />;
   const board = feed.data;
   const firedGates = board.flatMap((entry) =>
     entry.gates.filter((gate) => gate.latest?.result === 'fired'),
   );
+  // What a firing asks for, by the capability's name: the gate's code
+  // ("R13:root") rides on the hover and `data-fired` (M52.5).
+  const needed = board
+    .filter((entry) => entry.gates.some((gate) => gate.latest?.result === 'fired'))
+    .map((entry) => entry.capability.replaceAll('_', ' '));
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -521,15 +669,24 @@ function Gates({
           data-testid="gates-evaluate"
           onClick={onEvaluate}
           disabled={running}
-          className="rounded border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
+          className="rounded-xs border border-n-200 px-2.5 py-1 text-xs text-n-800 hover:bg-n-50 disabled:opacity-50"
         >
           {running ? 'Evaluating…' : 'Evaluate now'}
         </button>
-        <span data-testid="gates-summary" className="text-2xs text-n-500">
-          {board.length} {board.length === 1 ? 'capability' : 'capabilities'} held back,{' '}
-          {firedGates.length === 0
-            ? 'none fired'
-            : `${firedGates.map((gate) => gate.gate).join(', ')} has fired`}
+        <span
+          data-testid="gates-summary"
+          data-fired={firedGates.length === 0 ? undefined : firedGates.map((g) => g.gate).join(' ')}
+          title={
+            firedGates.length === 0
+              ? undefined
+              : `${firedGates.map((g) => g.gate).join(', ')} fired — a firing licenses a dated plan, never code`
+          }
+          className="text-2xs text-n-500"
+        >
+          {board.length} {board.length === 1 ? 'is' : 'are'} held back;{' '}
+          {needed.length === 0
+            ? 'none is needed yet'
+            : `${needed.join(', ')} ${needed.length === 1 ? 'is' : 'are'} needed now`}
           .
         </span>
         {board.length > 0 && (
@@ -540,7 +697,7 @@ function Gates({
             onClick={() => setExpanded(!expanded)}
             className="text-2xs text-n-500 underline underline-offset-2 hover:text-n-700"
           >
-            {expanded ? 'Hide the board' : 'Show the board'}
+            {expanded ? 'Hide them' : 'Show each one'}
           </button>
         )}
       </div>
@@ -558,7 +715,7 @@ function Gates({
             data-entry={entry.registry_id}
             className="flex flex-col gap-1"
           >
-            <span className="text-2xs uppercase tracking-[0.06em] text-n-500">
+            <span className="text-xs font-medium text-n-600">
               {entry.registry_id} — {entry.capability}
             </span>
             {entry.gates.map((gate) => (
@@ -579,7 +736,7 @@ function Lanes({ feed }: { feed: Feed<LanesView> }) {
   if (feed.kind === 'loading') return <Loading />;
   if (feed.kind === 'unavailable') {
     return (
-      <Section id="lanes-unavailable" title="Contradictions, gaps, staleness and debt">
+      <Section id="lanes-unavailable" title="What Knowledge is unsure of">
         <Unavailable what="The attention lanes" />
       </Section>
     );
@@ -621,16 +778,16 @@ export function WhatsContested({ vaultPath }: { vaultPath: string | null }) {
   return <Lanes feed={lanes} />;
 }
 
-/** The proposal queue — what the base wants to change and is waiting on you
- * to decide. Named "Waiting on you" rather than "Needs review": Knowledge
- * already has a Needs review row, for CONCEPTS a human has not verified, and
- * two unrelated queues under one string is a nav that lies. */
+/** The proposal queue — what agents want to change in Knowledge, waiting on
+ * you to decide. Named "Waiting on you" rather than "Needs review": Knowledge
+ * already has a review queue, for CONCEPTS a human has not verified, and two
+ * unrelated queues under one string is a nav that lies. */
 export function WaitingOnYou({ vaultPath }: { vaultPath: string | null }) {
   return (
     <Section
       id="needs-review"
       title="Waiting on you"
-      blurb="What the base wants to change and is waiting for you to decide."
+      blurb="What agents want to change in Knowledge, waiting for you to decide."
     >
       {/* M33.3: the cards themselves, not a count and a door. The section
           owns its own read. */}
@@ -664,6 +821,7 @@ export function Background({ vaultPath }: { vaultPath: string | null }) {
  * rather than inside either child, because it is the one thing they share.
  */
 export function AgentWork({ vaultPath }: { vaultPath: string | null }) {
+  const entries = useVaultStore((s) => s.entries);
   const [focus, setFocus] = useState<string | null>(null);
   return (
     <Section
@@ -676,7 +834,7 @@ export function AgentWork({ vaultPath }: { vaultPath: string | null }) {
           agent's actor is the same string wherever it ran. */}
       <AgentRoster vaultPath={vaultPath} focus={focus} onFocus={setFocus} />
       <h3 className="pt-1 text-xs font-semibold text-n-700">
-        {focus === null ? 'Every run booked here' : `Runs by ${focus}`}
+        {focus === null ? 'Every run booked here' : `Runs by ${actorLabel(focus, entries).text}`}
       </h3>
       <FleetSection focusActor={focus} />
     </Section>
@@ -714,8 +872,8 @@ export function DeferralGates({ vaultPath }: { vaultPath: string | null }) {
   return (
     <Section
       id="gates"
-      title="Deferral gates"
-      blurb="What stays unbuilt until measured evidence says otherwise. A firing licenses a dated plan, never code."
+      title="Features held back until they're needed"
+      blurb="Each stays unbuilt until measured use shows it is needed — and then it earns a dated plan, not code."
     >
       <Gates
         feed={gates}

@@ -13,12 +13,18 @@ import { boot, openKnowledgeTab, seedBeforeBoot } from './boot';
  * against the real interpreter in `policy::review` and `policy::evals`.
  *
  * **M33.3 moved the home, not the behaviour, and M33a.2 moved it again.**
- * These cards live in Knowledge's "Waiting on you" tab now — there is no
- * review tab and no Status hub either. Every card testid
+ * These cards live in Knowledge's Review tab, under "Waiting on you" (M51) —
+ * there is no review page and no Status hub either. Every card testid
  * below is unchanged on purpose — that is what makes this file able to prove
  * the extraction dropped nothing. The spec also stopped hand-rolling its own
  * boot: it used to set two localStorage keys and never pin the clock, which
  * is exactly the shelf-life bug `boot.ts` exists to prevent.
+ *
+ * **M52.2 changed what a card SAYS, not what it holds.** It leads in the
+ * app's words ("Retire a concept", why it waits as a sentence) and the codes
+ * the ledger recorded moved to `data-` attributes and the card's Details —
+ * so these assertions read the codes there, and the words where a person
+ * reads them.
  */
 
 const CARD = {
@@ -52,12 +58,12 @@ const CARD = {
 
 type Card = typeof CARD;
 
-/** Boot into Knowledge's "Waiting on you" tab with these cards staged, and
- * hand back the section that holds them. */
+/** Boot into Knowledge's Review tab with these cards staged, and hand back
+ * the "Waiting on you" section that holds them. */
 async function openNeedsReview(page: Page, fixture: { cards?: Card[]; applications?: unknown[] }) {
   await seedBeforeBoot(page, '__cerebroSeedReview', fixture);
   await boot(page);
-  await openKnowledgeTab(page, 'Waiting on you');
+  await openKnowledgeTab(page, 'review');
   return page.locator('[data-section="needs-review"]');
 }
 
@@ -69,10 +75,24 @@ test('review: a queued card says what it is, how dangerous it is, and why it wai
   });
   const card = section.getByTestId('review-card');
   await expect(card).toHaveCount(1);
-  await expect(card.getByTestId('card-op')).toHaveText('tombstone_belief');
-  await expect(card.getByTestId('card-risk')).toHaveText('HIGH');
-  // The table's own words, not a paraphrase.
-  await expect(card.getByTestId('card-queued-for')).toHaveText('high_stakes_verification_required');
+  // What would change, in the app's words; the op is still on the element.
+  await expect(card.getByTestId('card-op')).toHaveText('Retire a concept');
+  await expect(card.getByTestId('card-op')).toHaveAttribute('data-op', 'tombstone_belief');
+  // Its risk named, in sentence case; the rung on the element (M52.5).
+  await expect(card.getByTestId('card-risk')).toHaveText('High risk');
+  await expect(card.getByTestId('card-risk')).toHaveAttribute('data-risk', 'HIGH');
+  // Why it waits, as a sentence — keyed by the table's code, which is kept
+  // on the element and in Details because it is what the ledger recorded —
+  // naming what the card lacks, off its own refs (M52.5): no sign-off and
+  // no coverage check.
+  const held = card.getByTestId('card-queued-for');
+  await expect(held).toHaveText(
+    'Needs a person: it backs a high-stakes decision, nobody has signed off on it, and nothing has checked what it covers yet.',
+  );
+  await expect(held).toHaveAttribute('data-codes', 'high_stakes_verification_required');
+  await card.getByTestId('card-details').locator('summary').click();
+  await expect(card.getByTestId('card-details')).toContainText('high_stakes_verification_required');
+  await expect(card.getByTestId('card-targets')).toBeVisible();
   await expect(card.getByTestId('card-targets')).toContainText('belief');
 });
 
@@ -86,6 +106,12 @@ test('review: a card whose world moved says so before anyone clicks', async ({ p
     ],
   });
   await expect(section.getByTestId('card-stale')).toBeVisible();
+  // What happened; the act is a fresh proposal, not an Approve it describes.
+  await expect(section.getByTestId('card-stale')).toHaveText(
+    'A concept changed after this was proposed.',
+  );
+  await expect(section.getByTestId('approve')).toBeDisabled();
+  await expect(section.getByTestId('ask-fresh')).toBeVisible();
   await expect(section.getByTestId('card-targets')).toContainText('@1 → 2');
 });
 

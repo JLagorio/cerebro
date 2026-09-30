@@ -1,4 +1,3 @@
-import { resolveOptionColor } from '@/lib/swatch';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
@@ -44,7 +43,6 @@ import type {
   FieldKind,
   GroupNode,
   Presentation,
-  RowHeight,
   Schema,
 } from '@/engine/types';
 import {
@@ -61,6 +59,14 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
 import { duplicateRecord } from '@/app/recordActions';
 import { QuickAddInline } from '@/views/QuickAdd';
+import {
+  GroupBand,
+  GUTTER,
+  ROW_HEIGHT,
+  ROW_MIN_HEIGHT,
+  TABLE_ANATOMY,
+  TITLE_INSET,
+} from '@/views/tableAnatomy';
 import {
   CELL_CONTROL,
   primaryControl,
@@ -263,8 +269,8 @@ const TableCell = memo(function TableCell({
       {...(editable ? { onClick: openEditor } : {})}
       aria-colindex={colIndex + 2}
       className={[
-        'flex flex-none overflow-hidden border-r border-n-100 px-2',
-        wrap ? 'items-start py-1.5' : 'items-center',
+        TABLE_ANATOMY.cell,
+        wrap ? TABLE_ANATOMY.wrapCell : 'items-center',
         freeze === undefined ? '' : `z-10 ${fill}`,
         // The ring is inset, not a border: a border would add a pixel to a
         // cell whose width is a shared CSS variable and shear the column.
@@ -278,8 +284,8 @@ const TableCell = memo(function TableCell({
         ) : (
           <span
             className={[
-              'text-sm text-n-600',
-              wrap ? 'whitespace-normal [overflow-wrap:anywhere]' : 'truncate whitespace-nowrap',
+              TABLE_ANATOMY.value,
+              wrap ? TABLE_ANATOMY.wrap : TABLE_ANATOMY.oneLine,
             ].join(' ')}
           >
             {resolved.display === '' ? '—' : resolved.display}
@@ -365,7 +371,7 @@ function TitleCell({
           e.stopPropagation();
           setDraft(entry.title);
         }}
-        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+        className={TABLE_ANATOMY.title}
       >
         {entry.title}
       </button>
@@ -403,32 +409,6 @@ function TitleCell({
 
 /** Indent per nesting level, matching the group-band step. */
 const INDENT = 16;
-
-/**
- * Width of the leading gutter (M16.16), wide enough for insert + checkbox +
- * grip. It is laid out on every row rather than inserted on hover: a control
- * that pushes the whole grid 46px sideways under the pointer is worse than
- * one that was always there and only faded in.
- */
-const GUTTER = 46;
-
-/**
- * Row heights (M16.18). `presentation.rowHeight` has been parsed since M9.1
- * and serialized since M11 and was read by NOTHING — a saved view carried the
- * setting round-trip and the table ignored it. Tailwind classes rather than
- * numbers because the row is also `min-h-` when a column wraps, and one map
- * per spelling is one map too many.
- *
- * `Record<RowHeight, …>` since M16.29, when the height list moved to
- * `engine/types` — the settings page offering the choices and this map
- * rendering them cannot list different ones.
- */
-const ROW_HEIGHT: Record<RowHeight, string> = { compact: 'h-8', default: 'h-9', tall: 'h-12' };
-const ROW_MIN_HEIGHT: Record<RowHeight, string> = {
-  compact: 'min-h-8',
-  default: 'min-h-9',
-  tall: 'min-h-12',
-};
 
 /** Widest a fit-to-content column may become. Past this the column stops
  * being a column and becomes the table. */
@@ -492,9 +472,15 @@ function RowGutter({
       // from the DOM, which made the gutter and the first data cell both
       // column 1. Every data slot is offset by it.
       aria-colindex={1}
+      // The three controls fit it with 2px of air at the canvas edge (M52.5):
+      // 16 + 14 + 16, the grip's transparent inner edge tucked 2px under the
+      // checkbox, which sits above it. At 16 + 2 + 14 + 2 + 16 behind 8px of
+      // padding they were 12px wider than the gutter, and `justify-end`
+      // pushed the insert button 8px past the table's left edge — off the
+      // canvas, onto the sidebar's border.
       className={[
         frozen ? 'sticky left-0 z-10' : '',
-        'flex flex-none items-center justify-end gap-0.5 pl-1 pr-1',
+        'flex flex-none items-center justify-end',
         fill,
       ].join(' ')}
       style={{ width: GUTTER }}
@@ -509,7 +495,7 @@ function RowGutter({
             data-testid="row-insert"
             aria-label={`Insert a record after ${entry.title}`}
             onClick={onInsert}
-            className={`flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
+            className={`flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
           >
             <Icon name="plus" size={12} />
           </button>
@@ -524,7 +510,7 @@ function RowGutter({
         // onClick, not onChange: shift-extend needs the modifier, and a
         // change event does not carry one.
         onClick={(e) => onCheck(e.shiftKey)}
-        className={`h-3.5 w-3.5 flex-none accent-cortex-500 ${reveal}`}
+        className={`relative h-3.5 w-3.5 flex-none accent-cortex-500 ${reveal}`}
       />
       <button
         ref={gripRef}
@@ -533,7 +519,7 @@ function RowGutter({
         aria-label={`Actions for ${entry.title}`}
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className={`flex h-5 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
+        className={`-ml-0.5 flex h-5 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
       >
         <Icon name="grip-vertical" size={12} />
       </button>
@@ -767,15 +753,9 @@ const TableRow = memo(function TableRow({
       // aria-activedescendant and DOM focus never reaches a row at all. See
       // styles/table-chrome.css.
       className={[
-        'group cb-row flex border-b border-n-100',
+        TABLE_ANATOMY.row,
         autoHeight ? ROW_MIN_HEIGHT[rowHeight] : ROW_HEIGHT[rowHeight],
-        // The cursor row needs to survive a bright screen: the --cortex-50
-        // fill alone was 1.13:1 against white, so a left rule carries it.
-        selected
-          ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]'
-          : checked
-            ? 'bg-cortex-50'
-            : 'hover:bg-n-25',
+        selected ? TABLE_ANATOMY.rowSelected : checked ? 'bg-cortex-50' : TABLE_ANATOMY.rowHover,
       ].join(' ')}
     >
       <RowGutter
@@ -828,14 +808,14 @@ const TableRow = memo(function TableRow({
         className={[
           titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
-          'flex flex-none items-center gap-1.5 border-r border-n-100 pr-3',
+          TABLE_ANATOMY.titleCell,
           // The name cell is opaque because it is sticky — it has to hide the
           // columns sliding under it, so it repeats the row's own fill.
           fill,
         ].join(' ')}
         style={{
           width: `var(${TITLE_VAR})`,
-          paddingLeft: 12 + depth * INDENT,
+          paddingLeft: TITLE_INSET + depth * INDENT,
           ...freezeStyle(titlePos),
         }}
       >
@@ -851,7 +831,7 @@ const TableRow = memo(function TableRow({
               e.stopPropagation();
               onToggle();
             }}
-            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+            className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
           >
             <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
           </button>
@@ -883,7 +863,7 @@ const TableRow = memo(function TableRow({
             e.stopPropagation();
             openPath(entry.path);
           }}
-          className="cb-row-open flex-none rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
+          className={TABLE_ANATOMY.openPill}
         >
           Open
         </button>
@@ -1117,65 +1097,15 @@ function BandHeader({
   onToggle: () => void;
 }) {
   return (
-    /**
-     * A `role="row"` with cells in it, holding a real button (M20.4).
-     *
-     * This was a `<button role="row">` with no cells and no `aria-expanded`:
-     * a row that contains no gridcell is malformed to a screen reader, the
-     * grid's `aria-rowcount` did not count it, and nothing announced whether
-     * it was open or shut — the one fact a band header exists to carry.
-     * `ListView` has had this right since M10; this mirrors it.
-     */
-    <div
-      role="row"
-      data-testid="table-group-header"
-      data-depth={node.depth}
-      // M20.5: sticky under the column header, offset by depth so a nested
-      // band parks below its parent instead of on top of it — ListView has
-      // done this since M10, and without it you scroll into a run of rows with
-      // nothing on screen saying which band you are in. `top-8` is the header
-      // row's own height.
-      className="sticky z-[15] flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
-      style={{ top: 32 + node.depth * 32 }}
-    >
-      {/* The band spans the full scroll width, so the band itself cannot be
-          sticky (a sticky box as wide as its container has no room to shift).
-          The label cluster is the sticky part instead. */}
-      <span
-        role="gridcell"
-        className="sticky left-0 flex items-center gap-2 pr-3"
-        style={{ paddingLeft: GUTTER + node.depth * INDENT }}
-      >
-        <button
-          type="button"
-          aria-expanded={!collapsed}
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
-          onClick={onToggle}
-          className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
-        >
-          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
-        </button>
-        <span
-          className="box-border h-[10px] w-[10px] flex-none rounded-full"
-          style={
-            node.ghost || !node.color
-              ? { border: '1.5px solid var(--n-400)' }
-              : {
-                  background: resolveOptionColor(node.color).solid,
-                  border: `1.5px solid ${resolveOptionColor(node.color).solid}`,
-                }
-          }
-        />
-        <span
-          className={
-            node.depth === 0 ? 'text-sm font-semibold text-n-800' : 'text-xs font-medium text-n-700'
-          }
-        >
-          {node.label}
-        </span>
-        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
-      </span>
-    </div>
+    <GroupBand
+      label={node.label}
+      count={node.count}
+      color={node.ghost ? null : node.color}
+      depth={node.depth}
+      inset={GUTTER + node.depth * INDENT}
+      collapsed={collapsed}
+      onToggle={onToggle}
+    />
   );
 }
 
@@ -1391,7 +1321,7 @@ function AddColumnButton({
         aria-haspopup={sourceType === null ? 'menu' : 'dialog'}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+        className="flex h-5 w-5 items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name="plus" size={13} />
       </button>
@@ -2790,11 +2720,7 @@ export function TableView({
             } as React.CSSProperties
           }
         >
-          <div
-            ref={headerRowRef}
-            role="row"
-            className="group/head sticky top-0 z-20 flex h-8 border-b border-n-200 bg-n-25"
-          >
+          <div ref={headerRowRef} role="row" className={TABLE_ANATOMY.headerRow}>
             {/* M16.16: the gutter's header slot. Deliberately not a
                 columnheader — it holds no column, and the header drag
                 measures slots by that role. */}
@@ -2836,7 +2762,7 @@ export function TableView({
                     aria-colindex={d + 2}
                     className={[
                       titleFrozen ? 'z-30' : 'relative',
-                      'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-xs font-semibold text-n-600',
+                      TABLE_ANATOMY.titleHeader,
                       drag?.key === 'title' ? 'opacity-60' : '',
                     ].join(' ')}
                     style={{
@@ -2893,7 +2819,7 @@ export function TableView({
                   onClickCapture={swallowDraggedClick}
                   aria-colindex={d + 2}
                   className={[
-                    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-xs font-medium text-n-600',
+                    TABLE_ANATOMY.header,
                     d < frozenCount ? 'z-30 bg-n-25' : 'relative',
                     drag?.key === def.name ? 'opacity-60' : '',
                   ].join(' ')}
@@ -3156,12 +3082,16 @@ export function TableView({
           )}
         </div>
       </div>
+      {/* The last visible column fades out rather than stopping mid-word
+          (M52.5): a hard cut at "Shapin" read as a cell that failed to draw,
+          and a grey shadow as a border. A fade into the page says there is
+          more beside it. */}
       {moreRight && (
         <div
           aria-hidden
           data-testid="table-overflow-right"
-          className="pointer-events-none absolute inset-y-0 right-0 w-6"
-          style={{ background: 'linear-gradient(to left, var(--n-200), transparent)' }}
+          className="pointer-events-none absolute inset-y-0 right-0 w-12"
+          style={{ background: 'linear-gradient(to left, var(--n-0), transparent)' }}
         />
       )}
       {/* M16.16: the bulk bar. It floats over the rows rather than docking a

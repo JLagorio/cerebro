@@ -76,8 +76,10 @@ test('agent: walking away keeps the thread, and moves the context with you', asy
 });
 
 test('agent: context is shown as chips you can take away', async ({ page }) => {
-  // Wide enough for the record panel AND the assistant (M17.2's
-  // SHELL_TWO_PANEL_MIN); below that the record wins and the assistant parks.
+  // Wide enough for the record panel AND the assistant beside a sidebar
+  // column (M17.2's SHELL_TWO_PANEL_MIN); below that the sidebar steps down to
+  // its rail, and below the rail's width the record wins and the assistant
+  // parks (M52).
   await page.setViewportSize({ width: 1440, height: 900 });
   await boot(page);
   await page.getByTestId('sidebar').getByRole('button', { name: 'Assistant' }).click();

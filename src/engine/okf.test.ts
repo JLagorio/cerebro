@@ -1,34 +1,49 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import STALENESS_CASES from '../../shared/policy/staleness.v1.json';
 import {
   commitOf,
   conceptEdges,
   conceptsAbout,
   conceptsFrom,
-  defaultKnowledgeNav,
   footnoteRefs,
   nearDuplicates,
   isConcept,
+  canonicalKnowledgePath,
+  humanReviewed,
   isKnowledgePath,
+  knowledgeOf,
+  staleAfterOf,
+  staleFrom,
   isStale,
   lastVerifiedAt,
   lifecycleOf,
   listConcepts,
+  NO_QUARANTINE,
+  supersessionKey,
   listSections,
   listSubjects,
+  localDayOf,
   needsReview,
+  queueReason,
+  reviewQueue,
   parseAbout,
   parseActor,
   parseGenerated,
   parseLog,
   parseSources,
   parseVerified,
+  readableHorizon,
   readThread,
   recentlyLearned,
+  recheckLine,
   relatedConcepts,
   resolveBundleLink,
   reviewReasons,
   sectionOf,
+  sectionOfPath,
+  sourceCount,
   toConcept,
+  updatedAt,
   reviewStatus,
   reviewedBy,
   verifyPatch,
@@ -48,6 +63,24 @@ describe('bundle boundary', () => {
     // Must not match a sibling directory that merely shares the prefix.
     expect(isKnowledgePath('knowledge-archive/x.md')).toBe(false);
     expect(isKnowledgePath('records/risks/r.md')).toBe(false);
+    // M49.4 (K17): the resolved path — the same table knowledge.rs asserts.
+    const table: [string, string | null][] = [
+      ['./knowledge/x.md', 'knowledge/x.md'],
+      ['Knowledge/x.md', 'knowledge/x.md'],
+      ['KNOWLEDGE/log.md', 'knowledge/log.md'],
+      ['knowledge//a/./b.md', 'knowledge/a/b.md'],
+      ['records/../knowledge/x.md', 'knowledge/x.md'],
+      ['knowledge/../knowledge/x.md', 'knowledge/x.md'],
+      ['knowledge/../records/x.md', null],
+      ['../knowledge/x.md', null],
+      ['/knowledge/x.md', null],
+      ['knowledge-archive/x.md', null],
+      ['', null],
+    ];
+    for (const [raw, canonical] of table) {
+      expect(canonicalKnowledgePath(raw), raw).toBe(canonical);
+      expect(isKnowledgePath(raw), raw).toBe(canonical !== null);
+    }
   });
 
   it('treats OKF reserved files as structure, not concepts', () => {
@@ -176,6 +209,57 @@ describe('provenance', () => {
   it('tolerates a missing or malformed sources list', () => {
     expect(parseSources(concept({}))).toEqual([]);
     expect(parseSources(concept({ sources: 'nope' }))).toEqual([]);
+  });
+
+  // M52.5 — a count column. `parseSources` reads both as [], and 0 for a list
+  // nobody wrote would say it was measured.
+  it('counts sources, and a list nobody wrote is no count at all', () => {
+    expect(sourceCount(concept({ sources: [{ resource: 'a' }, { resource: 'b' }] }))).toBe(2);
+    expect(sourceCount(concept({ sources: [] }))).toBe(0);
+    // An entry that names nothing is no source, as `parseSources` says.
+    expect(sourceCount(concept({ sources: [{ id: 'x' }] }))).toBe(0);
+    expect(sourceCount(concept({}))).toBeNull();
+    expect(sourceCount(concept({ sources: null }))).toBeNull();
+    expect(sourceCount(concept({ sources: 'nope' }))).toBeNull();
+  });
+});
+
+describe('updatedAt (M52.5)', () => {
+  const at = (properties: Record<string, unknown>, modifiedAt = '2026-07-01T00:00:00Z') =>
+    updatedAt(
+      toConcept(
+        makeEntry({
+          path: 'knowledge/a.md',
+          filename: 'a.md',
+          type: 'Metric',
+          properties,
+          modifiedAt,
+        }),
+        TODAY,
+      ),
+    );
+
+  it('is the newest of the writing, the reviews and the file', () => {
+    expect(
+      at({
+        generated: { by: 'claude-code', at: '2026-07-20T10:00:00Z' },
+        verified: [
+          { by: 'human:josef', at: '2026-07-24T09:00:00Z' },
+          { by: 'human:tom', at: '2026-07-22T09:00:00Z' },
+        ],
+      }),
+    ).toBe('2026-07-24T09:00:00Z');
+    // An edit that wrote no stamp is newer than every stamp.
+    expect(
+      at({ generated: { by: 'claude-code', at: '2026-07-20T10:00:00Z' } }, '2026-07-27T08:00:00Z'),
+    ).toBe('2026-07-27T08:00:00Z');
+  });
+
+  it('skips a stamp whose instant cannot be read, and falls back on the file', () => {
+    expect(at({ generated: { by: 'claude-code', at: 'last tuesday' } })).toBe(
+      '2026-07-01T00:00:00Z',
+    );
+    expect(at({})).toBe('2026-07-01T00:00:00Z');
   });
 });
 
@@ -402,6 +486,9 @@ describe('entity anchors', () => {
     expect(sectionOf(makeEntry({ path: 'knowledge/metrics/a.md' }))).toBe('metrics');
     expect(sectionOf(makeEntry({ path: 'knowledge/a/b/c.md' }))).toBe('a');
     expect(sectionOf(makeEntry({ path: 'knowledge/a.md' }))).toBe('');
+    // The same rule from a bare path — what a `doc` selection carries (M52.3).
+    expect(sectionOfPath('knowledge/metrics/a.md')).toBe('metrics');
+    expect(sectionOfPath('knowledge/a.md')).toBe('');
   });
 
   it('counts sections and sorts root-level leftovers last', () => {
@@ -519,40 +606,185 @@ describe('subjects', () => {
   });
 });
 
-describe('where the Knowledge tab opens (M33a.3)', () => {
-  const project = makeEntry({
-    path: 'projects/phoenix/project.md',
-    filename: 'project.md',
-    folder: 'projects/phoenix',
-    title: 'Phoenix warehouse rollout',
-    type: 'Project',
+describe('the review queue, in the order it is worked (M51.2)', () => {
+  const at = (properties: Record<string, unknown>, path: string) =>
+    toConcept(concept(properties, path), TODAY);
+  const human = { verified: [{ by: 'human:josef', at: '2026-07-01' }] };
+  const agent = { verified: [{ by: 'process:n', at: '2026-07-01' }] };
+
+  it('says why each concept is queued, one reason per row', () => {
+    expect(queueReason(at({}, 'knowledge/a.md'))).toBe('new');
+    expect(queueReason(at({ ...agent, stale_after: '2026-01-01' }, 'knowledge/a.md'))).toBe(
+      'stale',
+    );
+    expect(queueReason(at({ ...agent, lifecycle: 'deprecated' }, 'knowledge/a.md'))).toBe(
+      'deprecated',
+    );
+    // M52.5 — never reviewed leads, as its page leads with "Unreviewed": the
+    // recheck or retirement it also owes is its reason's sentence.
+    expect(queueReason(at({ stale_after: '2026-01-01' }, 'knowledge/a.md'))).toBe('new');
+    expect(queueReason(at({ lifecycle: 'deprecated' }, 'knowledge/a.md'))).toBe('new');
+    // Retired and already seen by a person: nothing a reviewer could do would
+    // clear it, so it is not theirs to clear.
+    expect(queueReason(at({ ...human, lifecycle: 'deprecated' }, 'knowledge/a.md'))).toBeNull();
+    expect(
+      queueReason(at({ verified: [{ by: 'process:n', at: '2026-07-01' }] }, 'knowledge/a.md')),
+    ).toBe('agent-only');
+    expect(queueReason(at({ verified: 'verified at r3; current is r5' }, 'knowledge/a.md'))).toBe(
+      'changed',
+    );
+    // Membership is needsReview's — a concept a person reviewed is not queued.
+    expect(queueReason(at(human, 'knowledge/a.md'))).toBeNull();
   });
-  const about = (path: string, targets: string[]) =>
-    makeEntry({
-      path,
-      filename: path.split('/').pop(),
-      type: 'Reference',
-      relationships: { about: targets },
+
+  // M52.3 — Verify was the only thing a stale concept's page offered, and it
+  // could not clear the row: the Review count could never reach zero.
+  it('lets a person who read a concept once it was due clear its recheck row', () => {
+    const due = { stale_after: '2026-07-26' };
+    const verifiedOn = (day: string) =>
+      at({ ...due, verified: [{ by: 'human:josef', at: `${day}T09:00:00Z` }] }, 'knowledge/a.md');
+    // Read on or after the horizon: out of the queue, still stale on its page.
+    const after = verifiedOn('2026-07-28');
+    expect(reviewReasons(after)).toEqual([]);
+    expect(queueReason(after)).toBeNull();
+    expect(after.stale).toBe(true);
+    expect(reviewReasons(verifiedOn('2026-07-26'))).toEqual([]);
+    // Read BEFORE it fell due: that review cannot have covered the recheck.
+    expect(queueReason(verifiedOn('2026-07-20'))).toBe('stale');
+    expect(reviewReasons(verifiedOn('2026-07-20'))).toEqual(['stale']);
+  });
+
+  it('never lets a process, an unreadable horizon or an undated stamp clear it', () => {
+    const process = at(
+      { stale_after: '2026-07-26', verified: [{ by: 'process:n', at: '2026-07-28T09:00:00Z' }] },
+      'knowledge/a.md',
+    );
+    expect(queueReason(process)).toBe('stale');
+    // `2026-7-1` is malformed (stale by the shared rule); no date compares
+    // with it, so no review covers it.
+    const malformed = at(
+      { stale_after: '2026-7-1', verified: [{ by: 'human:josef', at: '2026-07-28T09:00:00Z' }] },
+      'knowledge/a.md',
+    );
+    expect(malformed.stale).toBe(true);
+    expect(queueReason(malformed)).toBe('stale');
+    const undated = at(
+      { stale_after: '2026-07-26', verified: [{ by: 'human:josef' }] },
+      'knowledge/a.md',
+    );
+    expect(queueReason(undated)).toBe('stale');
+    // A review that no longer covers the text covers no recheck either.
+    const changed = at(
+      { stale_after: '2026-07-26', verified: 'verified at r2; current is r3' },
+      'knowledge/a.md',
+    );
+    expect(queueReason(changed)).toBe('changed');
+  });
+
+  // M52.4 — the horizon is judged as `isStale` judges it (raw, calendar-real),
+  // and a stamp is compared as a day, never as the first ten characters.
+  it('reads the horizon and the stamp as dates before letting a review cover it', () => {
+    const covered = (staleAfter: string, stampAt: string, today = TODAY) =>
+      reviewReasons(
+        toConcept(
+          concept(
+            { stale_after: staleAfter, verified: [{ by: 'human:josef', at: stampAt }] },
+            'knowledge/a.md',
+          ),
+          today,
+        ),
+      );
+    // Padded: `concept.staleAfter` trims it, the shared rule calls it stale.
+    expect(covered(' 2026-07-01', '2026-07-28T09:00:00Z')).toEqual(['stale']);
+    // A day the calendar does not have.
+    expect(covered('2026-02-30', '2026-03-01T09:00:00Z')).toEqual(['stale']);
+    // Stamps that sort after any date as text, and are no later day.
+    expect(covered('2026-09-01', 'yesterday', '2026-09-29')).toEqual(['stale']);
+    expect(covered('2026-09-01', '2026-1-5', '2026-09-29')).toEqual(['stale']);
+  });
+
+  describe('on the reader’s calendar', () => {
+    const tz = process.env.TZ;
+    afterEach(() => {
+      // Assigning `undefined` would set the string "undefined".
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
     });
 
-  it('lands on the heaviest thread', () => {
-    const entries = [
-      project,
-      about('knowledge/a.md', ['aardvark']),
-      about('knowledge/b.md', ['phoenix']),
-      about('knowledge/c.md', ['phoenix']),
-    ];
-    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
-    expect(defaultKnowledgeNav(subjects)).toEqual({
-      tab: 'entity',
-      key: 'projects/phoenix/project.md',
+    it('counts a stamp on the day it fell where the person verified', () => {
+      process.env.TZ = 'Australia/Sydney';
+      const due = { stale_after: '2026-07-26' };
+      // 22:00 UTC on the 25th is 08:00 on the 26th in Sydney.
+      expect(localDayOf('2026-07-25T22:00:00Z')).toBe('2026-07-26');
+      expect(
+        reviewReasons(
+          at(
+            { ...due, verified: [{ by: 'human:me', at: '2026-07-25T22:00:00Z' }] },
+            'knowledge/a.md',
+          ),
+        ),
+      ).toEqual([]);
+      expect(localDayOf('yesterday')).toBeNull();
+    });
+
+    it('keeps a date-only stamp as written, west of Greenwich too', () => {
+      process.env.TZ = 'America/Los_Angeles';
+      // `Date.parse` reads it as UTC midnight — the 25th, in Los Angeles.
+      expect(localDayOf('2026-07-26')).toBe('2026-07-26');
+      const due = { stale_after: '2026-07-26' };
+      expect(
+        reviewReasons(
+          at({ ...due, verified: [{ by: 'human:me', at: '2026-07-26' }] }, 'knowledge/a.md'),
+        ),
+      ).toEqual([]);
+      expect(
+        reviewReasons(
+          at({ ...due, verified: [{ by: 'human:me', at: '2026-07-25' }] }, 'knowledge/a.md'),
+        ),
+      ).toEqual(['stale']);
     });
   });
 
-  it('falls back to the flat list when the bundle anchors nothing', () => {
-    // Every vault with no bundle at all, too — and a list is the honest
-    // answer to "which thread" when there are none.
-    expect(defaultKnowledgeNav([])).toEqual({ tab: 'all' });
+  it('says a stale concept is due, and how late only where the file says a readable date', () => {
+    const line = (staleAfter: unknown, today = '2026-07-28') =>
+      recheckLine(at({ stale_after: staleAfter }, 'knowledge/a.md'), today);
+    // How late, in the words the table and the review bar share (M52.5).
+    expect(line('2026-07-01')).toBe('Due a recheck · 27 days overdue');
+    expect(line('2026-07-27')).toBe('Due a recheck · 1 day overdue');
+    expect(line('2026-07-28')).toBe('Due a recheck today');
+    expect(line('2026-03-01')).toBe('Due a recheck · 4 months overdue');
+    for (const unreadable of ['', '   ', 2027, true, '2026-7-1']) {
+      const stale = at({ stale_after: unreadable }, 'knowledge/a.md');
+      expect(stale.stale, String(unreadable)).toBe(true);
+      expect(line(unreadable), String(unreadable)).toBe(
+        "Due a recheck — its recheck date can't be read",
+      );
+    }
+    expect(readableHorizon('2026-02-30')).toBe(false);
+    expect(readableHorizon(null)).toBe(false);
+  });
+
+  it('puts what a person must act on first, newest writing first within new', () => {
+    const queue = reviewQueue([
+      at({ generated: { by: 'claude-code', at: '2026-07-01T00:00:00Z' } }, 'knowledge/old.md'),
+      at({ ...agent, lifecycle: 'deprecated' }, 'knowledge/retired.md'),
+      at({ generated: { by: 'claude-code', at: '2026-07-20T00:00:00Z' } }, 'knowledge/fresh.md'),
+      at({ ...agent, stale_after: '2026-02-01' }, 'knowledge/stale-late.md'),
+      at({ ...agent, stale_after: '2026-01-01' }, 'knowledge/stale-early.md'),
+      at(
+        { stale_after: '2026-01-01', generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' } },
+        'knowledge/unread-and-due.md',
+      ),
+      at(human, 'knowledge/done.md'),
+    ]);
+    expect(queue.map((q) => [q.concept.entry.path, q.reason])).toEqual([
+      ['knowledge/stale-early.md', 'stale'],
+      ['knowledge/stale-late.md', 'stale'],
+      ['knowledge/retired.md', 'deprecated'],
+      ['knowledge/fresh.md', 'new'],
+      ['knowledge/old.md', 'new'],
+      ['knowledge/unread-and-due.md', 'new'],
+    ]);
   });
 });
 
@@ -759,6 +991,81 @@ describe('concept relations (M8.7)', () => {
     );
   });
 
+  it('an unreviewed replacement of a human-reviewed claim is only proposed (M49.8, K22)', () => {
+    const old = c('knowledge/a.md', 'Offline window', {
+      verified: { by: 'human:josef', at: '2026-07-01' },
+    });
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const concepts = listConcepts([project, old, now], TODAY);
+    const a = concepts.find((x) => x.entry.path === 'knowledge/a.md')!;
+    expect(a.supersededBy).toBeNull();
+    expect(a.replacementProposedBy).toBe('knowledge/b.md');
+  });
+
+  it('a replacement a person approved on its card retires the reviewed claim (M49.8, K22)', () => {
+    const old = c('knowledge/a.md', 'Offline window', {
+      verified: { by: 'human:josef', at: '2026-07-01' },
+    });
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const approved = new Set([supersessionKey('knowledge/b.md', 'knowledge/a.md')]);
+    const concepts = listConcepts([project, old, now], TODAY, NO_QUARANTINE, {
+      approved,
+      recordedHuman: null,
+    });
+    const a = concepts.find((x) => x.entry.path === 'knowledge/a.md')!;
+    expect(a.supersededBy).toBe('knowledge/b.md');
+    expect(a.replacementProposedBy).toBeNull();
+  });
+
+  it("who reviewed is the LEDGER's answer when one exists, as Rust `about` reads it (M49.8)", () => {
+    // A stamp typed into the file the ledger never recorded as a person's
+    // does not shield the concept; one the ledger records does, whatever the
+    // file now says.
+    const typed = c('knowledge/a.md', 'Offline window', {
+      verified: { by: 'human:someone', at: '2026-07-01' },
+    });
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const unshielded = listConcepts([project, typed, now], TODAY, NO_QUARANTINE, {
+      approved: new Set(),
+      recordedHuman: new Set(),
+    });
+    expect(unshielded.find((x) => x.entry.path === 'knowledge/a.md')!.supersededBy).toBe(
+      'knowledge/b.md',
+    );
+    const plain = c('knowledge/a.md', 'Offline window');
+    const shielded = listConcepts([project, plain, now], TODAY, NO_QUARANTINE, {
+      approved: new Set(),
+      recordedHuman: new Set(['knowledge/a.md']),
+    });
+    expect(shielded.find((x) => x.entry.path === 'knowledge/a.md')!.replacementProposedBy).toBe(
+      'knowledge/b.md',
+    );
+  });
+
+  it('two concepts that each claim to replace the other retire neither (M49.8, K22)', () => {
+    const a = c('knowledge/a.md', 'Offline window', {}, { supersedes: ['b'] });
+    const b = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const concepts = listConcepts([project, a, b], TODAY);
+    for (const concept of concepts) {
+      expect(concept.supersededBy).toBeNull();
+      expect(concept.replacementProposedBy).not.toBeNull();
+    }
+  });
+
+  it('a review claimed by a file that is not the recorded one reads disputed (M49.8, K21)', () => {
+    const stamped = c('knowledge/a.md', 'Offline window', {
+      verified: { by: 'human:josef', at: '2026-07-01' },
+    });
+    const [trusted] = listConcepts([project, stamped], TODAY);
+    expect(trusted.review).toBe('current');
+    expect(humanReviewed(trusted)).toBe(true);
+
+    const [disputed] = listConcepts([project, stamped], TODAY, new Set(['knowledge/a.md']));
+    expect(disputed.review).toBe('disputed');
+    expect(humanReviewed(disputed)).toBe(false);
+    expect(needsReview(disputed)).toBe(true);
+  });
+
   it('never lets a concept supersede itself', () => {
     const self = c('knowledge/a.md', 'Offline window', {}, { supersedes: ['a'] });
     const concepts = listConcepts([project, self], TODAY);
@@ -907,6 +1214,39 @@ describe('commitOf — has this note been committed to the knowledge base?', () 
       properties: { sources: [{ id: 'orphan' }] },
     });
     expect(conceptsFrom('inbox/standup.md', listConcepts([junk], TODAY))).toEqual([]);
+  });
+});
+
+describe('knowledgeOf — both directions, each concept once (M52.3)', () => {
+  const standup = makeEntry({ path: 'inbox/standup.md', filename: 'standup.md', title: 'Standup' });
+  const concept = (path: string, relationships: Record<string, string[]>, resources: string[]) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      properties: { sources: resources.map((resource, i) => ({ id: `s${i}`, resource })) },
+      relationships,
+    });
+
+  it('names what is about the page and what was learned from it', () => {
+    const entries = [
+      standup,
+      concept('knowledge/a.md', { about: ['standup'] }, []),
+      concept('knowledge/b.md', {}, ['/inbox/standup.md']),
+      concept('knowledge/c.md', {}, ['inbox/other.md']),
+    ];
+    const { about, from } = knowledgeOf('inbox/standup.md', listConcepts(entries, TODAY), entries);
+    expect(about.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+    expect(from.map((c) => c.entry.path)).toEqual(['knowledge/b.md']);
+  });
+
+  it('files a concept that is about the page AND cites it under about, once', () => {
+    const entries = [
+      standup,
+      concept('knowledge/both.md', { about: ['standup'] }, ['inbox/standup.md']),
+    ];
+    const { about, from } = knowledgeOf('inbox/standup.md', listConcepts(entries, TODAY), entries);
+    expect(about.map((c) => c.entry.path)).toEqual(['knowledge/both.md']);
+    expect(from).toEqual([]);
   });
 });
 
@@ -1076,5 +1416,13 @@ describe('footnoteRefs', () => {
       '[^policy]: Revenue recognition policy',
     ].join('\n');
     expect(footnoteRefs(body).sort()).toEqual(['ga4-schema', 'policy']);
+  });
+});
+
+describe('staleness — the shared rule (M49.8, K24)', () => {
+  it('replays shared/policy/staleness.v1.json, the cases knowledge.rs replays too', () => {
+    for (const c of STALENESS_CASES.cases) {
+      expect(staleFrom(staleAfterOf(c.stale_after), c.today), JSON.stringify(c)).toBe(c.stale);
+    }
   });
 });

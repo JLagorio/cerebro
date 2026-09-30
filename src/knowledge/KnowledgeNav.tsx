@@ -1,49 +1,32 @@
 import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
-import {
-  defaultKnowledgeNav,
-  listConcepts,
-  listSections,
-  listSubjects,
-  needsReview,
-} from '@/engine/okf';
-import { typeStyle } from '@/engine/typeCatalog';
+import { rowClass } from '@/app/sidebarChrome';
+import { listSections, reviewQueue } from '@/engine/okf';
 import type { KnowledgeNav as Nav } from '@/engine/types';
-import { todayIso } from '@/lib/templates';
+import { useConcepts } from '@/knowledge/useConcepts';
+import { usePendingCards } from '@/knowledge/usePendingCards';
 import { useNavStore } from '@/stores/navStore';
-import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 /**
- * The Knowledge sidebar (M8.1).
+ * The Knowledge sidebar (M8.1; M51).
  *
- * Knowledge used to borrow Home's sidebar — Views and Types — which describe a
- * corpus with a different author and different rules, so the page had to grow
- * a second nav column inside its own canvas to have anywhere to put its real
- * navigation. This is that navigation, in the place navigation goes.
+ * What a reader navigates Knowledge BY, in the shape every other section of
+ * the nav already has: its folders, the way Pages lists pages, and the one
+ * queue that waits for a person. The page itself carries the rest as three
+ * tabs (Concepts, Review, Activity).
  *
- * Its axes are the bundle's own: the entities its concepts are ABOUT, the
- * folders they are filed under, and the log of what changed. Only the entity
- * axis is new — and it is the one that makes the bundle part of the vault
- * rather than a corpus sitting beside it.
- *
- * M33a.2 gave it a second group. What the base HOLDS and what it knows about
- * ITSELF were two rail buttons describing one subject; they are two groups of
- * one nav now, and the Status hub's own five-row nav is gone with it.
- *
- * M33a.3 put threads first and demoted folders below the flat list. `SECTIONS`
- * and `ABOUT` were two complete partitions of the same concepts, and the one
- * that leads was the one nobody navigates by: which directory a file sits in
- * is a fact about the writer, while what a thread is ABOUT is the question the
- * reader arrived with.
+ * M51 retired the thread rows. Fifteen subjects — records, epics, concepts,
+ * anchors nobody had written a page for — were a second index of the vault
+ * inside this section, and the one question they answered ("what does
+ * Knowledge hold about this?") is answered on the subject's own page now, by
+ * the strip under its header (M50.2).
  */
 
 const sameTab = (a: Nav, b: Nav): boolean => {
   if (a.tab !== b.tab) return false;
   if (a.tab === 'section' && b.tab === 'section') return a.folder === b.folder;
   if (a.tab === 'entity' && b.tab === 'entity') return a.key === b.key;
-  // `runs` deliberately compares equal whichever run is deep-linked: opening
-  // one run does not move you to a different row.
   return true;
 };
 
@@ -51,14 +34,12 @@ function NavRow({
   icon,
   label,
   count,
-  color,
   nav,
   active,
 }: {
   icon: string;
   label: string;
   count?: number;
-  color?: string | null;
   nav: Nav;
   active: boolean;
 }) {
@@ -72,7 +53,7 @@ function NavRow({
       onClick={() => navigate({ kind: 'knowledge', nav })}
       className={rowClass(active)}
     >
-      <Icon name={icon} size={15} color={color ?? 'var(--n-500)'} />
+      <Icon name={icon} size={15} color="var(--n-500)" />
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       {count !== undefined && (
         <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">{count}</span>
@@ -87,141 +68,49 @@ export function KnowledgeNav({
 }: {
   nav?: Nav;
   /**
-   * Whether Base owns the canvas right now (M42.2). The nav renders on every
-   * surface since the groups nested — but electing the default row while some
-   * OTHER surface is on screen would be a highlight naming a view that is not
-   * there, so an un-current nav lights nothing.
+   * Whether Knowledge owns the canvas right now (M42.2) — its page, or one of
+   * its concepts open as a page, which lights that concept's folder (M52.3).
+   * The nav renders on every surface since the groups nested — but lighting a
+   * row while some OTHER surface is on screen would be a highlight naming a
+   * view that is not there, so an un-current nav lights nothing.
    */
   current?: boolean;
 }) {
-  const entries = useVaultStore((s) => s.entries);
-  const schema = useSchema();
-  const today = todayIso();
-
-  const concepts = useMemo(() => listConcepts(entries, today), [entries, today]);
+  const concepts = useConcepts();
   const sections = useMemo(() => listSections(concepts), [concepts]);
-  const subjects = useMemo(() => listSubjects(concepts, entries), [concepts, entries]);
-  const reviewCount = useMemo(() => concepts.filter(needsReview).length, [concepts]);
-
-  // The same default KnowledgePage lands on when the selection carries no nav
-  // (M33a.3), resolved from the same function — a highlighted row that names a
-  // different view than the one on screen is worse than no highlight at all.
-  const here = nav ?? defaultKnowledgeNav(subjects);
+  const queued = useMemo(() => reviewQueue(concepts).length, [concepts]);
+  // Review holds the proposals agents queued as well as the concepts to
+  // verify, so its count is both (M52.5) — "3" beside six decisions was the
+  // row undercounting its own page. Cards that could not be read are left
+  // out rather than counted as none.
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const pending = usePendingCards(vaultPath);
+  const proposals = pending.kind === 'ready' ? pending.data.length : 0;
+  const here: Nav = nav ?? { tab: 'all' };
   const is = (candidate: Nav) => current && sameTab(here, candidate);
 
   return (
-    // M37.3: nested under the Base row of the one nav column, which owns the
-    // scrolling — this container stopped being the scroll owner it was as a
-    // full sidebar mode.
+    // M37.3: nested under the section row of the one nav column, which owns
+    // the scrolling.
     <div className="pb-1">
-      {subjects.length > 0 && (
-        <>
-          <div className={SECTION_LABEL}>Threads</div>
-          {subjects.map((subject) => {
-            // A dangling anchor is an OPEN THREAD (M33a.3 / D7): the base is
-            // tracking something the workspace has not named yet, and the
-            // `+ Create page` button on the thread is how a human names it.
-            // It gets an ordinary row in ordinary colours — a broken-link
-            // glyph greyed to --n-300 said the row was damaged, when what is
-            // absent is a page nobody has written.
-            const style = typeStyle(subject.entry?.type ?? null, schema);
-            return (
-              <NavRow
-                key={subject.key}
-                icon={subject.entry === null ? 'circle-dashed' : style.icon}
-                color={subject.entry === null ? 'var(--n-500)' : style.color}
-                label={subject.label}
-                count={subject.concepts.length}
-                nav={{ tab: 'entity', key: subject.key }}
-                active={is({ tab: 'entity', key: subject.key })}
-              />
-            );
-          })}
-        </>
-      )}
-
-      <NavRow
-        icon="brain"
-        label="All concepts"
-        count={concepts.length}
-        nav={{ tab: 'all' }}
-        active={is({ tab: 'all' })}
-      />
+      {sections.map((section) => (
+        <NavRow
+          key={section.folder}
+          icon="folder"
+          label={section.label}
+          count={section.count}
+          nav={{ tab: 'section', folder: section.folder }}
+          active={is({ tab: 'section', folder: section.folder })}
+        />
+      ))}
       {/* The count lives on the row, not in the chrome: a destination may say
           how big it is, but nothing gets to count up at you from the chrome. */}
       <NavRow
         icon="shield-check"
-        label="Needs review"
-        count={reviewCount}
+        label="Review"
+        count={queued + proposals}
         nav={{ tab: 'review' }}
         active={is({ tab: 'review' })}
-      />
-      <NavRow icon="history" label="Update log" nav={{ tab: 'log' }} active={is({ tab: 'log' })} />
-
-      {sections.length > 0 && (
-        <>
-          <div className={SECTION_LABEL}>Folders</div>
-          {sections.map((section) => (
-            <NavRow
-              key={section.folder}
-              icon="folder"
-              label={section.label}
-              count={section.count}
-              nav={{ tab: 'section', folder: section.folder }}
-              active={is({ tab: 'section', folder: section.folder })}
-            />
-          ))}
-        </>
-      )}
-
-      {/* M33a.2 — what the base knows about ITSELF, folded in from the Status
-          rail button. Two destinations described one subject: a bundle that
-          cannot say what it is unsure of is not a knowledge base, it is a
-          folder.
-
-          No counts on any of these rows, and none on the Base
-          destination row either. A badge here would be the chrome telling somebody
-          their understanding is broken before they have asked it anything —
-          the rule that kept a review count off Knowledge (M8.1) and a commit
-          count off History (M9.4), now carried by the row that inherited the
-          responsibility. */}
-      <div className={SECTION_LABEL}>What it knows about itself</div>
-      <NavRow
-        icon="activity"
-        label="What changed"
-        nav={{ tab: 'changed' }}
-        active={is({ tab: 'changed' })}
-      />
-      <NavRow
-        icon="git-compare"
-        label="What's contested"
-        nav={{ tab: 'contested' }}
-        active={is({ tab: 'contested' })}
-      />
-      {/* "Waiting on you", not "Needs review". The `Needs review` row holds
-          CONCEPTS a human has not verified; this one holds PROPOSALS awaiting
-          approve or reject. Two unrelated queues under one string is a nav
-          that lies about where a click lands. (Named rather than pointed at:
-          the two rows have moved apart twice now, and a comment that counts
-          rows is a comment the next reorder falsifies.) */}
-      <NavRow
-        icon="gavel"
-        label="Waiting on you"
-        nav={{ tab: 'waiting' }}
-        active={is({ tab: 'waiting' })}
-      />
-      <NavRow
-        icon="gauge"
-        label="Background"
-        nav={{ tab: 'background' }}
-        active={is({ tab: 'background' })}
-      />
-      <NavRow icon="bot" label="Agent work" nav={{ tab: 'runs' }} active={is({ tab: 'runs' })} />
-      <NavRow
-        icon="scan-eye"
-        label="Deferral gates"
-        nav={{ tab: 'gates' }}
-        active={is({ tab: 'gates' })}
       />
     </div>
   );

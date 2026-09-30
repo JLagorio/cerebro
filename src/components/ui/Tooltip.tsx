@@ -69,7 +69,12 @@ export interface TooltipProps {
   side?: 'top' | 'bottom';
   /** Hold off before showing. 0 for controls whose meaning is urgent. */
   delayMs?: number;
-  /** Suppress it entirely, e.g. while a menu is already open over the trigger. */
+  /**
+   * Suppress it entirely, e.g. while a menu is already open over the trigger.
+   * The trigger keeps its node either way (M52): answering `disabled` with the
+   * bare child changed the tree's shape, React remounted the trigger, and a
+   * drawer that handed focus back to it on close handed it to a detached one.
+   */
   disabled?: boolean;
 }
 
@@ -116,6 +121,15 @@ export function Tooltip({
 
   useEffect(() => cancel, [cancel]);
 
+  // Disabled while it is up, or while its delay is running, it goes and
+  // stays gone (M52). `shown` drops it in the same render; this clears what
+  // would bring it back the moment it is enabled again, over whatever the
+  // pointer has moved on to.
+  useEffect(() => {
+    if (disabled) hide();
+  }, [disabled, hide]);
+  const shown = open && !disabled;
+
   useLayoutEffect(() => {
     if (!open) return;
     const anchor = anchorRef.current;
@@ -138,7 +152,7 @@ export function Tooltip({
     });
   }, [open, side]);
 
-  if (label === '' || disabled) return children;
+  if (label === '') return children;
 
   const child = children as React.ReactElement<Record<string, unknown>>;
   const childProps = child.props;
@@ -155,16 +169,16 @@ export function Tooltip({
       {/* Escape dismisses without moving the pointer — otherwise a tooltip can
           sit over the thing you are trying to read — and it dismisses ONLY
           this. */}
-      {open && <TooltipEscapeLayer onClose={hide} />}
+      {shown && <TooltipEscapeLayer onClose={hide} />}
       {React.cloneElement(child, {
         onPointerEnter: chain(show, childProps.onPointerEnter),
         onPointerLeave: chain(hide, childProps.onPointerLeave),
         onPointerDown: chain(hide, childProps.onPointerDown),
         onFocus: chain(show, childProps.onFocus),
         onBlur: chain(hide, childProps.onBlur),
-        'aria-describedby': open ? id : childProps['aria-describedby'],
+        'aria-describedby': shown ? id : childProps['aria-describedby'],
       })}
-      {open &&
+      {shown &&
         createPortal(
           <div
             ref={bubbleRef}

@@ -66,6 +66,15 @@ describe('resolveChips', () => {
     expect(chips).toEqual([place, record]);
   });
 
+  it('draws the page you stand on once, not as a place and a record (M52.3)', () => {
+    // Asking about the concept you are reading attaches it as the subject —
+    // and the page is already the turn's active note.
+    const page = placeChip({ kind: 'doc', path: 'docs/spec.md' }, { entries });
+    expect(resolveChips([page], [], [record, added])).toEqual([page, added]);
+    // Take the place away and the record is what is left to say "read this".
+    expect(resolveChips([page], [chipId(page)], [record])).toEqual([record]);
+  });
+
   it('never lists the same chip twice', () => {
     const chips: ContextChip[] = resolveChips([place, record], [], [record, place]);
     expect(chips.map(chipId)).toEqual([...new Set(chips.map(chipId))]);

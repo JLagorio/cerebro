@@ -1,4 +1,11 @@
-import { conceptsAbout, isKnowledgePath, type Concept, type ReviewState } from '@/engine/okf';
+import {
+  conceptEdges,
+  isKnowledgePath,
+  knowledgeOf,
+  resolveConcept,
+  type Concept,
+  type ReviewState,
+} from '@/engine/okf';
 import type { Entry, Schema, Selection } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 
@@ -20,10 +27,11 @@ import { resolveTarget } from '@/engine/wikilink';
 const MAX_RECORDS = 40;
 const MAX_LINKED = 12;
 const MAX_BODY = 4000;
-/** Concepts per turn (M17.20). Small on purpose: this is the precise,
- * anchor-reached subset, and a turn that spends its budget on background
- * belief has less room for the question. The agent can always read more with
- * its own tools — which is the tier-two half of the same idea as skills. */
+/** Concepts per turn (M17.20). Small on purpose: this is the precise subset,
+ * reached by anchor or by source, and a turn that spends its budget on
+ * background belief has less room for the question. The agent can always read
+ * more with its own tools — which is the tier-two half of the same idea as
+ * skills. */
 const MAX_CONCEPTS = 8;
 
 export interface RecordSummary {
@@ -71,6 +79,12 @@ export interface ContextSnapshot {
    * it, so a conversation about a project could not see what the base had
    * already concluded about that project.
    *
+   * …and by `sources`, read backwards (M52.3): a concept learned FROM a record
+   * in context is carried too, marked `relation: 'learned from'`. Also a claim
+   * someone made, not a resemblance — and the page's own strip counted it, so
+   * a capture that said "Knowledge · 1" on screen used to hand the assistant
+   * nothing.
+   *
    * Contradictions and unverified claims lead, because the useful thing to
    * say is rarely the settled thing.
    */
@@ -90,14 +104,22 @@ export interface KnowledgeNote {
    * confirmed it" is not that. */
   review: ReviewState;
   reviewedBy: 'human' | 'agent' | null;
-  /** Which record in context this is knowledge OF. */
+  /** Which record in context this concept bears on — the path `relation`
+   * relates it to. (Named for the M17.20 case, when `about:` anchors were the
+   * only way in.) */
   about: string;
+  /** How it bears on that record (M52.3): `about` — the record is its
+   * subject; `learned from` — the record is one of its sources. */
+  relation: 'about' | 'learned from';
   /** Set when another concept contradicts this one — the single most useful
    * thing the bundle can say, and useless if it does not travel. */
   contradictedBy?: string[];
   /** Set when this claim has been replaced. Carried so the agent does not
    * quote a retired belief as current. */
   supersededBy?: string;
+  /** Set when a concept CLAIMS to replace this one but could not retire it
+   * (M49.8): this one is still current, and the claim is unresolved. */
+  replacementProposedBy?: string;
   stale?: boolean;
 }
 
@@ -154,9 +176,10 @@ export interface SnapshotInput {
   attached?: string[];
   /** Where the conversation began, when that is not where the user is now. */
   startedIn?: string | null;
-  /** The knowledge bundle, for the `about:` lookup (M17.20). Absent means the
-   * caller has not derived it — the snapshot then carries no knowledge at all
-   * rather than silently claiming the base is empty. */
+  /** The knowledge bundle, for the `about:` and `sources` lookup (M17.20,
+   * M52.3). Absent means the caller has not derived it — the snapshot then
+   * carries no knowledge at all rather than silently claiming the base is
+   * empty. */
   concepts?: Concept[];
 }
 
@@ -270,10 +293,29 @@ function knowledgeFor(
   // Deduped across subjects: one concept anchored to three records in the same
   // view is one belief, not three.
   for (const path of [...new Set(subjects)]) {
-    for (const concept of conceptsAbout(path, concepts as Concept[], entries)) {
+    const { about, from } = knowledgeOf(path, concepts as Concept[], entries);
+    const related = [
+      ...about.map((concept) => ({ concept, relation: 'about' as const })),
+      ...from.map((concept) => ({ concept, relation: 'learned from' as const })),
+    ];
+    for (const { concept, relation } of related) {
       if (seen.has(concept.entry.path)) continue;
       seen.add(concept.entry.path);
-      const contradicted = concept.relations.contradicts;
+      // Both directions (M49.8, K24): `contradicts` is symmetric, and the
+      // end that did not declare it has no way to know from its own file —
+      // the snapshot used to carry only the edges a concept declared.
+      // …plus the declared targets that name no concept yet (a record, a
+      // concept not written) — dropping them read the claim as settled,
+      // while Rust's `about` keeps them (review fix).
+      const edges = conceptEdges(concept, concepts as Concept[], entries).filter(
+        (edge) => edge.kind === 'contradicts',
+      );
+      const unresolved = concept.relations.contradicts.filter(
+        (target) => resolveConcept(target, concepts as Concept[], entries) === null,
+      );
+      const contradicted = [
+        ...new Set([...edges.map((edge) => edge.concept.entry.path), ...unresolved]),
+      ];
       notes.push({
         path: concept.entry.path,
         title: concept.title,
@@ -281,8 +323,12 @@ function knowledgeFor(
         review: concept.review,
         reviewedBy: concept.reviewedBy,
         about: path,
+        relation,
         ...(contradicted.length > 0 ? { contradictedBy: contradicted } : {}),
         ...(concept.supersededBy === null ? {} : { supersededBy: concept.supersededBy }),
+        ...(concept.replacementProposedBy === null
+          ? {}
+          : { replacementProposedBy: concept.replacementProposedBy }),
         ...(concept.stale ? { stale: true } : {}),
       });
     }

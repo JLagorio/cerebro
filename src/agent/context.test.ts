@@ -225,6 +225,60 @@ describe('knowledge in the snapshot', () => {
     const snap = build([concept('a.md', 'Pricing is annual', 'Atlas')]);
     expect(snap.knowledge?.map((k) => k.title)).toEqual(['Pricing is annual']);
     expect(snap.knowledge?.[0].about).toBe('projects/atlas/project.md');
+    expect(snap.knowledge?.[0].relation).toBe('about');
+  });
+
+  // M52.3 — the page's strip counted these and the snapshot did not, so a
+  // capture reading "Knowledge · 1" on screen handed the assistant nothing.
+  it('carries what was learned FROM a record in context, and says so', () => {
+    const standup = makeEntry({ path: 'inbox/standup.md', title: 'Standup' });
+    const learned = makeEntry({
+      path: 'knowledge/systems/drain.md',
+      title: 'Drain time',
+      properties: {
+        description: 'Drain takes 40 minutes.',
+        sources: [{ id: 'standup', resource: '/inbox/standup.md' }],
+      } as unknown as Record<string, never>,
+      relationships: { about: ['Atlas'] },
+    });
+    const entries = [standup, learned, project];
+    const snap = buildSnapshot({
+      selection: { kind: 'doc', path: 'inbox/standup.md' },
+      entries,
+      schema,
+      activePath: 'inbox/standup.md',
+      concepts: listConcepts(entries, '2026-08-03'),
+    });
+    expect(snap.knowledge).toHaveLength(1);
+    expect(snap.knowledge?.[0]).toMatchObject({
+      path: 'knowledge/systems/drain.md',
+      about: 'inbox/standup.md',
+      relation: 'learned from',
+    });
+  });
+
+  it('counts a concept anchored to one record in view and learned from another once', () => {
+    const standup = makeEntry({ path: 'inbox/standup.md', title: 'Standup' });
+    const both = makeEntry({
+      path: 'knowledge/systems/both.md',
+      title: 'Both',
+      properties: {
+        sources: [{ id: 'standup', resource: 'inbox/standup.md' }],
+      } as unknown as Record<string, never>,
+      relationships: { about: ['Atlas'] },
+    });
+    const entries = [standup, both, project];
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries,
+      schema,
+      visible: [project, standup],
+      concepts: listConcepts(entries, '2026-08-03'),
+    });
+    // The first record in context to reach it names the relation.
+    expect(snap.knowledge?.map((k) => [k.about, k.relation])).toEqual([
+      ['projects/atlas/project.md', 'about'],
+    ]);
   });
 
   it('carries nothing at all when the caller derived no bundle', () => {
@@ -261,7 +315,11 @@ describe('knowledge in the snapshot', () => {
       concept('fresh.md', 'Unverified', 'Atlas'),
       concept('fight.md', 'Contested', 'Atlas', { contradicts: ['Settled'] }),
     ]);
-    expect(snap.knowledge?.map((k) => k.title)).toEqual(['Contested', 'Unverified', 'Settled']);
+    // Both ENDS of a contradiction lead (M49.8, K24): the settled claim is
+    // contradicted too, whether or not its own file says so.
+    expect(snap.knowledge?.map((k) => k.title)).toEqual(['Contested', 'Settled', 'Unverified']);
+    const settled = snap.knowledge?.find((k) => k.title === 'Settled');
+    expect(settled?.contradictedBy).toEqual(['knowledge/concepts/fight.md']);
   });
 
   it('says a claim was replaced rather than quoting it as current', () => {

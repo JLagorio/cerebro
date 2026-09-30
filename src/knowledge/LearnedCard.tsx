@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { listConcepts, recentlyLearned } from '@/engine/okf';
@@ -28,11 +29,15 @@ export function LearnedCard() {
   // `todayIso()` and then window them against a second, raw `new Date()` that
   // was not in the dependency list — two reads of the wall clock inside one
   // memo, which disagree across local midnight and which no test could pin.
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
   const today = todayIso();
   const learned = useMemo(() => {
-    const concepts = listConcepts(entries, today).filter((c) => !dismissed.includes(c.entry.path));
+    const concepts = listConcepts(entries, today, quarantine, ledgerReview).filter(
+      (c) => !dismissed.includes(c.entry.path),
+    );
     return recentlyLearned(concepts, today);
-  }, [dismissed, entries, today]);
+  }, [dismissed, entries, today, quarantine, ledgerReview]);
 
   if (learned.length === 0) return null;
 
@@ -53,9 +58,7 @@ export function LearnedCard() {
             <button
               type="button"
               data-path={concept.entry.path}
-              onClick={() =>
-                navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path })
-              }
+              onClick={() => navigate({ kind: 'doc', path: concept.entry.path })}
               className="flex min-w-0 flex-1 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
             >
               <span className="min-w-0 flex-1">

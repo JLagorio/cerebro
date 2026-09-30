@@ -152,8 +152,9 @@ pub fn capture_from_json(vault: &Path, request: &serde_json::Value) -> Option<Re
 }
 
 /// The suspension refusal while the divergence circuit breaker is open.
-pub const RECONCILIATION_SUSPENDED: &str =
-    "reconciliation is open for this vault — resolve the divergence before capturing edits";
+pub const RECONCILIATION_SUSPENDED: &str = "reconciliation_suspended: capture is stopped for \
+     this whole vault (a mass mismatch, a migration refusal, or a rewound history) — resolve \
+     it before capturing edits";
 
 /// The typed alias-removal refusal, shared with the concepts adapter.
 pub use super::concepts::UNSUPPORTED_ALIAS_REMOVAL;
@@ -172,6 +173,92 @@ pub fn capture_structured(vault: &Path, request: &CaptureRequest) -> Option<Resu
 pub fn capture_out_of_band(vault: &Path, rel: &str) -> Option<Result<(), String>> {
     shadow::with_writer(vault, |writer| capture_out_of_band_with(writer, vault, rel))
 }
+
+/// The projection write every capture ends with: guarded, and — for a
+/// change captured from the file on disk — allowed to replace exactly the
+/// bytes it adopted.
+fn write_captured(
+    vault: &Path,
+    path: &str,
+    projection: &super::reduce::ProjectionResult,
+    adopted: Option<&str>,
+) -> Result<(), String> {
+    match adopted {
+        Some(hash) => manifest::write_adopted_projection(vault, path, projection, hash),
+        None => manifest::write_projection(vault, path, projection),
+    }
+}
+
+/// A capture the live watcher could not make (M49.3, K15). Recorded in the
+/// operational log under its code, then escalated the way the launch scan
+/// escalates one: the scan re-classifies the bundle, and a change it cannot
+/// capture becomes a recorded divergence the banner shows now. Before, the
+/// watcher dropped the refusal and nothing said anything until a later
+/// launch — while the file sat on disk unrecorded.
+///
+/// A suspension is not escalated: the mode it reports is already open.
+pub fn escalate_refused_capture(vault: &Path, rel: &str, reason: &str) {
+    let code = log_refused_capture("watcher.capture_out_of_band", rel, reason);
+    if code != RECONCILIATION_SUSPENDED_CODE {
+        let _ = shadow::with_writer(vault, |writer| {
+            super::reconcile::launch_scan(writer, vault, None, None)
+        });
+    }
+}
+
+/// Record a refused capture in the operational log under its code (M49.6,
+/// K16) — the durable home of WHY a file is quarantined, which before
+/// existed only in a toast or nowhere. Returns the code.
+pub fn log_refused_capture(surface: &str, rel: &str, reason: &str) -> &'static str {
+    let code = refusal_code(reason);
+    if let Ok(table) = crate::policy::table::PolicyTable::load() {
+        if let Ok(refusal) = crate::policy::rejection::OperationalRefusal::new(
+            &table,
+            code,
+            surface,
+            format!("{rel}: {reason}"),
+        ) {
+            crate::runtime::sink::record(&refusal, &crate::runtime::operational::LogEntry::bare());
+        }
+    }
+    code
+}
+
+/// The code a capture refusal is logged under: its own typed prefix where
+/// it has one, `capture_refused` for the rest (forged provenance, alias
+/// removal, an edit the valve cannot represent).
+fn refusal_code(reason: &str) -> &'static str {
+    [
+        RECONCILIATION_SUSPENDED_CODE,
+        super::manifest::PROJECTION_DISK_CHANGED,
+        super::concepts::LEDGER_WRITER_UNAVAILABLE,
+    ]
+    .into_iter()
+    .find(|code| reason.starts_with(&format!("{code}:")))
+    .unwrap_or(CAPTURE_REFUSED)
+}
+
+/// Who an out-of-band change is recorded under (M49.4, K10). Nobody can
+/// say who made it: a person in another editor, a sync, a git checkout, or
+/// an agent with shell. It was `human:owner` — which filed an agent's log
+/// output as the owner's own assertion (live vault, seq 179). Its authority
+/// answers stay `unknown` (`AuthorityAnswers::default`), and trust is read
+/// from ledger attestations, never from who a change was filed under.
+///
+/// Its registration is still the `HumanActor` kind — the schema has no
+/// unattributed source — so the observation's provenance derives
+/// `trusted_human_capture`. With both authority answers `unknown`, no
+/// authority route or independence rule is ever satisfied by it.
+pub const OUT_OF_BAND_ACTOR: &str = "unattributed:out_of_band";
+
+/// Who an in-app edit is recorded under: the person at the keyboard.
+pub const OWNER_ACTOR: &str = "human:owner";
+
+/// The operational code of a capture the valve refused for its own reasons.
+pub const CAPTURE_REFUSED: &str = "capture_refused";
+
+/// The typed prefix of `RECONCILIATION_SUSPENDED`.
+pub const RECONCILIATION_SUSPENDED_CODE: &str = "reconciliation_suspended";
 
 /// Capture an editorial override through the vault's active writer.
 pub fn capture_editorial(vault: &Path, request: &EditorialRequest) -> Option<Result<(), String>> {
@@ -306,6 +393,57 @@ pub(crate) fn capture_structured_with(
     vault: &Path,
     request: &CaptureRequest,
 ) -> Result<(), String> {
+    capture_structured_adopting(writer, vault, request, Capture::InApp)
+}
+
+/// How a capture came to be — which decides what it may overwrite and
+/// whether a vault-wide stop holds it back.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Capture<'a> {
+    /// An in-app edit: not on disk yet, so the file there must be the one
+    /// the manifest recorded, and a vault-wide stop holds it.
+    InApp,
+    /// Captured automatically FROM the file (watcher, launch scan): the
+    /// canonical projection may replace exactly these adopted bytes (a
+    /// formatting normalization), and a vault-wide stop holds it.
+    Automatic(&'a str),
+    /// A person chose "Keep" for this file (M49.5): adopts like
+    /// `Automatic`, and a vault-wide stop does NOT hold it — the stop exists
+    /// so a rollback is never blessed silently, and this is not silent.
+    Chosen(&'a str),
+}
+
+impl Capture<'_> {
+    fn adopted(&self) -> Option<&str> {
+        match self {
+            Capture::InApp => None,
+            Capture::Automatic(hash) | Capture::Chosen(hash) => Some(hash),
+        }
+    }
+
+    fn held_by_stop(&self) -> bool {
+        !matches!(self, Capture::Chosen(_))
+    }
+
+    /// Who the change is filed under: the owner typed an in-app edit; a
+    /// change found on disk is unattributed, even one a person chose to
+    /// keep — keeping a file is not saying who wrote it.
+    fn actor(&self) -> &'static str {
+        match self {
+            Capture::InApp => OWNER_ACTOR,
+            Capture::Automatic(_) | Capture::Chosen(_) => OUT_OF_BAND_ACTOR,
+        }
+    }
+}
+
+/// `capture_structured_with`, for any capture mode (see `Capture`).
+fn capture_structured_adopting(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    request: &CaptureRequest,
+    mode: Capture<'_>,
+) -> Result<(), String> {
+    let adopted = mode.adopted();
     let krel = request
         .path
         .strip_prefix("knowledge/")
@@ -318,10 +456,21 @@ pub(crate) fn capture_structured_with(
     }
     let store = writer.store_id().to_string();
     let state = current_state(writer, vault)?;
-    // The circuit breaker: while reconciliation is open, automatic capture
-    // is suspended — resolve the divergence first (agent writes continue).
-    if state.reconciliation_open() {
+    // The circuit breaker (M49.5, K8): capture stops for the whole vault
+    // only on a vault-wide signal — a mass mismatch, a migration refusal, a
+    // rewound head. A divergence on some paths quarantines THOSE paths (the
+    // projection guard refuses writes over them) and leaves the rest of the
+    // bundle capturing.
+    if mode.held_by_stop() && super::reconcile::global_stop(vault, &state)? {
         return Err(RECONCILIATION_SUSPENDED.to_string());
+    }
+    // An in-app edit of a QUARANTINED path — its file is not the one the
+    // manifest recorded — refuses before anything commits (M49.5, K8): the
+    // projection write would refuse after, and the person first has to
+    // choose Keep or Restore for that file. A capture FROM the file adopts
+    // those very bytes, so it is exempt.
+    if adopted.is_none() {
+        manifest::ensure_writable(vault, &request.path, &state)?;
     }
     let belief_id = state
         .projection_paths
@@ -337,7 +486,7 @@ pub(crate) fn capture_structured_with(
         .any(|b| b.state == "committed" && b.operation_key.as_deref() == Some(&request.request_id))
     {
         let projection = project_belief(&state, &belief_id)?;
-        manifest::write_projection(vault, &request.path, &projection)?;
+        write_captured(vault, &request.path, &projection, adopted)?;
         crate::vault::watcher::note_own_write(&vault.join(&request.path));
         return Ok(());
     }
@@ -612,16 +761,27 @@ pub(crate) fn capture_structured_with(
 
     // Reduce, project, manifest-first write, THEN acknowledge.
     let projection = project_belief(&state, &belief_id)?;
-    manifest::write_projection(vault, &request.path, &projection)?;
+    write_captured(vault, &request.path, &projection, adopted)?;
     crate::vault::watcher::note_own_write(&vault.join(&request.path));
     Ok(())
 }
 
-fn capture_editorial_with(
+pub(crate) fn capture_editorial_with(
     writer: &mut LedgerWriter,
     vault: &Path,
     request: &EditorialRequest,
 ) -> Result<(), String> {
+    capture_editorial_adopting(writer, vault, request, Capture::InApp)
+}
+
+/// See `capture_structured_adopting`.
+fn capture_editorial_adopting(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    request: &EditorialRequest,
+    mode: Capture<'_>,
+) -> Result<(), String> {
+    let adopted = mode.adopted();
     let krel = request
         .path
         .strip_prefix("knowledge/")
@@ -640,8 +800,16 @@ fn capture_editorial_with(
     }
     let read = read_ledger(&ledger_dir(vault)).map_err(|e| e.to_string())?;
     let state = reduce(&read.frames, writer.store_id());
-    if state.reconciliation_open() {
+    if mode.held_by_stop() && super::reconcile::global_stop(vault, &state)? {
         return Err(RECONCILIATION_SUSPENDED.to_string());
+    }
+    // An in-app edit of a QUARANTINED path — its file is not the one the
+    // manifest recorded — refuses before anything commits (M49.5, K8): the
+    // projection write would refuse after, and the person first has to
+    // choose Keep or Restore for that file. A capture FROM the file adopts
+    // those very bytes, so it is exempt.
+    if adopted.is_none() {
+        manifest::ensure_writable(vault, &request.path, &state)?;
     }
     let belief_id = state
         .projection_paths
@@ -657,7 +825,7 @@ fn capture_editorial_with(
                 == Some(request.request_id.as_str())
     }) {
         let projection = project_belief(&state, &belief_id)?;
-        manifest::write_projection(vault, &request.path, &projection)?;
+        write_captured(vault, &request.path, &projection, adopted)?;
         crate::vault::watcher::note_own_write(&vault.join(&request.path));
         return Ok(());
     }
@@ -728,7 +896,7 @@ fn capture_editorial_with(
         return Err(format!("editorial capture refused: {detail}"));
     }
     let projection = project_belief(&state, &belief_id)?;
-    manifest::write_projection(vault, &request.path, &projection)?;
+    write_captured(vault, &request.path, &projection, adopted)?;
     crate::vault::watcher::note_own_write(&vault.join(&request.path));
     Ok(())
 }
@@ -758,17 +926,51 @@ fn alias_items(value: Option<&serde_json::Value>) -> Vec<String> {
 /// Capture one out-of-band knowledge edit from the file's parsed state,
 /// exactly as the launch scan or the live watcher found it. Field-level
 /// diffs run the SAME assertion+revision batch builder as IPC capture,
-/// with actor `human:owner`, both authority fields `unknown`, and a
+/// with actor `OUT_OF_BAND_ACTOR`, both authority fields `unknown`, and a
 /// deterministic request key from path/base revision/old hash/new hash.
 /// Prose defaults to editorial override, with the one carve-out: a body
 /// change that uniquely maps onto a current-basis Observation's
 /// `extracted_text` becomes a `field_change` correction. Ambiguity,
 /// provenance forgery, and alias removal refuse with typed errors — the
 /// caller escalates those into reconciliation, never guesses.
+///
+/// `knowledge/log.md` is never captured: it is a derived, system-owned view
+/// (M49.5, K11), so a hand edit is regenerated over — as the launch scan
+/// does — instead of pinned as an override.
 pub(crate) fn capture_out_of_band_with(
     writer: &mut LedgerWriter,
     vault: &Path,
     path: &str,
+) -> Result<(), String> {
+    if path == crate::knowledge::LOG_PATH {
+        let state = current_state(writer, vault)?;
+        if !state.projection_paths.contains_key("log.md") {
+            return Ok(()); // no log recorded yet: the file is nobody's view
+        }
+        if super::reconcile::global_stop(vault, &state)? {
+            return Err(RECONCILIATION_SUSPENDED.to_string());
+        }
+        return super::reconcile::regenerate_log(writer, vault);
+    }
+    capture_file_with(writer, vault, path, false)
+}
+
+/// Adopt the file at `path` because a person chose "Keep" for it (M49.5):
+/// the same capture as the watcher's, recorded as reconciliation adoption,
+/// and not held back by a vault-wide stop.
+pub(crate) fn keep_file_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    path: &str,
+) -> Result<(), String> {
+    capture_file_with(writer, vault, path, true)
+}
+
+fn capture_file_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    path: &str,
+    chosen: bool,
 ) -> Result<(), String> {
     let krel = path
         .strip_prefix("knowledge/")
@@ -777,11 +979,23 @@ pub(crate) fn capture_out_of_band_with(
     super::project::parse_okf(&raw)?; // unparsable bytes refuse early
 
     let state = current_state(writer, vault)?;
-    if state.reconciliation_open() {
+    if !chosen && super::reconcile::global_stop(vault, &state)? {
         return Err(RECONCILIATION_SUSPENDED.to_string());
     }
     let diff = diff_projection_file(&state, krel, &raw)?;
-    capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::OutOfBand)
+    let adopted = diff.new_hash.clone();
+    let (origin, mode) = if chosen {
+        (
+            schema::OverrideOrigin::ReconciliationAdoption,
+            Capture::Chosen(&adopted),
+        )
+    } else {
+        (
+            schema::OverrideOrigin::OutOfBand,
+            Capture::Automatic(&adopted),
+        )
+    };
+    capture_diff_with(writer, vault, path, diff, origin, mode)
 }
 
 /// Commit one mechanical diff: structured first (the revision moves the
@@ -793,7 +1007,10 @@ fn capture_diff_with(
     path: &str,
     diff: FileDiff,
     origin: schema::OverrideOrigin,
+    mode: Capture<'_>,
 ) -> Result<(), String> {
+    let restamp = diff.restamp.clone();
+    let restamped = restamp.is_some();
     let request_id = crate::ledger::sha256_hex(
         serde_json::to_string(&serde_json::json!({
             "capture": "out-of-band-v1",
@@ -805,27 +1022,73 @@ fn capture_diff_with(
         .map_err(|e| e.to_string())?
         .as_bytes(),
     );
+    if let Some(op) = restamp {
+        let state = current_state(writer, vault)?;
+        let current = state
+            .beliefs
+            .get(&diff.belief_id)
+            .ok_or("the restamped Belief is gone")?
+            .current();
+        let (schema_v, batch_id, _, actor) = common(mode.actor());
+        let body = schema::BeliefRevised {
+            schema: schema_v,
+            batch_id,
+            idempotency_key: None,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: diff.belief_id.clone(),
+            patch: vec![op],
+            basis: current.basis.clone(),
+        };
+        writer.append_once(
+            &format!("{request_id}-restamp"),
+            schema::KIND_BELIEF_REVISED,
+            serde_json::to_value(&body).map_err(|e| e.to_string())?,
+        )?;
+    }
+    let nothing_else = diff.fields.is_empty()
+        && diff.relations.is_empty()
+        && diff.alias_adds.is_empty()
+        && diff.editorial_ops.is_empty();
+    if nothing_else {
+        // A restamp alone has nothing after it to write the projection, and
+        // neither has a file that differs only in FORMATTING (quoting, key
+        // order, block vs flow): its values are already the ledger's, so the
+        // canonical projection replaces exactly the bytes adopted (M49.5,
+        // K5). Before, nothing was written, the file stayed quarantined, and
+        // Keep reported success while changing nothing.
+        let formatting = mode.adopted().is_some() && diff.new_hash != diff.old_hash;
+        if restamped || formatting {
+            let state = current_state(writer, vault)?;
+            let projection = project_belief(&state, &diff.belief_id)?;
+            write_captured(vault, path, &projection, mode.adopted())?;
+            crate::vault::watcher::note_own_write(&vault.join(path));
+        }
+        return Ok(());
+    }
     if !diff.fields.is_empty() || !diff.relations.is_empty() || !diff.alias_adds.is_empty() {
         let request = CaptureRequest {
             path: path.to_string(),
-            actor_id: "human:owner".to_string(),
+            actor_id: mode.actor().to_string(),
             fields: diff.fields,
             relations: diff.relations,
             alias_adds: diff.alias_adds,
             authority: AuthorityAnswers::default(),
             request_id: request_id.clone(),
         };
-        capture_structured_with(writer, vault, &request)?;
+        capture_structured_adopting(writer, vault, &request, mode)?;
     }
     if !diff.editorial_ops.is_empty() {
         let request = EditorialRequest {
             path: path.to_string(),
-            actor_id: "human:owner".to_string(),
+            actor_id: mode.actor().to_string(),
             ops: diff.editorial_ops,
             origin,
             request_id: format!("{request_id}-editorial"),
         };
-        capture_editorial_with(writer, vault, &request)?;
+        capture_editorial_adopting(writer, vault, &request, mode)?;
     }
     Ok(())
 }
@@ -838,7 +1101,7 @@ pub fn capture_body_edit(vault: &Path, path: &str, body: &str) -> Option<Result<
             .strip_prefix("knowledge/")
             .ok_or("capture applies only to knowledge/ projections")?;
         let state = current_state(writer, vault)?;
-        if state.reconciliation_open() {
+        if super::reconcile::global_stop(vault, &state)? {
             return Err(RECONCILIATION_SUSPENDED.to_string());
         }
         let belief_id = state
@@ -864,7 +1127,14 @@ pub fn capture_body_edit(vault: &Path, path: &str, body: &str) -> Option<Result<
         };
         let raw = super::project::project(&content, &fields);
         let diff = diff_projection_file(&state, krel, &raw)?;
-        capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::InApp)
+        capture_diff_with(
+            writer,
+            vault,
+            path,
+            diff,
+            schema::OverrideOrigin::InApp,
+            Capture::InApp,
+        )
     })
 }
 
@@ -883,7 +1153,7 @@ pub fn capture_frontmatter_patch(
             .strip_prefix("knowledge/")
             .ok_or("capture applies only to knowledge/ projections")?;
         let state = current_state(writer, vault)?;
-        if state.reconciliation_open() {
+        if super::reconcile::global_stop(vault, &state)? {
             return Err(RECONCILIATION_SUSPENDED.to_string());
         }
         let belief_id = state
@@ -903,7 +1173,14 @@ pub fn capture_frontmatter_patch(
         }
         let raw = super::project::project(&content, &serde_json::Value::Object(intended));
         let diff = diff_projection_file(&state, krel, &raw)?;
-        capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::InApp)
+        capture_diff_with(
+            writer,
+            vault,
+            path,
+            diff,
+            schema::OverrideOrigin::InApp,
+            Capture::InApp,
+        )
     })
 }
 
@@ -920,6 +1197,9 @@ pub(crate) struct FileDiff {
     pub alias_adds: Vec<String>,
     /// Presentation-field ops plus the default body override, in op order.
     pub editorial_ops: Vec<schema::OverridePatchOp>,
+    /// A `generated` stamp whose `at` moved while its `by` did not (M49.5,
+    /// K5): a restamp, adopted as an unattributed revision — not forgery.
+    pub restamp: Option<schema::PatchOp>,
     pub old_hash: String,
     pub new_hash: String,
     pub base_generating_event: String,
@@ -945,6 +1225,7 @@ pub(crate) fn diff_projection_file(
     let new_hash = crate::ledger::sha256_hex(raw.as_bytes());
 
     // Partition the frontmatter diff.
+    let mut restamp: Option<schema::PatchOp> = None;
     let mut fields: Vec<FieldEdit> = Vec::new();
     let mut editorial_ops: Vec<schema::OverridePatchOp> = Vec::new();
     let mut alias_adds: Vec<String> = Vec::new();
@@ -959,8 +1240,27 @@ pub(crate) fn diff_projection_file(
         if before == after {
             continue;
         }
-        // Provenance is never a human diff: a changed generated/verified
-        // stamp is forgery, hard-refused into reconciliation.
+        // M49.5 (K5): a `generated` stamp whose `at` moved and whose `by`
+        // did not is a RESTAMP — the incident's exact shape (a recheck lane
+        // rewrote `generated.at` and nothing else it could not explain). It
+        // claims nothing new about who wrote the concept, so it is adopted
+        // as an unattributed revision rather than refused as forgery.
+        if key == "generated" && is_restamp(before, after) {
+            restamp = Some(schema::PatchOp {
+                field_path: "/fields/generated".to_string(),
+                before: before
+                    .map(super::reduce::typed_from_value)
+                    .unwrap_or(TypedValue::Missing),
+                after: after
+                    .map(super::reduce::typed_from_value)
+                    .unwrap_or(TypedValue::Missing),
+            });
+            continue;
+        }
+        // Any other provenance change — a new author, a verified stamp — is
+        // never a diff anyone may adopt: it is forgery, hard-refused, and
+        // the path stays quarantined. Trust reads from ledger attestations,
+        // so a stamp typed into a file grants nothing either way.
         if key == "generated" || key == "verified" {
             return Err(format!(
                 "provenance forgery: the {key} stamp changed out of band — refused"
@@ -1008,7 +1308,7 @@ pub(crate) fn diff_projection_file(
 
     // Relation diffs pair with their exact events (field patches above keep
     // the projection matching the file bytes).
-    let relations = relation_diff(state, &belief_id, &old_fields, &new_fields);
+    let relations = relation_diff(state, &belief_id, &old_fields, &new_fields)?;
 
     // The body: editorial by default; the extracted-claim-text carve-out
     // when the mapping is UNIQUE; ambiguity refuses, never guesses.
@@ -1041,10 +1341,33 @@ pub(crate) fn diff_projection_file(
         relations,
         alias_adds,
         editorial_ops,
+        restamp,
         old_hash,
         new_hash,
         base_generating_event: belief.projection_head_event.clone(),
     })
+}
+
+/// Did only `generated.at` move? Both stamps are objects naming the same
+/// non-empty `by`, and every key but `at` is unchanged.
+fn is_restamp(before: Option<&serde_json::Value>, after: Option<&serde_json::Value>) -> bool {
+    let (Some(before), Some(after)) = (
+        before.and_then(|v| v.as_object()),
+        after.and_then(|v| v.as_object()),
+    ) else {
+        return false;
+    };
+    let by = before.get("by").and_then(|v| v.as_str());
+    if by.is_none_or(str::is_empty) || by != after.get("by").and_then(|v| v.as_str()) {
+        return false;
+    }
+    let others = |m: &serde_json::Map<String, serde_json::Value>| {
+        m.iter()
+            .filter(|(k, _)| k.as_str() != "at")
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    others(before) == others(after)
 }
 
 /// The intended-vs-live relation diff for a parsed fields object.
@@ -1053,48 +1376,106 @@ fn relation_diff(
     belief_id: &str,
     old_fields: &serde_json::Map<String, serde_json::Value>,
     new_fields: &serde_json::Map<String, serde_json::Value>,
-) -> Vec<RelationEdit> {
-    use super::migrate::{stem_of, wikilinks};
-    let stems: std::collections::BTreeMap<String, String> = state
-        .projection_paths
-        .iter()
-        .map(|(path, belief)| (stem_of(path).to_string(), belief.clone()))
-        .collect();
-    let resolve = |fields: &serde_json::Map<String, serde_json::Value>| {
-        let mut set: BTreeSet<(String, RelationKind)> = BTreeSet::new();
-        for (field, kind) in [
-            ("supersedes", RelationKind::Supersedes),
-            ("refines", RelationKind::Refines),
-            ("contradicts", RelationKind::Contradicts),
-        ] {
-            for link in wikilinks(fields.get(field)) {
-                if let Some(target) = stems.get(&link) {
-                    if target != belief_id {
-                        set.insert((target.clone(), kind));
-                    }
+) -> Result<Vec<RelationEdit>, String> {
+    use super::migrate::{ambiguous_link, resolve_link, wikilinks, LinkTarget};
+    // Only a link the edit ADDS has to name one concept: an ambiguous one
+    // refuses (M49.10, K33) — it names none, and relating to whichever path
+    // sorted last was a guess. A link the file already carried is judged by
+    // what the ledger related it to, so an ambiguity that arose later (a
+    // second concept sharing the stem) cannot make every edit of this
+    // concept — a body-only one, or the fix that spells the link by path —
+    // un-keepable.
+    let targets = |link: &str,
+                   kind: RelationKind,
+                   strict: bool|
+     -> Result<BTreeSet<(String, RelationKind)>, String> {
+        match resolve_link(&state.projection_paths, link) {
+            LinkTarget::One(target) if target != belief_id => Ok([(target, kind)].into()),
+            LinkTarget::Ambiguous(paths) if strict => Err(ambiguous_link(link, &paths)),
+            LinkTarget::Ambiguous(paths) => {
+                let candidates: BTreeSet<&String> = paths
+                    .iter()
+                    .filter_map(|p| p.strip_prefix("knowledge/"))
+                    .filter_map(|krel| state.projection_paths.get(krel))
+                    .collect();
+                Ok(state
+                    .relations
+                    .values()
+                    .filter(|r| {
+                        r.live
+                            && r.from == belief_id
+                            && r.relation == kind
+                            && candidates.contains(&r.to)
+                    })
+                    .map(|r| (r.to.clone(), kind))
+                    .collect())
+            }
+            _ => Ok(BTreeSet::new()),
+        }
+    };
+    let (mut kept, mut added, mut removed) = (BTreeSet::new(), BTreeSet::new(), BTreeSet::new());
+    // Kept ambiguous links: the link, the concepts its stem names, and the
+    // live targets it was read as.
+    type Guessed = (String, Vec<String>, BTreeSet<(String, RelationKind)>);
+    let mut guessed: Vec<Guessed> = Vec::new();
+    for (field, kind) in [
+        ("supersedes", RelationKind::Supersedes),
+        ("refines", RelationKind::Refines),
+        ("contradicts", RelationKind::Contradicts),
+    ] {
+        let old: BTreeSet<String> = wikilinks(old_fields.get(field)).into_iter().collect();
+        let new: BTreeSet<String> = wikilinks(new_fields.get(field)).into_iter().collect();
+        for link in old.intersection(&new) {
+            match resolve_link(&state.projection_paths, link) {
+                LinkTarget::Ambiguous(paths) => {
+                    guessed.push((link.clone(), paths, targets(link, kind, false)?));
                 }
+                _ => kept.extend(targets(link, kind, false)?),
             }
         }
-        set
-    };
-    let old = resolve(old_fields);
-    let new = resolve(new_fields);
+        for link in new.difference(&old) {
+            added.extend(targets(link, kind, true)?);
+        }
+        for link in old.difference(&new) {
+            removed.extend(targets(link, kind, false)?);
+        }
+    }
+    // A removal the kept ambiguous link could be read as keeping cannot be
+    // told apart from keeping it: refuse, so the person spells that link by
+    // path, rather than keep the relation live while the file drops it.
+    for (link, paths, read_as) in &guessed {
+        if removed
+            .iter()
+            .any(|t| read_as.contains(t) && !kept.contains(t) && !added.contains(t))
+        {
+            return Err(ambiguous_link(link, paths));
+        }
+        kept.extend(read_as.iter().cloned());
+    }
+    // old = kept ∪ removed and new = kept ∪ added, as resolved targets: a
+    // link respelled to the same concept moves nothing.
     let mut edits: Vec<RelationEdit> = Vec::new();
-    for (to, kind) in new.difference(&old) {
+    for (to, kind) in added
+        .iter()
+        .filter(|t| !kept.contains(*t) && !removed.contains(*t))
+    {
         edits.push(RelationEdit {
             action: RelationAction::Add,
             to_belief_id: to.clone(),
             kind: *kind,
         });
     }
-    for (to, kind) in old.difference(&new) {
+    for (to, kind) in removed
+        .iter()
+        .filter(|t| !kept.contains(*t) && !added.contains(*t))
+    {
         edits.push(RelationEdit {
             action: RelationAction::Remove,
             to_belief_id: to.clone(),
             kind: *kind,
         });
     }
-    edits
+    Ok(edits)
 }
 
 /// Current-basis Observations whose `extracted_text` occurs EXACTLY once in
@@ -1368,5 +1749,33 @@ mod tests {
             serde_json::json!("req-capture-key")
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M49.3 (K15): a watcher refusal is logged under its own code where it
+    // has one, and every code it can log under is registered operational.
+    #[test]
+    fn a_refused_capture_is_logged_under_a_registered_operational_code() {
+        use crate::policy::rejection::OperationalRefusal;
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        for (reason, code) in [
+            (
+                RECONCILIATION_SUSPENDED.to_string(),
+                RECONCILIATION_SUSPENDED_CODE,
+            ),
+            (
+                super::super::manifest::disk_changed("knowledge/a.md"),
+                super::super::manifest::PROJECTION_DISK_CHANGED,
+            ),
+            (
+                "provenance forgery: the generated stamp changed out of band — refused".into(),
+                CAPTURE_REFUSED,
+            ),
+        ] {
+            assert_eq!(refusal_code(&reason), code, "{reason}");
+            assert!(
+                OperationalRefusal::new(&table, code, "watcher", reason).is_ok(),
+                "{code}"
+            );
+        }
     }
 }

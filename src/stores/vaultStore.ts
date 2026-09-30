@@ -105,6 +105,22 @@ async function loadCollections(
 
 let watcherBound = false;
 
+/**
+ * The newest open wins (M49). `openVault` shows the shell the moment it sets
+ * `vaultPath`, so a person can pick another vault while the first open is
+ * still inside `start_watcher` — which is also where the ledger starts
+ * recording, and that can take a minute on a vault with history. Two opens
+ * in flight used to finish in whatever order the backend did: measured
+ * 2026-09-28, a window titled `test` held the demo vault's entries (its pages
+ * "couldn't be loaded") and recorded the demo vault, refusing every Keep.
+ *
+ * So each open takes a ticket and a superseded one stops before it writes
+ * anything, and `start_watcher` calls run one after another in the order
+ * they were asked for: the backend records ONE vault, the last one started.
+ */
+let openTicket = 0;
+let watcherQueue: Promise<unknown> = Promise.resolve();
+
 export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
   entries: [],
@@ -115,12 +131,18 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   error: null,
 
   async openVault(path) {
+    const ticket = ++openTicket;
+    const superseded = () => ticket !== openTicket;
     set({ vaultPath: path, status: 'scanning', error: null });
     try {
       const entries = await ipc.scanVault(path);
       const { views, collections } = await loadCollections(path, entries);
       const folders = await ipc.listFolders(path);
-      await ipc.startWatcher(path);
+      if (superseded()) return;
+      const started = watcherQueue.then(() => ipc.startWatcher(path));
+      watcherQueue = started.catch(() => undefined);
+      await started;
+      if (superseded()) return;
       if (inTauri() && !watcherBound) {
         const { listen } = await import('@tauri-apps/api/event');
         await listen('vault-changed', () => {
@@ -136,6 +158,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       }
       set({ entries, views, collections, folders, status: 'ready' });
     } catch (err) {
+      if (superseded()) return;
       const message = err instanceof Error ? err.message : String(err);
       set({ status: 'error', error: message });
       // Deviation (Task 23, execution-log note 15a, reported): status:'error'
@@ -157,6 +180,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       const entries = await ipc.scanVault(vault);
       const { views, collections } = await loadCollections(vault, entries);
       const folders = await ipc.listFolders(vault);
+      // A switch mid-scan: this is the old vault's snapshot, and the open in
+      // flight sets the new one's.
+      if (get().vaultPath !== vault) return;
       set({ entries, views, collections, folders, status: 'ready' });
     } catch {
       // The store keeps its last good snapshot; disk truth returns on the

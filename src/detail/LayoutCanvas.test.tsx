@@ -856,11 +856,13 @@ describe('the add-section button (M45.5 Task 3)', () => {
     setup();
     const btn = addButton();
     // --text-inverse is #ffffff in BOTH themes; --n-0 inverts to #15181f, and
-    // on this cortex-600 fill that measured 2.4:1 in dark — the resting state
-    // of the one control whose whole job is being found.
+    // on the blue fill that measured 2.4:1 in dark — the resting state of the
+    // one control whose whole job is being found. The fill is the DS primary
+    // button's (M52.4), resting and hovered, so both states hold white.
     expect(btn.className).toContain('text-inverse');
     expect(btn.className).not.toContain('text-n-0');
-    expect(btn.className).toContain('bg-cortex-600');
+    expect(btn.className).toContain('bg-accent');
+    expect(btn.className).toContain('hover:bg-accent-hover');
   });
 
   it('is a real button, keyboard reachable, standing after the last group slot', async () => {

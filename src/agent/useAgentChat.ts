@@ -300,6 +300,10 @@ export function useAgentChat(
       const recipient = address?.agent ?? null;
       const assistantId = nextId();
       lastPrompt.current = trimmed;
+      // A labelled ask's prompt rides on its bubble (ChatMessage.prompt), so a
+      // retry can send it again. A skill's expansion is a function read inside
+      // the turn, and is not kept.
+      const prompt = typeof message === 'string' ? message.trim() : '';
       setMessages((prev) => [
         ...prev,
         {
@@ -307,6 +311,7 @@ export function useAgentChat(
           role: 'user',
           text: trimmed,
           tools: [],
+          ...(prompt !== '' && prompt !== trimmed ? { prompt } : {}),
           // Carried on the message rather than raised as a toast. A mention
           // that routed and one that did not are both facts about this turn,
           // they belong next to the turn, and neither is an interruption —
@@ -503,7 +508,7 @@ export function useAgentChat(
 
 /** Tools that change disk — the ones that make a rescan necessary. */
 export function isWriteTool(name: string): boolean {
-  return /create_note|update_frontmatter|append_to_note|write_concept|cache_source|^Write$|^Edit$/.test(
+  return /create_note|update_frontmatter|append_to_note|write_concept|recheck_concept|cache_source|^Write$|^Edit$/.test(
     name,
   );
 }

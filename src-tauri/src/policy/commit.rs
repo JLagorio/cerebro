@@ -88,6 +88,62 @@ pub struct CommitOutcome {
     /// True when this call replayed an already committed transition — an
     /// acknowledgement-loss retry, answered from the ledger.
     pub replayed: bool,
+    /// Files an APPLIED set moved but did not write, because they changed on
+    /// disk since the ledger last wrote them (M49.3, files win). The set is
+    /// applied — the ledger is ahead of these files — and the quarantine
+    /// lists each one for a person to keep or restore.
+    pub kept: Vec<String>,
+}
+
+impl CommitOutcome {
+    /// Book this commit on its run's row (M49.9, K25): submitted, applied,
+    /// rejected. Before M49.9 nothing wrote these counters, so the Fleet
+    /// showed "0 applied" for runs that had written 29 concepts; rows from
+    /// then carry `counters_booked = 0` and read as NOT RECORDED rather than
+    /// as those zeros (`SCHEMA_V18`). A queued member counts as submitted
+    /// and nothing else — its decision is booked later, by
+    /// [`CommitOutcome::book_decision`]. A replayed acknowledgement books
+    /// nothing — it was counted when it committed. A run the runtime DB does
+    /// not know (a test, a write made outside a metered run) books nothing
+    /// either, and says so by touching no row.
+    pub fn book(&self, run_id: &str) {
+        self.book_counts(run_id, true);
+    }
+
+    /// Book a HUMAN resolution of a queued set (M49.9): its applied or
+    /// rejected members, never `proposals_submitted` again — the submit-time
+    /// [`CommitOutcome::book`] already counted every member once, and
+    /// counting it here too would double it. Without this a queued run read
+    /// "1 still waiting on a decision" forever, whatever the human decided.
+    pub fn book_decision(&self, run_id: &str) {
+        self.book_counts(run_id, false);
+    }
+
+    fn book_counts(&self, run_id: &str, count_submitted: bool) {
+        if self.replayed {
+            return;
+        }
+        let (mut applied, mut rejected) = (0i64, 0i64);
+        for result in &self.results {
+            match result {
+                SubmitResult::Applied { .. } => applied += 1,
+                SubmitResult::Rejected { .. } => rejected += 1,
+                SubmitResult::Queued { .. } => {}
+            }
+        }
+        let submitted = if count_submitted {
+            self.results.len() as i64
+        } else {
+            0
+        };
+        crate::runtime::sink::with_sink(|conn| {
+            let _ = conn.execute(
+                "UPDATE runs SET proposals_submitted = proposals_submitted + ?1, \
+                 applied = applied + ?2, rejected = rejected + ?3 WHERE run_id = ?4",
+                rusqlite::params![submitted, applied, rejected, run_id],
+            );
+        });
+    }
 }
 
 /// The commit set's identity: the run plus the frozen ordered member list.
@@ -858,6 +914,7 @@ fn reject_set(
         results,
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
+        kept: Vec::new(),
     })
 }
 
@@ -1000,6 +1057,7 @@ fn queue_set(
         results,
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
+        kept: Vec::new(),
     })
 }
 
@@ -1254,7 +1312,7 @@ fn apply_with_decisions(
     // Only after the marker is durable does the projection follow — and a
     // crash here is repaired from the committed ledger, never from a
     // half-written file.
-    project_applied(writer, vault)?;
+    let kept = project_applied(writer, vault, state)?;
     crate::crash::crash_point("commit-set-apply-acked");
     Ok(CommitOutcome {
         commit_set_id: commit_set_id.to_string(),
@@ -1262,6 +1320,7 @@ fn apply_with_decisions(
         results,
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
+        kept,
     })
 }
 
@@ -1297,9 +1356,25 @@ fn post_versions(
 /// proposal does not rewrite the manifest once per file in the vault. A
 /// crash mid-loop leaves the remaining files ledger-ahead, which is the M23
 /// class recovery already repairs from the committed ledger.
-fn project_applied(writer: &LedgerWriter, vault: &Path) -> Result<(), SubmitError> {
+///
+/// Files win (M49.3, K6): a file this batch moves is judged against what
+/// the ledger held BEFORE it (`before`) — the manifest entry when there is
+/// one, the pre-commit projection when there is not — so a hand-made or
+/// hand-edited file at a path the manifest never recorded is kept, not
+/// replaced. The set is already durable here, so a kept file is not a
+/// refusal of it: it is returned (and logged under `projection_disk_changed`)
+/// while every other path is written, and the quarantine lists it — the
+/// ledger ahead of a file it did not write — for a person to decide. Only a
+/// write that FAILED is an error, returned once the others are written.
+fn project_applied(
+    writer: &LedgerWriter,
+    vault: &Path,
+    before: &EpistemicState,
+) -> Result<Vec<String>, SubmitError> {
     let state = state_of(writer, vault)?;
     let manifest = crate::ledger::manifest::load(vault).map_err(internal)?;
+    let mut kept: Vec<String> = Vec::new();
+    let mut failed: Option<String> = None;
     for (path, belief_id) in &state.projection_paths {
         let projection =
             crate::ledger::reduce::project_belief(&state, belief_id).map_err(internal)?;
@@ -1316,10 +1391,45 @@ fn project_applied(writer: &LedgerWriter, vault: &Path) -> Result<(), SubmitErro
         if unchanged {
             continue;
         }
-        crate::ledger::manifest::write_projection(vault, &rel, &projection).map_err(internal)?;
-        crate::vault::watcher::note_own_write(&vault.join(&rel));
+        // A path this batch did not move (its projection is what it was
+        // before) is not this batch's to write: a file there that differs is
+        // someone else's quarantine, and is left exactly as it is.
+        let moved = before
+            .projection_paths
+            .get(path)
+            .and_then(|prior| crate::ledger::reduce::project_belief(before, prior).ok())
+            .is_none_or(|prior| prior.content_hash != projection.content_hash);
+        let on_disk = std::fs::read(vault.join(&rel))
+            .ok()
+            .map(|bytes| crate::ledger::sha256_hex(&bytes));
+        let identical = on_disk.as_deref() == Some(projection.content_hash.as_str());
+        if !moved && !identical {
+            continue;
+        }
+        // Identical bytes destroy nothing: only the manifest identity moves
+        // (`write_projection_as` checks this before its guard too).
+        let judged = if identical {
+            Ok(())
+        } else {
+            crate::ledger::manifest::ensure_disk_is_the_ledgers(vault, &rel, before)
+        };
+        let written = judged
+            .and_then(|()| crate::ledger::manifest::write_projection(vault, &rel, &projection));
+        match written {
+            Ok(()) => crate::vault::watcher::note_own_write(&vault.join(&rel)),
+            Err(e) if e.starts_with(crate::ledger::manifest::PROJECTION_DISK_CHANGED) => {
+                crate::ledger::capture::log_refused_capture("policy.project_applied", &rel, &e);
+                kept.push(rel);
+            }
+            Err(e) => {
+                failed.get_or_insert(e);
+            }
+        }
     }
-    Ok(())
+    match failed {
+        None => Ok(kept),
+        Some(detail) => Err(internal(detail)),
+    }
 }
 
 /// An expansion refusal becomes a submit error whose code the table knows.

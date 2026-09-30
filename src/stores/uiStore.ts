@@ -5,6 +5,11 @@ import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
+/** The side panel on a concept page (M50.1): its provenance comes first, and
+ *  a concept has no Info (its frontmatter is provenance) and no Knowledge tab
+ *  (its related knowledge is part of the details). The review itself is the
+ *  bar under the title since M51. */
+export type ConceptPanelTab = 'details' | 'outline' | 'links';
 
 /**
  * What the person chose, NOT what is on screen (M16.36).
@@ -28,6 +33,13 @@ export function asThemeMode(v: unknown): ThemeMode {
   return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
 }
 
+/** A prompt on its way to the Assistant — see `agentPendingPrompt`. */
+export interface PendingPrompt {
+  text: string;
+  subject: string | null;
+  label: string | null;
+}
+
 interface UiState {
   /**
    * The record showing in the right-hand area, or null.
@@ -46,7 +58,7 @@ interface UiState {
    * mid-sentence — and neither could you, by clicking a [[wikilink]] in one.
    *
    * So they are independent again, and the width problem is solved where it
-   * actually lives: in the layout (see SHELL_TWO_PANEL_MIN in App.tsx), which
+   * actually lives: in the layout (see `shellPlan` in app/shellLayout.ts), which
    * draws both when there is room and hides one WITHOUT unmounting when there
    * is not. A hidden panel keeps streaming; a closed one still stops.
    */
@@ -73,9 +85,22 @@ interface UiState {
    * a COLUMN of the layout rather than an overlay: how much of the window it
    * takes is a trade the person reading is making between the record and the
    * table beside it, and only they know which way it goes today.
+   *
+   * A preference, not a promise: the shell draws it at most the room left
+   * beside the assistant (app/shellLayout.ts), so a width chosen on a wide
+   * window can never push the assistant off a narrow one.
    */
   detailWidth: number;
   setDetailWidth(px: number): void;
+  /**
+   * Width of the assistant panel, in px (M15). Persisted.
+   *
+   * Here rather than in the panel because the shell has to know it: beside a
+   * record the assistant KEEPS this width and the record gives ground, so the
+   * layout cannot be worked out without it.
+   */
+  aiPanelWidth: number;
+  setAiPanelWidth(px: number): void;
   /** Sidebar width in px, and whether it is collapsed. Both persisted. */
   sidebarWidth: number;
   setSidebarWidth(px: number): void;
@@ -141,6 +166,15 @@ interface UiState {
   setDocPanelOpen(v: boolean): void;
   docPanelTab: DocPanelTab;
   setDocPanelTab(tab: DocPanelTab): void;
+  // Its own slot, so opening a concept lands on its details rather than on
+  // whichever tab the last doc left open (M50.1). Session-only.
+  conceptPanelTab: ConceptPanelTab;
+  setConceptPanelTab(tab: ConceptPanelTab): void;
+  // And its own open state (M51.3): a concept's review is the bar under its
+  // title, so its panel starts CLOSED — a page, its review panel and the
+  // assistant were four columns wide. Persisted like the doc panel's.
+  conceptPanelOpen: boolean;
+  setConceptPanelOpen(v: boolean): void;
   // Left-hand Pages panel on multi-page docs; collapsed state persists.
   docPagesOpen: boolean;
   setDocPagesOpen(v: boolean): void;
@@ -266,20 +300,26 @@ interface UiState {
   issuePrefixes: string;
   setIssuePrefixes(v: string): void;
   /**
-   * A prompt handed to the panel from elsewhere ("Ask the agent to revise").
+   * A prompt handed to the panel from elsewhere ("Ask to revise").
    *
    * M17.6: it carries its SUBJECT. Six call sites used to hand over a prompt
    * string naming a record and drop the record itself on the floor — so the
    * agent was told to revise a concept and then handed whatever surface the
    * user happened to be standing on as context. The subject arrives as a
    * context chip instead: visible, and removable if it was the wrong one.
+   *
+   * M52.3: it carries its LABEL — what the bubble and the thread title say
+   * (`askedAbout` in lib/prompts). A surface's prompt is pages long, and sent
+   * as its own bubble it titled every thread "Recheck the knowledge concept
+   * at knowledge/…". Null sends `text` as the bubble: words a person typed
+   * are already their own label.
    */
-  agentPendingPrompt: { text: string; subject: string | null } | null;
-  setAgentPendingPrompt(v: { text: string; subject: string | null } | null): void;
-  /** Open the panel and hand it a prompt about `subject`. One action because
-   * the two halves were always done together, and doing only the second is a
-   * prompt that lands in a panel nobody can see. */
-  askAgent(text: string, subject?: string | null): void;
+  agentPendingPrompt: PendingPrompt | null;
+  setAgentPendingPrompt(v: PendingPrompt | null): void;
+  /** Open the panel and hand it a prompt about `subject`, shown as `label`.
+   * One action because the two halves were always done together, and doing
+   * only the second is a prompt that lands in a panel nobody can see. */
+  askAgent(text: string, subject?: string | null, label?: string | null): void;
   // --- Automatic learning (M8.6) ---
   /**
    * Let the base read filed captures and edited notes on its own. Persisted.
@@ -369,6 +409,7 @@ interface UiState {
 const EXPANDED_KEY = 'cerebro.expandedFolders';
 const PANEL_OPEN_KEY = 'cerebro.docPanelOpen';
 const PANEL_TAB_KEY = 'cerebro.docPanelTab';
+const CONCEPT_PANEL_OPEN_KEY = 'cerebro.conceptPanelOpen';
 const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
@@ -395,6 +436,7 @@ const SKILL_RUNS_KEY = 'cerebro.skillRuns';
 const TRIGGER_RUNS_KEY = 'cerebro.triggerRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
+const AI_WIDTH_KEY = 'cerebro.aiPanelWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
 const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
 const COLLAPSED_KEY = 'cerebro.collapsed';
@@ -413,9 +455,12 @@ export const THEME_MODE_KEY = 'cerebro.themeMode';
  * 560 rather than the old 420: at 420 a record's properties column and its
  * values were both cramped, and a date range wrapped. The ceiling exists so
  * dragging it to full width cannot hide the canvas the panel is annotating.
+ *
+ * Its drag minimum, DETAIL_WIDTH_MIN below, IS the drawn floor (M52). It was
+ * 360 while the shell draws a squeezed panel down to 320, so a drag at the
+ * floor stored 360 for a panel drawn at 320 — a width the user never saw.
  */
 export const DETAIL_WIDTH_DEFAULT = 560;
-export const DETAIL_WIDTH_MIN = 360;
 export const DETAIL_WIDTH_MAX = 1000;
 export const SIDEBAR_WIDTH_DEFAULT = 264;
 export const SIDEBAR_WIDTH_MIN = 180;
@@ -433,8 +478,39 @@ export const SIDEBAR_WIDTH_MAX = 460;
  * text one character per line.
  */
 export const CANVAS_MIN_WIDTH = 400;
-/** How narrow the right-hand slot may get before the sidebar has to yield. */
+/** How narrow a right-hand panel is drawn before the sidebar has to yield. */
 export const RIGHT_PANEL_MIN_WIDTH = 320;
+export const DETAIL_WIDTH_MIN = RIGHT_PANEL_MIN_WIDTH;
+
+/**
+ * The assistant's width (M15). It was a fixed 380px you could only toggle,
+ * which made tool-call JSON unreadable on a wide screen and the assistant
+ * impossible to give ground on a narrow one.
+ */
+export const AI_WIDTH_DEFAULT = 380;
+export const AI_WIDTH_MIN = RIGHT_PANEL_MIN_WIDTH;
+export const AI_WIDTH_MAX = 720;
+
+/**
+ * A page's own panels: the side panel (DocSidePanel) and a multi-page doc's
+ * Pages panel (DocPagesPanel) — their widths, and how far they give.
+ *
+ * The page's reading column gives first, down to DOC_COLUMN_MIN_WIDTH, and
+ * only then the panels, down to their floors. Past that the Pages panel folds
+ * to its button, then the side panel folds too, and either opens on request
+ * as a drawer over the column (app/shellLayout.ts `pageAsides`) — never by
+ * squeezing the column further.
+ *
+ * 360, not the 200 it was: at 200 a concept's title broke mid-word ("Syn/c/
+ * erro/r/rate") and its review bar, which needs 309px, lost Verify off its
+ * right edge. The floors add to more than CANVAS_MIN_WIDTH on purpose — a
+ * canvas that cannot hold them folds the panel instead.
+ */
+export const DOC_PANEL_WIDTH = 272;
+export const DOC_PANEL_MIN_WIDTH = 200;
+export const DOC_PAGES_WIDTH = 216;
+export const DOC_PAGES_MIN_WIDTH = 180;
+export const DOC_COLUMN_MIN_WIDTH = 360;
 
 function loadNumber(key: string, fallback: number, min: number, max: number): number {
   const raw = Number(loadString(key, String(fallback)));
@@ -643,6 +719,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ detailWidth: clamped });
   },
 
+  aiPanelWidth: loadNumber(AI_WIDTH_KEY, AI_WIDTH_DEFAULT, AI_WIDTH_MIN, AI_WIDTH_MAX),
+  setAiPanelWidth: (px) => {
+    const clamped = Math.round(Math.min(AI_WIDTH_MAX, Math.max(AI_WIDTH_MIN, px)));
+    storeString(AI_WIDTH_KEY, String(clamped));
+    set({ aiPanelWidth: clamped });
+  },
+
   sidebarWidth: loadNumber(
     SIDEBAR_WIDTH_KEY,
     SIDEBAR_WIDTH_DEFAULT,
@@ -738,6 +821,13 @@ export const useUiStore = create<UiState>((set, get) => ({
   setDocPanelTab: (tab) => {
     storeString(PANEL_TAB_KEY, tab);
     set({ docPanelTab: tab });
+  },
+  conceptPanelTab: 'details',
+  setConceptPanelTab: (tab) => set({ conceptPanelTab: tab }),
+  conceptPanelOpen: loadString(CONCEPT_PANEL_OPEN_KEY, 'false') === 'true',
+  setConceptPanelOpen: (v) => {
+    storeString(CONCEPT_PANEL_OPEN_KEY, String(v));
+    set({ conceptPanelOpen: v });
   },
   docPagesOpen: loadString(PAGES_OPEN_KEY, 'true') === 'true',
   setDocPagesOpen: (v) => {
@@ -879,12 +969,15 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   agentPendingPrompt: null,
   setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
-  askAgent: (text, subject = null) => {
+  askAgent: (text, subject = null, label = null) => {
     storeString(AI_PANEL_KEY, 'true');
-    set({ aiPanelOpen: true, agentPendingPrompt: { text, subject } });
+    set({ aiPanelOpen: true, agentPendingPrompt: { text, subject, label } });
   },
 
-  autoLearn: loadString(AUTO_LEARN_KEY, 'true') === 'true',
+  // Off until asked for (M49.7, K20): unattended runs cost money and
+  // rewrite knowledge, so they are opted into, never inherited. A choice
+  // already stored is kept.
+  autoLearn: loadString(AUTO_LEARN_KEY, 'false') === 'true',
   setAutoLearn: (v) => {
     storeString(AUTO_LEARN_KEY, String(v));
     set({ autoLearn: v });

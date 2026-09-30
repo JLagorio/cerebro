@@ -4,26 +4,24 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FavoriteStar } from '@/app/FavoriteStar';
 import { agentRef, isAgentEntry } from '@/engine/agents';
+import { actorLabel, CONSTRUCT_ACTORS } from '@/engine/authors';
 import { agentDraft, type AgentDraft } from '@/engine/libraryDraft';
 import { holdsProposalTools, proposalConsequence } from '@/engine/tools';
+import { instantText } from '@/engine/whenText';
 import type { Entry, Selection } from '@/engine/types';
 import { ConceptBody } from '@/knowledge/ConceptBody';
+import { useConcepts } from '@/knowledge/useConcepts';
 import * as ipc from '@/lib/ipc';
-import { readNote, updateFrontmatter } from '@/lib/ipc';
+import { readNote, updateFrontmatter, type FleetRunDetail } from '@/lib/ipc';
 import type { FleetRun } from '@/lib/mockIpc';
 import { AgentRoster } from '@/status/AgentRoster';
 import { FleetSection } from '@/status/FleetSection';
+import { RunDetailPanel } from '@/status/RunDetailPanel';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 export type AgentsSelection = Extract<Selection, { kind: 'agents' }>;
-
-/** The three internal constructs (`agent::meter::CONSTRUCT_ACTORS`) — spawned
- * from Rust, grants structural, permanently record-less by the M35 decision.
- * Named here so their pages can SAY that instead of offering an editor that
- * could not exist. */
-const CONSTRUCT_ACTORS = ['agent:m26-ingest', 'agent:m26-maintenance', 'agent:m26-synthesis'];
 
 /** Frontmatter stripped for the charter render — the record keeps it; the
  * grants panel beside it is the frontmatter, read properly. */
@@ -86,7 +84,16 @@ function GrantsSummary({ draft }: { draft: AgentDraft }) {
       {draft.shell && <GrantRow label="Shell" value="host tools, capped by the Settings ceiling" />}
       <GrantRow
         label="Schedule"
-        value={draft.schedule === '' ? 'none — runs when asked' : draft.schedule}
+        // The roster's words (M52.3), so the row and the page agree — but
+        // only "off duty" when nothing else fires it: an agent with standing
+        // triggers and no schedule is on duty, on events (M52.4).
+        value={
+          draft.schedule === ''
+            ? draft.triggers.length > 0
+              ? 'none — its triggers fire it'
+              : 'none — off duty, runs only when you ask'
+            : draft.schedule
+        }
       />
       <GrantRow
         label="Triggers"
@@ -112,7 +119,18 @@ function GrantsSummary({ draft }: { draft: AgentDraft }) {
  * statement: hops bill to the root's ceiling.
  */
 function RunHistory({ actor }: { actor: string }) {
+  const entries = useVaultStore((s) => s.entries);
   const [runs, setRuns] = useState<Read<FleetRun[]>>({ kind: 'loading' });
+  // M50.3: a run opens where it is listed. These rows were inert, so the one
+  // page about an agent could not show what any of its runs did.
+  const [open, setOpen] = useState<FleetRunDetail | null>(null);
+  const openRun = (runId: string) => {
+    if (open?.run.run_id === runId) {
+      setOpen(null);
+      return;
+    }
+    ipc.fleetRunDetail(runId).then(setOpen, () => setOpen(null));
+  };
 
   useEffect(() => {
     let live = true;
@@ -162,16 +180,26 @@ function RunHistory({ actor }: { actor: string }) {
       : // The zeros a lost run leaves behind are not a measurement.
         'usage unknown';
 
+  // A hop is another worker's run, named as the app names it (M52.3); the
+  // stamp the runtime recorded stays in the tooltip.
+  const who = (raw: string | null) => actorLabel(raw, entries);
+
   const row = (run: FleetRun, hop: boolean) => (
-    <div
+    <button
+      type="button"
       key={run.run_id}
       data-testid={hop ? 'agent-run-hop' : 'agent-run'}
       data-run={run.run_id}
-      className={`flex items-center gap-2 rounded-md px-2 py-1 text-sm ${hop ? 'ml-6 border-l-2 border-n-200' : ''}`}
+      aria-expanded={open?.run.run_id === run.run_id}
+      onClick={() => openRun(run.run_id)}
+      className={`flex w-full items-center gap-2 rounded-md bg-transparent px-2 py-1 text-left text-sm hover:bg-n-50 ${hop ? 'ml-6 border-0 border-l-2 border-solid border-n-200' : 'border-0'}`}
     >
       {hop && <Icon name="corner-down-right" size={13} color="var(--n-400)" />}
-      <span className="min-w-0 flex-1 truncate text-n-800">
-        {hop ? (run.actor ?? 'unattributed') : run.started_at.slice(0, 16).replace('T', ' ')}
+      <span
+        className="min-w-0 flex-1 truncate text-n-800"
+        title={hop ? (run.actor ?? undefined) : run.started_at}
+      >
+        {hop ? who(run.actor).text : instantText(run.started_at)}
       </span>
       <span className="flex-none text-xs text-n-500">
         {run.lane} · {run.mode}
@@ -182,7 +210,7 @@ function RunHistory({ actor }: { actor: string }) {
       >
         {run.outcome}
       </span>
-    </div>
+    </button>
   );
 
   return (
@@ -197,11 +225,19 @@ function RunHistory({ actor }: { actor: string }) {
                 data-testid="agent-run-parent"
                 className="m-0 ml-2 text-xs leading-[17px] text-n-500"
               >
-                ↳ a hop from {parent?.actor ?? `run ${run.parent_run_id}`} — billed to that run's
-                ceiling
+                ↳ a hop from{' '}
+                <span title={parent?.actor ?? undefined}>
+                  {parent === null ? `run ${run.parent_run_id}` : who(parent.actor).text}
+                </span>{' '}
+                — billed to that run's ceiling
               </p>
             )}
             {row(run, false)}
+            {open?.run.run_id === run.run_id && (
+              <div className="my-1">
+                <RunDetailPanel detail={open} onClose={() => setOpen(null)} />
+              </div>
+            )}
             {hops.length > 0 && (
               <>
                 {hops.map((hopRun) => row(hopRun, true))}
@@ -214,6 +250,59 @@ function RunHistory({ actor }: { actor: string }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * What this agent has put into Knowledge (M50.3): the concepts stamped with
+ * its actor — found by the stamp, never by a title — and, for the agent that
+ * maintains Knowledge, the whole of it. The agent's page used to know its
+ * grants and runs and nothing of what they produced, while every concept it
+ * wrote named it.
+ */
+function AgentKnowledge({ actor, maintains }: { actor: string; maintains: boolean }) {
+  const navigate = useNavStore((s) => s.navigate);
+  const concepts = useConcepts();
+  const wrote = concepts.filter((c) => c.generated?.by.raw === actor);
+  if (wrote.length === 0 && !maintains) return null;
+  return (
+    <div data-testid="agent-knowledge" className="mt-6">
+      <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+        Knowledge
+      </div>
+      {maintains && (
+        <button
+          type="button"
+          data-testid="agent-maintains"
+          onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
+          className="mb-1 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-sm text-n-700 hover:bg-n-50"
+        >
+          <Icon name="brain" size={14} color="var(--synapse-500)" />
+          Maintains Knowledge · {concepts.length} concept{concepts.length === 1 ? '' : 's'}
+        </button>
+      )}
+      {wrote.length === 0 ? (
+        <p className="m-0 px-2 text-sm text-n-500">It has not written a concept yet.</p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-px p-0">
+          {wrote.map((c) => (
+            <li key={c.entry.path}>
+              <button
+                type="button"
+                data-testid="agent-wrote"
+                data-path={c.entry.path}
+                onClick={() => navigate({ kind: 'doc', path: c.entry.path })}
+                className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left text-sm hover:bg-n-50"
+              >
+                <Icon name="lightbulb" size={13} color="var(--n-400)" />
+                <span className="min-w-0 flex-1 truncate text-n-800">{c.title}</span>
+                <span className="flex-none text-xs text-n-500">{c.conceptType}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -247,14 +336,17 @@ function AgentDetail({ actor }: { actor: string }) {
   }, [entry, vaultPath]);
 
   if (entry === undefined) {
-    if (CONSTRUCT_ACTORS.includes(actor)) {
+    // The three internal constructs (`agent::meter::CONSTRUCT_ACTORS`) are
+    // permanently record-less — `meter.rs` records why — so their page says
+    // so, in plain words, instead of offering an editor that could not exist.
+    const construct = CONSTRUCT_ACTORS.find((c) => c.actor === actor);
+    if (construct !== undefined) {
       return (
         <div className="mx-auto w-full max-w-[720px] px-6 py-5" data-testid="agent-construct">
-          <p className="m-0 text-sm leading-[19px] text-n-600">
-            <strong>{actor}</strong> is an internal construct — permanently, by the M35 decision.
-            Its grants are structural, its spawn sites are Rust, and a record would hand vault
-            frontmatter the steering of machinery the vault must not steer. It has run history below
-            and no editor anywhere, on purpose.
+          <p className="m-0 text-sm leading-[19px] text-n-600" title={actor}>
+            <strong>{construct.label}</strong> is work Cerebro runs itself, not an agent you manage.
+            It has no record and nothing to edit — what it may do is fixed in the app, not set by a
+            page in your vault. Its runs are below.
           </p>
           <div className="mt-4">
             <RunHistory actor={actor} />
@@ -360,6 +452,11 @@ function AgentDetail({ actor }: { actor: string }) {
           <GrantsSummary draft={draft} />
         </div>
 
+        <AgentKnowledge
+          actor={actor}
+          maintains={agentRef(entry).capabilities.includes('knowledge')}
+        />
+
         <div className="mb-1 mt-6 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
           Runs
         </div>
@@ -419,18 +516,21 @@ export function AgentsPage({ selection }: { selection: AgentsSelection }) {
           New agent
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-4">
         {/* The roster's click OPENS the agent here — on this surface an agent
-            is a destination, not a filter. Base's fleet tab keeps the filter
-            semantic; two surfaces, two questions, one component. */}
-        <AgentRoster
-          vaultPath={vaultPath}
-          focus={null}
-          onFocus={(actor) => {
-            if (actor !== null) navigate({ kind: 'agents', actor });
-          }}
-        />
-        <FleetSection />
+            is a destination, not a filter. The fleet lives here alone since
+            M50.5; Knowledge's old runs deep link still renders the filtering
+            copy, and has no tab of its own. */}
+        <section data-section="fleet" className="flex flex-col gap-2">
+          <AgentRoster
+            vaultPath={vaultPath}
+            focus={null}
+            onFocus={(actor) => {
+              if (actor !== null) navigate({ kind: 'agents', actor });
+            }}
+          />
+          <FleetSection />
+        </section>
       </div>
     </div>
   );

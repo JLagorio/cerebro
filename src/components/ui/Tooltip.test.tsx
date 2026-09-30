@@ -170,4 +170,26 @@ describe('IconButton tooltip', () => {
       { timeout: 2000 },
     );
   });
+
+  // M52: a drawer's toggle, left under a resting pointer as the drawer
+  // opened, brought its tooltip up over the drawer to take the first Escape.
+  it('withholds the tooltip when asked, keeping the button and its name', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<IconButton icon="panel-right" label="Show panel" />);
+    const button = screen.getByRole('button', { name: 'Show panel' });
+    await user.hover(button);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeTruthy(), { timeout: 2000 });
+
+    rerender(<IconButton icon="panel-right" label="Show panel" tooltip={false} />);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(hasLayers()).toBe(false);
+    // The same node: a drawer hands focus back to the toggle it came from.
+    expect(screen.getByRole('button', { name: 'Show panel' })).toBe(button);
+
+    // Nor does it come back by itself once allowed again.
+    rerender(<IconButton icon="panel-right" label="Show panel" />);
+    expect(screen.getByRole('button', { name: 'Show panel' })).toBe(button);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
 });

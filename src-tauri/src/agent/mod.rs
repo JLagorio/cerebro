@@ -639,6 +639,41 @@ const INTERNAL_DISALLOWED: [&str; 11] = [
     "Bash",
 ];
 
+/// The CLI's built-in writers (M49.4, K7). `acceptEdits` auto-approves
+/// them inside the cwd — which is the vault — whether or not they were
+/// granted, and `--setting-sources user` imports the person's own global
+/// allow rules besides. A run WITHOUT shell therefore had a side door past
+/// every guard in knowledge.rs: an unattended recheck could Edit
+/// `knowledge/`, `log.md`, even `.cerebro/`. Denied on every run that was
+/// not granted shell — a shell grant is the deliberate, Settings-ceilinged
+/// choice that includes them, and a denylist on it would silently override
+/// the grant.
+const UNGRANTED_WRITERS: [&str; 5] = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"];
+
+/// A tool call's input, shortened for the event stream WITHOUT breaking it
+/// (M49.9, K25): each long string value is cut, never the JSON. It used to
+/// be the serialized input cut at 200 characters — a write_concept body is
+/// always longer, so the run log's `writtenPath` could never parse it and
+/// every knowledge run logged `files: []`, "wrote nothing" and "did not
+/// look" reading the same.
+fn tool_input_preview(input: &Value) -> String {
+    const MAX_STRING: usize = 160;
+    fn shorten(value: &Value) -> Value {
+        match value {
+            Value::String(s) if s.chars().count() > MAX_STRING => Value::String(format!(
+                "{}…",
+                s.chars().take(MAX_STRING).collect::<String>()
+            )),
+            Value::Array(items) => Value::Array(items.iter().map(shorten).collect()),
+            Value::Object(map) => {
+                Value::Object(map.iter().map(|(k, v)| (k.clone(), shorten(v))).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    shorten(input).to_string()
+}
+
 pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Vec<String> {
     let tools = narrow(
         tool_policy(req.shell.unwrap_or(false)),
@@ -669,9 +704,15 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Ve
         args.push(INTERNAL_DISALLOWED.join(","));
     } else {
         // The CLI's own gate stays out of the way: cerebro's tools enforce
-        // their boundaries themselves, and shell access is decided above.
+        // their boundaries themselves, and shell access is decided above —
+        // which is exactly why a run without it must not keep the built-in
+        // writers `acceptEdits` would wave through (M49.4).
         args.push("--permission-mode".into());
         args.push("acceptEdits".into());
+        if !req.shell.unwrap_or(false) {
+            args.push("--disallowedTools".into());
+            args.push(UNGRANTED_WRITERS.join(","));
+        }
     }
     args.push("--allowedTools".into());
     args.push(tools.join(","));
@@ -826,6 +867,12 @@ pub fn stream(
     );
     write_run_config(&config_path, &mcp_config_json(&url, &token, &extra_servers))?;
 
+    // M49.9: an attended run's row opens BEFORE the child exists, so every
+    // write it books lands on a row — the first moment its token can be
+    // presented is after this spawn. A spawn that fails takes the row back.
+    if let Some(meter) = &meter {
+        meter::begin(meter);
+    }
     let mut child =
         with_login_path(Command::new(&binary).args(build_args(&req, &config_path, strict_mcp)))
             // The vault is the working directory, so shell-capable modes and the
@@ -835,7 +882,12 @@ pub fn stream(
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
             .spawn()
-            .map_err(|e| format!("could not start Claude Code: {e}"))?;
+            .map_err(|e| {
+                if let Some(meter) = &meter {
+                    meter::discard(meter);
+                }
+                format!("could not start Claude Code: {e}")
+            })?;
 
     let stdout = child.stdout.take().ok_or("agent produced no stdout")?;
     let stderr = child.stderr.take();
@@ -1027,10 +1079,7 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                input: b.get("input").map(|i| {
-                    let text = i.to_string();
-                    text.chars().take(200).collect()
-                }),
+                input: b.get("input").map(tool_input_preview),
             })
             .collect(),
         "user" => content_blocks(value)
@@ -1168,19 +1217,39 @@ mod tests {
     }
 
     #[test]
-    fn a_user_authored_run_keeps_its_shipped_surface_even_unattended() {
+    fn a_shell_granted_run_keeps_its_shipped_surface_even_unattended() {
         // The declared-shell scheduled-agent path (useJobRunner.ts) must keep
-        // working: bounding internal runs may not withdraw a user grant. A
-        // blanket unattended denylist would break it silently, because a
-        // denylist overrides allow grants — which is why the bound is keyed
-        // on internal identity, never attendance.
+        // working: bounding runs may not withdraw a user grant. A denylist
+        // overrides allow grants, so a shell-granted run carries none.
         let mut req = panel_style_request();
         req.internal = false;
         req.attended = Some(false);
+        req.shell = Some(true);
         let args = build_args(&req, Path::new("/tmp/x.json"), true);
         let joined = args.join(" ");
         assert!(!joined.contains("--disallowedTools"));
         assert!(joined.contains("acceptEdits"));
+    }
+
+    // M49.4 (K7): without shell, `acceptEdits` would still auto-approve the
+    // CLI's own Write/Edit inside the vault — past every knowledge guard.
+    #[test]
+    fn a_run_without_shell_cannot_reach_the_vault_through_the_builtin_writers() {
+        for shell in [None, Some(false)] {
+            let mut req = panel_style_request();
+            req.shell = shell;
+            let args = build_args(&req, Path::new("/tmp/x.json"), true);
+            let at = args
+                .iter()
+                .position(|a| a == "--disallowedTools")
+                .expect("the writers are denied");
+            let denied: Vec<&str> = args[at + 1].split(',').collect();
+            for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"] {
+                assert!(denied.contains(&tool), "{tool} denied for shell={shell:?}");
+            }
+            let allowed = &args[args.iter().position(|a| a == "--allowedTools").unwrap() + 1];
+            assert!(!allowed.split(',').any(|t| t == "Write" || t == "Edit"));
+        }
     }
 
     #[test]
@@ -1809,5 +1878,19 @@ mod tests {
         assert!(translate(&json!({ "type": "telemetry" }), &mut session).is_empty());
         assert!(translate(&json!({}), &mut session).is_empty());
         assert!(translate(&json!({ "type": "stream_event" }), &mut session).is_empty());
+    }
+
+    // M49.9 (K25): the preview keeps the path a long write_concept names —
+    // the run log reads it from here.
+    #[test]
+    fn a_long_tool_input_keeps_its_path_and_stays_json() {
+        let input = serde_json::json!({
+            "path": "knowledge/metrics/churn.md",
+            "body": "x".repeat(5_000),
+        });
+        let preview = tool_input_preview(&input);
+        let parsed: serde_json::Value = serde_json::from_str(&preview).unwrap();
+        assert_eq!(parsed["path"], "knowledge/metrics/churn.md");
+        assert!(preview.len() < 400, "{}", preview.len());
     }
 }

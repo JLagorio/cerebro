@@ -311,9 +311,13 @@ export function AddPropertyPanel({
         // disabled). --n-0 fixed that in light and reintroduced it in dark,
         // where the ramp inverts to #15181f and the ink fell back to 2.4:1 on
         // the same fill. --text-inverse is #ffffff in BOTH themes — index.css
-        // names it the ink for anything sitting on --accent or --cortex-* —
-        // so the label holds 7.4:1 either way.
-        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-sm font-medium text-inverse hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
+        // names it the ink for anything sitting on --accent or --cortex-*.
+        // The fill is the DS primary button's own (M52.4): --accent at rest
+        // (cortex-500, white at 5.6:1 in both themes) and --accent-hover
+        // under the pointer — cortex-600 in light, cortex-400 in dark (~3.6:1
+        // under white) — where it was cortex-700, which dark mode turns into
+        // a pale tint that dropped the white label under 2:1.
+        className="mt-0.5 rounded-md border-0 bg-accent px-2 py-1.5 text-sm font-medium text-inverse hover:bg-accent-hover disabled:cursor-default disabled:opacity-40"
       >
         {isPerson ? 'Add person' : 'Add relation'}
       </button>

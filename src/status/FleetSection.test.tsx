@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeEntry } from '@/engine/testHelpers';
+import { localStamp } from '@/engine/whenText';
 import type { FleetRun, FleetRunDetail } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { FleetSection } from './FleetSection';
 
 /**
@@ -53,9 +57,20 @@ function run(over: Partial<FleetRun> = {}): FleetRun {
   };
 }
 
+/** An agent record answering to `process:weekly-digest`. */
+const digestAgent = makeEntry({
+  path: 'records/agents/weekly-digest.md',
+  filename: 'weekly-digest.md',
+  folder: 'records/agents',
+  title: 'Weekly digest',
+  type: 'Agent',
+  properties: { slug: 'weekly-digest' },
+});
+
 describe('FleetSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useVaultStore.setState({ vaultPath: null, entries: [] });
     fleetRuns.mockResolvedValue([run()]);
     fleetRunDetail.mockResolvedValue({
       run: run(),
@@ -85,6 +100,45 @@ describe('FleetSection', () => {
     const row = await screen.findByTestId('fleet-row');
     expect(row.textContent).toContain('unknown');
     expect(row.textContent).not.toContain('0 tokens');
+  });
+
+  it('says an unbooked run\'s proposals are "not recorded", never "0 applied"', async () => {
+    // M49.9: before booking existed nothing wrote these counters, so the
+    // zeros a legacy row carries are not a measurement.
+    const legacy = run({
+      run_id: 'legacy',
+      proposals_submitted: null,
+      applied: null,
+      rejected: null,
+    });
+    fleetRuns.mockResolvedValue([legacy]);
+    fleetRunDetail.mockResolvedValue({ run: legacy, cost_components: null, assembly: null });
+    render(<FleetSection />);
+
+    const row = await screen.findByTestId('fleet-row');
+    expect(row.textContent).toContain('proposals not recorded');
+    expect(row.textContent).not.toMatch(/\bapplied\b/);
+
+    fireEvent.click(row);
+    expect((await screen.findByTestId('run-detail-proposals')).textContent).toBe('not recorded');
+    // No "still waiting" arithmetic over numbers nobody measured.
+    expect(screen.queryByTestId('run-detail-to-review')).toBeNull();
+  });
+
+  it('counts a booked run, and what is left over is still waiting', async () => {
+    const booked = run({ proposals_submitted: 3, applied: 1, rejected: 1 });
+    fleetRuns.mockResolvedValue([booked]);
+    fleetRunDetail.mockResolvedValue({ run: booked, cost_components: null, assembly: null });
+    render(<FleetSection />);
+
+    const row = await screen.findByTestId('fleet-row');
+    expect(row.textContent).toContain('1 applied · 1 rejected');
+
+    fireEvent.click(row);
+    expect((await screen.findByTestId('run-detail-proposals')).textContent).toBe(
+      '3 submitted · 1 applied · 1 rejected',
+    );
+    expect(screen.getByTestId('run-detail-to-review').textContent).toContain('1 still waiting');
   });
 
   it('calls an unattributed run unattributed rather than blank', async () => {
@@ -196,5 +250,81 @@ describe('FleetSection', () => {
     expect((screen.getByTestId('fleet-filter-actor') as HTMLSelectElement).value).toBe(
       'process:weekly-digest',
     );
+  });
+  // --- One cast, one set of names (M52.3) -------------------------------------
+
+  it("names each run's actor in the app's words, keeping the stamp a hover away", async () => {
+    useVaultStore.setState({ entries: [digestAgent] });
+    fleetRuns.mockResolvedValue([
+      run(),
+      run({ run_id: 'r2', actor: 'claude-code' }),
+      run({ run_id: 'r3', actor: 'agent:m26-ingest' }),
+      run({ run_id: 'r4', actor: 'process:retired' }),
+    ]);
+    render(<FleetSection />);
+
+    await screen.findAllByTestId('fleet-row');
+    const actors = screen.getAllByTestId('fleet-actor');
+    expect(actors.map((a) => a.textContent)).toEqual([
+      'Weekly digest',
+      'Assistant',
+      'Background ingest',
+      // Nothing answers to it: shown as written, never guessed at.
+      'process:retired',
+    ]);
+    expect(actors.map((a) => a.getAttribute('title'))).toEqual([
+      'process:weekly-digest',
+      'claude-code',
+      'agent:m26-ingest',
+      'process:retired',
+    ]);
+  });
+
+  it('labels the actor filter in words while its values stay the stamps it matches', async () => {
+    useVaultStore.setState({ entries: [digestAgent] });
+    render(<FleetSection />);
+    await screen.findByTestId('fleet-row');
+
+    const options = [
+      ...(screen.getByTestId('fleet-filter-actor') as HTMLSelectElement).options,
+    ].map((o) => [o.value, o.textContent]);
+    // Every construct is offered before it has run, so "has ingest run at
+    // all?" is answered with a no rather than by a missing option.
+    expect(options).toEqual([
+      ['', 'any'],
+      ['agent:m26-ingest', 'Background ingest'],
+      ['agent:m26-maintenance', 'Background maintenance'],
+      ['agent:m26-synthesis', 'Background synthesis'],
+      ['process:weekly-digest', 'Weekly digest'],
+    ]);
+  });
+
+  it("opens a run under its agent's name, which opens the agent", async () => {
+    useVaultStore.setState({ entries: [digestAgent] });
+    render(<FleetSection />);
+    fireEvent.click(await screen.findByTestId('fleet-row'));
+
+    const agent = await screen.findByTestId('run-detail-agent');
+    expect(agent.textContent).toBe('Weekly digest');
+    fireEvent.click(agent);
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'agents',
+      actor: 'process:weekly-digest',
+    });
+  });
+
+  it("says when a run started and ended on the reader's clock, the ISO a hover away", async () => {
+    render(<FleetSection />);
+    fireEvent.click(await screen.findByTestId('fleet-row'));
+
+    const detail = await screen.findByTestId('run-detail');
+    const started = detail.querySelector('[title="2026-07-28T10:00:00Z"]');
+    expect(started?.textContent).toBe(localStamp(new Date('2026-07-28T10:00:00Z')));
+    expect(detail.querySelector('[title="2026-07-28T10:01:00Z"]')?.textContent).toBe(
+      localStamp(new Date('2026-07-28T10:01:00Z')),
+    );
+    expect(detail.textContent).not.toContain('T10:00:00Z');
+    // An actor nothing answers to has no page to open — and no dead button.
+    expect(screen.queryByTestId('run-detail-agent')).toBeNull();
   });
 });

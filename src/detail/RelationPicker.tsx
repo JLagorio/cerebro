@@ -226,7 +226,7 @@ export function RelationPicker({
                           aria-label={`Move ${entry?.title ?? id} up`}
                           disabled={i === 0}
                           onClick={() => move(i, -1)}
-                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
                         >
                           <Icon name="chevron-up" size={11} />
                         </button>
@@ -235,7 +235,7 @@ export function RelationPicker({
                           aria-label={`Move ${entry?.title ?? id} down`}
                           disabled={i === value.length - 1}
                           onClick={() => move(i, 1)}
-                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
                         >
                           <Icon name="chevron-down" size={11} />
                         </button>

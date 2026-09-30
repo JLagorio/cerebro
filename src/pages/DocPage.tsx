@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { pageAsides } from '@/app/shellLayout';
 import { MoveDialog } from '@/components/MoveDialog';
 import { Button } from '@/components/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
+import { DrawerScrim } from '@/components/ui/DrawerScrim';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FavoriteStar } from '@/app/FavoriteStar';
@@ -22,10 +24,17 @@ import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
+import { isKnowledgePath } from '@/engine/okf';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
+import { ConceptHeading } from '@/knowledge/ConceptHeading';
+import { ConceptReviewBar } from '@/knowledge/ConceptReviewBar';
+import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
+import { ReviewPager } from '@/knowledge/ReviewQueue';
+import { useConcept } from '@/knowledge/useConcepts';
+import { askedAbout, conceptAsk } from '@/lib/prompts';
 import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
@@ -37,10 +46,31 @@ import {
   todayIso,
 } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { DOC_COLUMN_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
+import { useMeasuredWidth } from '@/hooks/useMeasuredWidth';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export type DocSelection = Extract<Selection, { kind: 'doc' }>;
+
+/**
+ * Whether the page at `path` has its side panel open (M52): the shell counts
+ * that panel in the main column's floor, so the sidebar gives before the
+ * page's reading column does. The rule DocPage opens the panel by — a concept
+ * keeps its own flag (M51.3), every other page the doc panel's.
+ */
+export function usePageAsideOpen(path: string | null): boolean {
+  const isConcept = useConcept(path) !== null;
+  const exists = useEntry(path) !== null;
+  const open = useUiStore((s) => (isConcept ? s.conceptPanelOpen : s.docPanelOpen));
+  return exists && open;
+}
+
+/**
+ * Below this the reading column trims the editor's right-hand gutter (M52).
+ * The left one stays: it holds the block handles, and the title, the review
+ * bar and the Knowledge strip are all aligned to it.
+ */
+const DOC_NARROW_COLUMN = 560;
 
 /** True while the doc is effectively empty: at most an H1 plus blank
  * paragraphs — the moment the blank-page template bar should show. */
@@ -85,10 +115,24 @@ function UntitledDocHeading({
   useEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    el.style.height = 'auto';
-    // scrollHeight excludes the border, but the box is border-box, so setting
-    // height to scrollHeight alone clips the last two pixels of a descender.
-    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    const fit = () => {
+      el.style.height = 'auto';
+      // scrollHeight excludes the border, but the box is border-box, so setting
+      // height to scrollHeight alone clips the last two pixels of a descender.
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    };
+    fit();
+    // A narrower column rewraps the title onto lines the old height does not
+    // show (M52). Width only: the fit itself changes the height, and refitting
+    // on that would chase its own tail.
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [draft]);
   return (
     <textarea
@@ -185,10 +229,35 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const replacePath = useNavStore((s) => s.replacePath);
   const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
-  const panelOpen = useUiStore((s) => s.docPanelOpen);
-  const setPanelOpen = useUiStore((s) => s.setDocPanelOpen);
+  const docPanelOpen = useUiStore((s) => s.docPanelOpen);
+  const setDocPanelOpen = useUiStore((s) => s.setDocPanelOpen);
+  const conceptPanelOpen = useUiStore((s) => s.conceptPanelOpen);
+  const setConceptPanelOpen = useUiStore((s) => s.setConceptPanelOpen);
   const pagesOpen = useUiStore((s) => s.docPagesOpen);
   const openLayoutEditor = useUiStore((s) => s.openLayoutEditor);
+  const askAgent = useUiStore((s) => s.askAgent);
+  // M50.1 — a concept is a page. Same canvas, same editor, same panel; what
+  // differs is where its title lives (frontmatter), where its review sits (a
+  // bar under the title, M51.3), and which page actions its folder refuses.
+  const concept = useConcept(selection.path);
+  // The body as the disk last gave it to the editor — what Verify attests.
+  const [viewed, setViewed] = useState<{ path: string; body: string } | null>(null);
+  // M51.3 — a concept's panel keeps its own open state, closed until asked:
+  // its review is the bar under the title, not a column beside it.
+  // `usePageAsideOpen` states the same rule for the shell's floor.
+  const panelOpen = concept !== null ? conceptPanelOpen : docPanelOpen;
+  const setPanelOpen = concept !== null ? setConceptPanelOpen : setDocPanelOpen;
+  // M52: the page body's width decides how its panels are drawn (shellLayout
+  // `pageAsides`), and the column's decides how wide the editor's gutter is.
+  // The fold is decided before paint, or a fast resize draws the side panel
+  // past the canvas for a frame.
+  const [bodyRef, bodyWidth] = useMeasuredWidth({ beforePaint: true });
+  const [columnRef, columnWidth] = useMeasuredWidth();
+  // A folded panel opens on request as a drawer over the column. Session
+  // state, like the fold it opens over, and held as the PATH it was opened on
+  // so it never follows you to the next page.
+  const [pagesDrawerFor, setPagesDrawerFor] = useState<string | null>(null);
+  const [sideDrawerFor, setSideDrawerFor] = useState<string | null>(null);
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
@@ -204,7 +273,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   // M38.2 — a record is a page too. Same canvas, plus the property surface
   // the panel shows, minus nothing.
-  const record = entry !== null && isRecordEntry(entry);
+  // A concept is never a record page, whatever its `type:` names (M50.1):
+  // its frontmatter is provenance, which the review bar and the Details tab
+  // read, not a property stack to edit.
+  const record = entry !== null && isRecordEntry(entry) && !isKnowledgePath(entry.path);
   // M44.5 — the record page's tabs come from its TYPE (`typeTabs` synthesizes
   // Overview when none are saved) and the open one rides the selection, so
   // "the Spec tab of DOC-14" is a place the back button returns to. A stale
@@ -287,7 +359,40 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   }
 
   const docPages = docPagesFor(entry, entries);
+  const asides = pageAsides({
+    row: bodyWidth,
+    pages: docPages !== null && pagesOpen,
+    side: panelOpen,
+  });
+  // A drawer belongs to the fold it opened over: once the panel fits again,
+  // the next fold starts closed.
+  if (asides.pages && pagesDrawerFor !== null) setPagesDrawerFor(null);
+  if (asides.sideFits && sideDrawerFor !== null) setSideDrawerFor(null);
+  const pagesDrawn =
+    docPages !== null && pagesOpen && (asides.pages || pagesDrawerFor === entry.path);
+  const sideDrawn = panelOpen && (asides.sideFits || sideDrawerFor === entry.path);
+  // Drawn as drawers: over the column, closed by Escape or the scrim.
+  const pagesDrawer = pagesDrawn && !asides.pages;
+  const sideDrawer = sideDrawn && !asides.sideFits;
+  // The toggle speaks for what is on screen. Hiding writes the stored flag —
+  // that is the user's word; a fold never does. Showing a panel with no room
+  // beside the column opens it as a drawer rather than into a fold nobody
+  // can see.
+  const toggleSide = () => {
+    if (sideDrawn) {
+      setPanelOpen(false);
+      setSideDrawerFor(null);
+      return;
+    }
+    if (!panelOpen) setPanelOpen(true);
+    if (!asides.sideFits) setSideDrawerFor(entry.path);
+  };
   const fullWidth = entry.properties.full_width === true;
+  // Everything under knowledge/ is written through the ledger. A concept is
+  // edited as a concept; the rest of the folder (the derived log, cached
+  // sources) is the system's to write and opens read-only.
+  const knowledgeFile = isKnowledgePath(entry.path);
+  const readOnlyFile = knowledgeFile && concept === null;
 
   // M45.1 (spec §3.4) — the type's `layout.heading` renders as the key
   // property strip on EVERY tab of the record page. `stripShows` is derived
@@ -317,7 +422,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
   const folderSegments = entry.folder === '' ? [] : entry.folder.split('/');
-  const crumbFolders = docPages !== null ? folderSegments.slice(0, -1) : folderSegments;
+  const crumbFolders = knowledgeFile
+    ? folderSegments.slice(1)
+    : docPages !== null
+      ? folderSegments.slice(0, -1)
+      : folderSegments;
 
   // A record's crumb root is its backdrop — the Collection it lives in when
   // it has one, its type screen otherwise: the same rule useOpenPath applies
@@ -513,40 +622,70 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // customized. A const, so the guard's narrowing survives into the closure.
   const layoutType = record && entry.type !== null ? entry.type : null;
 
-  const menuItems: ContextMenuItem[] = [
-    {
-      icon: fullWidth ? 'minimize-2' : 'maximize-2',
-      label: fullWidth ? 'Center content' : 'Full width',
-      onSelect: () => void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
-    },
-    ...(layoutType !== null
-      ? [
-          {
-            icon: 'layout',
-            label: 'Customize layout…',
-            onSelect: () => openLayoutEditor(layoutType),
-          },
-        ]
+  // Under knowledge/ the file actions refuse (the folder is written through
+  // the ledger), so they are not offered; what is left is the concept's own.
+  // Its ask is the review bar's, chosen the same way (M52.3) — and, like the
+  // bar, a replaced concept offers none.
+  const knowledgeMenu: ContextMenuItem[] = [
+    ...(concept !== null && concept.supersededBy === null
+      ? [conceptAsk({ path: concept.entry.path, title: concept.title, stale: concept.stale })].map(
+          (act) => ({
+            icon: 'sparkles',
+            label: act.label,
+            onSelect: () =>
+              askAgent(act.text, concept.entry.path, askedAbout(act.label, concept.title)),
+          }),
+        )
       : []),
-    { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
-    { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
     {
-      icon: 'layout-template',
-      label: 'Save as template',
-      onSelect: () => void saveAsTemplate(),
-    },
-    {
-      icon: 'folder-input',
-      label: 'Move to folder…',
-      onSelect: () => setMoving(true),
-    },
-    {
-      icon: 'trash-2',
-      label: isDocMain && deleteSubject.extraPages > 0 ? 'Move doc to Trash' : 'Move to Trash',
-      danger: true,
-      onSelect: () => setConfirmDelete(true),
+      icon: 'brain',
+      label: 'Show in Knowledge',
+      onSelect: () =>
+        navigate(
+          concept !== null
+            ? { kind: 'knowledge', nav: { tab: 'section', folder: concept.section } }
+            : { kind: 'knowledge' },
+        ),
     },
   ];
+
+  const menuItems: ContextMenuItem[] = knowledgeFile
+    ? knowledgeMenu
+    : [
+        {
+          icon: fullWidth ? 'minimize-2' : 'maximize-2',
+          label: fullWidth ? 'Center content' : 'Full width',
+          onSelect: () =>
+            void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
+        },
+        ...(layoutType !== null
+          ? [
+              {
+                icon: 'layout',
+                label: 'Customize layout…',
+                onSelect: () => openLayoutEditor(layoutType),
+              },
+            ]
+          : []),
+        { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
+        { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
+        {
+          icon: 'layout-template',
+          label: 'Save as template',
+          onSelect: () => void saveAsTemplate(),
+        },
+        {
+          icon: 'folder-input',
+          label: 'Move to folder…',
+          onSelect: () => setMoving(true),
+        },
+        {
+          icon: 'trash-2',
+          label: isDocMain && deleteSubject.extraPages > 0 ? 'Move doc to Trash' : 'Move to Trash',
+          danger: true,
+          onSelect: () => setConfirmDelete(true),
+        },
+      ];
 
   const crumb = (label: string, opts: { icon?: string; onClick?: () => void; strong?: boolean }) =>
     opts.onClick !== undefined ? (
@@ -585,6 +724,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           editorControls.current = info;
           setEditor(info.editor);
         }}
+        readOnly={readOnlyFile}
+        sections={concept !== null}
+        onBodyLoaded={concept !== null ? (path, body) => setViewed({ path, body }) : undefined}
       />
       <GitHistoryPanel path={entry.path} />
     </>
@@ -593,26 +735,40 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
       <div className="flex h-11 flex-none items-center gap-0.5 border-b border-n-200 px-3">
-        {record
-          ? recordFolder !== null
-            ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
-                icon: 'folder',
-                onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
-              })
-            : crumb(entry.type ?? 'Records', {
-                icon: 'database',
-                onClick:
-                  entry.type === null
-                    ? undefined
-                    : () => navigate({ kind: 'type', name: entry.type as string }),
-              })
-          : // M38.3: no Docs surface to root at — a doc's crumb is its
-            // folder path, and the Pages tree in the nav is the way up.
-            crumb('Pages', { icon: 'library' })}
+        {knowledgeFile
+          ? crumb('Knowledge', {
+              icon: 'brain',
+              onClick: () => navigate({ kind: 'knowledge' }),
+            })
+          : record
+            ? recordFolder !== null
+              ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
+                  icon: 'folder',
+                  onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
+                })
+              : crumb(entry.type ?? 'Records', {
+                  icon: 'database',
+                  onClick:
+                    entry.type === null
+                      ? undefined
+                      : () => navigate({ kind: 'type', name: entry.type as string }),
+                })
+            : // M38.3: no Docs surface to root at — a doc's crumb is its
+              // folder path, and the Pages tree in the nav is the way up.
+              crumb('Pages', { icon: 'library' })}
         {crumbFolders.map((seg, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
             {separator}
-            {crumb(humanizeSlug(seg), {})}
+            {crumb(
+              humanizeSlug(seg),
+              // A concept's folder is a Knowledge section, and a place.
+              knowledgeFile && i === 0
+                ? {
+                    onClick: () =>
+                      navigate({ kind: 'knowledge', nav: { tab: 'section', folder: seg } }),
+                  }
+                : {},
+            )}
           </span>
         ))}
         {docPages !== null && (
@@ -632,7 +788,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
             {separator}
             {crumb(entry.title, {
-              icon: docPages === null ? 'file-text' : undefined,
+              icon: concept !== null ? 'lightbulb' : docPages === null ? 'file-text' : undefined,
               strong: true,
             })}
           </span>
@@ -653,6 +809,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             {SAVE_LABEL[saveState]}
           </span>
         )}
+        {/* M51.2 — the review queue, walkable from the page it sends you to. */}
+        {/* One line: squeezed beside the assistant it wrapped to "Review 1 of"
+            over "3" and doubled the header's height (M52). */}
+        {concept !== null && (
+          <span className="flex flex-none whitespace-nowrap">
+            <ReviewPager path={entry.path} />
+          </span>
+        )}
         <FavoriteStar path={entry.path} />
         {/* 'Add page' and 'Move to folder' are BOTH in the overflow menu
             below — the toolbar's only labelled control was a duplicate of the
@@ -671,22 +835,58 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           />
         </div>
         <IconButton
-          icon={panelOpen ? 'panel-right-close' : 'panel-right'}
-          label={panelOpen ? 'Hide panel' : 'Show panel'}
+          icon={sideDrawn ? 'panel-right-close' : 'panel-right'}
+          label={sideDrawn ? 'Hide panel' : 'Show panel'}
           size="sm"
-          onClick={() => setPanelOpen(!panelOpen)}
+          // Not while its drawer is open (M52): the pointer that opened it is
+          // still resting here, and the tooltip came up over the drawer and
+          // took the first Escape, so closing it took two.
+          tooltip={!sideDrawer}
+          onClick={toggleSide}
         />
       </div>
-      <div className="flex min-h-0 flex-1">
-        {docPages !== null && pagesOpen && (
+      {/* `relative` hosts a folded panel's drawer (M52). */}
+      <div ref={bodyRef} className="relative flex min-h-0 flex-1">
+        {/* A drawer closes on Escape or a press on the column it covers, and
+            neither writes the stored open flag — the fold is not the user's
+            word, so neither is its drawer's close (M52). */}
+        {(pagesDrawer || sideDrawer) && (
+          <DrawerScrim
+            onDismiss={() => {
+              setPagesDrawerFor(null);
+              setSideDrawerFor(null);
+            }}
+            label="Close the panel"
+            testId="doc-drawer-scrim"
+            className="absolute inset-0 z-10"
+          />
+        )}
+        {pagesDrawn && (
           <DocPagesPanel
             pages={docPages}
             activePath={entry.path}
             onAddPage={() => setAddingPage(true)}
+            onHide={pagesDrawer ? () => setPagesDrawerFor(null) : undefined}
           />
         )}
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
+        {/* The reading column gives first, but only down to its floor — then
+            the panels give, then fold (M52). It had `min-w-0`, so
+            beside a wide assistant it went to 128px while the side panel
+            kept all 272. */}
+        <div
+          ref={columnRef}
+          data-testid="doc-column"
+          className={[
+            'relative flex min-h-0 flex-1 flex-col',
+            columnWidth !== null && columnWidth < DOC_NARROW_COLUMN ? 'cb-doc-narrow' : '',
+          ].join(' ')}
+          style={{ minWidth: DOC_COLUMN_MIN_WIDTH }}
+        >
+          {docPages !== null && !pagesDrawn && (
+            <DocPagesFloatingButton
+              onOpen={pagesOpen ? () => setPagesDrawerFor(entry.path) : undefined}
+            />
+          )}
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div
               data-testid="doc-content"
@@ -703,11 +903,41 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                       of the editor — rendering a second heading above it would
                       show the same string twice, which is the bug this fixes,
                       not a second copy of it. */}
-                  {!titled && (
-                    <UntitledDocHeading
-                      title={entry.title}
-                      onCommit={(next) => void adoptTitle(next)}
-                    />
+                  {/* M50.2 — what Knowledge holds about this page, where the
+                      page is read. Silent when there is nothing, and absent
+                      under knowledge/ (a concept's relations are its details). */}
+                  {!knowledgeFile && <KnowledgeStrip entry={entry} />}
+                  {concept !== null ? (
+                    <>
+                      <ConceptHeading concept={concept} />
+                      {/* Keyed by the concept (M52.4): the pager's Next swaps
+                          the concept under a mounted page, so the bar reads
+                          the proposal queue afresh for the concept now shown,
+                          and a Verify in flight stays with the one it began
+                          on. */}
+                      <ConceptReviewBar
+                        key={concept.entry.path}
+                        concept={concept}
+                        viewedBody={
+                          viewed !== null && viewed.path === entry.path ? viewed.body : null
+                        }
+                        verifyBlocked={
+                          saveState === 'dirty' || saveState === 'saving'
+                            ? 'Saving your edit — Verify when it lands.'
+                            : saveState === 'failed'
+                              ? "Your last edit didn't save — Verify would attest the older text."
+                              : null
+                        }
+                      />
+                    </>
+                  ) : (
+                    !titled &&
+                    !knowledgeFile && (
+                      <UntitledDocHeading
+                        title={entry.title}
+                        onCommit={(next) => void adoptTitle(next)}
+                      />
+                    )
                   )}
                   {/* M45.1 — the key-property strip, on every tab. M46.1: so
                       is its expander, because the stack it opens is the same
@@ -817,12 +1047,19 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               )}
             </div>
           </div>
-          {blank && !busy && (
+          {blank && !busy && !knowledgeFile && (
             <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />
           )}
         </div>
-        {panelOpen && (
-          <DocSidePanel entry={entry} schema={schema} editor={editor} scrollRef={scrollRef} />
+        {sideDrawn && (
+          <DocSidePanel
+            overlay={sideDrawer}
+            entry={entry}
+            schema={schema}
+            editor={editor}
+            scrollRef={scrollRef}
+            concept={concept}
+          />
         )}
       </div>
 

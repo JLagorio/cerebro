@@ -63,9 +63,13 @@ pub struct FleetRun {
     pub usage_state: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub proposals_submitted: u64,
-    pub applied: u64,
-    pub rejected: u64,
+    /// The three proposal counters are `None` — NOT RECORDED — on a row
+    /// with `counters_booked = 0`: one written before M49.9, when nothing
+    /// booked them and their zeros were never a measurement. On a booked
+    /// row, `0` is measured-at-zero.
+    pub proposals_submitted: Option<u64>,
+    pub applied: Option<u64>,
+    pub rejected: Option<u64>,
     /// M34.3's hop lineage, surfaced in M41: the run this one was spawned
     /// FROM. `None` is a root — every run before handoffs existed, and every
     /// run a person or a schedule started directly.
@@ -126,8 +130,9 @@ pub struct ActorSummary {
     pub output_tokens: u64,
     pub unknown_runs: u64,
     /// Rows still carrying `outcome = 'running'` (M33b.4). This is the whole
-    /// of what "working" means on the fleet surface: a run the dispatcher
-    /// opened and has not finalized. It is a COUNT rather than a flag because
+    /// of what "working" means on the fleet surface: a run whose row was
+    /// opened — by the ambient claim, or at an attended spawn since M49.9 —
+    /// and has not been finalized. It is a COUNT rather than a flag because
     /// the row count is what the table holds, and a surface that wants a
     /// boolean can ask whether it is above zero — the reverse is lossy the
     /// day the concurrency ceiling stops being one.
@@ -140,9 +145,13 @@ pub struct ActorSummary {
 
 const RUN_COLUMNS: &str = "run_id, actor, vault_id, mode, lane, started_at, ended_at, outcome, \
                            usage_state, input_tokens, output_tokens, proposals_submitted, \
-                           applied, rejected, parent_run_id";
+                           applied, rejected, parent_run_id, counters_booked";
 
 fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
+    let booked = row.get::<_, i64>(15)? != 0;
+    let counter = |index: usize| -> rusqlite::Result<Option<u64>> {
+        Ok(booked.then_some(row.get::<_, i64>(index)? as u64))
+    };
     Ok(FleetRun {
         run_id: row.get(0)?,
         actor: row.get(1)?,
@@ -155,9 +164,9 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
         usage_state: row.get(8)?,
         input_tokens: row.get::<_, i64>(9)? as u64,
         output_tokens: row.get::<_, i64>(10)? as u64,
-        proposals_submitted: row.get::<_, i64>(11)? as u64,
-        applied: row.get::<_, i64>(12)? as u64,
-        rejected: row.get::<_, i64>(13)? as u64,
+        proposals_submitted: counter(11)?,
+        applied: counter(12)?,
+        rejected: counter(13)?,
         parent_run_id: row.get(14)?,
     })
 }
@@ -513,6 +522,128 @@ mod tests {
         assert_eq!(hop.parent_run_id.as_deref(), Some("root"));
         let root = all.iter().find(|r| r.run_id == "root").unwrap();
         assert_eq!(root.parent_run_id, None, "a root run reads back as one");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M49.9: before booking existed nothing wrote the proposal counters, so
+    // a row that predates v18 holds zeros nobody measured. It reads back as
+    // NOT RECORDED; an attended row opened at spawn reads back as booked —
+    // what the run booked while it wrote survives its finish, and a quiet
+    // run's zero is measured-at-zero. A row the meter could only write at
+    // the end stood for no booking, and reads as not recorded too. The
+    // fixture stands at v17 — the version a dev database may already be at
+    // — and upgrades through v18.
+    #[test]
+    fn a_row_from_before_booking_reads_as_not_recorded_and_a_new_row_as_booked() {
+        use crate::runtime::{dispatch, schema, MIGRATIONS};
+        let _sink = crate::runtime::sink::test_lock();
+        let dir = testutil::temp_vault("fleet-unbooked");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(crate::runtime::runtime_db_path(&dir)).unwrap();
+        let mut sql = String::from("BEGIN;");
+        for migration in MIGRATIONS.iter().filter(|m| m.to <= 17) {
+            sql.push_str(migration.sql);
+        }
+        sql.push_str("PRAGMA user_version = 17; COMMIT;");
+        conn.execute_batch(&sql).unwrap();
+        // v3's `validate` seeds the lane registry, and raw SQL does not run it.
+        for (lane, priority, enabled) in schema::LANES {
+            conn.execute(
+                "INSERT INTO lane_registry (lane, priority, enabled_by_default, \
+                 introduced_version) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![lane, priority, i64::from(enabled), schema::LANE_INTRODUCED],
+            )
+            .unwrap();
+        }
+        // A pre-M49.9 row: 0 applied that nobody ever wrote.
+        conn.execute(
+            "INSERT INTO runs (run_id, mode, lane, started_at, ended_at, outcome, usage_state, \
+             input_tokens, output_tokens, cache_read, cache_write, reserved_total_tokens, \
+             reserved_output_tokens, proposals_submitted, applied, rejected) \
+             VALUES ('legacy', 'attended', 'agent', '2026-08-09T10:00:00.000Z', \
+             '2026-08-09T10:01:00.000Z', 'succeeded', 'exact', 5, 1, 0, 0, 0, 0, 0, 0, 0)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = crate::runtime::open(&dir).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 18, "v17 upgrades through v18");
+        let at = chrono::DateTime::parse_from_rfc3339("2026-09-27T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let finish = |run_id: &str| {
+            dispatch::meter_attended(
+                &conn,
+                run_id,
+                None,
+                None,
+                dispatch::RunOutcome::Succeeded,
+                None,
+                None,
+                None,
+                None,
+                at,
+                at,
+            )
+            .unwrap()
+        };
+        // The production order: open at spawn, book mid-run through the
+        // sink (as a write inside the run does), finish.
+        crate::runtime::sink::arm(&dir).unwrap();
+        dispatch::begin_attended(&conn, "fresh", None, None, None, None, at).unwrap();
+        crate::policy::commit::CommitOutcome {
+            commit_set_id: "set".into(),
+            transition: crate::policy::commit::TransitionCode::Apply,
+            results: vec![crate::policy::submit::SubmitResult::Applied {
+                proposal_id: "p1".into(),
+                resulting_versions: vec![],
+            }],
+            batch_id: "batch".into(),
+            replayed: false,
+            kept: vec![],
+        }
+        .book("fresh");
+        crate::runtime::sink::disarm();
+        finish("fresh");
+        dispatch::begin_attended(&conn, "quiet", None, None, None, None, at).unwrap();
+        finish("quiet");
+        finish("late");
+
+        let all = runs(&conn, &Filter::default()).unwrap();
+        let legacy = all.iter().find(|r| r.run_id == "legacy").unwrap();
+        assert_eq!(
+            (legacy.proposals_submitted, legacy.applied, legacy.rejected),
+            (None, None, None),
+            "zeros nobody booked are not recorded, never a measurement"
+        );
+        let fresh = all.iter().find(|r| r.run_id == "fresh").unwrap();
+        assert_eq!(
+            (fresh.proposals_submitted, fresh.applied, fresh.rejected),
+            (Some(1), Some(1), Some(0)),
+            "what the run booked while it wrote survives its finish"
+        );
+        let quiet = all.iter().find(|r| r.run_id == "quiet").unwrap();
+        assert_eq!(
+            (quiet.proposals_submitted, quiet.applied, quiet.rejected),
+            (Some(0), Some(0), Some(0)),
+            "a booked row's zero is measured-at-zero"
+        );
+        let late = all.iter().find(|r| r.run_id == "late").unwrap();
+        assert_eq!(
+            (late.proposals_submitted, late.applied, late.rejected),
+            (None, None, None),
+            "a row written only at the end stood for no booking"
+        );
+        assert_eq!(
+            run_detail(&conn, "legacy").unwrap().run.applied,
+            None,
+            "the detail read says the same"
+        );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
