@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runAgent, stopAllAgents } from '@/agent/agentIpc';
+import NOTE_TARGETS from '../../src-tauri/fixtures/note-targets.json';
 import * as mock from './mockIpc';
 import { sha256Hex } from './sha256';
 
@@ -637,6 +638,119 @@ describe('mockIpc', () => {
       await expect(mock.writeTextFile('/demo-vault', '', 'x\n')).rejects.toThrow(
         /escapes the vault/,
       );
+    });
+  });
+
+  /**
+   * Parity with `note_join` in write.rs (PLATFORM-API-1): the note writers
+   * refuse anything that is not a note — `.git/config`, a ledger segment,
+   * `.claude/settings.json`, a `.canvas`, `views/x.yml`, and the upper-case
+   * spellings APFS folds onto them — and the bundle under any name but its
+   * own, while a note in a folder the scanner lists (`Attachments/`) saves.
+   * One file of cases, replayed through the real doors on BOTH backends, so
+   * the two cannot quietly disagree about a target: a refusal that held only
+   * in Tauri would "work" in dev and vitest and fail in the packaged app. The
+   * other half is write.rs's `note_targets_replay_the_shared_cases`.
+   */
+  describe('note targets (PLATFORM-API-1) — parity with write.rs', () => {
+    interface NoteTargetCase {
+      door: string;
+      path?: string;
+      folder?: string;
+      slug?: string;
+      seed?: boolean;
+      refused?: string;
+      lands?: string;
+      why?: string;
+    }
+    const fs = () =>
+      (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const EDITS = ['save_note', 'update_frontmatter', 'set_note_title'];
+
+    const call = (c: NoteTargetCase): Promise<string> => {
+      const path = c.path ?? '';
+      switch (c.door) {
+        case 'save_note':
+          return mock.saveNote('/demo-vault', path, '\n# Landed\n').then(() => path);
+        case 'update_frontmatter':
+          return mock.updateFrontmatter('/demo-vault', path, { status: 'done' }).then(() => path);
+        case 'set_note_title':
+          return mock.setNoteTitle('/demo-vault', path, 'Landed').then(() => path);
+        case 'create_note':
+          return mock.createNote('/demo-vault', c.folder ?? '', c.slug ?? '', {}, '# Landed\n');
+        case 'write_text_file':
+          return mock.writeTextFile('/demo-vault', path, 'flowchart TD\n');
+        default:
+          throw new Error(`no door called ${c.door}`);
+      }
+    };
+
+    for (const c of NOTE_TARGETS.cases as NoteTargetCase[]) {
+      const target = c.path ?? `${c.folder}/${c.slug}`;
+      it(`${c.door} ${target} ${c.refused === undefined ? 'lands' : 'refuses'}`, async () => {
+        if (EDITS.includes(c.door) && c.seed !== false) fs().set(c.path ?? '', NOTE_TARGETS.seed);
+        const before = new Map(fs());
+        if (c.refused !== undefined) {
+          await expect(call(c)).rejects.toThrow(c.refused);
+          // Every byte where it was, and nothing new beside it.
+          expect(new Map(fs())).toEqual(before);
+        } else {
+          expect(await call(c)).toBe(c.lands);
+          expect(new Map(fs())).not.toEqual(before);
+        }
+      });
+    }
+
+    it('replays every door both backends share', () => {
+      const doors = new Set((NOTE_TARGETS.cases as NoteTargetCase[]).map((c) => c.door));
+      expect([...doors].sort()).toEqual([
+        'create_note',
+        'save_note',
+        'set_note_title',
+        'update_frontmatter',
+        'write_text_file',
+      ]);
+    });
+
+    // The views/attachments rule decides only what is VISIBLE, so it says
+    // exactly what scanVault says: a listed note that will not save is a page
+    // whose every keystroke fails. Parity with write.rs's
+    // `the_note_writers_take_exactly_the_notes_the_scanner_lists`, dotfile
+    // notes included — the one deliberate exception, listed and read-only.
+    it('saves exactly the notes scanVault lists', async () => {
+      const paths = [
+        'records/ok.md',
+        'Attachments/b.md',
+        'Views/a.md',
+        'notes/Views/e.md',
+        'views./d.md',
+        'views/x.md',
+        'attachments/y.md',
+        'notes/views/z.md',
+      ];
+      for (const path of paths) fs().set(path, NOTE_TARGETS.seed);
+      const listed = new Set((await mock.scanVault('/demo-vault')).map((e) => e.path));
+      for (const path of paths) {
+        const saved = await mock.saveNote('/demo-vault', path, '\n# Saved\n').then(
+          () => true,
+          () => false,
+        );
+        expect(saved, path).toBe(listed.has(path));
+      }
+      expect([...listed].filter((p) => paths.includes(p)).sort()).toEqual([
+        'Attachments/b.md',
+        'Views/a.md',
+        'notes/Views/e.md',
+        'records/ok.md',
+        'views./d.md',
+      ]);
+
+      fs().set('records/.draft.md', NOTE_TARGETS.seed);
+      const all = (await mock.scanVault('/demo-vault')).map((e) => e.path);
+      expect(all).toContain('records/.draft.md');
+      await expect(
+        mock.saveNote('/demo-vault', 'records/.draft.md', '\n# Saved\n'),
+      ).rejects.toThrow('dotfiles hold no notes');
     });
   });
 

@@ -8,7 +8,10 @@ use super::entry::{build_entry, Entry};
 
 const SKIPPED_DIRS: [&str; 2] = ["views", "attachments"];
 
-fn is_skipped_dir(name: &str) -> bool {
+/// A folder the scan never descends into, by its exact name. The note
+/// writers ask this same predicate (write.rs `note_refusal`), so a note the
+/// scan lists is a note they will save.
+pub(crate) fn is_skipped_dir(name: &str) -> bool {
     name.starts_with('.') || SKIPPED_DIRS.contains(&name)
 }
 

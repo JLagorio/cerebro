@@ -2622,13 +2622,6 @@ fn governed_compose_refusal(
 /// allows it) and the append that supplies the closing fence promotes the
 /// whole thing to byte-zero frontmatter (PR #17 security review).
 fn governed_append_refusal(vault: &Path, rel: &str, joined: &str) -> Option<&'static str> {
-    // A .mmd is always untyped, the same rule `note_type` keeps: its `---`
-    // header is mermaid config, and a `type:` key in there is diagram data,
-    // not vault schema (M29.23). Refusing here would refuse a write that is
-    // not actually governed.
-    if rel.ends_with(".mmd") {
-        return None;
-    }
     let content = vault::write::saved_note(vault, rel, joined).ok()?;
     governed_type_refusal(vault::parse::declared_type(&content).as_deref())
 }
@@ -2686,8 +2679,11 @@ fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     // Least severe of the three, still a bypass (M17.1): a concept body grown
     // here carries no `sources`, no updated `generated`, and no dedup check.
     crate::knowledge::guard_agent_write(&path)?;
-    let existing = vault::write::read_note(vault, &path)?;
-    let joined = format!("{}\n\n{}\n", existing.trim_end(), content.trim());
+    // Composed by the mechanism, which refuses anything that is not a
+    // markdown note — `.git/config`, a ledger segment, a `.canvas`, a `.mmd`
+    // — before reading a byte of it (PLATFORM-API-1). The grant cannot: an
+    // unscoped run's grant admits every path.
+    let joined = vault::write::appended_body(vault, &path, &content)?;
     // Both directions here too: what the note IS was asked above; this is what
     // the appended bytes will DECLARE.
     if let Some(refusal) = governed_append_refusal(vault, &path, &joined) {
@@ -4573,6 +4569,245 @@ mod tests {
         ok.insert("path".into(), json!("records/notes/n-1.md"));
         ok.insert("patch".into(), json!({ "status": "done" }));
         assert!(tool_update_frontmatter(&dir, &ok).is_ok());
+    }
+
+    /// PLATFORM-API-1. An unrestricted grant — every panel turn, and every
+    /// Agent record without `scope:` — passes every check `call_tool` makes
+    /// before dispatch, for ANY path. So nothing about the grant ever stopped
+    /// an append to `.git/config`, where a planted `core.fsmonitor` runs on
+    /// the app's next `git status` poll and a planted `gpg.program` on its
+    /// next auto-commit, with the agent's shell switched off. The note writers
+    /// refuse now, in the vault's write mechanism, and leave every byte where
+    /// it was.
+    #[test]
+    fn an_unrestricted_run_cannot_write_outside_the_notes() {
+        let dir = crate::vault::testutil::temp_vault("mcp-note-targets");
+        let segment = format!(
+            "{}/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab-0000000000000001{}",
+            crate::ledger::LEDGER_DIR,
+            crate::ledger::segment::SEALED_SUFFIX
+        );
+        let seeded = [
+            (
+                ".git/config",
+                "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+            ),
+            (".cerebro/connectors.json", "{\"mcpServers\":{}}\n"),
+            (segment.as_str(), "{\"seq\":1}\n"),
+            (
+                ".claude/settings.json",
+                "{\"permissions\":{\"allow\":[]}}\n",
+            ),
+            ("views/x.yml", "name: X\npresentation:\n  type: table\n"),
+            ("boards/plan.canvas", "{\"nodes\":[],\"edges\":[]}\n"),
+            ("data/table.csv", "a,b\n1,2\n"),
+            ("data/config.json", "{\"k\":1}\n"),
+            ("diagrams/flow.mmd", "flowchart TD\n  A --> B\n"),
+            ("records/.hidden.md", "---\ntype: Note\n---\n\n# Hidden\n"),
+        ];
+        for (rel, bytes) in seeded {
+            crate::vault::testutil::write(&dir, rel, bytes);
+        }
+        // Every regular file, dot-folders included: changed bytes AND new
+        // files both show up here.
+        let snapshot = || -> BTreeMap<PathBuf, Vec<u8>> {
+            walkdir::WalkDir::new(&dir)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_file())
+                .map(|e| (e.path().to_path_buf(), std::fs::read(e.path()).unwrap()))
+                .collect()
+        };
+        let before = snapshot();
+
+        let grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+        // The spellings APFS folds onto the same files refuse alike.
+        let folded = [
+            ".GIT/config",
+            ".Git/config",
+            ".CEREBRO/connectors.json",
+            ".Claude/settings.json",
+            "Views/x.yml",
+            "VIEWS/X.YML",
+            "boards/PLAN.CANVAS",
+            "data/TABLE.CSV",
+            "data/CONFIG.JSON",
+        ];
+        let targets = seeded.iter().map(|(rel, _)| *rel).chain(folded);
+        for target in targets {
+            let patch: Map<String, Value> = serde_json::from_value(json!({
+                "path": target,
+                "patch": { "core": { "fsmonitor": "touch /tmp/pwned" } }
+            }))
+            .unwrap();
+            let append: Map<String, Value> = serde_json::from_value(json!({
+                "path": target,
+                "content": "[core]\n\tfsmonitor = touch /tmp/pwned"
+            }))
+            .unwrap();
+            for (tool, args) in [("update_frontmatter", &patch), ("append_to_note", &append)] {
+                // Nothing before dispatch stops it: the grant admits both the
+                // path and the tool.
+                assert_eq!(write_target(tool, args).as_deref(), Some(target));
+                assert!(grant.may_write(target));
+                assert!(ungranted_tool_refusal(&grant, tool).is_none());
+                assert!(!writes_preferences(&grant.actor, tool, args));
+                let refusal = match tool {
+                    "update_frontmatter" => tool_update_frontmatter(&dir, args),
+                    _ => tool_append(&dir, args),
+                }
+                .expect_err(&format!("{tool} must refuse {target}"));
+                assert!(refusal.contains(target), "{tool} on {target}: {refusal}");
+            }
+        }
+
+        // create_note names a folder; a hook or a ledger file is still not a note.
+        for (folder, slug) in [
+            (".git/hooks", "pre-commit"),
+            (".GIT/hooks", "post-checkout"),
+            (".cerebro", "connectors"),
+            (".cerebro/ledger", "segment"),
+        ] {
+            let args: Map<String, Value> = serde_json::from_value(json!({
+                "folder": folder,
+                "slug": slug,
+                "body": "#!/bin/sh\ntouch /tmp/pwned\n"
+            }))
+            .unwrap();
+            assert_eq!(write_target("create_note", &args).as_deref(), Some(folder));
+            assert!(grant.may_write(folder));
+            let refusal = tool_create_note(&dir, &args).expect_err("a dot-folder holds no notes");
+            assert!(refusal.starts_with("not a note"), "{refusal}");
+        }
+        // cache_source is exempt from scope by design (no_write_tool_escapes_
+        // the_scope_check); it writes notes all the same.
+        let source: Map<String, Value> = serde_json::from_value(json!({
+            "kind": "issue",
+            "id": "x/.git/hooks/pre-commit",
+            "title": "T",
+            "body": "b"
+        }))
+        .unwrap();
+        assert!(tool_cache_source(&dir, &source, DEFAULT_ACTOR).is_err());
+
+        assert_eq!(snapshot(), before, "every byte where it was, nothing new");
+
+        // An ordinary note still lands, through all three doors.
+        let create: Map<String, Value> = serde_json::from_value(json!({
+            "folder": "records",
+            "slug": "x",
+            "body": "# X\n",
+            "frontmatter": { "type": "Note" }
+        }))
+        .unwrap();
+        let created = tool_create_note(&dir, &create).unwrap();
+        assert_eq!(created["content"][0]["text"], "Created records/x.md");
+        let status: Map<String, Value> = serde_json::from_value(json!({
+            "path": "records/x.md",
+            "patch": { "status": "done" }
+        }))
+        .unwrap();
+        tool_update_frontmatter(&dir, &status).unwrap();
+        let more: Map<String, Value> =
+            serde_json::from_value(json!({ "path": "records/x.md", "content": "Appended." }))
+                .unwrap();
+        tool_append(&dir, &more).unwrap();
+        let landed = std::fs::read_to_string(dir.join("records/x.md")).unwrap();
+        assert!(landed.contains("status: done"), "{landed}");
+        assert!(landed.ends_with("# X\n\nAppended.\n"), "{landed}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The knowledge door's half of the same review. `write_concept` checks
+    /// only that a path is SPELLED `knowledge/…`, and its projection was
+    /// written with a plain join, so a symlinked folder inside the bundle
+    /// carried the concept into `.git/hooks`, or out of the vault. Refused now
+    /// before the transition commits: the ledger's head does not move.
+    #[cfg(unix)]
+    #[test]
+    fn write_concept_cannot_follow_a_symlink_out_of_the_bundle() {
+        let dir = crate::vault::testutil::temp_vault("mcp-concept-symlink");
+        let outside = crate::vault::testutil::temp_vault("mcp-concept-outside");
+        std::fs::create_dir_all(dir.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(dir.join("knowledge")).unwrap();
+        std::os::unix::fs::symlink(dir.join(".git/hooks"), dir.join("knowledge/sys")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("knowledge/out")).unwrap();
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
+        let concept = |path: &str| -> Map<String, Value> {
+            serde_json::from_value(json!({
+                "path": path,
+                "type": "Reference",
+                "title": "Hook",
+                "description": "A concept filed where a git hook would be.",
+                "body": "Filed through a link."
+            }))
+            .unwrap()
+        };
+        let head = || crate::ledger::shadow::state_of(&dir).unwrap().head_seq;
+        let before = head();
+        for (path, landed) in [
+            (
+                "knowledge/sys/pre-commit.md",
+                dir.join(".git/hooks/pre-commit.md"),
+            ),
+            ("knowledge/out/escaped.md", outside.join("escaped.md")),
+        ] {
+            let err = tool_write_concept(&dir, &concept(path), DEFAULT_ACTOR).unwrap_err();
+            assert!(
+                err.contains("outside knowledge/") || err.contains("escapes the vault"),
+                "{path}: {err}"
+            );
+            assert!(!landed.exists(), "{}", landed.display());
+            assert_eq!(head(), before, "{path}: nothing committed");
+        }
+        // The bundle's own folders still take one.
+        tool_write_concept(&dir, &concept("knowledge/systems/hook.md"), DEFAULT_ACTOR).unwrap();
+        assert!(dir.join("knowledge/systems/hook.md").is_file());
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// An agent files a concept where the scan can list it, or not at all.
+    /// The projection writer takes a dot-folder inside the bundle (a person
+    /// archives concepts there), so the agent's doors refuse one themselves —
+    /// with `views/` and `attachments/`, which the scan skips too. Written
+    /// there, a concept sat in the ledger and nowhere in Knowledge, while the
+    /// tool told the agent it was waiting for review.
+    #[test]
+    fn concept_doors_refuse_folders_the_scan_cannot_list() {
+        let dir = crate::vault::testutil::temp_vault("mcp-concept-unlisted");
+        let _shadow = crate::ledger::shadow::testing::activated(&dir);
+        let concept = |path: &str| -> Map<String, Value> {
+            serde_json::from_value(json!({
+                "path": path,
+                "type": "Reference",
+                "title": "Hidden",
+                "description": "A concept filed where the scan never looks.",
+                "body": "Out of sight."
+            }))
+            .unwrap()
+        };
+        let head = || crate::ledger::shadow::state_of(&dir).unwrap().head_seq;
+        let before = head();
+        for path in [
+            "knowledge/.drafts/hidden.md",
+            "knowledge/views/hidden.md",
+            "knowledge/notes/attachments/hidden.md",
+            "knowledge/.hidden.md",
+        ] {
+            let err = tool_write_concept(&dir, &concept(path), DEFAULT_ACTOR).unwrap_err();
+            assert!(err.contains("not a concept path"), "{path}: {err}");
+            assert!(!dir.join(path).exists(), "{path}");
+            assert_eq!(head(), before, "{path}: nothing committed");
+            let recheck: Map<String, Value> =
+                serde_json::from_value(json!({ "path": path, "stale_after": "2099-01-01" }))
+                    .unwrap();
+            let err = tool_recheck_concept(&dir, &recheck, DEFAULT_ACTOR, None).unwrap_err();
+            assert!(err.contains("not a concept path"), "{path}: {err}");
+        }
+        crate::ledger::shadow::deactivate();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

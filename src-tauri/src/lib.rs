@@ -1734,4 +1734,92 @@ mod tests {
         req.allowed_tools = Some(vec!["get_note".into()]);
         assert_eq!(grant_tools(&req), Some(vec!["get_note".into()]));
     }
+
+    /// PLATFORM-API-1, the human half: these commands share the note writers
+    /// the agent's MCP doors use, so they were just as path-unbounded — and
+    /// now refuse the same targets, through the same mechanism.
+    #[test]
+    fn the_ipc_note_commands_refuse_what_is_not_a_note() {
+        let dir = vault::testutil::temp_vault("ipc-note-targets");
+        let seeded = [
+            (".git/config", "[core]\n\tbare = false\n"),
+            (".cerebro/connectors.json", "{\"mcpServers\":{}}\n"),
+            (".claude/settings.json", "{\"permissions\":{}}\n"),
+            ("views/x.yml", "name: X\n"),
+            ("boards/plan.canvas", "{\"nodes\":[]}\n"),
+            ("data/table.csv", "a,b\n"),
+            // The bundle under a spelling APFS folds onto it, which the
+            // commands' knowledge check (ASCII folding) does not read: past
+            // the capture valve, a plain write would land on a concept.
+            (
+                "\u{212a}nowledge/metrics/churn.md",
+                "---\ntype: Metric\n---\n\n# Churn\n",
+            ),
+        ];
+        for (rel, bytes) in seeded {
+            vault::testutil::write(&dir, rel, bytes);
+        }
+        let snapshot = || -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+            walkdir::WalkDir::new(&dir)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_file())
+                .map(|e| (e.path().to_path_buf(), std::fs::read(e.path()).unwrap()))
+                .collect()
+        };
+        let before = snapshot();
+        let v = dir.to_string_lossy().to_string();
+        let mut patch = serde_json::Map::new();
+        patch.insert(
+            "core".into(),
+            serde_json::json!({ "fsmonitor": "touch /tmp/pwned" }),
+        );
+
+        let targets = seeded.iter().map(|(rel, _)| *rel).chain([
+            ".GIT/config",
+            "Views/x.yml",
+            "data/TABLE.CSV",
+        ]);
+        for target in targets {
+            let saved = save_note(v.clone(), target.into(), "pwned\n".into());
+            assert!(saved.unwrap_err().contains(target));
+            let patched = update_frontmatter(v.clone(), target.into(), patch.clone());
+            assert!(patched.unwrap_err().contains(target));
+            let titled = set_note_title(v.clone(), target.into(), "Pwned".into());
+            assert!(titled.unwrap_err().contains(target));
+        }
+        for folder in [".git/hooks", ".cerebro"] {
+            let created = create_note(
+                v.clone(),
+                folder.into(),
+                "pre-commit".into(),
+                serde_json::Map::new(),
+                "#!/bin/sh\n".into(),
+            );
+            assert!(created.unwrap_err().starts_with("not a note"));
+        }
+        assert_eq!(snapshot(), before, "every byte where it was, nothing new");
+
+        // An ordinary note still lands through every one of them.
+        let rel = create_note(
+            v.clone(),
+            "records".into(),
+            "x".into(),
+            serde_json::Map::new(),
+            "# X\n".into(),
+        )
+        .unwrap();
+        assert_eq!(rel, "records/x.md");
+        save_note(v.clone(), rel.clone(), "\n# X\n\nSaved.\n".into()).unwrap();
+        let mut status = serde_json::Map::new();
+        status.insert("status".into(), serde_json::json!("done"));
+        update_frontmatter(v.clone(), rel.clone(), status).unwrap();
+        set_note_title(v.clone(), rel.clone(), "Titled".into()).unwrap();
+        let landed = std::fs::read_to_string(dir.join(&rel)).unwrap();
+        assert!(
+            landed.contains("status: done") && landed.contains("# Titled"),
+            "{landed}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

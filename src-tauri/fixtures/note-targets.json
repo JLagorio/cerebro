@@ -1,0 +1,166 @@
+{
+  "format": 1,
+  "about": "What a note writer may touch (PLATFORM-API-1). A note is a .md file, or a .mmd for the doors that edit diagrams, with no path component starting with '.', and, for markdown, in no folder the scanner skips: exactly views/ or attachments/, at any depth, matched as the scanner matches them, so Views/ and Attachments/, which it lists, hold notes. Nor may a note reach knowledge/ by another name: a first component a folding disk hears as `knowledge` (Unicode case folded, HFS+ ignorables dropped) that the bundle's ASCII-folding guards do not read. Only filesystem-independent cases live here; what a disk folds or a symlink reaches is write.rs's own tests. Replayed through the real doors by note_targets_replay_the_shared_cases in src-tauri/src/vault/write.rs and by src/lib/mockIpc.test.ts. A case whose door edits an existing file is seeded with `seed` first unless it says \"seed\": false. `refused` is a fragment both backends' refusals carry, and a refused case must leave every byte where it was; `lands` is the vault-relative path the door wrote; `why` is for the reader.",
+  "seed": "---\ntype: Note\n---\n\n# Seed\n",
+  "cases": [
+    { "door": "save_note", "path": ".git/config", "refused": "not a note" },
+    { "door": "save_note", "path": ".GIT/config", "refused": "not a note" },
+    { "door": "save_note", "path": ".Git/config", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": "\u200c.claude/agents/note-target-probe.md",
+      "seed": false,
+      "refused": "not a note",
+      "why": "HFS+ ignores U+200C in a name, so on such a disk this IS .claude/agents/, where Claude Code reads agent definitions; with no .claude/ yet, the landing check has nothing to resolve (git's core.protectHFS class)."
+    },
+    {
+      "door": "update_frontmatter",
+      "path": "\ufeff.git/info/note-target-probe.md",
+      "refused": "not a note"
+    },
+    { "door": "save_note", "path": ".cerebro/connectors.json", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": ".cerebro/ledger/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab-0000000000000001.ndjsonl",
+      "refused": "not a note"
+    },
+    { "door": "save_note", "path": ".claude/settings.json", "refused": "not a note" },
+    { "door": "save_note", "path": ".github/pull_request_template.md", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": "records/.hidden.md",
+      "refused": "not a note",
+      "why": "Decided, not overlooked: the scanner still LISTS a dotfile note, and the writers refuse it, so it is read-only in the app. PLATFORM-API-1 refuses every dotfile; hiding them from the scanner too is the owner's call."
+    },
+    { "door": "save_note", "path": "views/x.yml", "refused": "not a note" },
+    { "door": "save_note", "path": "Views/x.yml", "refused": "not a note" },
+    { "door": "save_note", "path": "boards/plan.canvas", "refused": "not a note" },
+    { "door": "save_note", "path": "data/table.csv", "refused": "not a note" },
+    { "door": "save_note", "path": "data/config.json", "refused": "not a note" },
+    { "door": "save_note", "path": "records/x.MD", "refused": "not a note" },
+    { "door": "save_note", "path": "views/x.md", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": "VIEWS/x.md",
+      "lands": "VIEWS/x.md",
+      "why": "The scanner skips exactly views/, so a VIEWS/ folder is one it lists, and a listed note saves. Where a disk folds VIEWS/ onto an existing views/, it lands in views/ and refuses (write.rs tests)."
+    },
+    { "door": "save_note", "path": "views./x.md", "lands": "views./x.md" },
+    { "door": "save_note", "path": "projects/atlas/views/x.md", "refused": "not a note" },
+    { "door": "save_note", "path": "attachments/notes.md", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": "Attachments/notes.md",
+      "lands": "Attachments/notes.md",
+      "why": "An Obsidian habit: the scanner lists Attachments/, so its notes are notes."
+    },
+    { "door": "save_note", "path": "notes/Views/plan.md", "lands": "notes/Views/plan.md" },
+    {
+      "door": "save_note",
+      "path": "know\u200cledge/x.md",
+      "refused": "inside knowledge/ by another name",
+      "why": "HFS+ ignores U+200C ZERO WIDTH NON-JOINER in a name: on such a disk this IS knowledge/."
+    },
+    { "door": "save_note", "path": ".git/flow.mmd", "refused": "not a note" },
+    { "door": "save_note", "path": "../outside.md", "seed": false, "refused": "escapes the vault" },
+    { "door": "save_note", "path": "records/x.md", "lands": "records/x.md" },
+    { "door": "save_note", "path": "diagrams/flow.mmd", "lands": "diagrams/flow.mmd" },
+    {
+      "door": "save_note",
+      "path": "views/whiteboards/board.mmd",
+      "lands": "views/whiteboards/board.mmd"
+    },
+
+    { "door": "update_frontmatter", "path": ".git/config", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": ".GIT/config", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": ".cerebro/connectors.json", "refused": "not a note" },
+    {
+      "door": "update_frontmatter",
+      "path": ".cerebro/ledger/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab-0000000000000001.ndjsonl",
+      "refused": "not a note"
+    },
+    { "door": "update_frontmatter", "path": ".claude/settings.json", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "views/x.yml", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "VIEWS/X.YML", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "boards/plan.canvas", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "data/table.csv", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "data/config.json", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "records/.hidden.md", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "attachments/notes.md", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "diagrams/flow.mmd", "refused": "raw diagram source" },
+    {
+      "door": "update_frontmatter",
+      "path": "\u212anowledge/metrics/churn.md",
+      "refused": "inside knowledge/ by another name",
+      "why": "APFS hears U+212A KELVIN SIGN as k, and the bundle's guards fold ASCII only: a verified stamp patched here lands on a concept."
+    },
+    {
+      "door": "update_frontmatter",
+      "path": "Attachments/notes.md",
+      "lands": "Attachments/notes.md"
+    },
+    { "door": "update_frontmatter", "path": "records/x.md", "lands": "records/x.md" },
+
+    { "door": "set_note_title", "path": ".git/config", "refused": "not a note" },
+    { "door": "set_note_title", "path": ".claude/settings.json", "refused": "not a note" },
+    { "door": "set_note_title", "path": "views/x.md", "refused": "not a note" },
+    { "door": "set_note_title", "path": "diagrams/flow.mmd", "refused": "raw diagram source" },
+    { "door": "set_note_title", "path": "records/x.md", "lands": "records/x.md" },
+
+    {
+      "door": "create_note",
+      "folder": ".git/hooks",
+      "slug": "pre-commit",
+      "refused": "not a note"
+    },
+    {
+      "door": "create_note",
+      "folder": ".GIT/hooks",
+      "slug": "pre-commit",
+      "refused": "not a note"
+    },
+    { "door": "create_note", "folder": ".cerebro", "slug": "connectors", "refused": "not a note" },
+    { "door": "create_note", "folder": ".cerebro/ledger", "slug": "x", "refused": "not a note" },
+    { "door": "create_note", "folder": "views", "slug": "x", "refused": "not a note" },
+    { "door": "create_note", "folder": "Attachments", "slug": "x", "lands": "Attachments/x.md" },
+    { "door": "create_note", "folder": "records", "slug": ".hidden", "refused": "not a note" },
+    {
+      "door": "create_note",
+      "folder": "\u212anowledge/metrics",
+      "slug": "churn",
+      "refused": "inside knowledge/ by another name",
+      "why": "The plant: made before the bundle exists, this folder IS the bundle on APFS from then on, under a name no guard reads."
+    },
+    {
+      "door": "create_note",
+      "folder": "knowledge-archive",
+      "slug": "x",
+      "lands": "knowledge-archive/x.md"
+    },
+    {
+      "door": "create_note",
+      "folder": "records",
+      "slug": "note-target-probe",
+      "lands": "records/note-target-probe.md"
+    },
+
+    { "door": "write_text_file", "path": ".git/hooks/flow.mmd", "refused": "not a note" },
+    { "door": "write_text_file", "path": ".cerebro/flow.mmd", "refused": "not a note" },
+    { "door": "write_text_file", "path": "data/table.csv", "refused": "only writes" },
+    {
+      "door": "write_text_file",
+      "path": "\u212anowledge/flow.mmd",
+      "refused": "inside knowledge/ by another name"
+    },
+    {
+      "door": "write_text_file",
+      "path": "diagrams/note-target-probe.mmd",
+      "lands": "diagrams/note-target-probe.mmd"
+    },
+    {
+      "door": "write_text_file",
+      "path": "views/whiteboards/note-target-probe.mmd",
+      "lands": "views/whiteboards/note-target-probe.mmd"
+    }
+  ]
+}

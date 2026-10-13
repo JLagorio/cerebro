@@ -87,6 +87,21 @@ fn outside_bundle(rel: &str) -> String {
     format!("only knowledge/ concepts are ledger-backed; {rel} is outside the bundle")
 }
 
+/// The path an AGENT's concept door takes (M53.4): inside `knowledge/`, and
+/// where the scan can list it (`write::concept_refusal`) — not through a
+/// dot-folder, not under `views/` or `attachments/`. The projection writer
+/// itself only keeps a file inside the bundle, because it also writes what a
+/// person filed by hand (`write::bundle_join`).
+fn agent_concept_path(rel: &str) -> Result<(), String> {
+    if !rel.starts_with("knowledge/") {
+        return Err(outside_bundle(rel));
+    }
+    match crate::vault::write::concept_refusal(rel) {
+        Some(reason) => Err(format!("not a concept path: {rel} — {reason}")),
+        None => Ok(()),
+    }
+}
+
 /// `write_concept` for the run that asked for it (M49.9, K25): its
 /// proposals and commit set carry that run's id, and the run's row books
 /// what was submitted, applied and rejected.
@@ -97,9 +112,7 @@ pub fn write_concept_in_run(
     body: &str,
     run: &str,
 ) -> Result<(), String> {
-    if !rel.starts_with("knowledge/") {
-        return Err(outside_bundle(rel));
-    }
+    agent_concept_path(rel)?;
     shadow::with_writer(vault, |writer| {
         write_concept_in_run_with(writer, vault, rel, frontmatter, body, Some(run))
     })
@@ -115,9 +128,7 @@ pub fn write_concept(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
-    if !rel.starts_with("knowledge/") {
-        return Err(outside_bundle(rel));
-    }
+    agent_concept_path(rel)?;
     shadow::with_writer(vault, |writer| {
         write_concept_with(writer, vault, rel, frontmatter, body)
     })
@@ -192,9 +203,7 @@ pub fn recheck_concept(
     actor: &str,
     run: Option<&str>,
 ) -> Result<Rechecked, String> {
-    if !rel.starts_with("knowledge/") {
-        return Err(outside_bundle(rel));
-    }
+    agent_concept_path(rel)?;
     shadow::with_writer(vault, |writer| {
         recheck_with(writer, vault, rel, stale_after, actor, run)
     })

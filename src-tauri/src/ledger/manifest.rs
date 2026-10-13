@@ -244,8 +244,9 @@ pub fn disk_changed(vault_rel: &str) -> String {
     )
 }
 
-/// What a concept WRITER asks before it commits: `ensure_disk_is_the_ledgers`,
-/// and — because a writer names one concept on purpose — a RECORDED concept
+/// What a concept WRITER asks before it commits: that the file stays inside
+/// the bundle (`write::bundle_join`), `ensure_disk_is_the_ledgers`, and —
+/// because a writer names one concept on purpose — a RECORDED concept
 /// whose file is gone refuses even when no manifest entry proves a write (a
 /// vault that never armed has none). A ledger ahead of a file that never
 /// landed is recovery's to repair, never an agent's to rewrite over what may
@@ -256,6 +257,10 @@ pub fn ensure_writable(
     vault_rel: &str,
     state: &EpistemicState,
 ) -> Result<(), String> {
+    // The projection writer's own containment check, asked BEFORE the
+    // transition commits: asked only at write time, a refusal would leave
+    // the ledger ahead of a file it may never write.
+    crate::vault::write::bundle_join(vault, vault_rel)?;
     ensure_disk_is_the_ledgers(vault, vault_rel, state)?;
     let recorded = vault_rel
         .strip_prefix("knowledge/")
@@ -364,7 +369,9 @@ fn write_projection_as(
     projection: &super::reduce::ProjectionResult,
     guard: Guard<'_>,
 ) -> Result<(), String> {
-    let file_path = vault.join(vault_rel);
+    // Inside the bundle as the filesystem resolves it, or nothing is
+    // recorded or written: a symlink in `knowledge/` is not a way out.
+    let file_path = crate::vault::write::bundle_join(vault, vault_rel)?;
     let prior = disk_hash(vault, vault_rel)?;
     let mut manifest = load(vault)?.unwrap_or(Manifest {
         format: MANIFEST_FORMAT,
@@ -610,6 +617,55 @@ mod tests {
         assert_eq!(meta.modified().unwrap(), before, "mtime untouched");
         assert_eq!(std::fs::read(vault.join(REL)).unwrap(), bytes);
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // A projection path is `knowledge/` plus the path a write named, and the
+    // concept doors check only that spelling — so a symlinked folder inside
+    // the bundle carried write_concept, a capture or a governed apply into
+    // `.git/`, or out of the vault. The write refuses before the manifest
+    // records a pending entry, and the concept writers' pre-commit check
+    // (`ensure_writable`) refuses too, so no transition commits for it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_in_the_bundle_cannot_carry_a_projection_out_of_it() {
+        let vault = testutil::temp_vault("manifest-symlink");
+        let outside = testutil::temp_vault("manifest-symlink-outside");
+        let projection = seeded_projection(&vault);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &read.store.store_id);
+        std::fs::create_dir_all(vault.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(vault.join("knowledge")).unwrap();
+
+        for (target, landed) in [
+            (vault.join(".git/hooks"), vault.join(".git/hooks/acme.md")),
+            (outside.clone(), outside.join("acme.md")),
+        ] {
+            let link = vault.join("knowledge/concepts");
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            let err = write_projection(&vault, REL, &projection).unwrap_err();
+            assert!(
+                err.contains("outside knowledge/") || err.contains("escapes the vault"),
+                "{err}"
+            );
+            assert!(ensure_writable(&vault, REL, &state).is_err());
+            assert!(!landed.exists(), "{}", landed.display());
+            let recorded = load(&vault).unwrap();
+            assert!(
+                recorded.is_none_or(|m| m.entries.is_empty()),
+                "nothing recorded"
+            );
+        }
+
+        // The bundle's own folder still takes it.
+        std::fs::remove_file(vault.join("knowledge/concepts")).unwrap();
+        write_projection(&vault, REL, &projection).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault.join(REL)).unwrap(),
+            projection.bytes
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     /// Child: seed nothing (the parent seeded), just re-project and write.

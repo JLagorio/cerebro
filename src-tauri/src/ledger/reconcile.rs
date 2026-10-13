@@ -2238,6 +2238,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // A concept a person files in a dot-folder (`knowledge/.archive/`) is
+    // adopted there like any other move, and every exit that rewrites every
+    // projection still runs. When the projection writer refused dot-folders,
+    // the adoption committed its move and then failed its write, failing the
+    // launch scan with it, and every restore after that.
+    #[test]
+    fn a_move_into_a_dot_folder_is_adopted_and_every_exit_still_runs() {
+        let (vault, mut writer) = armed("scan-move-dot");
+        let store = writer.store_id().to_string();
+        let from = vault.join("knowledge/systems/status-model.md");
+        let to = vault.join("knowledge/.archive/status-model.md");
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::rename(&from, &to).unwrap();
+
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(
+            outcome.moved,
+            vec![(
+                "knowledge/systems/status-model.md".to_string(),
+                "knowledge/.archive/status-model.md".to_string()
+            )]
+        );
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        assert!(quarantined_paths(&vault, &state).unwrap().is_empty());
+        let head = head_of(&writer);
+        assert!(launch_scan(&mut writer, &vault, None, None)
+            .unwrap()
+            .moved
+            .is_empty());
+        assert_eq!(head_of(&writer), head, "the next scan is quiet");
+
+        mass_edited(&vault, &mut writer);
+        resolve_restore_with(&mut writer, &vault).unwrap();
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        assert!(!state.reconciliation_open());
+        let belief = &state.projection_paths[".archive/status-model.md"];
+        assert_eq!(
+            std::fs::read_to_string(&to).unwrap(),
+            project_belief(&state, belief).unwrap().bytes
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     // Two candidate files with the moved bytes: which one is the concept is
     // a person's call, so nothing is adopted.
     #[test]

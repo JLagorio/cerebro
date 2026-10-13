@@ -5,7 +5,7 @@
 // "disk" state. 'vault-changed' has no equivalent here: startWatcher is a
 // no-op and writers trigger rescans directly (see vaultStore).
 import YAML, { type Document } from 'yaml';
-import { isKnowledgePath } from '@/engine/okf';
+import { isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
@@ -174,12 +174,20 @@ export async function getLastVault(): Promise<string | null> {
   return '/demo-vault';
 }
 
+/**
+ * Parity with scan.rs `is_skipped_dir`: a folder the scan never descends
+ * into — a dot-folder, or exactly `views` or `attachments`, at any depth (v2
+ * project folders carry their own views/). The note writers ask it too.
+ */
+const isSkippedDir = (name: string): boolean =>
+  name.startsWith('.') || name === 'views' || name === 'attachments';
+
 export async function scanVault(_vault: string): Promise<Entry[]> {
-  // Parity with scan.rs: views/ and attachments/ and dot-dirs are skipped at
-  // any depth (v2 project folders carry their own views/).
-  const skipped = /(^|\/)(views|attachments|\.[^/]*)\//;
   const paths = [...files.keys()]
-    .filter((p) => (p.endsWith('.md') || p.endsWith('.mmd')) && !skipped.test(p))
+    .filter(
+      (p) =>
+        (p.endsWith('.md') || p.endsWith('.mmd')) && !p.split('/').slice(0, -1).some(isSkippedDir),
+    )
     .sort();
   const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
@@ -208,7 +216,77 @@ function guardHumanWrite(path: string): void {
   if (isKnowledgePath(path)) throw new Error(READ_ONLY_KNOWLEDGE);
 }
 
+/** What the markdown-only note writers accept (write.rs `MARKDOWN`). */
+const MARKDOWN = ['md'];
+/** `save_note`'s set: diagrams save raw through the same door (M29.20). */
+const MARKDOWN_OR_DIAGRAM = ['md', 'mmd'];
+
+/** Code points HFS+ ignores in a name, which write.rs `disk_folded` drops. */
+const HFS_IGNORABLE = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+
+/**
+ * Mirror of write.rs `disk_folded`: `name` as a disk that folds names may
+ * hear it — Unicode case folded (APFS hears U+212A KELVIN SIGN as `k`), with
+ * the HFS+ ignorables dropped.
+ */
+const diskFolded = (name: string): string =>
+  name.replace(HFS_IGNORABLE, '').toUpperCase().toLowerCase();
+
+/**
+ * Mirror of `note_refusal` in write.rs (PLATFORM-API-1): why `path` is not a
+ * note a note writer may touch, or null when it is. No component may start
+ * with `.` — not `.git/`, `.cerebro/`, `.claude/`, any dot-folder or dotfile;
+ * the extension must be one the door takes, spelled as the scanner spells
+ * it; and a markdown note may not sit in a folder the scanner skips, asked
+ * with scanVault's own `isSkippedDir` — exactly `views/` and `attachments/`,
+ * so `Attachments/` and `Views/`, which it lists, save. A `.mmd` may, for the
+ * legacy-List whiteboards write.rs names.
+ */
+function noteRefusal(path: string, extensions: readonly string[]): string | null {
+  const names = path.split('/').filter((name) => name !== '' && name !== '.');
+  // As HFS+ hears the name (write.rs `disk_folded`): `\u200c.claude` IS `.claude` there.
+  if (names.some((name) => name.replace(HFS_IGNORABLE, '').startsWith('.'))) {
+    return 'dot-folders and dotfiles hold no notes';
+  }
+  const leaf = names.at(-1) ?? '';
+  const dot = leaf.lastIndexOf('.');
+  const extension = dot > 0 ? leaf.slice(dot + 1) : '';
+  if (!extensions.includes(extension)) {
+    return `only ${extensions.map((e) => `.${e}`).join(' and ')} files are notes`;
+  }
+  if (extension === 'md' && names.slice(0, -1).some(isSkippedDir)) {
+    return 'views/ and attachments/ hold no notes';
+  }
+  return null;
+}
+
+/**
+ * Mirror of `note_join` in write.rs: contained (as `safe_join` judges, and
+ * first), AND a note, AND not the bundle under another name — a first
+ * component a folding disk hears as `knowledge` (U+212A KELVIN SIGN +
+ * `nowledge`) that the bundle's guards, which fold ASCII only, do not read.
+ * Rust also judges where a path LANDS — through a symlink, under a name APFS
+ * folds, inside the folder `knowledge/` resolves to — and that half has
+ * nothing to mirror here: this disk is a Map, and a key only ever lands on
+ * itself. Both backends replay src-tauri/fixtures/note-targets.json.
+ */
+function guardNoteTarget(path: string, extensions: readonly string[]): void {
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    throw new Error(`path escapes the vault: ${path}`);
+  }
+  const refusal = noteRefusal(path, extensions);
+  if (refusal !== null) throw new Error(`not a note: ${path} — ${refusal}`);
+  const head = path.split('/').find((name) => name !== '' && name !== '.');
+  if (head !== undefined && diskFolded(head) === KNOWLEDGE_DIR && !isKnowledgePath(path)) {
+    throw new Error(
+      `${path} is inside knowledge/ by another name — the bundle is reached by its own name or not at all`,
+    );
+  }
+}
+
 export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
+  // Note targets first, as save_note's note_join does (PLATFORM-API-1).
+  guardNoteTarget(path, MARKDOWN_OR_DIAGRAM);
   // The M23.7 capture valve: an in-app body edit to a knowledge projection
   // is CAPTURED (Rust: an editorial override), no longer refused. The mock
   // applies the same edit; the ledger half exists only in Tauri.
@@ -237,6 +315,7 @@ export async function updateFrontmatter(
   if (path.endsWith('.mmd')) {
     throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
   }
+  guardNoteTarget(path, MARKDOWN);
   if (isKnowledgePath(path)) {
     // The valve's frontmatter half, with the SAME hard refusals as Rust:
     // provenance stamps are never a human patch, and alias removal has no
@@ -417,6 +496,9 @@ export async function createNote(
   let finalSlug = slug;
   for (let n = 2; files.has(`${prefix}${finalSlug}.md`); n++) finalSlug = `${slug}-${n}`;
   const path = `${prefix}${finalSlug}.md`;
+  // Judged on the file it will write, as write.rs create_note judges it: a
+  // dot-folder (`.git/hooks`), a skipped folder, or a dotfile slug refuses.
+  guardNoteTarget(path, MARKDOWN);
   // Parity with write.rs create_note: null-valued keys are skipped, an empty
   // mapping omits the fence block, and an empty body gets a humanized H1.
   const kept = Object.entries(frontmatter).filter(([, value]) => value !== null);
@@ -433,6 +515,14 @@ export async function createNote(
 
 export async function setNoteTitle(_vault: string, path: string, title: string): Promise<void> {
   guardHumanWrite(path);
+  // Parity with set_note_title in write.rs: a .mmd's title is its filename,
+  // and `# title` spliced into mermaid source breaks the diagram (M29.21).
+  if (path.endsWith('.mmd')) {
+    throw new Error(
+      `${path}: a .mmd is raw diagram source, and its title is its filename — there is no H1 to set`,
+    );
+  }
+  guardNoteTarget(path, MARKDOWN);
   const { yaml, body } = splitFrontmatter(mustGet(path));
   // Parity with write.rs replace_h1: rewrite exactly the line the parser
   // reads the title from (fence/indent-aware, shared firstH1LineIndex);
@@ -1020,9 +1110,10 @@ export async function importAttachment(_vault: string, source: string): Promise<
 
 /**
  * Mirror of `vault::write::write_text_file` (M29.22): same knowledge guard,
- * same `.mmd`-only extension allowlist, same stem dedupe, and the same
- * vault containment `safe_join` enforces (no absolute paths, no `..`, no
- * empty path). Returns the vault-relative path actually written.
+ * same `.mmd`-only extension allowlist, same stem dedupe, the same vault
+ * containment `safe_join` enforces (no absolute paths, no `..`, no empty
+ * path), and the same note-target rules (PLATFORM-API-1): no dot-folder.
+ * Returns the vault-relative path actually written.
  */
 export async function writeTextFile(
   _vault: string,
@@ -1039,6 +1130,7 @@ export async function writeTextFile(
   if (ext !== 'mmd') {
     throw new Error(`write_text_file only writes ["mmd"] files: ${path}`);
   }
+  guardNoteTarget(path, ['mmd']);
   let actual = path;
   for (let n = 2; files.has(actual); n += 1) actual = `${stem}-${n}.${ext}`;
   files.set(actual, content);

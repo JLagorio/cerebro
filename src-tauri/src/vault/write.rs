@@ -2,7 +2,12 @@
 //! All writes go through `write_file` so the watcher (Task 8) can register
 //! own-writes for suppression in one place. All caller-supplied paths are
 //! validated by `safe_join`/`safe_component` — Task 7 exposes these functions
-//! over IPC, so vault containment is enforced here, not in the callers.
+//! over IPC, so vault containment is enforced here, not in the callers. The
+//! writers that change a NOTE go one step further through `note_join`, which
+//! also refuses anything that is not a note (PLATFORM-API-1) — the same
+//! mechanism under the agent's MCP doors and the human IPC commands — and the
+//! ledger's projection writer goes through `bundle_join`, which keeps a
+//! projection inside the bundle.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -165,6 +170,23 @@ pub fn clean_orphan_temps(vault: &Path) {
 /// symlink pointing wherever it likes, so containment has to be verified
 /// against the resolved filesystem path, not the requested one.
 fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    resolve(vault, rel).map(|resolved| resolved.joined)
+}
+
+/// A contained vault-relative path, and where it actually lands.
+struct Resolved {
+    /// `vault.join(rel)` — what the writers open.
+    joined: PathBuf,
+    /// Where `joined` lands, relative to the vault: its longest existing
+    /// ancestor as the filesystem resolves it — symlinks followed, and every
+    /// name as the disk stores it, which `realpath` answers with on APFS even
+    /// when the request folded case — then the part that does not exist yet.
+    landing: PathBuf,
+}
+
+/// `safe_join`'s whole check, keeping the resolution it already has to do
+/// for `note_join` to judge.
+fn resolve(vault: &Path, rel: &str) -> Result<Resolved, String> {
     let contained = !rel.is_empty()
         && Path::new(rel)
             .components()
@@ -192,11 +214,16 @@ fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
     let canonical_existing = existing
         .canonicalize()
         .map_err(|e| format!("resolving path: {e}"))?;
-    if canonical_existing.starts_with(&canonical_vault) {
-        Ok(joined)
-    } else {
-        Err(format!("path escapes the vault: {rel:?}"))
-    }
+    let Ok(inside) = canonical_existing.strip_prefix(&canonical_vault) else {
+        return Err(format!("path escapes the vault: {rel:?}"));
+    };
+    // `existing` was walked up from `joined` by `parent`, so it is a prefix
+    // and this cannot miss; if it ever did, refusing is the safe answer.
+    let rest = joined
+        .strip_prefix(existing)
+        .map_err(|_| format!("resolving path: {rel:?}"))?;
+    let landing = inside.join(rest);
+    Ok(Resolved { joined, landing })
 }
 
 /// Require a single normal path component: non-empty, no separators, no
@@ -212,6 +239,239 @@ fn safe_component(kind: &str, value: &str) -> Result<(), String> {
     } else {
         Err(format!("invalid {kind}: {value:?}"))
     }
+}
+
+// --- Note targets (PLATFORM-API-1, CANVAS-1) --------------------------------
+
+/// What the markdown-only note writers accept.
+const MARKDOWN: &[&str] = &["md"];
+
+/// `save_note`'s set: the diagram page and the whiteboard tab save a `.mmd`
+/// raw, through the body editor's own door (M29.20, M29.46).
+const MARKDOWN_OR_DIAGRAM: &[&str] = &["md", "mmd"];
+
+/// Why `path` is not a note a note writer may touch, or `None` when it is.
+///
+/// Judged per component, the way the scanner judges folders:
+/// - No component may start with `.`: not `.git/`, whose config the app's
+///   own `git status` poll and auto-commit execute (`core.fsmonitor`,
+///   `gpg.program`, and more); not `.cerebro/`, with its write-once ledger
+///   segments and connector config; not `.claude/`, any other dot-folder, or
+///   any dotfile. Heard as HFS+ hears a name (`disk_folded`), which ignores
+///   U+200C, U+FEFF and their kind: there, `\u{200c}.claude/` IS `.claude/`
+///   (git's `core.protectHFS` class), and with no such folder yet the landing
+///   check has nothing to resolve.
+/// - The extension must be one of `extensions`, spelled exactly as the
+///   scanner spells it. An append adds markdown and a frontmatter patch
+///   prepends YAML, and in a `.canvas`, `.csv`, `.json` or `.yml` either one
+///   is corruption.
+/// - A markdown note may not sit in a folder the scanner skips, asked with
+///   the scanner's own predicate (`scan::is_skipped_dir`): exactly `views/`
+///   and `attachments/`, at any depth. This rule only decides what is
+///   VISIBLE — the two above are the boundary — so it says exactly what the
+///   scanner says. `Attachments/`, `Views/` and `views./` are folders the
+///   scanner lists, so their notes save; where a disk folds `Views/` onto an
+///   existing `views/`, the LANDING is `views/` (see `note_join`), and that
+///   refuses.
+///
+/// Two consequences, both deliberate:
+/// - A dotfile note the scanner still lists (`records/.draft.md`) is
+///   read-only in the app. PLATFORM-API-1 refuses every dotfile; whether the
+///   scanner should hide them too is the owner's call, and
+///   note-targets.json records the decision as it stands.
+/// - A `.mmd` is exempt from the folder rule because something writes one
+///   there today: `WhiteboardView` files a legacy `views/<id>.yml` List's
+///   canvases under `views/whiteboards/`, and refusing would strand every
+///   canvas such a List already has. Only the human doors take a `.mmd`.
+///
+/// Mirrored by `noteRefusal` in src/lib/mockIpc.ts; both replay
+/// src-tauri/fixtures/note-targets.json.
+fn note_refusal(path: &Path, extensions: &[&str]) -> Option<String> {
+    let names: Vec<_> = path
+        .components()
+        .filter_map(|c| match c {
+            Component::Normal(name) => Some(name.to_string_lossy()),
+            _ => None,
+        })
+        .collect();
+    if names.iter().any(|name| disk_folded(name).starts_with('.')) {
+        return Some("dot-folders and dotfiles hold no notes".to_string());
+    }
+    let leaf = names.last().map(|name| name.as_ref()).unwrap_or_default();
+    let folders = &names[..names.len().saturating_sub(1)];
+    let extension = Path::new(leaf)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    if !extensions.contains(&extension) {
+        let kinds: Vec<String> = extensions.iter().map(|e| format!(".{e}")).collect();
+        return Some(format!("only {} files are notes", kinds.join(" and ")));
+    }
+    if extension == "md" && folders.iter().any(|name| super::scan::is_skipped_dir(name)) {
+        return Some("views/ and attachments/ hold no notes".to_string());
+    }
+    None
+}
+
+/// `name` as a disk that folds names may hear it: Unicode case folded — APFS
+/// hears U+212A KELVIN SIGN as `k` — with the code points HFS+ ignores in a
+/// name dropped. Two names that fold alike may be one folder on such a disk.
+fn disk_folded(name: &str) -> String {
+    let heard: String = name
+        .chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'
+            )
+        })
+        .collect();
+    heard.to_uppercase().to_lowercase()
+}
+
+/// Where the bundle is on this disk, relative to the vault: what
+/// `vault/knowledge` resolves to — through a symlink, and under the name the
+/// disk stores, which `realpath` answers with even for a folder planted as
+/// U+212A + `nowledge`. `None` while the vault holds no bundle.
+fn bundle_root(vault: &Path) -> Option<PathBuf> {
+    let canonical_vault = vault.canonicalize().ok()?;
+    let root = vault
+        .join(crate::knowledge::KNOWLEDGE_DIR)
+        .canonicalize()
+        .ok()?;
+    root.strip_prefix(&canonical_vault)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+/// The first named component of `path`.
+fn first_name(path: &Path) -> Option<String> {
+    path.components().find_map(|c| match c {
+        Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+        _ => None,
+    })
+}
+
+/// Is `path`'s first component one a folding disk hears as `knowledge`?
+fn names_the_bundle(path: &Path) -> bool {
+    first_name(path).is_some_and(|name| disk_folded(&name) == crate::knowledge::KNOWLEDGE_DIR)
+}
+
+/// A vault-relative path `/`-joined, for a message.
+fn slashed(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// `safe_join` for a writer that changes a NOTE (PLATFORM-API-1): the target
+/// must be contained, AND be a note.
+///
+/// Every note writer below resolves its target here before it reads a byte —
+/// `save_note`, `update_frontmatter`, `set_note_title`, `create_note`, the
+/// agent's append (`appended_body`), `write_source` and `write_text_file` —
+/// so the agent's MCP doors and the human IPC commands share one boundary,
+/// and a refused file is never opened, let alone rewritten. It lives in the
+/// mechanism because the grant cannot hold it: panel turns, and every Agent
+/// record without `scope:`, run unscoped, so nothing upstream ever stopped an
+/// append to `.git/config`. Writers whose job IS config (`save_view`,
+/// `save_list`, `save_collection`, the ledger, the connector settings) do not
+/// come through here.
+///
+/// Judged twice: once as asked, and once where it LANDS (see `Resolved`), so
+/// a symlink with an innocent name cannot carry the write into `.git/`, and a
+/// name a folding disk hears as a skipped folder (`view` + U+017F LONG S IS
+/// `views` on APFS) is judged as the folder it reaches.
+///
+/// And it may not reach `knowledge/` by any name but the bundle's own. The
+/// bundle's guards (`knowledge::canonical_path`) read the name and fold ASCII
+/// case only, so a write reaching the bundle another way — a symlink, or a
+/// spelling APFS folds onto it (U+212A KELVIN SIGN + `nowledge`) — walks past
+/// every one of them. Membership is IDENTITY (it lands under where
+/// `knowledge/` resolves) or NAME (a first component that folds to
+/// `knowledge`, as asked or as landed). Identity alone misses the plant: a
+/// folder made under the folded spelling before the bundle exists, which the
+/// bundle's own writes then land in, and which no name-based guard would
+/// ever recognise again.
+fn note_join(vault: &Path, rel: &str, extensions: &[&str]) -> Result<PathBuf, String> {
+    let resolved = resolve(vault, rel)?;
+    if let Some(reason) = note_refusal(Path::new(rel), extensions) {
+        return Err(format!("not a note: {rel} — {reason}"));
+    }
+    let landing = slashed(&resolved.landing);
+    if let Some(reason) = note_refusal(&resolved.landing, extensions) {
+        return Err(format!(
+            "not a note: {rel} resolves to {landing} — {reason}"
+        ));
+    }
+    let in_bundle = names_the_bundle(Path::new(rel))
+        || names_the_bundle(&resolved.landing)
+        || bundle_root(vault).is_some_and(|root| resolved.landing.starts_with(root));
+    if in_bundle && !crate::knowledge::is_knowledge_path(rel) {
+        let lands = if landing == slashed(Path::new(rel)) {
+            String::new()
+        } else {
+            format!(" (it resolves to {landing})")
+        };
+        return Err(format!(
+            "{rel} is inside knowledge/ by another name{lands} — the bundle is reached by its own \
+             name or not at all"
+        ));
+    }
+    Ok(resolved.joined)
+}
+
+/// `safe_join` for the ledger's projection writer (`ledger::manifest`): the
+/// file must land INSIDE the bundle — under where `knowledge/` resolves, not
+/// merely at a path spelled `knowledge/…` — and be markdown.
+///
+/// A projection path is `knowledge/` plus the path a write named, so a
+/// symlink inside the bundle (`knowledge/sys` → `.git/hooks`, or a folder
+/// outside the vault) carried `write_concept`, a capture or a governed apply
+/// wherever it pointed. Judged before anything is recorded or written, and
+/// by the concept writers before anything commits (`manifest::ensure_writable`).
+///
+/// Containment and nothing more, because this writer also writes back what a
+/// PERSON filed: a concept moved into `knowledge/.archive/` is adopted where
+/// it went (`reconcile::adopt_moves`), and every reconciliation exit
+/// rewrites every projection, so a path refused here fails the whole vault's
+/// exits, not one write. Which folders a NEW concept may go in is the agent
+/// doors' rule (`concept_refusal`).
+pub fn bundle_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    let resolved = resolve(vault, rel)?;
+    let landing = slashed(&resolved.landing);
+    let inside = match bundle_root(vault) {
+        Some(root) => resolved.landing.starts_with(root),
+        // No bundle yet: the folder this write creates is the one it names.
+        None => first_name(&resolved.landing).as_deref() == Some(crate::knowledge::KNOWLEDGE_DIR),
+    };
+    if !inside {
+        return Err(format!(
+            "{rel} resolves to {landing}, outside knowledge/ — a projection is written inside the \
+             bundle or not at all"
+        ));
+    }
+    if resolved.landing.extension().and_then(|e| e.to_str()) != Some("md") {
+        return Err(format!("{rel}: a projection is a .md file"));
+    }
+    Ok(resolved.joined)
+}
+
+/// Why an agent's concept door refuses `rel`, or `None`: a concept an agent
+/// writes or rechecks is a note the scan can list — no dot-folder or dotfile,
+/// a `.md`, not under `views/` or `attachments/` (`note_refusal`). Written
+/// where the scan cannot see it, a concept sits in the ledger and nowhere in
+/// the app — no Knowledge row, no Review card, no `get_note` — while the
+/// tool tells the agent it waits in Knowledge for review.
+pub(crate) fn concept_refusal(rel: &str) -> Option<String> {
+    note_refusal(Path::new(rel), MARKDOWN)
+}
+
+/// `read_file` for a note writer: `note_join` judges the target before a byte
+/// of it is read.
+fn read_note_target(vault: &Path, rel: &str, extensions: &[&str]) -> Result<String, String> {
+    std::fs::read_to_string(note_join(vault, rel, extensions)?).map_err(|e| format!("{rel}: {e}"))
 }
 
 fn read_file(vault: &Path, rel: &str) -> Result<String, String> {
@@ -290,7 +550,7 @@ pub fn patched_frontmatter(
             "{rel}: a .mmd is raw diagram source and has no frontmatter to update"
         ));
     }
-    let content = read_file(vault, rel)?;
+    let content = read_note_target(vault, rel, MARKDOWN)?;
     let (block, body) = parse::split_frontmatter(&content);
     let mut mapping = match block {
         Some(b) => parse::parse_frontmatter(b)
@@ -324,7 +584,7 @@ pub fn update_frontmatter(
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
     let content = patched_frontmatter(vault, rel, patch)?;
-    write_file(&safe_join(vault, rel)?, &content)?;
+    write_file(&note_join(vault, rel, MARKDOWN)?, &content)?;
     shadow_write(vault, rel, &content, "vault.write", None);
     Ok(())
 }
@@ -349,7 +609,7 @@ pub fn verify_frontmatter(
 /// diagram syntax, so the body IS the whole file — no frontmatter compose.
 pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
     let composed = saved_note(vault, rel, body)?;
-    write_file(&safe_join(vault, rel)?, &composed)?;
+    write_file(&note_join(vault, rel, MARKDOWN_OR_DIAGRAM)?, &composed)?;
     if !rel.ends_with(".mmd") {
         shadow_write(vault, rel, &composed, "vault.write", None);
     }
@@ -365,11 +625,11 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
 /// completes arrives at byte zero as the frontmatter the scanner will read
 /// (PR #17 security review).
 pub fn saved_note(vault: &Path, rel: &str, body: &str) -> Result<String, String> {
+    let content = read_note_target(vault, rel, MARKDOWN_OR_DIAGRAM)?;
     if rel.ends_with(".mmd") {
-        read_file(vault, rel)?; // same contract as .md: save only overwrites
+        // Read anyway: same contract as .md, save only overwrites.
         return Ok(body.to_string());
     }
-    let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
     Ok(compose(block, body))
 }
@@ -384,7 +644,11 @@ pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
     if rel.ends_with(".mmd") {
         return None;
     }
-    parse::declared_type(&read_file(vault, rel).ok()?)
+    // Not a note, so no type worth asking for: every note writer refuses the
+    // file anyway, and judging it first means the agent's governed-type
+    // checks never open `.git/` or a ledger segment to find out
+    // (PLATFORM-API-1).
+    parse::declared_type(&read_note_target(vault, rel, MARKDOWN).ok()?)
 }
 
 /// Return the note body only (frontmatter stripped). `.mmd` files pass
@@ -396,6 +660,24 @@ pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
     }
     let (_, body) = parse::split_frontmatter(&content);
     Ok(body.to_string())
+}
+
+/// The body the agent's `append_to_note` saves (mcp.rs): the note's body with
+/// `addition` appended as its own paragraph.
+///
+/// Markdown notes only, judged before a byte is read (PLATFORM-API-1). A
+/// `.mmd` is refused outright rather than with the other non-notes because it
+/// IS a note elsewhere — just not one markdown can be appended to: the text
+/// lands in raw mermaid source, and the diagram stops parsing.
+pub fn appended_body(vault: &Path, rel: &str, addition: &str) -> Result<String, String> {
+    if rel.ends_with(".mmd") {
+        return Err(format!(
+            "{rel}: a .mmd is raw diagram source, and markdown appended to it is not a diagram"
+        ));
+    }
+    let content = read_note_target(vault, rel, MARKDOWN)?;
+    let (_, body) = parse::split_frontmatter(&content);
+    Ok(format!("{}\n\n{}\n", body.trim_end(), addition.trim()))
 }
 
 fn unique_rel_path(vault: &Path, folder: &str, slug: &str) -> String {
@@ -430,7 +712,9 @@ const TEXT_FILE_EXTENSIONS: [&str; 1] = ["mmd"];
 /// The extension allowlist and the knowledge guard live HERE, beside the
 /// dedupe, rather than in the lib.rs command: a raw-bytes writer that could
 /// be pointed at `knowledge/` or at a `.md` would bypass every invariant the
-/// note pipeline enforces, so the policy sits with the mechanism.
+/// note pipeline enforces, so the policy sits with the mechanism. So do the
+/// note-target rules (`note_join`): a diagram in a dot-folder is not one the
+/// scanner will ever show.
 pub fn write_text_file(vault: &Path, rel: &str, content: &str) -> Result<String, String> {
     crate::knowledge::guard_human_write(rel)?;
     let Some((stem, ext)) = rel.rsplit_once('.') else {
@@ -441,7 +725,7 @@ pub fn write_text_file(vault: &Path, rel: &str, content: &str) -> Result<String,
             "write_text_file only writes {TEXT_FILE_EXTENSIONS:?} files: {rel}"
         ));
     }
-    safe_join(vault, rel)?;
+    note_join(vault, rel, &TEXT_FILE_EXTENSIONS)?;
     let mut n = 1;
     let actual = loop {
         let candidate = if n == 1 {
@@ -454,7 +738,7 @@ pub fn write_text_file(vault: &Path, rel: &str, content: &str) -> Result<String,
         }
         n += 1;
     };
-    write_file(&safe_join(vault, &actual)?, content)?;
+    write_file(&note_join(vault, &actual, &TEXT_FILE_EXTENSIONS)?, content)?;
     Ok(actual)
 }
 
@@ -572,8 +856,12 @@ pub fn create_note(
     safe_join(vault, folder)?; // folder must stay inside the vault
     safe_component("slug", slug)?;
     let rel = unique_rel_path(vault, folder, slug);
+    // Judged on the file it will actually write (PLATFORM-API-1): the folder
+    // can be a dot-folder (`.git/hooks`), a skipped one, or a symlink into
+    // either, and the slug can make a dotfile.
+    let target = note_join(vault, &rel, MARKDOWN)?;
     let content = compose_new_note(frontmatter, slug, body)?;
-    write_file(&vault.join(&rel), &content)?;
+    write_file(&target, &content)?;
     shadow_write(vault, &rel, &content, "vault.write", None);
     Ok(rel)
 }
@@ -616,10 +904,10 @@ fn concept_write(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<String, String> {
-    let target = safe_join(vault, rel)?;
-    if !rel.ends_with(".md") {
-        return Err(format!("a concept path must end in .md: {rel}"));
-    }
+    // A cached source is a note like any other (PLATFORM-API-1), and the
+    // frontend finds one by SCANNING for its path — a copy written where the
+    // scan cannot see it reads as never fetched, forever.
+    let target = note_join(vault, rel, MARKDOWN)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
     }
@@ -706,11 +994,20 @@ fn replace_h1(body: &str, title: &str) -> String {
 
 /// Replace the first H1 line of the body, or insert one as the first line.
 pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String> {
-    let content = read_file(vault, rel)?;
+    // A .mmd's title IS its filename stem, and `# title` spliced into raw
+    // mermaid source is a broken diagram (M29.21: the file tree already
+    // declines to ask). Refused here, so no other caller can.
+    if rel.ends_with(".mmd") {
+        return Err(format!(
+            "{rel}: a .mmd is raw diagram source, and its title is its filename — there is no H1 \
+             to set"
+        ));
+    }
+    let content = read_note_target(vault, rel, MARKDOWN)?;
     let (block, body) = parse::split_frontmatter(&content);
     let new_body = replace_h1(body, title);
     let composed = compose(block, &new_body);
-    write_file(&safe_join(vault, rel)?, &composed)?;
+    write_file(&note_join(vault, rel, MARKDOWN)?, &composed)?;
     shadow_write(vault, rel, &composed, "vault.write", None);
     Ok(())
 }
@@ -1609,6 +1906,409 @@ mod tests {
         assert!(save_view(&vault, "../../evil-view", "name: Evil\n", None).is_err());
         assert!(save_view(&vault, "nested/id", "name: Evil\n", None).is_err());
         assert!(save_view(&vault, "", "name: Evil\n", None).is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- Note targets (PLATFORM-API-1) -----------------------------------
+
+    /// Every regular file under `vault`, dot-folders included, with its bytes:
+    /// what "a refusal changed nothing" means. Symlinks are not followed, so
+    /// a write carried through one shows up at the file it reached.
+    fn snapshot(vault: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        walkdir::WalkDir::new(vault)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| (e.path().to_path_buf(), std::fs::read(e.path()).unwrap()))
+            .collect()
+    }
+
+    /// The cases src/lib/mockIpc.test.ts replays through the mock's doors.
+    const NOTE_TARGETS: &str = include_str!("../../fixtures/note-targets.json");
+
+    // The parity half: every note door here and its mock twin answer every
+    // shared case alike — the agent's `.git/config` and ledger segment, the
+    // upper-case spellings APFS folds onto them, the files an append or a
+    // patch would corrupt — and a refusal leaves every byte where it was.
+    #[test]
+    fn note_targets_replay_the_shared_cases() {
+        let file: serde_json::Value =
+            serde_json::from_str(NOTE_TARGETS).expect("note-targets.json parses");
+        let seed = file["seed"].as_str().expect("a seed");
+        for case in file["cases"].as_array().expect("cases") {
+            let vault = testutil::temp_vault("wfm-note-targets");
+            let door = case["door"].as_str().expect("a door");
+            let path = case["path"].as_str().unwrap_or_default();
+            let edits = matches!(door, "save_note" | "update_frontmatter" | "set_note_title");
+            if edits && case["seed"] != serde_json::json!(false) {
+                testutil::write(&vault, path, seed);
+            }
+            let before = snapshot(&vault);
+            let outcome = match door {
+                "save_note" => save_note(&vault, path, "\n# Landed\n").map(|()| path.to_string()),
+                "update_frontmatter" => update_frontmatter(
+                    &vault,
+                    path,
+                    &patch(&[("status", serde_json::json!("done"))]),
+                )
+                .map(|()| path.to_string()),
+                "set_note_title" => {
+                    set_note_title(&vault, path, "Landed").map(|()| path.to_string())
+                }
+                "create_note" => create_note(
+                    &vault,
+                    case["folder"].as_str().expect("a folder"),
+                    case["slug"].as_str().expect("a slug"),
+                    &patch(&[]),
+                    "# Landed\n",
+                ),
+                "write_text_file" => write_text_file(&vault, path, "flowchart TD\n"),
+                other => panic!("no door called {other}"),
+            };
+            match (case["refused"].as_str(), case["lands"].as_str()) {
+                (Some(fragment), None) => {
+                    let err = outcome.expect_err(&format!("{case} must refuse"));
+                    assert!(err.contains(fragment), "{case}: {err}");
+                    assert_eq!(
+                        snapshot(&vault),
+                        before,
+                        "{case}: the refusal changed bytes"
+                    );
+                }
+                (None, Some(expected)) => {
+                    let landed = outcome.unwrap_or_else(|e| panic!("{case} must land: {e}"));
+                    assert_eq!(landed, expected, "{case}");
+                    assert_ne!(snapshot(&vault), before, "{case}: nothing was written");
+                }
+                _ => panic!("{case} must name exactly one of `refused` and `lands`"),
+            }
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+    }
+
+    // Containment waves a symlink through when it points INSIDE the vault,
+    // and `.git/` is inside the vault. So the note writers judge where a path
+    // LANDS: an innocent name cannot carry a write into `.git/`.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cannot_carry_a_note_write_into_git() {
+        const GIT_CONFIG: &str = "[core]\n\trepositoryformatversion = 0\n";
+        let vault = testutil::temp_vault("wfm-symlink-git");
+        testutil::write(&vault, ".git/config", GIT_CONFIG);
+        // Note-shaped, so only the landing can tell where it is.
+        testutil::write(&vault, ".git/notes.md", NOTE);
+        testutil::write(&vault, "records/real.md", NOTE);
+        std::os::unix::fs::symlink(vault.join(".git"), vault.join("docs")).unwrap();
+        std::os::unix::fs::symlink(vault.join(".git/config"), vault.join("records/config.md"))
+            .unwrap();
+        // Containment alone passes both: each resolves inside the vault.
+        assert!(safe_join(&vault, "docs/notes.md").is_ok());
+        assert!(safe_join(&vault, "records/config.md").is_ok());
+
+        let before = snapshot(&vault);
+        let hacked = patch(&[("hacked", serde_json::json!(true))]);
+        let err = save_note(&vault, "docs/notes.md", "hacked\n").unwrap_err();
+        assert!(err.contains("resolves to .git/notes.md"), "{err}");
+        assert!(update_frontmatter(&vault, "docs/notes.md", &hacked).is_err());
+        assert!(set_note_title(&vault, "docs/notes.md", "Hacked").is_err());
+        assert!(appended_body(&vault, "docs/notes.md", "hacked").is_err());
+        // A folder that does not exist yet still lands under the link.
+        let err = create_note(&vault, "docs/hooks", "pre-commit", &hacked, "x\n").unwrap_err();
+        assert!(
+            err.contains("resolves to .git/hooks/pre-commit.md"),
+            "{err}"
+        );
+        assert!(create_note(&vault, "docs", "x", &hacked, "x\n").is_err());
+        assert!(write_text_file(&vault, "docs/x.mmd", "graph TD\n").is_err());
+        // A leaf link whose own name is a note.
+        let err = update_frontmatter(&vault, "records/config.md", &hacked).unwrap_err();
+        assert!(err.contains("resolves to .git/config"), "{err}");
+        assert!(save_note(&vault, "records/config.md", "hacked\n").is_err());
+        assert!(appended_body(&vault, "records/config.md", "hacked").is_err());
+
+        // Every byte where it was, nothing new under .git, the link a link.
+        assert_eq!(snapshot(&vault), before);
+        assert!(std::fs::symlink_metadata(vault.join("records/config.md"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        // And an ordinary note beside them still lands.
+        save_note(&vault, "records/real.md", "\n# Real\n").unwrap();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The disk the app ships for folds case — Unicode case, not just ASCII —
+    // and `realpath` answers with the stored name, so a folded spelling is
+    // judged by where it LANDS: `view` + U+017F LONG S is `views`, and
+    // U+212A KELVIN SIGN + `nowledge` is the bundle, under a spelling
+    // `knowledge::canonical_path` (ASCII folding) does not recognise — which
+    // would walk straight past every bundle guard keyed off that name.
+    #[test]
+    fn a_folded_spelling_cannot_reach_a_skipped_folder_or_the_bundle() {
+        let vault = testutil::temp_vault("wfm-folding");
+        testutil::write(&vault, "views/x.yml", "name: X\n");
+        testutil::write(&vault, "knowledge/metrics/churn.md", NOTE);
+        if !vault.join("VIEWS").exists() {
+            // A case-sensitive volume (CI's ext4): these spellings name new,
+            // unrelated folders there, so there is nothing to reach.
+            let _ = std::fs::remove_dir_all(&vault);
+            return;
+        }
+        let kelvin = "\u{212a}nowledge/metrics/churn.md";
+        assert!(crate::knowledge::canonical_path(kelvin).is_none());
+
+        let before = snapshot(&vault);
+        let err = create_note(&vault, "view\u{17f}", "x", &patch(&[]), "# X\n").unwrap_err();
+        assert!(err.contains("resolves to views/x.md"), "{err}");
+        // Plain ASCII case too: the scanner skips exactly `views/`, and this
+        // `Views/` IS that folder here, so it lands there and refuses.
+        let err = create_note(&vault, "Views", "x", &patch(&[]), "# X\n").unwrap_err();
+        assert!(err.contains("resolves to views/x.md"), "{err}");
+        let stamp = patch(&[("verified", serde_json::json!({ "by": "human:josef" }))]);
+        let err = update_frontmatter(&vault, kelvin, &stamp).unwrap_err();
+        assert!(err.contains("inside knowledge/"), "{err}");
+        assert!(save_note(&vault, kelvin, "\n# Rewritten\n").is_err());
+        assert!(set_note_title(&vault, kelvin, "Rewritten").is_err());
+        let smuggled = create_note(
+            &vault,
+            "\u{212a}nowledge/metrics",
+            "smuggled",
+            &patch(&[]),
+            "# S\n",
+        );
+        assert!(smuggled.is_err());
+        assert_eq!(snapshot(&vault), before);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The views/attachments rule decides only what is VISIBLE — the dot rule
+    // and the extension rule are the boundary — so it must say exactly what
+    // the scanner says: a note the scanner lists and the writers refuse is a
+    // page whose every keystroke fails to save. `Attachments/` (an Obsidian
+    // habit), `Views/`, `notes/Views/` and `views./` are folders the scanner
+    // lists; `views/` and `attachments/`, at any depth, are folders it skips.
+    // Dotfile notes are the one deliberate exception: listed, and read-only.
+    #[test]
+    fn the_note_writers_take_exactly_the_notes_the_scanner_lists() {
+        let listed = |vault: &Path| -> Vec<String> {
+            super::super::scan::scan_vault(vault)
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.path)
+                .collect()
+        };
+        let cases: &[(&[&str], &str)] = &[
+            (&[], "records/ok.md"),
+            (&[], "Attachments/b.md"),
+            (&[], "Views/a.md"),
+            (&[], "notes/Views/e.md"),
+            (&[], "views./d.md"),
+            (&[], "views/x.md"),
+            (&[], "attachments/y.md"),
+            (&[], "notes/views/z.md"),
+            // Beside an existing `views/`, a folding disk files `Views/` inside
+            // it, where the scanner never looks; a case-sensitive one makes a
+            // folder of its own, which the scanner lists. Both agree either way.
+            (&["views/x.yml"], "Views/plan.md"),
+            (&["attachments/pic.png"], "ATTACHMENTS/notes.md"),
+        ];
+        for (beside, rel) in cases {
+            // The editing doors, on a note that is already there.
+            let vault = testutil::temp_vault("wfm-scanner-agrees");
+            for file in beside.iter() {
+                testutil::write(&vault, file, "x\n");
+            }
+            testutil::write(&vault, rel, NOTE);
+            let visible = !listed(&vault).is_empty();
+            let done = patch(&[("status", serde_json::json!("done"))]);
+            let saved = save_note(&vault, rel, "\n# Saved\n").is_ok();
+            assert_eq!(saved, visible, "{rel} beside {beside:?}: saved {saved}");
+            assert_eq!(
+                update_frontmatter(&vault, rel, &done).is_ok(),
+                visible,
+                "{rel}"
+            );
+            assert_eq!(
+                set_note_title(&vault, rel, "Titled").is_ok(),
+                visible,
+                "{rel}"
+            );
+            let _ = std::fs::remove_dir_all(&vault);
+
+            // And create: what it writes, the scanner lists; what it refuses,
+            // written by hand instead, the scanner would never have shown.
+            let vault = testutil::temp_vault("wfm-scanner-agrees-create");
+            for file in beside.iter() {
+                testutil::write(&vault, file, "x\n");
+            }
+            let (folder, leaf) = rel.rsplit_once('/').expect("a folder");
+            let slug = leaf.trim_end_matches(".md");
+            match create_note(&vault, folder, slug, &patch(&[]), "# Created\n") {
+                Ok(created) => assert_eq!(listed(&vault).len(), 1, "{created}"),
+                Err(_) => {
+                    testutil::write(&vault, rel, NOTE);
+                    assert_eq!(
+                        listed(&vault),
+                        Vec::<String>::new(),
+                        "{rel} beside {beside:?}"
+                    );
+                }
+            }
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+
+        // The exception, decided rather than overlooked (note-targets.json).
+        let vault = testutil::temp_vault("wfm-scanner-dotfile");
+        testutil::write(&vault, "records/.draft.md", NOTE);
+        assert_eq!(listed(&vault), ["records/.draft.md"]);
+        let err = save_note(&vault, "records/.draft.md", "\n# Saved\n").unwrap_err();
+        assert!(err.contains("dotfiles hold no notes"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The plant: a folder made under a spelling a folding disk hears as
+    // `knowledge`, BEFORE the bundle exists, is the bundle from then on — the
+    // bundle's own writes land in it — under a name no bundle guard reads. So
+    // the plant refuses at every note door, by NAME; and a bundle already
+    // stored that way (planted before this check, or made by hand) is still
+    // the bundle by IDENTITY, reached under that name or through a symlink.
+    #[cfg(unix)]
+    #[test]
+    fn the_bundle_cannot_be_planted_under_another_spelling() {
+        let vault = testutil::temp_vault("wfm-plant");
+        let kelvin = "\u{212a}nowledge";
+        let planted = create_note(
+            &vault,
+            &format!("{kelvin}/metrics"),
+            "churn",
+            &patch(&[]),
+            "# Churn\n",
+        );
+        let err = planted.unwrap_err();
+        assert!(err.contains("inside knowledge/ by another name"), "{err}");
+        // HFS+ ignores U+200C in a name the way APFS folds the Kelvin sign.
+        assert!(create_note(&vault, "know\u{200c}ledge", "x", &patch(&[]), "# X\n").is_err());
+        assert!(write_text_file(&vault, &format!("{kelvin}/flow.mmd"), "graph TD\n").is_err());
+        assert_eq!(
+            std::fs::read_dir(&vault).unwrap().count(),
+            0,
+            "nothing was made"
+        );
+
+        // Planted anyway, with a concept in it — spelled as stored, so a
+        // case-sensitive disk builds the same tree; on a folding one, this is
+        // where `write_concept("knowledge/metrics/churn.md")` lands.
+        testutil::write(&vault, &format!("{kelvin}/metrics/churn.md"), NOTE);
+        std::os::unix::fs::symlink(vault.join(kelvin), vault.join("docs")).unwrap();
+        if vault.join("knowledge").exists() {
+            assert_eq!(bundle_root(&vault).as_deref(), Some(Path::new(kelvin)));
+        }
+        let before = snapshot(&vault);
+        let stamp = patch(&[("verified", serde_json::json!({ "by": "human:josef" }))]);
+        for rel in [
+            format!("{kelvin}/metrics/churn.md"),
+            "docs/metrics/churn.md".to_string(),
+        ] {
+            let err = update_frontmatter(&vault, &rel, &stamp).unwrap_err();
+            assert!(
+                err.contains("inside knowledge/ by another name"),
+                "{rel}: {err}"
+            );
+            assert!(save_note(&vault, &rel, "\n# Rewritten\n").is_err(), "{rel}");
+            assert!(set_note_title(&vault, &rel, "Rewritten").is_err(), "{rel}");
+            assert!(appended_body(&vault, &rel, "More.").is_err(), "{rel}");
+        }
+        let smuggled = create_note(&vault, "docs/metrics", "smuggled", &patch(&[]), "# S\n");
+        assert!(smuggled.is_err());
+        assert_eq!(snapshot(&vault), before);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Identity on its own: where `knowledge` is a link to another folder, that
+    // folder IS the bundle, under a name no fold could guess — so its notes
+    // take no plain write, and a projection may land there.
+    #[cfg(unix)]
+    #[test]
+    fn the_folder_knowledge_resolves_to_is_the_bundle() {
+        let vault = testutil::temp_vault("wfm-bundle-identity");
+        testutil::write(&vault, "kb/metrics/churn.md", NOTE);
+        std::os::unix::fs::symlink(vault.join("kb"), vault.join("knowledge")).unwrap();
+        assert_eq!(bundle_root(&vault).as_deref(), Some(Path::new("kb")));
+        let before = snapshot(&vault);
+        let stamp = patch(&[("verified", serde_json::json!({ "by": "human:josef" }))]);
+        let err = update_frontmatter(&vault, "kb/metrics/churn.md", &stamp).unwrap_err();
+        assert!(err.contains("inside knowledge/ by another name"), "{err}");
+        assert!(save_note(&vault, "kb/metrics/churn.md", "\n# Rewritten\n").is_err());
+        assert!(create_note(&vault, "kb", "smuggled", &patch(&[]), "# S\n").is_err());
+        assert_eq!(snapshot(&vault), before);
+        assert!(bundle_join(&vault, "knowledge/metrics/churn.md").is_ok());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The projection writer's door (ledger::manifest): a projection lands
+    // inside the bundle as the filesystem resolves it, or nowhere. The
+    // concept doors check only that a path is SPELLED `knowledge/…`, so a
+    // symlink inside the bundle carried write_concept wherever it pointed.
+    #[cfg(unix)]
+    #[test]
+    fn bundle_join_keeps_a_projection_inside_the_bundle() {
+        let vault = testutil::temp_vault("wfm-bundle-join");
+        let outside = testutil::temp_vault("wfm-bundle-join-outside");
+        // No bundle yet: a projection may create it, and nothing else.
+        assert!(bundle_join(&vault, "knowledge/metrics/churn.md").is_ok());
+        let err = bundle_join(&vault, "records/x.md").unwrap_err();
+        assert!(err.contains("outside knowledge/"), "{err}");
+
+        testutil::write(&vault, "knowledge/metrics/churn.md", NOTE);
+        testutil::write(&vault, "records/x.md", NOTE);
+        testutil::write(&vault, ".git/config", "[core]\n");
+        std::fs::create_dir_all(vault.join(".git/hooks")).unwrap();
+        let link = |target: &Path, name: &str| {
+            std::os::unix::fs::symlink(target, vault.join("knowledge").join(name)).unwrap()
+        };
+        link(&vault.join(".git/hooks"), "sys");
+        link(&outside, "out");
+        link(&vault.join("records"), "records");
+        link(&vault.join("knowledge/metrics"), "current");
+
+        assert!(bundle_join(&vault, "knowledge/metrics/churn.md").is_ok());
+        assert!(bundle_join(&vault, "knowledge/metrics/new.md").is_ok());
+        // A link that stays inside the bundle is just another way in.
+        assert!(bundle_join(&vault, "knowledge/current/churn.md").is_ok());
+        let err = bundle_join(&vault, "knowledge/sys/pre-commit.md").unwrap_err();
+        assert!(
+            err.contains("resolves to .git/hooks/pre-commit.md, outside knowledge/"),
+            "{err}"
+        );
+        let err = bundle_join(&vault, "knowledge/out/escaped.md").unwrap_err();
+        assert!(err.contains("escapes the vault"), "{err}");
+        let err = bundle_join(&vault, "knowledge/records/x.md").unwrap_err();
+        assert!(err.contains("resolves to records/x.md"), "{err}");
+        // A dot-folder inside the bundle is still the bundle: a person files
+        // concepts there by hand, and the agent doors keep agents out of it
+        // (`concept_refusal`).
+        assert!(bundle_join(&vault, "knowledge/.archive/x.md").is_ok());
+        let err = bundle_join(&vault, "knowledge/metrics/churn.txt").unwrap_err();
+        assert!(err.contains("a projection is a .md file"), "{err}");
+        let err = bundle_join(&vault, "knowledge/../.git/x.md").unwrap_err();
+        assert!(err.contains("escapes the vault"), "{err}");
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    #[test]
+    fn appended_body_appends_to_markdown_notes_only() {
+        let vault = vault_with_note("wfm-appended-body");
+        testutil::write(&vault, "diagrams/flow.mmd", "flowchart TD\n  A --> B\n");
+        assert_eq!(
+            appended_body(&vault, "items/atl-1.md", "  More.  ").unwrap(),
+            "\n# Ship the scanner\n\nBody stays.\n\nMore.\n"
+        );
+        // A .mmd is a note elsewhere — just not one markdown appends to.
+        let err = appended_body(&vault, "diagrams/flow.mmd", "More.").unwrap_err();
+        assert!(err.contains("raw diagram source"), "{err}");
+        let err = appended_body(&vault, ".git/config", "More.").unwrap_err();
+        assert!(err.starts_with("not a note: .git/config"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
