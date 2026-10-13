@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { beforeAll, describe, expect, it } from 'vitest';
-import { BlockNoteEditor } from '@blocknote/core';
+import { BlockNoteEditor, defaultBlockSpecs } from '@blocknote/core';
+import { getDefaultSlashMenuItems } from '@blocknote/core/extensions';
 import {
   blocksToMarkdown,
+  escapeMarkerLines,
+  formatAiMarker,
   isLossyImport,
   markdownToBlocks,
   normalizeParsedBlocks,
+  parseAiMarker,
   spliceTitleIntoBlocks,
+  unwrapReplyFence,
 } from './markdown';
 import { cerebroSchema, type CerebroEditor } from './MarkdownEditor';
 import { splitFrontmatter } from '@/lib/mockParse';
@@ -314,6 +319,894 @@ describe('the ::: column containers', () => {
     const blocks = await markdownToBlocks(editor, sample);
     expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
     expect(await roundTrip(sample)).toBe(sample);
+  });
+
+  /* Only a hand-edited file puts text between two columns, and it lands in
+     the row itself. It used to be written back as an EMPTY column — the row's
+     marker, a column's, and the text nowhere (M53.9 found it). */
+  it('keeps text a hand-edited row holds between its columns', async () => {
+    const md = ':::columns\nStray words.\n\n::::column\nLeft.\n::::\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks[0].children.map((c: { type: string }) => c.type)).toEqual([
+      'paragraph',
+      'column',
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+});
+
+/** A headless editor holding `blocks`, the way the page holds them. */
+const holding = (blocks: unknown[]): CerebroEditor => {
+  const live = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+  live.replaceBlocks(live.document, blocks as never);
+  return live;
+};
+
+/*
+ * The AI block (M53.9). It had no carrier: a save rendered it, so the file got
+ * its chrome — MEASURED in Chromium, the question glued to the "Answer"
+ * button's label in one paragraph, the block's type and props gone — and a
+ * save inside the unmount flush wrote nothing of it at all. On disk it is a
+ * `:::ai` directive container now, the column's spelling, with the answer
+ * inside as ordinary markdown.
+ */
+describe('the :::ai container', () => {
+  const ANSWERED = [
+    'Before.',
+    '',
+    ':::ai{prompt="The open questions in this document" generated="2026-10-12"}',
+    '* Who owns the migration?',
+    '',
+    '* When does the freeze start?',
+    '',
+    '```ts',
+    "const freeze = '2026-11-02';",
+    '```',
+    ':::',
+    '',
+    'After.',
+    '',
+  ].join('\n');
+
+  it('reads the container as an AI block holding its answer', async () => {
+    const blocks = await markdownToBlocks(editor, ANSWERED);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'ai', 'paragraph']);
+    expect(blocks[1].props).toEqual({
+      prompt: 'The open questions in this document',
+      generated: '2026-10-12',
+    });
+    expect(blocks[1].children.map((c: { type: string }) => c.type)).toEqual([
+      'bulletListItem',
+      'bulletListItem',
+      'codeBlock',
+    ]);
+  });
+
+  it('round-trips byte for byte, and the second save is the first', async () => {
+    const once = await roundTrip(ANSWERED);
+    expect(once).toBe(ANSWERED);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  /* The order a person meets it in: a block on the page, saved, opened, and
+     saved again. */
+  it('saves a live block, opens it as the same block, and saves the same bytes', async () => {
+    const live = holding([
+      {
+        type: 'ai',
+        props: { prompt: 'Summarise "the plan"', generated: '2026-10-12' },
+        children: [
+          { type: 'bulletListItem', content: 'Ship the [[kickoff]] notes first' },
+          { type: 'codeBlock', props: { language: 'ts' }, content: 'const x = 1;' },
+        ],
+      },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(
+      [
+        ':::ai{prompt="Summarise \\"the plan\\"" generated="2026-10-12"}',
+        '* Ship the [[kickoff]] notes first',
+        '',
+        '```ts',
+        'const x = 1;',
+        '```',
+        ':::',
+        '',
+      ].join('\n'),
+    );
+    const reopened = await markdownToBlocks(live, saved);
+    expect(reopened).toHaveLength(1);
+    expect(reopened[0].props).toEqual({ prompt: 'Summarise "the plan"', generated: '2026-10-12' });
+    live.replaceBlocks(live.document, reopened);
+    expect(await blocksToMarkdown(live)).toBe(saved);
+  });
+
+  it("never writes the block's chrome", async () => {
+    for (const generated of ['', '2026-10-12']) {
+      const saved = await blocksToMarkdown(
+        holding([
+          {
+            type: 'ai',
+            props: { prompt: 'What changed?', generated },
+            children: [{ type: 'paragraph', content: 'The freeze moved.' }],
+          },
+        ]),
+      );
+      // The run button's two labels and the provenance line under it.
+      expect(saved).not.toMatch(/Recompute|Answer|Working…/);
+      expect(saved.split('\n')[0]).toBe(formatAiMarker(3, { prompt: 'What changed?', generated }));
+    }
+  });
+
+  /* What `/` leaves before anything is asked is a block too, and a page that
+     saves on a debounce writes it. */
+  it('round-trips a block nobody has asked anything yet', async () => {
+    const saved = await blocksToMarkdown(holding([{ type: 'ai' }]));
+    expect(saved).toBe(':::ai\n:::\n');
+    const blocks = await markdownToBlocks(editor, saved);
+    expect(blocks.map((b) => b.type)).toEqual(['ai']);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* A question is free text, and both halves of the round trip read text as
+     markdown: emphasis, inline code, HTML, escapes, chips, a run of spaces.
+     The opening line goes round both, so every one of these comes back. */
+  it('keeps a question the parser would read as markdown exactly as asked', async () => {
+    const prompt =
+      'Why *this*, _that_ and `code`? <b>bold</b> &amp; [[kickoff]] [^src] 📅 2026-08-01 ' +
+      '"quoted" back\\slash  two  spaces';
+    const saved = await blocksToMarkdown(holding([{ type: 'ai', props: { prompt } }]));
+    const [reopened] = await markdownToBlocks(editor, saved);
+    expect(reopened.type).toBe('ai');
+    expect(reopened.props.prompt).toBe(prompt);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* `JSON.stringify` writes U+2028 and U+2029 as they are, and those end a line
+     for the opening line's reader: the block reopened as paragraphs. They are
+     written escaped, and JSON reads the escape back. */
+  it('keeps a question holding a line or paragraph separator on its one line', async () => {
+    const prompt = 'First part\u2028second part\u2029third part';
+    const saved = await blocksToMarkdown(
+      holding([
+        { type: 'ai', props: { prompt }, children: [{ type: 'paragraph', content: 'A.' }] },
+      ]),
+    );
+    expect(saved).toBe(':::ai{prompt="First part\\u2028second part\\u2029third part"}\nA.\n:::\n');
+    const [reopened] = await markdownToBlocks(editor, saved);
+    expect(reopened.type).toBe('ai');
+    expect(reopened.props.prompt).toBe(prompt);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  it("is ordinary text in an answer that only mentions ':::'", async () => {
+    const md =
+      ':::ai{prompt="How do containers close?"}\nWith a line of ::: under the last block.\n:::\n';
+    const [block] = await markdownToBlocks(editor, md);
+    expect(block.children[0].content[0].text).toBe('With a line of ::: under the last block.');
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  /* An answer may hold a line that is nothing but `:::` — an example, say. Read
+     back bare, that line would close the block early and spill the rest of
+     the answer below it. It is text, so it is written escaped. */
+  it("escapes a line of ':::' in its answer, and keeps its own depth", async () => {
+    const live = holding([
+      {
+        type: 'ai',
+        props: { prompt: 'Show the syntax' },
+        children: [
+          { type: 'paragraph', content: 'A container closes with' },
+          { type: 'paragraph', content: ':::' },
+          { type: 'paragraph', content: 'on a line of its own.' },
+        ],
+      },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(
+      ':::ai{prompt="Show the syntax"}\nA container closes with\n\n\\:::\n\non a line of its own.\n:::\n',
+    );
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['ai']);
+    expect(
+      reopened[0].children.map((c: { content: { text: string }[] }) => c.content[0].text),
+    ).toEqual(['A container closes with', ':::', 'on a line of its own.']);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* A close the FILE holds inside an answer is a marker the fold could not
+     use: it is kept, written back as the marker it is, and the block steps
+     its own markers past it, the way a code fence lengthens past the
+     backticks inside it. */
+  it('steps its markers past a close the file holds in its answer', async () => {
+    const md = '::::ai{prompt="Show the syntax"}\nBefore.\n:::\n\nAfter.\n::::\n';
+    const [block] = await markdownToBlocks(editor, md);
+    expect(block.type).toBe('ai');
+    expect(block.children.map((c: { content: { text: string }[] }) => c.content[0].text)).toEqual([
+      'Before.',
+      ':::',
+      'After.',
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('sits in a column as an AI block, one marker deeper than the column', async () => {
+    const md = [
+      ':::columns',
+      '::::column',
+      ':::::ai{prompt="Summarise the left" generated="2026-10-12"}',
+      '* One point',
+      ':::::',
+      '::::',
+      '::::column',
+      'Right.',
+      '::::',
+      ':::',
+      '',
+    ].join('\n');
+    const blocks = await markdownToBlocks(editor, md);
+    const ai = blocks[0].children[0].children[0];
+    expect(ai.type).toBe('ai');
+    expect(ai.props).toEqual({ prompt: 'Summarise the left', generated: '2026-10-12' });
+    expect(ai.children.map((c: { type: string }) => c.type)).toEqual(['bulletListItem']);
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('holds a column layout and another AI block in its answer', async () => {
+    const md = [
+      ':::ai{prompt="outer"}',
+      'Intro.',
+      '',
+      '::::ai{prompt="inner"}',
+      'Inner answer.',
+      '::::',
+      '',
+      '::::columns',
+      ':::::column',
+      'Left.',
+      ':::::',
+      ':::::column',
+      'Right.',
+      ':::::',
+      '::::',
+      ':::',
+      '',
+    ].join('\n');
+    const [outer] = await markdownToBlocks(editor, md);
+    expect(outer.children.map((c: { type: string }) => c.type)).toEqual([
+      'paragraph',
+      'ai',
+      'columnList',
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  /* Strict, like the column markers: anything the block could not carry back
+     out is not a marker, and its lines stay the text they are. Written in
+     the tight form a save gives a stray close, so the bytes are held too. */
+  it.each([
+    ':::ai{prompt="x" mood="y"}',
+    ':::ai{prompt="x" prompt="y"}',
+    ':::ai{prompt=x}',
+    ':::ai{prompt="unterminated}',
+    ':::ai{prompt="x"} and more',
+    ':::aim{prompt="x"}',
+    ':::assistant',
+  ])('leaves %s and the lines after it as the text they are', async (line) => {
+    const md = `${line}\n\nThe answer.\n:::\n`;
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
+    expect(blocks.map((b) => (b.content as { text: string }[])[0].text)).toEqual([
+      line,
+      'The answer.',
+      ':::',
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  /* Hand-written tight, a line that is not a marker is not lifted out, so the
+     parser reads it into one paragraph with the line under it — and every
+     word stays, the soft break becoming the hard one M2 writes for any
+     paragraph. */
+  it('keeps every word of a malformed marker written tight against its answer', async () => {
+    const md = ':::ai{prompt="x" mood="y"}\nThe answer.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(JSON.stringify(blocks)).not.toContain('"type":"ai"');
+    expect((blocks[0].content as { text: string }[])[0].text).toBe(
+      ':::ai{prompt="x" mood="y"}\nThe answer.',
+    );
+    const once = await roundTrip(md);
+    expect(once).toBe(':::ai{prompt="x" mood="y"}\\\nThe answer.\n:::\n');
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  /* An opening line with no close is the asymmetric tolerance the columns
+     keep: nothing is folded, and the line is the text it was — as written,
+     not as the markdown parser would have read it. */
+  it('leaves an AI block that never closes as the text it was', async () => {
+    const md = ':::ai{prompt="What is *left*?"}\nNever closed.\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'paragraph']);
+    expect(blocks[0].content).toEqual([
+      { type: 'text', text: ':::ai{prompt="What is *left*?"}', styles: {} },
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('does not read a marker inside a code fence', async () => {
+    const sample = '```markdown\n:::ai{prompt="x"}\nAn example.\n:::\n```\n';
+    const blocks = await markdownToBlocks(editor, sample);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(await roundTrip(sample)).toBe(sample);
+  });
+});
+
+const textsOf = (blocks: { content?: { text?: string }[] }[]): (string | undefined)[] =>
+  blocks.map((b) => b.content?.[0]?.text);
+
+/*
+ * Where fenced code ends (M53.9). Every line pass here used to flip "in a
+ * fence" on any line that started with ``` or ~~~, so a code block holding a
+ * lone fence line — which the serializer wraps in a longer fence — left the
+ * rest of the page read as code. MEASURED: every AI block below one came back
+ * as three paragraphs, its question re-read as markdown, and the next save
+ * wrote it as JSON that no longer parsed. The other way round, an example of
+ * the carrier inside nested fences was lifted out of its code, and the code
+ * block showed the placeholder instead.
+ */
+describe('fenced code and the containers below it', () => {
+  it.each([
+    ['markdown', 'Open a fence with\n```\nand forget to close it'],
+    ['markdown', 'Close a fence with\n```'],
+    ['bash', 'cat <<EOF\n~~~\nEOF'],
+  ])(
+    'keeps an AI block whole below a %s block holding a lone fence line',
+    async (language, code) => {
+      const live = holding([
+        { type: 'codeBlock', props: { language }, content: code },
+        {
+          type: 'ai',
+          props: { prompt: 'Summarise "the plan" for *Q4*', generated: '2026-10-12' },
+          children: [{ type: 'paragraph', content: 'Because.' }],
+        },
+      ]);
+      const saved = await blocksToMarkdown(live);
+      expect(saved).toContain(
+        '\n:::ai{prompt="Summarise \\"the plan\\" for *Q4*" generated="2026-10-12"}\nBecause.\n:::\n',
+      );
+      const reopened = await markdownToBlocks(editor, saved);
+      expect(reopened.map((b) => b.type)).toEqual(['codeBlock', 'ai']);
+      expect(reopened[0].content[0].text).toBe(code);
+      expect(reopened[1].props.prompt).toBe('Summarise "the plan" for *Q4*');
+      expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+    },
+  );
+
+  it('reads an example of the carrier inside nested fences as the code it is', async () => {
+    const md =
+      'How the file looks:\n\n````markdown\n```markdown\n:::ai{prompt="Summarise"}\nThe answer.\n:::\n```\n````\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'codeBlock']);
+    expect(blocks[1].content[0].text).toBe(
+      '```markdown\n:::ai{prompt="Summarise"}\nThe answer.\n:::\n```',
+    );
+    const saved = await roundTrip(md);
+    expect(saved).toBe(md);
+    expect(isLossyImport(md, saved)).toBe(false);
+  });
+
+  it('reads a backtick fence inside a tilde fence as code, whatever follows it', async () => {
+    const md = '~~~markdown\n```\n:::ai{prompt="x"}\n~~~\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(blocks[0].content[0].text).toBe('```\n:::ai{prompt="x"}');
+    const saved = await roundTrip(md);
+    expect(isLossyImport(md, saved)).toBe(false);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* The fence reader reads lines, not containers, so it can still disagree
+     with the parser: four spaces at the top of a page are indented code to
+     CommonMark and a fence to the reader, which then closes it on the bare
+     fence below — the one the parser opens, and never closes. The AI line
+     after it is lifted out of what the parser reads as code; it must go back
+     into that code exactly, and no placeholder may reach the page or the
+     disk. */
+  it('puts a lifted line back into code the parser read it into', async () => {
+    const md = '    ```\nx\n```\n:::ai{prompt="x"}\nanswer\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock', 'paragraph', 'codeBlock']);
+    expect(blocks[2].content[0].text).toBe(':::ai{prompt="x"}\nanswer');
+    expect(JSON.stringify(blocks)).not.toContain('cerebro-line-');
+    expect(await blocksToMarkdown(editor, blocks)).not.toContain('cerebro-line-');
+  });
+
+  /* The route a model takes there: a reply that opens and closes with code
+     blocks. The old cleanup stripped a fence line from each END of it and
+     left the fence in between open. */
+  it('keeps both code blocks of a reply that starts and ends with one', async () => {
+    const reply = '```sql\nSELECT 1;\n```\n\nThen the totals:\n\n```sql\nSELECT 2;\n```';
+    expect(unwrapReplyFence(reply)).toBe(reply);
+    const answer = await markdownToBlocks(editor, escapeMarkerLines(unwrapReplyFence(reply)));
+    expect(answer.map((b) => b.type)).toEqual(['codeBlock', 'paragraph', 'codeBlock']);
+    const page = [
+      { type: 'ai', props: { prompt: 'The queries' }, children: answer },
+      {
+        type: 'ai',
+        props: { prompt: 'Who signs off on "the plan"?' },
+        children: [{ type: 'paragraph', content: 'Maya.' }],
+      },
+    ];
+    const saved = await blocksToMarkdown(editor, page as never);
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['ai', 'ai']);
+    expect(reopened[1].props.prompt).toBe('Who signs off on "the plan"?');
+    expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+  });
+});
+
+/*
+ * Text that only looks like a marker (M53.9). It was written bare, and the
+ * next open read it as one: MEASURED, an answer quoting a `:::columns` line
+ * reopened as nothing but paragraphs, the AI block and the page's real layout
+ * both gone, because an opening marker that never closes abandons the fold
+ * for the whole page. It is written escaped now. The FILE's own markers are
+ * not text, and a page whose fold was abandoned writes them back as it had
+ * them.
+ */
+describe('text that only looks like a marker', () => {
+  it.each([':::', ':::columns', '::::column width=2', ':::ai', ':::ai{prompt="x"}'])(
+    'writes %s typed as a paragraph escaped, and reads it back as that text',
+    async (text) => {
+      const live = holding([
+        { type: 'paragraph', content: text },
+        { type: 'ai', props: { prompt: 'Q' }, children: [{ type: 'paragraph', content: 'A' }] },
+      ]);
+      const saved = await blocksToMarkdown(live);
+      expect(saved).toBe(`\\${text}\n\n:::ai{prompt="Q"}\nA\n:::\n`);
+      const reopened = await markdownToBlocks(editor, saved);
+      expect(reopened.map((b) => b.type)).toEqual(['paragraph', 'ai']);
+      expect(reopened[0].content[0].text).toBe(text);
+      expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+    },
+  );
+
+  it('escapes a marker line that follows a break inside a paragraph', async () => {
+    const saved = await blocksToMarkdown(
+      holding([{ type: 'paragraph', content: 'The layout:\n:::columns' }]),
+    );
+    expect(saved).toBe('The layout:\\\n\\:::columns\n');
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['paragraph']);
+    expect(reopened[0].content[0].text).toBe('The layout:\n:::columns');
+    expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+  });
+
+  it('keeps the page whole when an answer quotes a marker', async () => {
+    const reply = 'The page uses a layout:\n\n:::columns\n\nwith two columns.';
+    const answer = await markdownToBlocks(editor, escapeMarkerLines(reply));
+    expect(textsOf(answer)).toEqual(['The page uses a layout:', ':::columns', 'with two columns.']);
+    const page = await markdownToBlocks(
+      editor,
+      ':::ai{prompt="Q"}\nOld.\n:::\n\n:::columns\n::::column\nL\n::::\n::::column\nR\n::::\n:::\n',
+    );
+    page[0].children = answer;
+    const saved = await blocksToMarkdown(editor, page);
+    expect(saved).toContain('\n\\:::columns\n');
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['ai', 'columnList']);
+    expect(textsOf(reopened[0].children)).toEqual(textsOf(answer));
+    expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+  });
+
+  /* A stray `:::columns` abandons the fold, and every marker on the page is
+     shown as the text it is. Written back escaped, one stray line would have
+     turned every container on the page into text for good; written back
+     through the serializer, the AI line lost a space from its question. */
+  it('writes back the markers of a page whose fold was abandoned, as the file had them', async () => {
+    const prompt = 'two  spaces, *stars* and "quotes"';
+    const md = `:::ai{prompt=${JSON.stringify(prompt)}}\nAn answer.\n:::\n\n:::columns\nNever closed.\n`;
+    const live = holding(await markdownToBlocks(editor, md));
+    expect(live.document.every((b) => b.type === 'paragraph')).toBe(true);
+    live.insertBlocks(
+      [{ type: 'paragraph', content: 'An edit.' }],
+      live.document[live.document.length - 1],
+      'after',
+    );
+    const edited = await blocksToMarkdown(live);
+    expect(edited).toBe(`${md}\nAn edit.\n`);
+
+    // Once the stray line is gone, the page folds, and the question is as asked.
+    const stray = live.document.find((b) => textsOf([b as never])[0] === ':::columns');
+    live.removeBlocks([stray!]);
+    const fixed = await markdownToBlocks(editor, await blocksToMarkdown(live));
+    expect(fixed.map((b) => b.type)).toEqual(['ai', 'paragraph', 'paragraph']);
+    expect(fixed[0].props.prompt).toBe(prompt);
+  });
+
+  it('keeps a stray close the file holds as the marker it is', async () => {
+    const md = 'One.\n:::\n\nTwo.\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks)).toEqual(['One.', ':::', 'Two.']);
+    expect(await roundTrip(md)).toBe(md);
+  });
+});
+
+/*
+ * A paragraph that reads as a marker only once its link, chip or style is
+ * dropped (M53.9). The fold read marker text with everything but plain text
+ * dropped, so each of these was a marker: MEASURED, a code span of
+ * `:::columns` opened a live layout and a code span of `:::` ended an AI
+ * block early, and a paragraph the fold kept was saved as the bare marker,
+ * its link or chip deleted. A marker is plain text and nothing else.
+ */
+describe('a paragraph that is more than plain marker text', () => {
+  const LOOKALIKES = [
+    ['a link after :::', '::: [a link](https://example.com)', '"type":"link"'],
+    ['bold :::', '**:::**', '"bold":true'],
+    ['a code span of :::columns', '`:::columns`', '"code":true'],
+    ['a chip after :::', '::: [[kickoff]]', '"type":"wikilink"'],
+  ] as const;
+
+  it.each(LOOKALIKES)(
+    'round-trips %s byte for byte, beside a layout and inside one',
+    async (_name, line, carried) => {
+      const md = [
+        'Before.',
+        '',
+        line,
+        '',
+        ':::columns',
+        '::::column',
+        'Left.',
+        '',
+        line,
+        '::::',
+        ':::',
+        '',
+        'After.',
+        '',
+      ].join('\n');
+      const blocks = await markdownToBlocks(editor, md);
+      expect(blocks.map((b) => b.type)).toEqual([
+        'paragraph',
+        'paragraph',
+        'columnList',
+        'paragraph',
+      ]);
+      const column = blocks[2].children[0];
+      expect(column.type).toBe('column');
+      expect(column.children.map((c: { type: string }) => c.type)).toEqual([
+        'paragraph',
+        'paragraph',
+      ]);
+      expect(JSON.stringify(blocks[1].content)).toContain(carried);
+      expect(JSON.stringify(column.children[1].content)).toContain(carried);
+      const once = await roundTrip(md);
+      expect(once).toBe(md);
+      expect(await roundTrip(once)).toBe(once);
+    },
+  );
+
+  it.each(LOOKALIKES)(
+    'keeps %s in an answer, and the block whole',
+    async (_name, line, carried) => {
+      const md = `:::ai{prompt="Q"}\nBefore.\n\n${line}\n\nAfter.\n:::\n`;
+      const blocks = await markdownToBlocks(editor, md);
+      expect(blocks.map((b) => b.type)).toEqual(['ai']);
+      expect(blocks[0].children.map((c: { type: string }) => c.type)).toEqual([
+        'paragraph',
+        'paragraph',
+        'paragraph',
+      ]);
+      expect(JSON.stringify(blocks[0].children[1].content)).toContain(carried);
+      expect(await roundTrip(md)).toBe(md);
+    },
+  );
+
+  it('keeps a code span of :::columns a code span, with a close below it', async () => {
+    const md = '`:::columns`\n\nWords.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'paragraph', 'paragraph']);
+    expect(blocks[0].content).toEqual([
+      { type: 'text', text: ':::columns', styles: { code: true } },
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('does not end an AI block at a code span of :::', async () => {
+    const md =
+      ':::ai{prompt="How do containers close?"}\nWith a line of\n\n`:::`\n\nunder the last block.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['ai']);
+    expect(textsOf(blocks[0].children)).toEqual(['With a line of', ':::', 'under the last block.']);
+    expect(blocks[0].children[1].content).toEqual([
+      { type: 'text', text: ':::', styles: { code: true } },
+    ]);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  /* A marker the file holds is kept, and written back as it was — until
+     somebody makes it more than plain text. Then it is text, and its link,
+     chip or style is written with it. */
+  it.each([
+    [
+      [
+        { type: 'text', text: '::: ', styles: {} },
+        { type: 'link', href: 'https://example.com', content: 'a link' },
+      ],
+      '::: [a link](https://example.com)',
+    ],
+    [[{ type: 'text', text: ':::', styles: { bold: true } }], '**:::**'],
+    [
+      [
+        { type: 'text', text: '::: ', styles: {} },
+        { type: 'wikilink', props: { target: 'kickoff', alias: '' } },
+      ],
+      '::: [[kickoff]]',
+    ],
+  ])('writes a kept marker edited to %j as the text it now is', async (content, written) => {
+    const live = holding(await markdownToBlocks(editor, 'One.\n:::\n\nTwo.\n'));
+    const kept = live.document[1];
+    live.updateBlock(kept, { content: content as never });
+    expect(live.document[1].id).toBe(kept.id);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(`One.\n\n${written}\n\nTwo.\n`);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+});
+
+describe('unwrapReplyFence / escapeMarkerLines', () => {
+  it('takes off one fence wrapped round the whole reply', () => {
+    expect(unwrapReplyFence('```markdown\n* one\n* two\n```')).toBe('* one\n* two');
+    expect(unwrapReplyFence('\n~~~\nPlain.\n~~~\n')).toBe('Plain.');
+    expect(unwrapReplyFence('````\n```js\nx\n```\n````')).toBe('```js\nx\n```');
+  });
+
+  /* A reply wrapped in a markdown fence holds code blocks of its own, and the
+     first of them closes the wrapper as CommonMark reads it. The cleanup
+     before M53.9 took the wrapper off anyway, and so does this. */
+  it('takes off a markdown fence round a reply that holds code blocks of its own', async () => {
+    const inner = 'Run this:\n\n```js\nconst x = 1;\n```\n\nThen check it.';
+    expect(unwrapReplyFence(`\`\`\`markdown\n${inner}\n\`\`\``)).toBe(inner);
+    expect(unwrapReplyFence(`\n\`\`\`MD\n${inner}\n\`\`\`\n`)).toBe(inner);
+    expect(unwrapReplyFence(`~~~Markdown\n${inner}\n~~~`)).toBe(inner);
+    const endsInCode = 'The totals:\n\n```sql\nSELECT 2;\n```';
+    expect(unwrapReplyFence(`\`\`\`md\n${endsInCode}\n\`\`\``)).toBe(endsInCode);
+    const answer = await markdownToBlocks(
+      editor,
+      escapeMarkerLines(unwrapReplyFence(`\`\`\`markdown\n${inner}\n\`\`\``)),
+    );
+    expect(answer.map((b) => b.type)).toEqual(['paragraph', 'codeBlock', 'paragraph']);
+  });
+
+  it('leaves every other reply as it came, trimmed', () => {
+    for (const reply of [
+      'No fence at all.',
+      '```sql\nSELECT 1;\n```\n\nThen the totals:\n\n```sql\nSELECT 2;\n```',
+      '```markdown\n# An example\n```\n\nThen the totals:\n\n```sql\nSELECT 2;\n```',
+      '```\nnever closed',
+      '```\ncode\n```\nand words after it',
+      '```markdown\ncode\n```\nand words after it',
+      '```markdown\nRun this:\n```js\nx\n```\n~~~',
+      '````markdown\nRun this:\n```js\nx\n```',
+      'Words, then\n```\ncode\n```',
+    ]) {
+      expect(unwrapReplyFence(` ${reply}\n`)).toBe(reply);
+    }
+  });
+
+  it('escapes the marker lines outside fenced code, and nothing else', () => {
+    const md = [
+      'Text',
+      ':::columns',
+      '```markdown',
+      ':::',
+      '```',
+      '  :::',
+      '\\:::',
+      ':::ai{prompt="x"}',
+      ':::ai{prompt="x" mood="y"}',
+    ].join('\n');
+    expect(escapeMarkerLines(md).split('\n')).toEqual([
+      'Text',
+      '\\:::columns',
+      '```markdown',
+      ':::',
+      '```',
+      '  :::',
+      '\\:::',
+      '\\:::ai{prompt="x"}',
+      ':::ai{prompt="x" mood="y"}',
+    ]);
+  });
+});
+
+describe('parseAiMarker / formatAiMarker', () => {
+  it('writes only what is set, in one order', () => {
+    expect(formatAiMarker(3, { prompt: '', generated: '' })).toBe(':::ai');
+    expect(formatAiMarker(4, { prompt: 'Q', generated: '' })).toBe('::::ai{prompt="Q"}');
+    expect(formatAiMarker(3, { prompt: '', generated: '2026-10-12' })).toBe(
+      ':::ai{generated="2026-10-12"}',
+    );
+    expect(formatAiMarker(3, { prompt: 'Q', generated: '2026-10-12' })).toBe(
+      ':::ai{prompt="Q" generated="2026-10-12"}',
+    );
+  });
+
+  it('reads back exactly what it writes', () => {
+    for (const prompt of [
+      'plain',
+      'a "quote"',
+      'back\\slash',
+      'two\nlines',
+      'tab\there',
+      '}{',
+      'x"} trailing',
+      'line\u2028separator',
+      'paragraph\u2029separator',
+      '',
+    ]) {
+      const line = formatAiMarker(5, { prompt, generated: '2026-10-12' });
+      expect(line).not.toMatch(/[\n\u2028\u2029]/u);
+      expect(parseAiMarker(line)).toEqual({ depth: 5, prompt, generated: '2026-10-12' });
+    }
+  });
+
+  it('reads the attributes in either order, and an empty brace pair as none', () => {
+    expect(parseAiMarker(':::ai{generated="2026-10-12" prompt="Q"}')).toEqual({
+      depth: 3,
+      prompt: 'Q',
+      generated: '2026-10-12',
+    });
+    expect(parseAiMarker(':::ai{}')).toEqual({ depth: 3, prompt: '', generated: '' });
+    expect(parseAiMarker('::ai{prompt="too shallow"}')).toBeNull();
+    expect(parseAiMarker(' :::ai')).toBeNull();
+  });
+});
+
+/*
+ * Every block the `/` menu can insert, and whether a save keeps it (M53.9).
+ *
+ * The AI block came back from every save as a paragraph of its own chrome,
+ * and nothing said so: the lossy-import check compares letters and digits,
+ * and every word was still there. This holds the whole menu to the question
+ * that would have caught it — does a block reopen as the block it was, and
+ * does a second save write the bytes of the first?
+ *
+ * Not here: the `/` menu's Date entry inserts an inline chip (the chip tests
+ * above hold those), and a template inserts the markdown it is made of.
+ */
+describe('every block the / menu inserts survives a save, or is named', () => {
+  /**
+   * The ones that do not, today. EDITOR-1
+   * (docs/superpowers/specs/2026-10-12-macro-reference/03-editor.md) is the
+   * work that gives each one a carrier. The list can only shrink: an entry
+   * that starts surviving fails below until it is taken off.
+   */
+  const KNOWN_LOSSY: Record<string, string> = {
+    toggle_list: 'saves as a bullet and reopens as one',
+    toggle_heading: 'saves as a heading and reopens without its toggle',
+    toggle_heading_2: 'saves as a heading and reopens without its toggle',
+    toggle_heading_3: 'saves as a heading and reopens without its toggle',
+    table: 'has no header row, which a markdown table must — the first save writes an empty one',
+    image: 'reopens named "BlockNote image", the alt text the serializer invents',
+    audio: 'saves as a bare link that reopens as an empty paragraph',
+    file: 'saves as an autolink that reopens as a paragraph holding a link',
+  };
+
+  /** Emoji opens a picker that inserts a character, not a block. */
+  const NOT_A_BLOCK = new Set(['emoji']);
+
+  /** A file block needs a file to be anything at all. */
+  const MEDIA_URL: Record<string, string> = {
+    image: 'https://example.com/plan.png',
+    video: 'https://example.com/walkthrough.mp4',
+    audio: 'https://example.com/standup.mp3',
+    file: 'https://example.com/contract.pdf',
+  };
+
+  /** Cerebro's own blocks, each the way the `/` menu leaves it once used. */
+  const OURS: Record<string, unknown[]> = {
+    ai: [
+      {
+        type: 'ai',
+        props: { prompt: 'The open questions', generated: '2026-10-12' },
+        children: [{ type: 'paragraph', content: 'Who owns the migration?' }],
+      },
+    ],
+    callout: [{ type: 'callout', props: { kind: 'warning' }, content: 'Mind the gap' }],
+    mermaid: [{ type: 'mermaid', props: { code: 'flowchart TD\n  A --> B' } }],
+    database: [{ type: 'database', props: { database: 'Reading list', view: 'shelf' } }],
+    // A column only exists in a row, so the row is the column's fixture too.
+    columnList: [
+      {
+        type: 'columnList',
+        children: [
+          { type: 'column', props: { width: 1 }, children: [{ type: 'paragraph', content: 'L' }] },
+          { type: 'column', props: { width: 2 }, children: [{ type: 'paragraph', content: 'R' }] },
+        ],
+      },
+    ],
+  };
+  OURS.column = OURS.columnList;
+
+  const withoutIds = (blocks: unknown[]): unknown[] =>
+    blocks.map((block) => {
+      const { id: _id, children, ...rest } = block as { id: string; children: unknown[] };
+      return { ...rest, children: withoutIds(children ?? []) };
+    });
+
+  /** One save and one reopen give back the same blocks, and a second save the same bytes. */
+  async function survives(blocks: unknown[]): Promise<boolean> {
+    const live = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+    live.replaceBlocks(live.document, blocks as never);
+    const before = JSON.stringify(withoutIds(live.document));
+    const saved = await blocksToMarkdown(live);
+    live.replaceBlocks(live.document, await markdownToBlocks(live, saved));
+    return (
+      JSON.stringify(withoutIds(live.document)) === before &&
+      (await blocksToMarkdown(live)) === saved
+    );
+  }
+
+  /** What one of BlockNote's own entries inserts, run on a fresh page, with words in it. */
+  function insertedBy(key: string): unknown[] {
+    const live = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+    live.replaceBlocks(live.document, [{ type: 'paragraph' }]);
+    live.setTextCursorPosition(live.document[0]);
+    getDefaultSlashMenuItems(live)
+      .find((item) => item.key === key)
+      ?.onItemClick();
+    const { type, props } = live.document[0] as { type: string; props: Record<string, unknown> };
+    const content = (cerebroSchema.blockSpecs as Record<string, { config: { content: string } }>)[
+      type
+    ].config.content;
+    return [
+      {
+        type,
+        props: type in MEDIA_URL ? { ...props, url: MEDIA_URL[type] } : props,
+        ...(content === 'inline' ? { content: 'Some words' } : {}),
+        ...(content === 'table'
+          ? {
+              content: {
+                type: 'tableContent',
+                rows: [{ cells: ['a', 'b'] }, { cells: ['c', 'd'] }],
+              },
+            }
+          : {}),
+      },
+    ];
+  }
+
+  // The menu's own `getDefaultReactSlashMenuItems` is this list with an icon
+  // put on each entry; the core list keeps each entry's key in its type.
+  const MENU = getDefaultSlashMenuItems(
+    BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor,
+  )
+    .map((item) => item.key)
+    .filter((key) => !NOT_A_BLOCK.has(key));
+  const CEREBRO_TYPES = Object.keys(cerebroSchema.blockSpecs).filter(
+    (type) => !(type in defaultBlockSpecs),
+  );
+
+  it('names only entries the menu has', () => {
+    for (const key of Object.keys(KNOWN_LOSSY)) expect(MENU).toContain(key);
+  });
+
+  it.each(MENU)("BlockNote's %s entry", async (key) => {
+    const lossy = key in KNOWN_LOSSY;
+    expect(
+      await survives(insertedBy(key)),
+      lossy ? `${key} survives a save now: take it off KNOWN_LOSSY` : `${key} lost something`,
+    ).toBe(!lossy);
+  });
+
+  it.each(CEREBRO_TYPES)("Cerebro's %s block", async (type) => {
+    expect(OURS[type], `${type} has no fixture here`).toBeDefined();
+    expect(await survives(OURS[type])).toBe(true);
   });
 });
 

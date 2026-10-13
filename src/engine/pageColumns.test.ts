@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   closeMarker,
   DEFAULT_COLUMN_WIDTH,
+  fenceReader,
   MIN_COLUMN_SHARE,
   resizeColumnPair,
   loosenColumnMarkers,
@@ -200,6 +201,28 @@ describe('loosening and tightening', () => {
     expect(tightenColumnMarkers(fenced)).toBe(fenced);
   });
 
+  /* The fence a code block holding a lone ``` line is written in is longer
+     than that line, and that line does not close it. Read as a toggle, the
+     ``` flipped the page back to "in a fence" and every marker below it was
+     left loose on the way out and unread on the way in. */
+  it('reads markers below a code block that holds a lone fence line', () => {
+    const page = [
+      '````markdown',
+      'Close a fence with',
+      '```',
+      '````',
+      '',
+      ':::columns',
+      '::::column',
+      'A.',
+      '::::',
+      ':::',
+    ].join('\n');
+    const loose = loosenColumnMarkers(page).split('\n');
+    expect(loose[loose.indexOf(':::columns') + 1]).toBe('');
+    expect(tightenColumnMarkers(loosenColumnMarkers(page))).toBe(page);
+  });
+
   it('survives a nested container at a deeper marker depth', () => {
     const nested = [
       ':::columns',
@@ -213,6 +236,41 @@ describe('loosening and tightening', () => {
       ':::',
     ].join('\n');
     expect(tightenColumnMarkers(loosenColumnMarkers(nested))).toBe(nested);
+  });
+});
+
+/* Where fenced code starts and stops, the way CommonMark reads it (M53.9). */
+describe('reading fenced code', () => {
+  const kinds = (...lines: string[]) => lines.map(fenceReader());
+
+  it('closes a fence only on the same character, at least as long, with nothing after it', () => {
+    expect(kinds('````md', '```', '~~~~', '```` trailing', '`````', 'after')).toEqual([
+      'open',
+      'code',
+      'code',
+      'code',
+      'close',
+      'text',
+    ]);
+    expect(kinds('~~~', '```', '~~~~  ', 'after')).toEqual(['open', 'code', 'close', 'text']);
+  });
+
+  it('reads a backtick run with a backtick after it as inline code, not a fence', () => {
+    expect(kinds('``` not a fence ```', ':::')).toEqual(['text', 'text']);
+    expect(kinds('~~~ `info` is fine', 'x', '~~~')).toEqual(['open', 'code', 'close']);
+  });
+
+  it('opens at any indentation and closes no more than three columns past it', () => {
+    expect(kinds('  ```', '      ```', '     ```', 'after')).toEqual([
+      'open',
+      'code',
+      'close',
+      'text',
+    ]);
+  });
+
+  it('leaves a fence nobody closes open to the end', () => {
+    expect(kinds('```', ':::columns', '')).toEqual(['open', 'code', 'code']);
   });
 });
 

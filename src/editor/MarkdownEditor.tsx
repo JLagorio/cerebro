@@ -43,19 +43,26 @@ import {
   ColumnBlock,
   ColumnListBlock,
   DatabaseBlock,
+  leaveAiAnswer,
   MermaidBlock,
 } from './blocks';
 import { AssigneeChip, CitationChip, DueChip, WikilinkChip } from './chips';
 import { citationPasteHandler, citationTextInput, insertCitation } from './citationInput';
 import { citationChoices, citationIndexOf } from './citations';
 import { buildOutline } from './DocOutline';
-import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
+import {
+  blocksToMarkdown,
+  escapeMarkerLines,
+  isLossyImport,
+  markdownToBlocks,
+  unwrapReplyFence,
+} from './markdown';
 import { NotePathContext } from './notePath';
 
 // Default schema with the fully-featured code block (shiki highlighting,
-// full language list) swapped in, plus the Cerebro custom blocks (callout,
-// mermaid, database) and inline chips: wikilinks, assignees, dates, and
-// footnote citations (M2.x, M47.2, M51.5).
+// full language list) swapped in, plus the Cerebro custom blocks (AI block,
+// callout, columns, database, mermaid) and inline chips: wikilinks,
+// assignees, dates, and footnote citations (M2.x, M47.2, M48.1, M51.5).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
@@ -273,16 +280,27 @@ export function MarkdownEditor({
   // editor to close the link menu a marker's `[` opened, and it is handed to
   // TipTap before there is an editor to close anything on.
   const closeLinkMenu = useRef(() => {});
+  // The same, for the Enter that leaves an AI block's answer (M53.9).
+  const leaveAnswer = useRef<(event: KeyboardEvent) => boolean>(() => false);
   const editor = useCreateBlockNote({
     schema: cerebroSchema,
-    // M52.1: a hand-typed `[^id]` becomes a chip as its `]` lands.
     _tiptapOptions: {
-      editorProps: { handleTextInput: citationTextInput(() => closeLinkMenu.current()) },
+      editorProps: {
+        // M52.1: a hand-typed `[^id]` becomes a chip as its `]` lands.
+        handleTextInput: citationTextInput(() => closeLinkMenu.current()),
+        // M53.9: Enter at the end of an AI block's answer starts a paragraph
+        // after the block (`leaveAiAnswer`). A view prop runs before every
+        // keymap, and an open suggestion menu takes its Enter before the view
+        // sees it at all; only a key typed into the page itself is ours, not
+        // one typed into a field inside a block.
+        handleKeyDown: (view, event) => event.target === view.dom && leaveAnswer.current(event),
+      },
     },
     // M52.4: pasted markdown keeps its footnotes as the markers they are.
     pasteHandler: citationPasteHandler,
   });
   closeLinkMenu.current = () => editor.getExtension(SuggestionMenu)?.closeMenu();
+  leaveAnswer.current = (event) => leaveAiAnswer(editor, event);
   // M48.4 — what the block drag measures against. The editor's own host
   // element, so a drop can be resolved against every rendered block including
   // the ones inside columns.
@@ -526,7 +544,35 @@ export function MarkdownEditor({
     onItemClick: () => insertChip({ type: 'due', props: { date: isoAfterDays(0) } }),
   });
 
-  // Custom blocks (M2.x): callout + mermaid diagram.
+  /**
+   * Focus a just-inserted AI block's question field (M53.9).
+   *
+   * The block asks its question first, so the field takes the caret rather
+   * than the editor — `editor.focus()` here used to blur the field the moment
+   * it had focus, and the blur closed it, leaving nothing to type into. The
+   * node view mounts through a React portal, so the field may not exist on the
+   * first try; it is looked for again on the next few frames.
+   *
+   * The field is the one in the block's OWN content, not one in an answer
+   * nested under it — and both depths are named because the browser wraps a
+   * React block in an extra element that jsdom does not.
+   */
+  const focusAiPrompt = (id: string, tries = 10) => {
+    const escaped =
+      typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id;
+    const field = host.current
+      ?.querySelector(`.bn-block[data-id="${escaped}"]`)
+      ?.querySelector<HTMLInputElement>(
+        ':scope > [data-content-type="ai"] input, :scope > * > [data-content-type="ai"] input',
+      );
+    if (field != null) {
+      field.focus();
+      return;
+    }
+    if (tries > 0) window.requestAnimationFrame(() => focusAiPrompt(id, tries - 1));
+  };
+
+  // Custom blocks (M2.x): AI block, callout, mermaid diagram, database.
   const insertBlockAtCursor = (block: { type: string; props?: Record<string, string> }) => {
     const cursor = editor.getTextCursorPosition().block;
     const inserted = editor.insertBlocks([block as never], cursor, 'after');
@@ -536,6 +582,10 @@ export function MarkdownEditor({
     // is still placed on the next tick, once that close has finished handing
     // focus back, or typing continues in the old block.
     window.setTimeout(() => {
+      if (target !== undefined && block.type === 'ai') {
+        focusAiPrompt(target.id);
+        return;
+      }
       if (target !== undefined && block.type === 'callout') {
         editor.setTextCursorPosition(target, 'start');
       }
@@ -785,16 +835,30 @@ export function MarkdownEditor({
             }
             if (e.kind === 'Done') {
               stop();
-              const clean = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '');
-              const current = editor.getBlock(id);
-              if (current === undefined || clean === '') return;
-              // One edit, so it is one undo step and one save — the same
-              // reason the rewrite is not streamed in.
-              editor.updateBlock(current, {
-                props: { prompt, generated: todayIso() },
-                content: clean,
-              } as never);
-              scheduleEmit();
+              const clean = unwrapReplyFence(text);
+              if (editor.getBlock(id) === undefined || clean === '') return;
+              // The answer is markdown, and it becomes the block's children
+              // read the way the file will read it back (M53.9) — a list is a
+              // list, a [[link]] a chip — so what is on screen now is what
+              // the next open shows. A line in it that would read as a
+              // container marker is escaped first: the reply is the answer's
+              // text, never the page's structure, and the prompt above hands
+              // the run the page's own carrier lines to echo.
+              markdownToBlocks(editor, escapeMarkerLines(clean))
+                .then((answer) => {
+                  const current = editor.getBlock(id);
+                  if (current === undefined) return;
+                  // One edit, so it is one undo step and one save — the same
+                  // reason the rewrite is not streamed in. An answer the
+                  // parser made nothing of is kept as the text it was:
+                  // `children: []` would leave the OLD answer under a new date.
+                  editor.updateBlock(current, {
+                    props: { prompt, generated: todayIso() },
+                    children: answer.length > 0 ? answer : [{ type: 'paragraph', content: clean }],
+                  } as never);
+                  scheduleEmit();
+                })
+                .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err)));
             }
           }, runId);
         } catch (err) {

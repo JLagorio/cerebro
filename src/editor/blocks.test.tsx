@@ -1,6 +1,7 @@
 import { BlockNoteEditor } from '@blocknote/core';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_COLUMN_WIDTH } from '@/engine/pageColumns';
+import { leaveAiAnswer } from './blocks';
 import { cerebroSchema } from './MarkdownEditor';
 
 /**
@@ -128,5 +129,154 @@ describe('a column list is nesting BlockNote already does', () => {
     expect(html).toContain('::::column width=2');
     expect(html).not.toContain('flex-grow');
     expect(html).not.toContain('.cerebro-editor');
+  });
+});
+
+/**
+ * The AI block holds its answer the way a column holds its contents (M53.9):
+ * `content: 'none'`, the answer as children. The same observation the column
+ * rests on, held for this block too.
+ */
+describe('the AI block', () => {
+  const answered = {
+    type: 'ai',
+    props: { prompt: 'The open questions', generated: '2026-10-12' },
+    children: [{ type: 'paragraph', content: 'Who owns the migration?' }],
+  };
+
+  it('keeps its question, its date and its answer through the editor', () => {
+    const editor = BlockNoteEditor.create({
+      schema: cerebroSchema,
+      initialContent: [answered] as never,
+    });
+    const [block] = editor.document as unknown as Record<string, any>[];
+    expect(block.type).toBe('ai');
+    expect(block.props).toEqual({ prompt: 'The open questions', generated: '2026-10-12' });
+    expect(block.children.map((c: any) => c.content[0].text)).toEqual(['Who owns the migration?']);
+  });
+
+  /* Without `toExternalHTML` BlockNote copies the RENDERED text, and the
+     rendered text is the chrome: the question run into "Recompute", then the
+     provenance line — what a save used to write to disk, too. */
+  it('puts its opening line and its answer on the clipboard, never its chrome', async () => {
+    const editor = BlockNoteEditor.create({ schema: cerebroSchema });
+    const html = await editor.blocksToHTMLLossy([answered] as never);
+    expect(html).toContain(':::ai{prompt="The open questions" generated="2026-10-12"}');
+    expect(html).toContain('Who owns the migration?');
+    for (const chrome of ['Recompute', 'Answer', 'Answered', 'edit the answer below']) {
+      expect(html).not.toContain(chrome);
+    }
+  });
+});
+
+/**
+ * Enter at the end of an AI block's answer leaves the block (M53.9);
+ * MarkdownEditor.test.tsx holds the key reaching it through the editor. Here,
+ * the places it must leave alone.
+ */
+describe('leaveAiAnswer', () => {
+  const enter = {
+    key: 'Enter',
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    isComposing: false,
+  };
+
+  type Nest = { id: string; type: string; children: Nest[] };
+
+  /**
+   * A headless editor holding one AI block over `answer`, the caret at the end
+   * of the answer's last block — the deepest one, when the answer ends nested.
+   */
+  function atEndOfAnswer(answer: unknown[]) {
+    const editor = BlockNoteEditor.create({
+      schema: cerebroSchema,
+      initialContent: [{ type: 'ai', props: { prompt: 'Q' }, children: answer }] as never,
+    });
+    let last = (editor.document as unknown as Nest[])[0];
+    while (last.children.length > 0) last = last.children[last.children.length - 1];
+    editor.setTextCursorPosition(last.id, 'end');
+    return editor;
+  }
+
+  /* An answer that ends in a sub-bullet, which is how a model often ends one.
+     Enter there made a sibling INSIDE the answer, and the next Recompute took
+     it with the old answer. */
+  const NESTED = [
+    { type: 'bulletListItem', content: 'First point' },
+    {
+      type: 'bulletListItem',
+      content: 'Second point',
+      children: [
+        {
+          type: 'bulletListItem',
+          content: 'A sub-point',
+          children: [{ type: 'bulletListItem', content: 'A deeper one' }],
+        },
+      ],
+    },
+  ];
+
+  it('starts a paragraph after the block, and puts the caret in it', () => {
+    const editor = atEndOfAnswer([{ type: 'bulletListItem', content: 'Last point' }]);
+    expect(leaveAiAnswer(editor, enter)).toBe(true);
+    const [ai, after] = editor.document as unknown as {
+      id: string;
+      type: string;
+      children: unknown[];
+    }[];
+    expect(ai.children).toHaveLength(1);
+    expect(after.type).toBe('paragraph');
+    expect(editor.getTextCursorPosition().block.id).toBe(after.id);
+  });
+
+  it('leaves a modified Enter, a code block and an empty last line to BlockNote', () => {
+    const paragraph = [{ type: 'paragraph', content: 'Words' }];
+    expect(leaveAiAnswer(atEndOfAnswer(paragraph), { ...enter, shiftKey: true })).toBe(false);
+    expect(leaveAiAnswer(atEndOfAnswer(paragraph), { ...enter, isComposing: true })).toBe(false);
+    expect(leaveAiAnswer(atEndOfAnswer(paragraph), { ...enter, key: 'a' })).toBe(false);
+    const code = [{ type: 'codeBlock', props: { language: 'ts' }, content: 'const x = 1;' }];
+    expect(leaveAiAnswer(atEndOfAnswer(code), enter)).toBe(false);
+    expect(leaveAiAnswer(atEndOfAnswer([...paragraph, { type: 'paragraph' }]), enter)).toBe(false);
+  });
+
+  it('leaves the caret anywhere but the end of the last block to BlockNote', () => {
+    const editor = atEndOfAnswer([
+      { type: 'paragraph', content: 'First' },
+      { type: 'paragraph', content: 'Second' },
+    ]);
+    const [ai] = editor.document as unknown as { children: { id: string }[] }[];
+    editor.setTextCursorPosition(ai.children[0].id, 'end');
+    expect(leaveAiAnswer(editor, enter)).toBe(false);
+    editor.setTextCursorPosition(ai.children[1].id, 'start');
+    expect(leaveAiAnswer(editor, enter)).toBe(false);
+  });
+
+  it('leaves from the end of an answer that ends in a nested block', () => {
+    const editor = atEndOfAnswer(NESTED);
+    const answer = JSON.stringify((editor.document as unknown as Nest[])[0].children);
+    expect(leaveAiAnswer(editor, enter)).toBe(true);
+    const [ai, after] = editor.document as unknown as Nest[];
+    expect(JSON.stringify(ai.children)).toBe(answer);
+    expect(after.type).toBe('paragraph');
+    expect(editor.getTextCursorPosition().block.id).toBe(after.id);
+  });
+
+  it('leaves the blocks above the deepest last one, and its exceptions, to BlockNote', () => {
+    const editor = atEndOfAnswer(NESTED);
+    const second = (editor.document as unknown as Nest[])[0].children[1];
+    for (const block of [second, second.children[0]]) {
+      editor.setTextCursorPosition(block.id, 'end');
+      expect(leaveAiAnswer(editor, enter)).toBe(false);
+    }
+    const under = (children: unknown[]) => [
+      { type: 'bulletListItem', content: 'A point', children },
+    ];
+    const code = { type: 'codeBlock', props: { language: 'ts' }, content: 'const x = 1;' };
+    expect(leaveAiAnswer(atEndOfAnswer(under([code])), enter)).toBe(false);
+    expect(leaveAiAnswer(atEndOfAnswer(under([{ type: 'bulletListItem' }])), enter)).toBe(false);
+    expect(leaveAiAnswer(atEndOfAnswer(NESTED), { ...enter, shiftKey: true })).toBe(false);
   });
 });

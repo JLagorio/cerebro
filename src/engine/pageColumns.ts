@@ -88,7 +88,62 @@ export const openColumnMarker = (depth: number, width: number): string =>
 /** The marker line that closes a container at this depth. */
 export const closeMarker = (depth: number): string => ':'.repeat(depth);
 
-const FENCE = /^[ \t]*(```|~~~)/;
+/** What one line is to the fenced code around it. */
+export type FenceLine = 'text' | 'open' | 'code' | 'close';
+
+const FENCE = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+
+/** Leading whitespace in columns, a tab taken as four. */
+const indentOf = (space: string): number => space.replaceAll('\t', '    ').length;
+
+/**
+ * Read a file's lines one at a time, in order, and say which ones are fenced
+ * code (M53.9) — read the way CommonMark reads a fence.
+ *
+ * A fence opens on a run of three or more backticks or tildes, and closes only
+ * on a run of the SAME character at least as long, with nothing after it but
+ * spaces or tabs, indented no more than three columns past the opening. A
+ * backtick fence's info string cannot hold a backtick: that line is inline
+ * code in a paragraph. Anything else inside the fence is a line OF the code.
+ *
+ * The toggle this replaced flipped on any line that merely started with ```
+ * or ~~~. A code block holding one — a markdown example that ends in a lone
+ * ```, which the serializer itself wraps in a ```` fence — left every line
+ * after it read as code: MEASURED, an AI block below one came back as three
+ * paragraphs with its question re-read as markdown. The other way round, an
+ * AI block's opening line in an example inside nested fences was lifted out
+ * of its code, and the code block showed the placeholder in its place.
+ *
+ * Where it can still disagree with the parser, it is because it reads lines
+ * and not containers. Any indentation opens a fence, since a fence inside a
+ * list item is indented by the item — so four spaces at the top of a page,
+ * which CommonMark reads as indented code, open one here. And a fence the
+ * parser closes where its list item or quote ends stays open here.
+ */
+export function fenceReader(): (line: string) => FenceLine {
+  let open: { char: string; length: number; indent: number } | null = null;
+  return (line) => {
+    const fence = FENCE.exec(line);
+    if (open === null) {
+      if (fence === null) return 'text';
+      const [, space, run, info] = fence;
+      if (run[0] === '`' && info.includes('`')) return 'text';
+      open = { char: run[0], length: run.length, indent: indentOf(space) };
+      return 'open';
+    }
+    if (
+      fence !== null &&
+      fence[2][0] === open.char &&
+      fence[2].length >= open.length &&
+      /^[ \t]*$/.test(fence[3]) &&
+      indentOf(fence[1]) <= open.indent + 3
+    ) {
+      open = null;
+      return 'close';
+    }
+    return 'code';
+  };
+}
 
 /**
  * Put a blank line on either side of every marker line.
@@ -100,19 +155,18 @@ const FENCE = /^[ \t]*(```|~~~)/;
  * to read a page that is half blank lines. So loosening happens on the way IN,
  * and `tightenColumnMarkers` undoes it on the way out.
  *
- * Fenced code is skipped: `:::` inside a ``` block is somebody's example, not
- * our layout.
+ * Fenced code is skipped (`fenceReader`): `:::` inside a ``` block is
+ * somebody's example, not our layout.
  */
 export function loosenColumnMarkers(markdown: string): string {
   const out: string[] = [];
-  let inFence = false;
+  const read = fenceReader();
   // A marker owes exactly ONE blank line after it — satisfied by the next line
   // if that line is already blank. Without this the function is not
   // idempotent, and a file loosened twice grows a blank per marker per pass.
   let owed = false;
   for (const line of markdown.split('\n')) {
-    if (FENCE.test(line)) inFence = !inFence;
-    if (!inFence && parseColumnMarker(line) !== null) {
+    if (read(line) === 'text' && parseColumnMarker(line) !== null) {
       while (out.length > 0 && out[out.length - 1] === '') out.pop();
       if (out.length > 0) out.push('');
       out.push(line);
@@ -163,12 +217,8 @@ export function loosenColumnMarkers(markdown: string): string {
  */
 export function tightenColumnMarkers(markdown: string): string {
   const lines = markdown.split('\n');
-  const markers: (ColumnMarker | null)[] = [];
-  let inFence = false;
-  for (const line of lines) {
-    if (FENCE.test(line)) inFence = !inFence;
-    markers.push(inFence ? null : parseColumnMarker(line));
-  }
+  const read = fenceReader();
+  const markers = lines.map((line) => (read(line) === 'text' ? parseColumnMarker(line) : null));
   const out: string[] = [];
   for (let i = 0; i < lines.length; i += 1) {
     if (lines[i] === '') {

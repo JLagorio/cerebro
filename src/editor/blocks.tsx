@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BlockNoteEditor } from '@blocknote/core';
 import { createReactBlockSpec, useEditorChange } from '@blocknote/react';
 import { ColumnGutter } from './ColumnGutter';
@@ -12,6 +12,7 @@ import {
   openColumnMarker,
   openListMarker,
 } from '@/engine/pageColumns';
+import { formatAiMarker } from './markdown';
 
 /**
  * Custom blocks (M2.x docs polish). All of them stay plain markdown on disk:
@@ -21,6 +22,7 @@ import {
  *   database    ```cerebro-database fence holding a POINTER (M47.2)
  *   columnList  `:::columns` directive container (M48.1)
  *   column      `::::column` directive container (M48.1)
+ *   ai          `:::ai{prompt="…"}` directive container (M53.9)
  *
  * markdown.ts promotes the plain forms into these blocks after parse and
  * demotes them back before serialization, so files never stop being
@@ -182,11 +184,14 @@ export const MermaidBlock = createReactBlockSpec(
  * re-derived, and a reader can see what produced the text they are reading
  * rather than having to trust it.
  *
- * ## Why the content is ordinary markdown
+ * ## The answer is the block's children
  *
- * `content: 'inline'` — the generated text is editable prose like any other
- * block. Recomputing replaces it, but nothing stops a person fixing a line by
- * hand, and a block that fought that would be a block people delete. The
+ * `content: 'none'`, and the answer is the blocks nested under it — a list
+ * renders as a list, a code fence as code, and a person can fix a line of it
+ * by hand like any other block (a generated block that fought that would be a
+ * block people delete). Recomputing replaces them. It is the column's shape
+ * (M48.1), and for the column's reason: on disk the block is a `:::ai`
+ * directive container whose contents are ordinary markdown (markdown.ts). The
  * `generated` prop records when it was last answered, so "this was written by
  * the assistant on Tuesday" is visible rather than implied.
  */
@@ -196,41 +201,69 @@ function AiBlockView({
   running,
   onEditPrompt,
   onRun,
-  contentRef,
 }: {
   prompt: string;
   generated: string;
   running: boolean;
   onEditPrompt: (prompt: string) => void;
   onRun: () => void;
-  contentRef: (node: HTMLElement | null) => void;
 }) {
   const [editing, setEditing] = useState(prompt.trim() === '');
   const [draft, setDraft] = useState(prompt);
+  // The question as it stood when the field opened: what Escape puts back.
+  const before = useRef(prompt);
+  const field = useRef<HTMLInputElement | null>(null);
+  // Set by a click on the question, so the field it opens takes the caret.
+  // MEASURED without it, in Chromium: the click opened the field, focus fell
+  // to the page body, and what was typed next went nowhere.
+  const focusWhenOpen = useRef(false);
+  useEffect(() => {
+    if (!editing || !focusWhenOpen.current) return;
+    focusWhenOpen.current = false;
+    field.current?.focus();
+  }, [editing]);
   return (
     <div
       data-testid="ai-block"
       className="my-1 w-full rounded-lg border border-synapse-200 bg-synapse-50 px-3 py-2"
     >
-      <div className="mb-1 flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5">
         <Icon name="sparkles" size={12} color="var(--synapse-500)" />
         {editing ? (
+          // No autoFocus: a page that merely LOADS with an unasked block must
+          // not take the caret. The `/` insert focuses this field itself, and
+          // a click on the question through `focusWhenOpen`.
           <input
-            autoFocus
+            ref={field}
+            data-testid="ai-block-prompt-input"
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              // Into the block as it is typed (M53.9), not when the field
+              // closes. Held here until a blur or Enter, the question was lost
+              // to any way off the page that did not blur the field first,
+              // and the unmount flush saved an empty `:::ai`. The block is
+              // re-rendered, not rebuilt, so this field keeps the caret.
+              setDraft(e.target.value);
+              onEditPrompt(e.target.value);
+            }}
             onBlur={() => {
-              onEditPrompt(draft);
-              setEditing(false);
+              // An empty question stays open. Closed, it is a button with no
+              // label — nothing on screen to click to ask it.
+              if (draft.trim() !== '') setEditing(false);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                onEditPrompt(draft);
+                if (draft.trim() === '') return;
                 setEditing(false);
                 onRun();
               }
-              if (e.key === 'Escape') setEditing(false);
+              if (e.key === 'Escape') {
+                // Out of the block too, since typing already put it there.
+                setDraft(before.current);
+                onEditPrompt(before.current);
+                if (before.current.trim() !== '') setEditing(false);
+              }
             }}
             aria-label="What should this block answer?"
             placeholder="The open questions in this document…"
@@ -242,6 +275,8 @@ function AiBlockView({
             data-testid="ai-block-prompt"
             onClick={() => {
               setDraft(prompt);
+              before.current = prompt;
+              focusWhenOpen.current = true;
               setEditing(true);
             }}
             className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-2xs text-synapse-700"
@@ -259,12 +294,9 @@ function AiBlockView({
           {running ? 'Working…' : generated === '' ? 'Answer' : 'Recompute'}
         </button>
       </div>
-      {/* Ordinary editable prose. A generated block that refused hand-edits
-          would be a block people delete rather than correct. */}
-      <div ref={contentRef} className="text-sm leading-[20px] text-n-800" />
       {generated !== '' && (
         <div className="mt-1 text-2xs text-n-400">
-          Answered {generated} — edit it, or ask again when the document moves on.
+          Answered {generated} — edit the answer below, or ask again when the document moves on.
         </div>
       )}
     </div>
@@ -280,7 +312,7 @@ export const AiBlock = createReactBlockSpec(
       /** When it was last answered, so provenance is visible not implied. */
       generated: { default: '' as string },
     },
-    content: 'inline',
+    content: 'none',
   },
   {
     render: (props) => (
@@ -288,25 +320,114 @@ export const AiBlock = createReactBlockSpec(
         prompt={String(props.block.props.prompt ?? '')}
         generated={String(props.block.props.generated ?? '')}
         running={false}
-        onEditPrompt={(prompt) =>
-          props.editor.updateBlock(props.block, { props: { prompt } } as never)
-        }
+        onEditPrompt={(prompt) => {
+          // Only a changed question is written: an unchanged one would still
+          // be an edit to the document, and schedule a save for nothing.
+          // Compared with the LIVE block, for the reason `onRun` reads it.
+          const live = props.editor.getBlock(props.block.id);
+          if (live === undefined || live.props.prompt === prompt) return;
+          props.editor.updateBlock(live, { props: { prompt } } as never);
+        }}
         onRun={() => {
           // The run itself is wired by the editor, which owns the vault path
           // and the agent IPC; the block owns the question and the answer.
           // Kept apart so this file stays free of app state and can be
           // rendered in a test with no store behind it.
+          //
+          // The question is read off the LIVE block: `props.block` is the
+          // render this closed over, older than the last write to the
+          // question until React renders again. MEASURED when Enter wrote
+          // the question and ran in one handler: a new block asked "", its
+          // old question, which the editor then declined to run.
+          const live = props.editor.getBlock(props.block.id);
           window.dispatchEvent(
             new CustomEvent('cerebro:ai-block-run', {
-              detail: { id: props.block.id, prompt: String(props.block.props.prompt ?? '') },
+              detail: { id: props.block.id, prompt: String(live?.props.prompt ?? '') },
             }),
           );
         }}
-        contentRef={props.contentRef}
       />
+    ),
+    /**
+     * What leaves the app when a selection crosses this block: its opening
+     * line, the one markdown.ts writes to disk. Without it BlockNote falls
+     * back to the RENDERED text, the way MermaidBlock documents, and a copy
+     * would carry the question glued to "Recompute" — the same chrome a save
+     * used to write before the block had a carrier. The answer follows as the
+     * block's children, which BlockNote exports itself.
+     */
+    toExternalHTML: (props) => (
+      <p>
+        {formatAiMarker(BASE_MARKER_DEPTH, {
+          prompt: String(props.block.props.prompt ?? ''),
+          generated: String(props.block.props.generated ?? ''),
+        })}
+      </p>
     ),
   },
 );
+
+/**
+ * Enter at the end of an AI block's answer leaves the block (M53.9). Returns
+ * whether it took the key.
+ *
+ * The answer is the block's children, and BlockNote's Enter makes a sibling of
+ * the block it splits — so a paragraph started after the answer landed INSIDE
+ * it, was written into the `:::ai` container, and went with the next
+ * Recompute, which replaces every child. MEASURED in Chromium: a note typed
+ * that way was saved inside the container, and one click on Recompute took it
+ * off the page. Enter at the end of the answer's last block now starts a
+ * paragraph after the AI block, as it did when the answer was the block's own
+ * text — the DEEPEST last block, when the answer ends nested, in a sub-bullet
+ * say, which is how a model often ends one. Anywhere else in the answer it
+ * edits the answer, and Tab nests a block back into it. An empty last line is
+ * left to BlockNote, whose Enter already lifts it out, and so is a code block,
+ * where Enter is a new line of code.
+ */
+export function leaveAiAnswer(
+  // Erased generics, as in markdown.ts: this reads the cursor and inserts a paragraph.
+  editor: BlockNoteEditor<any, any, any>,
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'altKey' | 'ctrlKey' | 'metaKey' | 'isComposing'>,
+): boolean {
+  if (event.key !== 'Enter' || event.isComposing) return false;
+  if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return false;
+  const { block, parentBlock } = editor.getTextCursorPosition();
+  const hasWords = Array.isArray(block.content) && block.content.length > 0;
+  if (!hasWords || block.type === 'codeBlock') return false;
+  const ai = aiAnswerEndingIn(editor, block.id, parentBlock);
+  if (ai === undefined) return false;
+  const { selection } = editor.prosemirrorState;
+  if (!selection.empty || selection.$from.parentOffset < selection.$from.parent.content.size) {
+    return false;
+  }
+  const [after] = editor.insertBlocks([{ type: 'paragraph' }], ai, 'after');
+  editor.setTextCursorPosition(after, 'start');
+  return true;
+}
+
+type Nested = { id: string; type: string; children: Nested[] };
+
+/**
+ * The AI block whose answer ends in the block `id`, if one does: the nearest
+ * AI block above it, when taking the last child at every level down from that
+ * block arrives at `id`. An AI block further up can only end there through
+ * the nearest one, so the nearest is the one to leave.
+ */
+function aiAnswerEndingIn(
+  editor: BlockNoteEditor<any, any, any>,
+  id: string,
+  parent: Nested | undefined,
+): Nested | undefined {
+  let ai = parent;
+  while (ai !== undefined && ai.type !== 'ai') {
+    ai = editor.getParentBlock(ai.id) as Nested | undefined;
+  }
+  let last = ai?.children[ai.children.length - 1];
+  while (last !== undefined && last.children.length > 0) {
+    last = last.children[last.children.length - 1];
+  }
+  return last?.id === id ? ai : undefined;
+}
 
 /**
  * A database block that knows its page (M48.7).
