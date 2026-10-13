@@ -11,6 +11,20 @@ import { useUiStore } from '@/stores/uiStore';
 export interface VaultState {
   vaultPath: string | null;
   entries: Entry[];
+  /**
+   * The vault `entries` was scanned from — written in the same `set` as every
+   * scanned `entries`, and null until a first scan lands (AUTOMATION-2b).
+   *
+   * Not always `vaultPath`. An open moves `vaultPath` at once but lands the
+   * new vault's entries only after its scan and its watcher start, which can
+   * take a minute (M49); until then `entries` is the LAST vault's, unless a
+   * rescan inside that window lands the new vault's early — it scans
+   * `vaultPath` — and the open's older scan is then dropped (`landedScan`).
+   * A reader that diffs one scan against the next, or acts on `entries` as
+   * the open vault's, checks this first: the trigger diff, run across a
+   * switch, read every note in the new vault as just created.
+   */
+  entriesVault: string | null;
   /** Every List in the vault (M10) — what saved views became. */
   views: ListFile[];
   /** Every Collection: the containers Lists and Docs live in (M10). */
@@ -121,9 +135,27 @@ let watcherBound = false;
 let openTicket = 0;
 let watcherQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * Scans land newer over older, never the reverse (AUTOMATION-2b). Each scan
+ * takes a ticket as it STARTS and lands only if no scan that started after
+ * it has landed first. `rescan` scans `vaultPath`, which an open moves
+ * before its own scan lands, so a rescan inside that window — a job
+ * finishing, a watcher event, an edit — lands the new vault's entries first,
+ * and the open's scan, taken before it, used to land over them. The store
+ * went back in time, and the trigger diff read the difference as fresh edits,
+ * or a file deleted in between as created. Two rescans can cross the same way.
+ *
+ * Scans only. An optimistic inline edit (`patchFrontmatter`, `setTitle`)
+ * writes `entries` without taking a ticket, so a rescan that started before
+ * the edit can still land over it and put back the entry it replaced.
+ */
+let scanTicket = 0;
+let landedScan = 0;
+
 export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
   entries: [],
+  entriesVault: null,
   views: [],
   collections: [],
   folders: [],
@@ -134,6 +166,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const ticket = ++openTicket;
     const superseded = () => ticket !== openTicket;
     set({ vaultPath: path, status: 'scanning', error: null });
+    const scan = ++scanTicket;
     try {
       const entries = await ipc.scanVault(path);
       const { views, collections } = await loadCollections(path, entries);
@@ -156,7 +189,11 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         // app lifetime.
         watcherBound = true;
       }
-      set({ entries, views, collections, folders, status: 'ready' });
+      // A rescan inside the window already landed a newer snapshot of this
+      // vault, and `status: 'ready'` with it (see `landedScan`).
+      if (scan < landedScan) return;
+      landedScan = scan;
+      set({ entries, entriesVault: path, views, collections, folders, status: 'ready' });
     } catch (err) {
       if (superseded()) return;
       const message = err instanceof Error ? err.message : String(err);
@@ -172,6 +209,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   async rescan() {
     const vault = get().vaultPath;
     if (vault === null) return;
+    const scan = ++scanTicket;
     // Store-layer invariant (M14.8): actions never throw. Before this, a
     // scan failure was toasted, swallowed, or an unhandled rejection
     // depending on which of a dozen call sites you arrived through — and a
@@ -181,9 +219,11 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       const { views, collections } = await loadCollections(vault, entries);
       const folders = await ipc.listFolders(vault);
       // A switch mid-scan: this is the old vault's snapshot, and the open in
-      // flight sets the new one's.
-      if (get().vaultPath !== vault) return;
-      set({ entries, views, collections, folders, status: 'ready' });
+      // flight sets the new one's. A newer scan already landed: this one
+      // would roll it back (see `landedScan`).
+      if (get().vaultPath !== vault || scan < landedScan) return;
+      landedScan = scan;
+      set({ entries, entriesVault: vault, views, collections, folders, status: 'ready' });
     } catch {
       // The store keeps its last good snapshot; disk truth returns on the
       // next successful scan (watcher event, write, or vault reopen).

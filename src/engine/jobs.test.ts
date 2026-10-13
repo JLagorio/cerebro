@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { jobQueue } from './jobs';
+import type { VaultEvent } from './events';
+import { jobQueue, TRIGGER_COOLDOWN_MS, type AgentJob } from './jobs';
 import { lastFireKey, parseSchedule } from './skills';
 import { listConcepts } from './okf';
 import { makeEntry } from './testHelpers';
@@ -143,6 +144,8 @@ describe('jobQueue', () => {
     expect(due.map((j) => [j.kind, j.path, j.runKey])).toEqual([
       ['scheduled', 'records/skills/digest.md', '2026-07-31 09:00'],
     ]);
+    // A skill has no trigger, so it has no cooldown to start.
+    expect(due[0].cooldownKey).toBeNull();
     const recorded = jobQueue(entries, listConcepts(entries, TODAY), {
       ...EMPTY,
       skillRuns: { 'records/skills/digest.md': '2026-07-31 09:00' },
@@ -241,6 +244,9 @@ describe('jobQueue', () => {
     // fire-key ledger. Recording it anywhere else re-runs the agent forever
     // — the review's worst finding, pinned here.
     expect(due[0].ledger).toBe('skillRuns');
+    // And it starts no event cooldown: only an event-fired run does
+    // (TRIGGER_COOLDOWN_MS).
+    expect(due[0].cooldownKey).toBeNull();
     expect(
       jobQueue([scout], [], {
         ...EMPTY,
@@ -541,6 +547,11 @@ describe('jobQueue', () => {
     // The fire key names the event, so THIS refresh wakes the agent once and
     // the next refresh — a new modifiedAt — is a genuinely new fire.
     expect(jobs[0].runKey).toBe('event:changed:sources/issues/phx-421.md@2026-07-31T10:00:00Z');
+    // Remembered in the event lane's own slot, and — the one kind of run
+    // that starts the cooldown — stamped under the agent's bare identity
+    // (AUTOMATION-2).
+    expect(jobs[0].key).toBe('records/agents/source-watcher.md#event');
+    expect(jobs[0].cooldownKey).toBe('records/agents/source-watcher.md');
   });
 
   it('a skill is never read for material, however a concept cites it', () => {
@@ -558,5 +569,197 @@ describe('jobQueue', () => {
     ];
     const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
     expect(jobs).toEqual([]);
+  });
+});
+
+/**
+ * One agent with a schedule AND a trigger (AUTOMATION-2).
+ *
+ * Both kinds of run used to claim one ledger slot, `skillRuns[identity]`. An
+ * event run overwrote the fire its schedule had answered, so the schedule
+ * fired again the same period; that re-fire overwrote the event in turn, so in
+ * a quiet vault the same event fired again once the cooldown ran out — the
+ * two ping-ponging every fifteen minutes until the day's budget stopped them.
+ */
+describe('jobQueue — a schedule and a trigger on one agent (AUTOMATION-2)', () => {
+  const IDENTITY = 'records/agents/watcher.md';
+  const agent = (over: Record<string, unknown> = {}, path = IDENTITY) =>
+    makeEntry({
+      path,
+      title: 'Watcher',
+      type: 'Agent',
+      snippet: 'instructions',
+      properties: { schedule: 'daily 06:00', when: [{ event: 'changed', in: 'inbox' }], ...over },
+    });
+  const watcher = agent();
+  const noteAt = (modifiedAt: string) => makeEntry({ path: 'inbox/a.md', title: 'A', modifiedAt });
+  const changed = (modifiedAt: string): VaultEvent => ({
+    kind: 'changed',
+    path: 'inbox/a.md',
+    entry: noteAt(modifiedAt),
+    before: noteAt('2026-07-30T00:00:00Z'),
+    fields: [],
+  });
+  /** 2026-07-31 on the local wall clock — the one schedules run on. */
+  const at = (hour: number, minute = 0) => new Date(2026, 6, 31, hour, minute);
+
+  type Ledgers = { skillRuns: Record<string, string>; triggerRuns: Record<string, string> };
+  /** What the runner writes for a job it starts (useJobRunner): the claim
+   * under `key` in the job's ledger, then the cooldown stamp under
+   * `cooldownKey`, which only an event run carries. */
+  function run(job: AgentJob, ledgers: Ledgers, now: Date): void {
+    if (job.ledger === 'skillRuns') ledgers.skillRuns[job.key] = job.runKey;
+    if (job.cooldownKey !== null) ledgers.triggerRuns[job.cooldownKey] = now.toISOString();
+  }
+
+  it('06:00 answered, then an event run: no second 06:00 job that day, and no event re-run', () => {
+    const event = changed('2026-07-31T09:00:00Z');
+    const ledgers: Ledgers = { skillRuns: { [IDENTITY]: '2026-07-31 06:00' }, triggerRuns: {} };
+    const derive = (now: Date) =>
+      jobQueue([watcher, event.entry], [], { attempts: {}, ...ledgers, events: [event], now });
+
+    const [job, ...rest] = derive(at(10, 30));
+    expect(rest).toEqual([]);
+    expect(job).toEqual({
+      kind: 'agent',
+      path: IDENTITY,
+      key: `${IDENTITY}#event`,
+      title: 'Watcher',
+      runKey: 'event:changed:inbox/a.md@2026-07-31T09:00:00Z',
+      ledger: 'skillRuns',
+      cooldownKey: IDENTITY,
+    });
+    run(job, ledgers, at(10, 30));
+
+    // The schedule's slot still holds the fire it answered.
+    expect(ledgers.skillRuns[IDENTITY]).toBe('2026-07-31 06:00');
+    // Nothing for the rest of the day — inside the cooldown, past it, and at
+    // the last minute — with the same event still on offer, as it stays in a
+    // quiet vault until a scan finds something new.
+    for (const now of [at(10, 31), at(10, 46), at(17, 0), at(23, 59)]) {
+      expect(derive(now)).toEqual([]);
+    }
+    // Tomorrow's 06:00 is a new fire, and the schedule still answers it.
+    expect(derive(new Date(2026, 7, 1, 6, 30)).map((j) => [j.key, j.runKey])).toEqual([
+      [IDENTITY, '2026-08-01 06:00'],
+    ]);
+  });
+
+  it('drained minute by minute from one 06:00 to the next: schedule, event, schedule, no ping-pong', () => {
+    // The runner takes the head of the queue and records it; this replays
+    // that for every minute from 06:00 to noon the next day. The event lands
+    // at 09:00 and nothing changes after it. Shared, the slot produced a 06:00
+    // re-run at 09:01 and then an event/schedule pair every fifteen minutes.
+    const event = changed('2026-07-31T09:00:00Z');
+    const ledgers: Ledgers = { skillRuns: {}, triggerRuns: {} };
+    const hhmm = (d: Date) =>
+      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const ran: string[] = [];
+    for (let now = at(6); now < new Date(2026, 7, 1, 12); now = new Date(now.getTime() + 60_000)) {
+      const [job] = jobQueue([watcher, event.entry], [], {
+        attempts: {},
+        ...ledgers,
+        events: now >= at(9) ? [event] : [],
+        now,
+      });
+      if (job === undefined) continue;
+      ran.push(`${hhmm(now)} ${job.runKey}`);
+      run(job, ledgers, now);
+    }
+    expect(ran).toEqual([
+      '06:00 2026-07-31 06:00',
+      '09:00 event:changed:inbox/a.md@2026-07-31T09:00:00Z',
+      // Tomorrow's fire is the schedule's alone, and the event still on offer
+      // stays answered in its own slot after it.
+      '06:00 2026-08-01 06:00',
+    ]);
+  });
+
+  it('the cooldown reads the key its run stamps: a NEW event waits out the window, then runs', () => {
+    // The trap: the check reads `triggerRuns` under the bare identity, and
+    // the runner used to stamp under `key`. With `key` moved to the `#event`
+    // slot, a stamp there is one the check never sees, and an agent writing
+    // into the folder it watches re-fires on every write. `run` stamps where
+    // the runner does — under `cooldownKey` — so this pins the derivation's
+    // half of that contract (useJobRunner.test.tsx pins the runner's).
+    const first = changed('2026-07-31T10:00:00Z');
+    const second = changed('2026-07-31T10:05:00Z');
+    const ledgers: Ledgers = { skillRuns: { [IDENTITY]: '2026-07-31 06:00' }, triggerRuns: {} };
+    const derive = (event: VaultEvent, now: Date) =>
+      jobQueue([watcher, event.entry], [], { attempts: {}, ...ledgers, events: [event], now });
+
+    const [job] = derive(first, at(10, 0));
+    // The bare identity — what the check reads, and where every cooldown
+    // stamp written before the split already lives.
+    expect(job.cooldownKey).toBe(IDENTITY);
+    run(job, ledgers, at(10, 0));
+    expect(ledgers.triggerRuns).toEqual({ [IDENTITY]: at(10, 0).toISOString() });
+
+    // A new event (its own write, say) inside the window waits…
+    const stamped = at(10, 0).getTime();
+    expect(derive(second, at(10, 5))).toEqual([]);
+    expect(derive(second, new Date(stamped + TRIGGER_COOLDOWN_MS - 1))).toEqual([]);
+    // …and runs once the window has passed: a cooldown, not a ban.
+    expect(
+      derive(second, new Date(stamped + TRIGGER_COOLDOWN_MS)).map((j) => [j.key, j.runKey]),
+    ).toEqual([[`${IDENTITY}#event`, 'event:changed:inbox/a.md@2026-07-31T10:05:00Z']]);
+  });
+
+  it('a scheduled run starts no cooldown: its own write fires ONE event run, and that run starts it', () => {
+    // Only an event-fired run stamps the clock (TRIGGER_COOLDOWN_MS). What
+    // the 06:00 run writes into the folder its agent watches is an event like
+    // any other, so it wakes the agent once, with no window to wait out.
+    const ledgers: Ledgers = { skillRuns: {}, triggerRuns: {} };
+    const [fire] = jobQueue([watcher], [], { attempts: {}, ...ledgers, now: at(6) });
+    expect([fire.key, fire.runKey, fire.cooldownKey]).toEqual([IDENTITY, '2026-07-31 06:00', null]);
+    run(fire, ledgers, at(6));
+    expect(ledgers.triggerRuns).toEqual({});
+
+    const own = changed('2026-07-31T06:01:00Z');
+    const derive = (now: Date) =>
+      jobQueue([watcher, own.entry], [], { attempts: {}, ...ledgers, events: [own], now });
+    const [woken, ...rest] = derive(at(6, 1));
+    expect(rest).toEqual([]);
+    expect([woken.key, woken.runKey, woken.cooldownKey]).toEqual([
+      `${IDENTITY}#event`,
+      'event:changed:inbox/a.md@2026-07-31T06:01:00Z',
+      IDENTITY,
+    ]);
+    run(woken, ledgers, at(6, 1));
+    // The event run started the clock, under the key the check reads.
+    expect(ledgers.triggerRuns).toEqual({ [IDENTITY]: at(6, 1).toISOString() });
+
+    // Then neither lane re-fires the other: with the write still on offer in
+    // a quiet vault, nothing inside the window, past it, or at the last
+    // minute…
+    for (const now of [at(6, 2), at(6, 17), at(12, 0), at(23, 59)]) {
+      expect(derive(now)).toEqual([]);
+    }
+    // …and tomorrow's 06:00 is the schedule's alone, with nothing after it.
+    const tomorrow = new Date(2026, 7, 1, 6, 0);
+    const [next, ...others] = derive(tomorrow);
+    expect(others).toEqual([]);
+    expect([next.key, next.runKey]).toEqual([IDENTITY, '2026-08-01 06:00']);
+    run(next, ledgers, tomorrow);
+    expect(derive(new Date(2026, 7, 1, 6, 1))).toEqual([]);
+  });
+
+  it('a slugged agent keeps both slots by its slug, so a rename moves neither', () => {
+    const slugged = agent({ slug: 'Risk watch' }, 'records/agents/renamed.md');
+    const event = changed('2026-07-31T09:00:00Z');
+    const jobs = jobQueue([slugged, event.entry], [], {
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      events: [event],
+      now: at(10, 30),
+    });
+    // Both due, in their own slots: the event first (every `event:` key
+    // sorts before every fire key), then the unanswered 06:00. Only the event
+    // run stamps the cooldown, under the slug.
+    expect(jobs.map((j) => [j.key, j.runKey, j.cooldownKey])).toEqual([
+      ['slug:risk-watch#event', 'event:changed:inbox/a.md@2026-07-31T09:00:00Z', 'slug:risk-watch'],
+      ['slug:risk-watch', '2026-07-31 06:00', null],
+    ]);
   });
 });

@@ -51,6 +51,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 import * as agentIpc from './agentIpc';
 import { useJobRunner } from './useJobRunner';
 import { makeEntry } from '@/engine/testHelpers';
+import type { Entry } from '@/engine/types';
 import { loadRunLog } from '@/engine/runLog';
 import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -80,6 +81,25 @@ async function startJob(): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(SETTLE);
   });
+}
+
+const MINUTE = 60_000;
+
+/**
+ * Let the clock run, in steps, then one settle. An async `act` holds React's
+ * renders until its scope ends, so one long advance re-derives the queue
+ * ONCE, at the end, and the job it finds then has not started when the scope
+ * returns. Each step renders what its ticks changed, and the next step lets
+ * that render's settle timer fire. In a quiet vault the derivation only gains
+ * jobs as time passes, so a job due anywhere inside a step is due at its end.
+ */
+async function advance(ms: number, step = MINUTE): Promise<void> {
+  for (let left = ms; left > 0; left -= step) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(Math.min(step, left));
+    });
+  }
+  await startJob();
 }
 
 /** A ledger status whose writer is held — the normal, recording state. */
@@ -142,6 +162,7 @@ describe('useJobRunner stream ownership', () => {
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [note],
       rescan: vi.fn(async () => undefined),
     });
@@ -265,6 +286,7 @@ describe('useJobRunner scheduled runs', () => {
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [skill('records/skills/digest.md', 'Digest')],
       rescan: vi.fn(async () => undefined),
     });
@@ -374,8 +396,9 @@ describe('useJobRunner scheduled runs', () => {
     // /other holds the same relative path with the same due fire key — fire
     // keys are calendar values, so they collide across vaults by
     // construction. This vault's file was never read; the failure memory
-    // must not reach across.
-    act(() => useVaultStore.setState({ vaultPath: '/other' }));
+    // must not reach across. (Its snapshot lands with its own name, as an
+    // open's does — the queue derives nothing from another vault's.)
+    act(() => useVaultStore.setState({ vaultPath: '/other', entriesVault: '/other' }));
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
     expect(useUiStore.getState().skillRuns).toEqual({
@@ -412,6 +435,7 @@ describe('useJobRunner shell gating', () => {
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [],
       rescan: vi.fn(async () => undefined),
     });
@@ -587,6 +611,7 @@ describe('useJobRunner durable ledgers', () => {
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [skill],
       rescan: vi.fn(async () => undefined),
     });
@@ -737,6 +762,7 @@ describe('useJobRunner while the vault is not recording', () => {
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
+      entriesVault: '/vault',
       entries: [staleConcept],
       rescan: vi.fn(async () => undefined),
     });
@@ -784,5 +810,474 @@ describe('useJobRunner while the vault is not recording', () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(agentIpc.runAgent).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Event runs and schedules in their own ledger slots (AUTOMATION-2), driven
+ * through the real runner: the derivation, the claim, and the cooldown stamp.
+ * The watcher has `schedule: daily 06:00`, which is also what keeps the
+ * minute tick — and so the clock the cooldown is measured on — running.
+ */
+describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
+  const IDENTITY = 'records/agents/watcher.md';
+  const watcher = makeEntry({
+    path: IDENTITY,
+    filename: 'watcher.md',
+    folder: 'records/agents',
+    title: 'Watcher',
+    type: 'Agent',
+    properties: { schedule: 'daily 06:00', when: [{ event: 'changed', in: 'inbox' }] },
+  });
+  const noteAt = (modifiedAt: string) =>
+    makeEntry({ path: 'inbox/a.md', filename: 'a.md', folder: 'inbox', title: 'A', modifiedAt });
+  const eventKey = (modifiedAt: string) => `event:changed:inbox/a.md@${modifiedAt}`;
+
+  /** A scan that finds inbox/a.md at a new version — a new event. */
+  function edit(modifiedAt: string): void {
+    act(() => useVaultStore.setState({ entries: [watcher, noteAt(modifiedAt)] }));
+  }
+  function done(): void {
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+  }
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    // 10:30 — today's 06:00 is long past, and answered (hydrated below).
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
+    vi.mocked(ipc.readNote).mockClear();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Agent\n---\nwatch');
+    resetLedgerMocks();
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
+      attempts: {},
+      skillRuns: { [IDENTITY]: '2026-07-31 06:00' },
+      triggerRuns: {},
+    }));
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+      entries: [watcher, noteAt('2026-07-31T08:00:00Z')],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      runs: [],
+      agentShellAccess: false,
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('06:00 answered, then an event run: no second 06:00 that day, and no event re-run', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    edit('2026-07-31T10:30:00Z');
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    // Claimed in the event lane's own slot; the schedule's still holds 06:00.
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenCalledWith(
+      '/vault',
+      'skillRuns',
+      `${IDENTITY}#event`,
+      eventKey('2026-07-31T10:30:00Z'),
+    );
+    expect(useUiStore.getState().skillRuns['/vault']).toEqual({
+      [IDENTITY]: '2026-07-31 06:00',
+      [`${IDENTITY}#event`]: eventKey('2026-07-31T10:30:00Z'),
+    });
+    done();
+
+    // A quiet vault: the event stays on offer, the clock ticks past the
+    // cooldown and on into the evening. Sharing the slot, this re-ran 06:00
+    // at the next settle and then the event every fifteen minutes.
+    await advance(20 * MINUTE);
+    await advance(8 * 60 * MINUTE, 30 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps the cooldown where the derivation reads it, so a new event waits out the window', async () => {
+    // The trap, through the real runner: it stamped `triggerRuns` under
+    // `job.key`, which for an event run is now the `#event` slot — a stamp
+    // the cooldown check would never see, letting an agent that writes into
+    // the folder it watches re-fire on every write.
+    renderHook(() => useJobRunner());
+    await startJob();
+    edit('2026-07-31T10:30:00Z');
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ipc.jobLedgerStamp)).toHaveBeenCalledWith(
+      '/vault',
+      IDENTITY,
+      expect.any(String),
+    );
+    expect(Object.keys(useUiStore.getState().triggerRuns['/vault'] ?? {})).toEqual([IDENTITY]);
+    done();
+
+    // Five minutes on, a NEW event (a new version of the note): it waits,
+    // to the edge of the window — the run stamped 10:30:08.
+    await advance(5 * MINUTE);
+    edit('2026-07-31T10:35:00Z');
+    await advance(9 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+
+    // Past the window it runs — a cooldown, not a ban.
+    await advance(2 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenLastCalledWith(
+      '/vault',
+      'skillRuns',
+      `${IDENTITY}#event`,
+      eventKey('2026-07-31T10:35:00Z'),
+    );
+  });
+
+  it('a scheduled run starts no cooldown: its own write fires one event run, and that run starts it', async () => {
+    // 06:00:30, today's fire unanswered. The run writes into the folder its
+    // agent watches, and that write is an event like any other. Only an
+    // event-fired run stamps the clock (TRIGGER_COOLDOWN_MS), so the write
+    // wakes the agent once, one settle after the run ends.
+    vi.setSystemTime(new Date(2026, 6, 31, 6, 0, 30));
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenLastCalledWith(
+      '/vault',
+      'skillRuns',
+      IDENTITY,
+      '2026-07-31 06:00',
+    );
+    expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
+    expect(useUiStore.getState().triggerRuns['/vault']).toEqual({});
+    edit('2026-07-31T06:00:40Z');
+    done();
+
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenLastCalledWith(
+      '/vault',
+      'skillRuns',
+      `${IDENTITY}#event`,
+      eventKey('2026-07-31T06:00:40Z'),
+    );
+    // The event run stamps, under the key the cooldown check reads.
+    expect(vi.mocked(ipc.jobLedgerStamp).mock.calls).toEqual([
+      ['/vault', IDENTITY, expect.any(String)],
+    ]);
+    expect(Object.keys(useUiStore.getState().triggerRuns['/vault'] ?? {})).toEqual([IDENTITY]);
+    done();
+
+    // Then neither lane re-fires the other: the write stays on offer in this
+    // quiet vault, the schedule's slot holds 06:00 and the `#event` slot the
+    // write — through the window and on into the afternoon.
+    await advance(20 * MINUTE);
+    await advance(8 * 60 * MINUTE, 30 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('a record that cannot be read is read once per lane, not in a loop between them', async () => {
+    // Both lanes due on one record: today's 06:00 unanswered, and an event
+    // on offer. The failure memory was keyed by path, so each lane's failure
+    // overwrote the other's and the two alternated — a read, a failed run-log
+    // row and a rescan every settle, for as long as the app stayed open.
+    window.localStorage.removeItem('cerebro.runLog');
+    vi.mocked(ipc.readNote).mockImplementation(async () => {
+      throw new Error('EIO');
+    });
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    edit('2026-07-31T10:30:00Z');
+    for (let settle = 0; settle < 10; settle += 1) await startJob();
+
+    expect(vi.mocked(ipc.readNote)).toHaveBeenCalledTimes(2);
+    expect(loadRunLog().map((row) => [row.trigger, row.status])).toEqual([
+      ['event', 'failed'],
+      ['schedule', 'failed'],
+    ]);
+    expect(vi.mocked(useVaultStore.getState().rescan)).toHaveBeenCalledTimes(2);
+    // A failed read is not a run: neither fire is claimed. The schedule's
+    // stays owed to the next app start or the next fire; the event's goes
+    // with this session, since events are never stored.
+    expect(vi.mocked(ipc.jobLedgerClaim)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+  });
+
+  it('a gate deferral of both lanes asks once per lane, never alternating between them', async () => {
+    // Both lanes due on one record — today's 06:00 unanswered, an event on
+    // offer — and the budget gate defers every run. Each deferral surrenders
+    // its durable claim and keeps its local record as this session's
+    // suppression. Sharing one slot, each lane's record overwrote the
+    // other's, so the two took turns asking the gate every settle: a
+    // decision row and a run-log row each time (measured: 922 asks in this
+    // hour).
+    window.localStorage.removeItem('cerebro.runLog');
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+    }));
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      deferred: ['daily_token_ceiling'],
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    edit('2026-07-31T10:30:00Z');
+    for (let settle = 0; settle < 20; settle += 1) await startJob();
+    await advance(60 * MINUTE, 5 * MINUTE);
+
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(loadRunLog().map((row) => [row.trigger, row.status])).toEqual([
+      ['event', 'deferred'],
+      ['schedule', 'deferred'],
+    ]);
+    // Each surrender names its own slot: the event's never touches the
+    // schedule's.
+    expect(vi.mocked(ipc.jobLedgerUnclaim).mock.calls).toEqual([
+      ['/vault', 'skillRuns', IDENTITY, '2026-07-31 06:00'],
+      ['/vault', 'skillRuns', `${IDENTITY}#event`, eventKey('2026-07-31T10:30:00Z')],
+    ]);
+    // A deferred run never spawned, so neither starts the cooldown.
+    expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The trigger diff across a vault switch (AUTOMATION-2b). Its baseline was
+ * whatever the runner saw last, so the first scan of a newly opened vault
+ * was diffed against the vault it replaced: a scratch run fired `created` on
+ * a 2025 inbox note.
+ */
+describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
+  // Every vault's watcher wakes on any create or change anywhere.
+  const watcherIn = (name: string) =>
+    makeEntry({
+      path: `records/agents/${name}.md`,
+      filename: `${name}.md`,
+      folder: 'records/agents',
+      title: name,
+      type: 'Agent',
+      properties: { when: ['created', 'changed'] },
+    });
+  const note = (path: string, modifiedAt: string, createdAt = '2026-07-01T00:00:00Z') =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop() ?? path,
+      folder: 'inbox',
+      title: path,
+      createdAt,
+      modifiedAt,
+    });
+  const aWatcher = watcherIn('a-watcher');
+  const vaultA = [aWatcher, note('inbox/a1.md', '2026-07-01T09:00:00Z')];
+  // Diffed against A, all of this is an event: a 2025 capture A never held
+  // (created) and A's own path at another version (changed).
+  const vaultB = [
+    watcherIn('b-watcher'),
+    note('inbox/2025-03-02-call.md', '2025-03-02T10:00:00Z', '2025-03-02T10:00:00Z'),
+    note('inbox/a1.md', '2026-06-15T09:00:00Z'),
+  ];
+
+  /** An open as the store performs one: `vaultPath` moves at once, and the
+   * new vault's entries land, under its name, only after the scan. */
+  async function open(vault: string, entries: Entry[]): Promise<void> {
+    act(() => useVaultStore.setState({ vaultPath: vault }));
+    await startJob();
+    act(() => useVaultStore.setState({ entries, entriesVault: vault }));
+    await startJob();
+  }
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
+    vi.mocked(ipc.readNote).mockClear();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Agent\n---\nwatch');
+    resetLedgerMocks();
+    useVaultStore.setState({
+      vaultPath: '/a',
+      entriesVault: '/a',
+      entries: vaultA,
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      runs: [],
+      agentShellAccess: false,
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("emits nothing for the new vault's notes, nor for the old one's on the way back", async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+
+    await open('/b', vaultB);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // A changed while B was open — a1 edited, a note added. Nobody saw it
+    // happen, just as nobody sees what happens while the app is closed.
+    const awayA = [
+      aWatcher,
+      note('inbox/a1.md', '2026-07-20T09:00:00Z'),
+      note('inbox/a2.md', '2026-07-20T10:00:00Z'),
+    ];
+    await open('/a', awayA);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // …and from here on A is observed again: a real edit wakes its watcher.
+    act(() =>
+      useVaultStore.setState({
+        entries: [aWatcher, note('inbox/a1.md', '2026-07-31T10:00:00Z'), awayA[2]],
+      }),
+    );
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenCalledWith(
+      '/a',
+      'skillRuns',
+      'records/agents/a-watcher.md#event',
+      'event:changed:inbox/a1.md@2026-07-31T10:00:00Z',
+    );
+  });
+
+  it('an event still on offer when the vault was left is not offered again on the way back', async () => {
+    // A's watcher woke a minute ago (hydrated below), so an edit now waits
+    // out its cooldown: on offer, not run. Leaving A must drop that event —
+    // back in A, it describes a vault nobody was watching in between. Its
+    // answered 06:00 schedule keeps A's clock ticking.
+    const ticking = makeEntry({
+      ...aWatcher,
+      properties: { when: ['created', 'changed'], schedule: 'daily 06:00' },
+    });
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async (vault) =>
+      vault === '/a'
+        ? {
+            attempts: {},
+            skillRuns: { [ticking.path]: '2026-07-31 06:00' },
+            triggerRuns: { [ticking.path]: new Date(2026, 6, 31, 10, 29).toISOString() },
+          }
+        : { attempts: {}, skillRuns: {}, triggerRuns: {} },
+    );
+    useVaultStore.setState({ entries: [ticking, note('inbox/a1.md', '2026-07-01T09:00:00Z')] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    const edited = [ticking, note('inbox/a1.md', '2026-07-31T10:30:00Z')];
+    act(() => useVaultStore.setState({ entries: edited }));
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // Twenty minutes in B — A's cooldown has long run out — then back to A,
+    // unchanged, for long enough that a re-offered event would run.
+    await open('/b', vaultB);
+    await advance(20 * MINUTE);
+    await open('/a', edited);
+    await advance(5 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+  });
+
+  it("derives nothing from the last vault's snapshot while an open is in flight", async () => {
+    // A's daily digest is answered in A's ledger, and unanswered in B's —
+    // fire keys are calendar values. Between `vaultPath` moving and B's
+    // entries landing (up to a minute, M49), deriving from A's entries ran
+    // A's skill against B: read under B's path, claimed in B's ledger.
+    const digest = makeEntry({
+      path: 'records/skills/digest.md',
+      filename: 'digest.md',
+      folder: 'records/skills',
+      title: 'Digest',
+      type: 'Skill',
+      properties: { schedule: 'daily 09:00' },
+    });
+    const answeredInA: Record<string, string> = { [digest.path]: '2026-07-31 09:00' };
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async (vault) => ({
+      attempts: {},
+      skillRuns: vault === '/a' ? answeredInA : {},
+      triggerRuns: {},
+    }));
+    useVaultStore.setState({ entries: [digest] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // The open is in flight: B's ledgers hydrate, B's entries have not landed.
+    act(() => useVaultStore.setState({ vaultPath: '/b' }));
+    await startJob();
+    await advance(MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(vi.mocked(ipc.readNote)).not.toHaveBeenCalled();
+  });
+
+  it('a job in a vault switched to runs on an endpoint pointed at that vault', async () => {
+    // `startMcp` is what points the one loopback server at a vault (mcp.rs
+    // `ensure`), and every tool call resolves against that pointer. Cached
+    // from the first job for the app's lifetime, it left a job in a vault
+    // switched to reading and writing the vault the first job ran in.
+    const digest = makeEntry({
+      path: 'records/skills/digest.md',
+      filename: 'digest.md',
+      folder: 'records/skills',
+      title: 'Digest',
+      type: 'Skill',
+      properties: { schedule: 'daily 09:00' },
+    });
+    const wire: string[] = [];
+    vi.mocked(agentIpc.startMcp).mockImplementation(async (vault) => {
+      wire.push(`point ${vault}`);
+      return { url: 'mock', token: 't' };
+    });
+    vi.mocked(agentIpc.runAgent).mockImplementation(async (vault) => {
+      wire.push(`run ${vault}`);
+      return { run: JOB_RUN, durableId: JOB_DURABLE };
+    });
+    try {
+      useVaultStore.setState({ entries: [digest] });
+      renderHook(() => useJobRunner());
+      await startJob();
+      act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+      // Due in B as well: fire keys are calendar values, and B's ledger is empty.
+      await open('/b', [digest]);
+      expect(wire).toEqual(['point /a', 'run /a', 'point /b', 'run /b']);
+    } finally {
+      vi.mocked(agentIpc.startMcp).mockReset();
+    }
   });
 });

@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp } from './agentIpc';
 import { buildSystemPrompt } from './systemPrompt';
-import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
-import { diffEntries, type VaultEvent } from '@/engine/events';
+import { observeScan, type ScanBaseline, type VaultEvent } from '@/engine/events';
 import { jobQueue, KNOWLEDGE_JOB_KINDS, type AgentJob } from '@/engine/jobs';
 import { isRecording, useLedgerStore, useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
-import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
 import { fireKeyDate, isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
@@ -72,9 +70,15 @@ const SETTLE_MS = 4_000;
  * be noticed when `now` moves. */
 const TICK_MS = 60_000;
 
+/** One empty list, so "no events" keeps one identity across renders. */
+const NO_EVENTS: readonly VaultEvent[] = [];
+
 export function useJobRunner(): void {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
+  // AUTOMATION-2b: which vault `entries` came from, which during an open can
+  // still be the last one (see VaultState.entriesVault).
+  const entriesVault = useVaultStore((s) => s.entriesVault);
   const rescan = useVaultStore((s) => s.rescan);
   const autoLearn = useUiStore((s) => s.autoLearn);
   // M49.2: the knowledge lanes wait while the vault is not recording.
@@ -114,14 +118,19 @@ export function useJobRunner(): void {
     return () => window.clearInterval(timer);
   }, [hasSchedules]);
 
-  // Scheduled runs whose record could not be READ this session, vault →
-  // path → fire key. Vault-scoped like skillRuns and for the same reason
-  // (PR #5 review): fire keys are calendar values, so a flat path map would
-  // let one vault's failed read suppress the SAME relative path in a vault
-  // opened later this session. A failed read leaves the fire key unconsumed
-  // so the run is retried — but retried on the next app start or the next
-  // fire, not in a read→fail→rescan hot loop. State rather than a ref so
-  // recording a failure re-derives `next` and lets the jobs behind it
+  // Runs whose record could not be READ this session, vault → ledger slot
+  // (`AgentJob.key`) → run key. Vault-scoped like skillRuns and for the same
+  // reason (PR #5 review): fire keys are calendar values, so a flat map would
+  // let one vault's failed read suppress the SAME record in a vault opened
+  // later this session. Keyed by the slot, never the path: one agent record
+  // holds two lanes, its schedule's and its `#event` one, and keyed by path
+  // each lane's failure overwrote the other's, so the two took turns reading,
+  // failing and rescanning every settle — AUTOMATION-2's shared slot, again.
+  // A failed read leaves the fire key unconsumed so a schedule's run is
+  // retried — on the next app start or the next fire, not in a
+  // read→fail→rescan hot loop. An event run is not retried: events are never
+  // stored, and the first scan after a launch emits none. State rather than a
+  // ref so recording a failure re-derives `next` and lets the jobs behind it
   // proceed.
   const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
@@ -193,25 +202,50 @@ export function useJobRunner(): void {
    * What changed since the last scan (M17.12) — the trigger event source.
    *
    * The runner's own memory of what it has already looked at, rather than
-   * store state, and `null` until the first corpus arrives: a first scan must
+   * store state, and kept PER VAULT (AUTOMATION-2b): a first scan must
    * produce NOTHING, or launching the app reads as "every note in the vault
-   * was just created" and fires every trigger at once.
+   * was just created" and fires every trigger at once — and the first scan of
+   * a vault switched to, or back to, is a first scan too. Diffed against the
+   * vault it replaced, every note in the new one read as created. See
+   * `observeScan`, which owns that rule.
    */
-  const seen = useRef<Entry[] | null>(null);
-  const [events, setEvents] = useState<VaultEvent[]>([]);
+  const seen = useRef<ScanBaseline | null>(null);
+  const [scanned, setScanned] = useState<{
+    vault: string;
+    events: readonly VaultEvent[];
+  } | null>(null);
   useEffect(() => {
-    if (entries.length === 0) return;
-    const next = diffEntries(seen.current, entries);
-    seen.current = entries;
-    // Replaced, never appended. An event the queue has already been offered
-    // and declined will not become interesting later, and a growing list would
-    // re-offer it on every scan for the rest of the session.
-    if (next.length > 0) setEvents(next);
-  }, [entries]);
+    if (entriesVault === null) return;
+    const scan = observeScan(seen.current, entriesVault, entries);
+    seen.current = scan.baseline;
+    // Replaced, never appended: an event stays on offer until a scan finds
+    // something new, so in a quiet vault one the cooldown held back is
+    // offered again on every derivation, while one that already ran is held
+    // off by its `#event` slot (engine/jobs.ts). Dropped outright when the
+    // snapshot is another vault's: nothing the last vault produced is this
+    // one's, switching back included.
+    setScanned((last) =>
+      scan.events.length > 0
+        ? { vault: entriesVault, events: scan.events }
+        : last !== null && last.vault !== entriesVault
+          ? null
+          : last,
+    );
+  }, [entries, entriesVault]);
+  // Read through the tag as well: the render in which a new vault's snapshot
+  // first appears still holds the old vault's events, until the effect above
+  // drops them.
+  const events = scanned !== null && scanned.vault === entriesVault ? scanned.events : NO_EVENTS;
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
-    if (!autoLearn || vaultPath === null || !ledgersReady) return null;
+    // Never from another vault's snapshot (AUTOMATION-2b): between an open
+    // moving `vaultPath` and its entries landing — up to a minute (M49) — the
+    // last vault's records would be derived against this vault's ledgers,
+    // and read, run and claimed under this vault's path.
+    if (!autoLearn || vaultPath === null || entriesVault !== vaultPath || !ledgersReady) {
+      return null;
+    }
     return (
       jobQueue(entries, listConcepts(entries, today, quarantine, ledgerReview), {
         attempts,
@@ -225,7 +259,7 @@ export function useJobRunner(): void {
         triggerRuns: triggerRuns[vaultPath] ?? {},
       }).find(
         (j) =>
-          failedReads[vaultPath]?.[j.path] !== j.runKey &&
+          failedReads[vaultPath]?.[j.key] !== j.runKey &&
           (!KNOWLEDGE_JOB_KINDS.has(j.kind) ||
             (recording && quarantine !== 'unknown' && !quarantine.has(j.path))),
       ) ?? null
@@ -238,6 +272,7 @@ export function useJobRunner(): void {
     recording,
     connectors,
     entries,
+    entriesVault,
     failedReads,
     events,
     ledgersReady,
@@ -263,7 +298,6 @@ export function useJobRunner(): void {
   const wrote = useRef<string[]>([]);
   const logged = useRef<Omit<RunLogEntry, 'files' | 'status' | 'at' | 'id'> | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
-  const mcp = useRef<McpInfo | null>(null);
 
   const failure = useRef<string | null>(null);
 
@@ -445,7 +479,12 @@ export function useJobRunner(): void {
           // would be read as a footnote to them rather than a correction of
           // them.
           const message = `${state}\n\n${body}`;
-          mcp.current ??= await startMcp(vaultPath);
+          // Per job, never cached: `startMcp` is also what points the one
+          // loopback server at a vault (mcp.rs `ensure`), and every tool call
+          // resolves against that pointer. A session kept from the first job
+          // left every later one, in a vault switched to as well, on
+          // whichever vault the server was last pointed at.
+          const mcp = await startMcp(vaultPath);
           // Ownership re-check (PR #5 review): while this start-up was
           // parked on readNote or startMcp, a chat preemption may have taken
           // the stream — the takeover subscriber dropped this claim — and a
@@ -527,13 +566,15 @@ export function useJobRunner(): void {
             // ingest share one budget and one deferral record.
             lane: job.kind,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
-            mcp: mcp.current,
+            mcp,
           });
           if ('deferred' in start) {
             // The gate said "not now" — over a ceiling, paused, accounting
             // unknown. One honest row, and the claim is SURRENDERED so the
-            // deferral never eats the fire it refused: the next launch
-            // re-hydrates the open fire and retries it. The local record
+            // deferral never eats the fire it refused: for a schedule, the
+            // next launch re-hydrates the open fire and retries it. A
+            // deferred EVENT run is not retried: events are never stored,
+            // and the first scan after a launch emits none. The local record
             // stays, as this session's suppression — re-asking the gate
             // every tick would be sixty deferral rows an hour.
             if (job.ledger === 'skillRuns' || job.ledger === 'attempts') {
@@ -562,11 +603,13 @@ export function useJobRunner(): void {
           // on its own output the moment it finished (M17.12). After the
           // spawn, so a deferred run starts no cooldown. Fire and forget —
           // a clock is not a claim, and a stamp that failed only costs one
-          // extra cooldown check on the next launch.
-          if (job.ledger === 'skillRuns' && job.runKey.startsWith('event:')) {
+          // extra cooldown check on the next launch. Under `cooldownKey`,
+          // never `key`: an event run's `key` is its `#event` slot, where the
+          // cooldown check never looks (AUTOMATION-2, AgentJob.cooldownKey).
+          if (job.cooldownKey !== null) {
             const at = new Date().toISOString();
-            useUiStore.getState().recordTriggerRun(vaultPath, job.key, at);
-            void jobLedgerStamp(vaultPath, job.key, at).catch(() => undefined);
+            useUiStore.getState().recordTriggerRun(vaultPath, job.cooldownKey, at);
+            void jobLedgerStamp(vaultPath, job.cooldownKey, at).catch(() => undefined);
           }
           // Scoped to THIS job's run (M17.3). The old subscription saw every
           // event in the app and guessed with `running.current`, which is how
@@ -628,7 +671,7 @@ export function useJobRunner(): void {
           if (!recorded) {
             setFailedReads((m) => ({
               ...m,
-              [vaultPath]: { ...m[vaultPath], [job.path]: job.runKey },
+              [vaultPath]: { ...m[vaultPath], [job.key]: job.runKey },
             }));
           }
           finish();
@@ -638,7 +681,8 @@ export function useJobRunner(): void {
     return () => clearTimeout(timer);
     // `events` is read inside the timer to describe what woke a run. Listed
     // because it is genuinely read — and harmless as a dep: it only changes
-    // when a scan produced something new, which is also when `next` changes.
+    // when a scan produced something new or a vault switch dropped it, which
+    // is also when `next` changes.
   }, [connectors, events, finish, issuePrefixes, next, shell, vaultPath, yielding]);
 }
 

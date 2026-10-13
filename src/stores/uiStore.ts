@@ -344,7 +344,9 @@ interface UiState {
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
   /**
-   * Vault path → skill path → the schedule fire key last run (M13.2).
+   * Vault path → record identity → the schedule fire key last run (M13.2),
+   * and identity + `#event` → the event run key last run (AUTOMATION-2;
+   * engine/jobs.ts `AgentJob.key` says why the two never share a slot).
    * Persisted; the same loop-stopper discipline as learnAttempts. Scoped by
    * vault like stdioApprovals (PR #5 review): fire keys are calendar values,
    * identical everywhere, so a flat map would let `records/skills/digest.md`
@@ -354,11 +356,13 @@ interface UiState {
   recordSkillRun(vault: string, path: string, fireKey: string): void;
   /**
    * Vault → agent identity → when it last ran from an EVENT trigger, ISO
-   * (M17.12). Separate from skillRuns because it answers a different question:
+   * (M17.12). Keyed by the bare identity, never the `#event` slot: it is the
+   * event cooldown's clock, read there (engine/jobs.ts TRIGGER_COOLDOWN_MS).
+   * Separate from skillRuns because it answers a different question:
    * skillRuns says "has this exact fire been answered", this says "how long
-   * ago did this agent last wake at all". Only the second can break the loop
-   * an agent creates by writing into the folder it watches, because every such
-   * write mints a genuinely new fire key.
+   * ago did an event last wake this agent". Only the second can break the
+   * loop an agent creates by writing into the folder it watches, because
+   * every such write mints a genuinely new fire key.
    */
   triggerRuns: Record<string, Record<string, string>>;
   recordTriggerRun(vault: string, agent: string, at: string): void;

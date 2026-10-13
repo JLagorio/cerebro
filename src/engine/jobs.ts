@@ -62,6 +62,18 @@ export const KNOWLEDGE_JOB_KINDS: ReadonlySet<JobKind> = new Set<JobKind>(['stal
  * The alternative — "ignore events inside your own scope" — is tempting and
  * wrong: reacting to a human edit in the folder you maintain is the single
  * most useful thing a scoped agent can do.
+ *
+ * The clock is the agent's, under its bare identity in `triggerRuns`, and it
+ * only bounds anything while the check and the stamp agree on that key —
+ * which is why the job carries it (`AgentJob.cooldownKey`). Only an
+ * EVENT-fired run stamps it. A scheduled run does not, so what it writes into
+ * the folder its agent watches can fire one event run, and that run starts
+ * the clock. Attended @agent chat turns and `hand_to` runs never stamp it.
+ *
+ * Stamping on a scheduled run too was tried and reverted (AUTOMATION-2). It
+ * only postponed that one event run, and a person's edit inside the window
+ * could be lost rather than delayed: the runner keeps one event list, and
+ * the next scan that finds a change replaces it (useJobRunner).
  */
 export const TRIGGER_COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -94,6 +106,15 @@ export interface AgentJob {
    * `slug:` keeps its place in the ledger across a rename — renaming a record
    * renames its file, and a path-keyed ledger therefore forgot every fire the
    * schedule had answered and ran one catch-up for the privilege.
+   *
+   * An EVENT-triggered agent run is remembered apart from its schedule, as
+   * `<identity>#event` (AUTOMATION-2); the bare identity is the schedule's
+   * alone. The two shared one slot: an event run overwrote the fire key its
+   * schedule had answered, so the schedule fired again the same period, and
+   * that re-fire overwrote the event in turn, so the same event fired again
+   * once the cooldown ran out — the two ping-ponging every fifteen minutes
+   * until the day's budget stopped them. No scanned path ends in `#event`
+   * (they all end in `.md`), and no slug contains a `#`.
    */
   key: string;
   title: string;
@@ -115,6 +136,19 @@ export interface AgentJob {
    * back-to-back forever.
    */
   ledger: 'attempts' | 'skillRuns';
+  /**
+   * The `triggerRuns` key this job's run stamps when it spawns — the event
+   * cooldown's clock — or null for every job but an event-fired agent run,
+   * the one run that starts it (see TRIGGER_COOLDOWN_MS).
+   *
+   * Carried, never re-derived in the runner, for the same reason as `ledger`.
+   * It is the agent's bare identity, which is what the cooldown check reads,
+   * and NOT `key`: the runner used to stamp under `key`, so splitting event
+   * runs into `<identity>#event` (AUTOMATION-2) would have moved the stamp
+   * where the check never looks and silently deleted the only bound on an
+   * agent re-firing on its own writes.
+   */
+  cooldownKey: string | null;
 }
 
 export interface JobQueueInput {
@@ -125,14 +159,17 @@ export interface JobQueueInput {
    * would pick it up again on the next tick, forever.
    */
   attempts: Readonly<Record<string, string>>;
-  /** Skill path → fire key last run — the OPEN VAULT's slice of
-   * uiStore.skillRuns, which is vault-scoped (PR #5 review). */
+  /** Ledger key → run key last answered: a schedule's fire key under the
+   * record's identity, an event run's key under `<identity>#event` (see
+   * `AgentJob.key`). The OPEN VAULT's slice of uiStore.skillRuns, which is
+   * vault-scoped (PR #5 review). */
   skillRuns: Readonly<Record<string, string>>;
-  /** What changed since the last scan (M17.12). Absent means no previous
-   * scan to compare against — the first scan of a session fires nothing. */
+  /** What changed since the last scan of the open vault (M17.12). Absent
+   * means no previous scan to compare against — the first scan of a session,
+   * or of a vault just opened (AUTOMATION-2b), fires nothing. */
   events?: readonly VaultEvent[];
-  /** Agent identity → when it last ran from a TRIGGER, ISO. See
-   * TRIGGER_COOLDOWN_MS. */
+  /** Agent identity → when it last ran from a trigger, ISO. The bare
+   * identity, never the `#event` key — see TRIGGER_COOLDOWN_MS. */
   triggerRuns?: Readonly<Record<string, string>>;
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;
@@ -197,6 +234,7 @@ export function jobQueue(
         title: entry.title,
         runKey: entry.modifiedAt,
         ledger: 'attempts',
+        cooldownKey: null,
       });
     }
   }
@@ -262,12 +300,14 @@ export function jobQueue(
       title: concept.title,
       runKey,
       ledger: 'attempts',
+      cooldownKey: null,
     });
   }
 
   // Scheduled skills and scheduled agent runs share the derivation and the
-  // fire-key ledger (both are path-keyed); they differ in kind because the
-  // runner builds a different prompt, tool policy, and actor for an agent.
+  // fire-key ledger, under the bare record identity — a slot only a schedule
+  // writes (see AgentJob.key). They differ in kind because the runner builds
+  // a different prompt, tool policy, and actor for an agent.
   const scheduled: AgentJob[] = [];
   for (const entry of entries) {
     const kind: JobKind | null = isSkillEntry(entry)
@@ -288,6 +328,9 @@ export function jobQueue(
       title: entry.title,
       runKey: key,
       ledger: 'skillRuns',
+      // No scheduled run starts the event cooldown, an agent's included:
+      // only an event-fired run does (TRIGGER_COOLDOWN_MS).
+      cooldownKey: null,
     });
   }
 
@@ -301,8 +344,11 @@ export function jobQueue(
       if (!isAgentEntry(entry) || isPaused(entry)) continue;
       const triggers = parseTriggers(entry.properties.when);
       if (triggers.length === 0) continue;
-      const key = recordIdentity(entry);
-      const last = triggerRuns[key];
+      const identity = recordIdentity(entry);
+      // ONE variable is both the key this check reads and the key the run
+      // stamps (`cooldownKey` below) — see AgentJob.cooldownKey.
+      const cooldownKey = identity;
+      const last = triggerRuns[cooldownKey];
       if (last !== undefined && now.getTime() - Date.parse(last) < TRIGGER_COOLDOWN_MS) continue;
       // An agent must never be fired by a change to ITSELF: editing an agent's
       // instructions, or its own memory write at the end of a run, would
@@ -312,6 +358,10 @@ export function jobQueue(
       );
       if (event === undefined) continue;
       const runKey = `event:${event.kind}:${event.path}@${event.entry.modifiedAt}`;
+      // The event lane's own slot (AUTOMATION-2). Answered here, the same
+      // event stays answered however long the vault stays quiet, and the
+      // schedule's slot never learns that an event ran.
+      const key = `${identity}#event`;
       if (skillRuns[key] === runKey) continue;
       scheduled.push({
         kind: 'agent',
@@ -320,6 +370,7 @@ export function jobQueue(
         title: entry.title,
         runKey,
         ledger: 'skillRuns',
+        cooldownKey,
       });
     }
   }

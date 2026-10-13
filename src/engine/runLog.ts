@@ -43,8 +43,10 @@ export interface RunLogEntry {
    * an agent that correctly decides to do nothing has run successfully. */
   files: string[];
   /** `deferred` (M34.2.4) is the budget gate saying "not now" — the run
-   * never started, its fire key was surrendered, and it retries on a later
-   * launch. Deliberately not `failed`: nothing went wrong. */
+   * never started and its fire key was surrendered. A schedule's fire
+   * retries on a later launch; an event run does not, because events are
+   * never stored and the first scan after a launch emits none. Deliberately
+   * not `failed`: nothing went wrong. */
   status: 'ok' | 'failed' | 'stopped' | 'deferred';
   /** Present when status is 'failed' or 'deferred'. One line, never a
    * stack — for a deferral, the gate's reasons. */

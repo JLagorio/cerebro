@@ -12,6 +12,7 @@ vi.mock('@/engine/schema', () => ({
 vi.mock('@/lib/ipc', { spy: true });
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }));
 
+import { observeScan, type ScanBaseline } from '@/engine/events';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import * as mockBackend from '@/lib/mockIpc';
@@ -38,7 +39,14 @@ function mockFsDisk(): Map<string, string> {
 beforeEach(() => {
   resetMockFs();
   vi.clearAllMocks();
-  useVaultStore.setState({ vaultPath: null, entries: [], views: [], status: 'idle', error: null });
+  useVaultStore.setState({
+    vaultPath: null,
+    entries: [],
+    entriesVault: null,
+    views: [],
+    status: 'idle',
+    error: null,
+  });
 });
 
 describe('vaultStore', () => {
@@ -159,6 +167,133 @@ describe('vaultStore', () => {
     expect(s.vaultPath).toBe('/second');
     expect(s.status).toBe('ready');
     expect(s.entries.length).toBeGreaterThan(50);
+  });
+
+  it('openVault and rescan name the vault their entries were scanned from (AUTOMATION-2b)', async () => {
+    expect(useVaultStore.getState().entriesVault).toBeNull();
+    await useVaultStore.getState().openVault('/demo-vault');
+    expect(useVaultStore.getState().entriesVault).toBe('/demo-vault');
+    const scanned = useVaultStore.getState().entries;
+    await useVaultStore.getState().rescan();
+    expect(useVaultStore.getState().entries).not.toBe(scanned);
+    expect(useVaultStore.getState().entriesVault).toBe('/demo-vault');
+  });
+
+  // AUTOMATION-2b: the trigger diff ran across this window and read every
+  // note in the new vault as just created. A reader can only avoid that if
+  // the snapshot says which vault it is.
+  it('an open moves vaultPath at once, but names its snapshot only when the entries land', async () => {
+    let releaseWatcher: () => void = () => undefined;
+    vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
+      vault === '/second'
+        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
+        : Promise.resolve(),
+    );
+    try {
+      await useVaultStore.getState().openVault('/first');
+      const firstEntries = useVaultStore.getState().entries;
+      expect(useVaultStore.getState().entriesVault).toBe('/first');
+
+      const second = useVaultStore.getState().openVault('/second');
+      await vi.waitFor(() => expect(vi.mocked(ipc.startWatcher)).toHaveBeenCalledWith('/second'));
+      // The window — up to a minute on a vault with history (M49): the open
+      // vault is /second, the entries are still /first's, and they say so.
+      expect(useVaultStore.getState().vaultPath).toBe('/second');
+      expect(useVaultStore.getState().entries).toBe(firstEntries);
+      expect(useVaultStore.getState().entriesVault).toBe('/first');
+
+      releaseWatcher();
+      await second;
+      expect(useVaultStore.getState().entries).not.toBe(firstEntries);
+      expect(useVaultStore.getState().entriesVault).toBe('/second');
+    } finally {
+      vi.mocked(ipc.startWatcher).mockReset();
+    }
+  });
+
+  /** Every scan the store lands, through the trigger diff the way the runner
+   * feeds it — the events it read, as [kind, path]. */
+  function observeStoreScans(): { events: Array<[string, string]>; stop: () => void } {
+    const events: Array<[string, string]> = [];
+    let baseline: ScanBaseline | null = null;
+    const stop = useVaultStore.subscribe((s, prev) => {
+      if (s.entriesVault === null) return;
+      if (s.entries === prev.entries && s.entriesVault === prev.entriesVault) return;
+      const scan = observeScan(baseline, s.entriesVault, s.entries);
+      baseline = scan.baseline;
+      events.push(...scan.events.map((e): [string, string] => [e.kind, e.path]));
+    });
+    return { events, stop };
+  }
+
+  // AUTOMATION-2b. rescan() scans `vaultPath`, which an open moves at once,
+  // so a rescan inside the open's window lands the new vault's entries first.
+  // The open's own scan, taken before it, then landed over them: the store
+  // went back in time, and the trigger diff read the difference as an edit.
+  it("a rescan inside an open's window is never rolled back by the open's older scan", async () => {
+    const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+    let releaseWatcher: () => void = () => undefined;
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
+      vault === '/second'
+        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
+        : Promise.resolve(),
+    );
+    const scans = observeStoreScans();
+    try {
+      await useVaultStore.getState().openVault('/first');
+      const second = useVaultStore.getState().openVault('/second');
+      await vi.waitFor(() => expect(vi.mocked(ipc.startWatcher)).toHaveBeenCalledWith('/second'));
+      // Inside the window, /second changes on disk and a rescan picks it up.
+      await ipc.updateFrontmatter('/second', PATH, { probe: 'x' });
+      await useVaultStore.getState().rescan();
+      expect(useVaultStore.getState().entriesVault).toBe('/second');
+      expect(findEntry(PATH)?.properties.probe).toBe('x');
+
+      releaseWatcher();
+      await second;
+      expect(useVaultStore.getState().status).toBe('ready');
+      expect(findEntry(PATH)?.properties.probe).toBe('x');
+      // The first scan of each vault, and nothing read as an edit.
+      expect(scans.events).toEqual([]);
+    } finally {
+      scans.stop();
+      vi.mocked(ipc.scanVault).mockReset();
+      vi.mocked(ipc.startWatcher).mockReset();
+    }
+  });
+
+  it('an older rescan never lands over a newer one', async () => {
+    const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    const scans = observeStoreScans();
+    await useVaultStore.getState().openVault('/demo-vault');
+    // Two rescans in flight — a job's finish() and a watcher event, say. The
+    // first has read the disk and is parked when the disk changes and the
+    // second runs.
+    let parked = false;
+    let releaseScan: () => void = () => undefined;
+    vi.mocked(ipc.scanVault).mockImplementationOnce(async (vault) => {
+      const before = await mockBackend.scanVault(vault);
+      parked = true;
+      await new Promise<void>((resolve) => (releaseScan = resolve));
+      return before;
+    });
+    try {
+      const older = useVaultStore.getState().rescan();
+      await vi.waitFor(() => expect(parked).toBe(true));
+      await ipc.updateFrontmatter('/demo-vault', PATH, { probe: 'x' });
+      await useVaultStore.getState().rescan();
+      expect(findEntry(PATH)?.properties.probe).toBe('x');
+      releaseScan();
+      await older;
+      expect(findEntry(PATH)?.properties.probe).toBe('x');
+      // One real edit, read once — never a second, backwards one.
+      expect(scans.events).toEqual([['changed', PATH]]);
+    } finally {
+      scans.stop();
+      vi.mocked(ipc.scanVault).mockReset();
+    }
   });
 
   it('an open superseded before its scan ends never starts a watcher or sets entries', async () => {
