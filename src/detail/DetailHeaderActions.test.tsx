@@ -141,6 +141,76 @@ describe('DetailHeaderActions', () => {
     expect(useUiStore.getState().detailWidth).toBe(DETAIL_WIDTH_DEFAULT);
   });
 
+  /**
+   * M52 — verified at 1440 beside the assistant: the room was 396, the peek
+   * drew 396 whether 560 or 1000 was stored, and « flipped to "Narrow" having
+   * changed nothing on screen. The owner's "expand" was silently a no-op on
+   * every laptop width.
+   */
+  describe('in a room capped by the shell (M52)', () => {
+    function capped(
+      drawn: number,
+      room: number,
+      width = DETAIL_WIDTH_DEFAULT,
+      besideAssistant = false,
+    ) {
+      setup();
+      useUiStore.setState({ detailWidth: width });
+      cleanup();
+      const entry = useVaultStore.getState().entries.find((e) => e.path === B);
+      if (entry === undefined) throw new Error('no entry');
+      render(
+        <DetailHeaderActions
+          entry={entry}
+          drawn={drawn}
+          room={room}
+          besideAssistant={besideAssistant}
+        />,
+      );
+    }
+
+    it('says there is no room to widen, and why, when widening would draw nothing new', () => {
+      capped(396, 396, DETAIL_WIDTH_DEFAULT, true);
+      const button = screen.getByRole<HTMLButtonElement>('button', {
+        name: 'No room to widen — close the Assistant',
+      });
+      expect(button.disabled).toBe(true);
+    });
+
+    // Verified at 900 and 1000 with the assistant parked: this read "close
+    // the Assistant" beside the parked tab reading "close the record". A
+    // parked assistant takes no room, so closing it would widen nothing.
+    it('does not blame an assistant that is open but parked', () => {
+      useUiStore.setState({ aiPanelOpen: true });
+      capped(396, 396, DETAIL_WIDTH_DEFAULT, false);
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'No room to widen' }).disabled,
+      ).toBe(true);
+      expect(screen.queryByRole('button', { name: /close the Assistant/ })).toBeNull();
+    });
+
+    it('stays disabled when a stored widest width draws what the default would', () => {
+      capped(396, 396, DETAIL_WIDTH_MAX);
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'No room to widen' }).disabled,
+      ).toBe(true);
+      expect(screen.queryByRole('button', { name: 'Narrow the panel' })).toBeNull();
+    });
+
+    it('widens into the room there is, then reads as wide once it fills it', async () => {
+      const user = userEvent.setup();
+      capped(DETAIL_WIDTH_DEFAULT, 800);
+      await user.click(screen.getByRole('button', { name: 'Widen the panel' }));
+      expect(useUiStore.getState().detailWidth).toBe(DETAIL_WIDTH_MAX);
+
+      // Stored 1000, drawn at the 800 the room allows: that IS its widest.
+      capped(800, 800, DETAIL_WIDTH_MAX);
+      expect(
+        screen.getByRole<HTMLButtonElement>('button', { name: 'Narrow the panel' }).disabled,
+      ).toBe(false);
+    });
+  });
+
   it('copies the wikilink the rest of the app understands, not a URL', async () => {
     const user = userEvent.setup();
     setup();

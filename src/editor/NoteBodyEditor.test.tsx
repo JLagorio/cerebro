@@ -132,7 +132,11 @@ describe('NoteBodyEditor', () => {
     const last = editor.document[editor.document.length - 1];
     editor.insertBlocks([{ type: 'paragraph', content: 'doomed edit' }], last, 'after');
     await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't save page");
+      const messages = useUiStore.getState().toasts.map((t) => t.message);
+      // M49.6: the toast carries WHY, not just that.
+      expect(messages.some((m) => m.startsWith("Couldn't save page: ") && m.length > 20)).toBe(
+        true,
+      );
     }, DISK_ROUND_TRIP);
   });
 

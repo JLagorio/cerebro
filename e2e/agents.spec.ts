@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { boot, seedBeforeBoot } from './boot';
+import { boot, openAgents, openKnowledgeTab, seedBeforeBoot } from './boot';
 
 /**
  * The agents' front door (M41): the roster over the run feed, one page per
@@ -53,10 +53,46 @@ test('agents: the front door — roster, agent page, chain trace, one editor', a
 
   // -- The chain renders: the hop indents under its root, billing stated ---
   await expect(page.getByTestId('agent-run')).toHaveCount(1);
-  await expect(page.getByTestId('agent-run-hop')).toContainText('process:knowledge');
+  // The hop names its agent as its record does (M52.3), not by its stamp.
+  await expect(page.getByTestId('agent-run-hop')).toContainText('Knowledge agent');
   await expect(page.getByText(/billed to this run's ceiling/)).toBeVisible();
 
   // -- Editing stays the Library's: one editor, one save path --------------
   await page.getByTestId('agent-edit').click();
   await expect(page.getByTestId('library-editor')).toBeVisible();
+});
+
+// M52.3 — one worker, one name, wherever you meet it. The corpus's Knowledge
+// agent ran once (an addressed turn) and wrote two concepts; the run, the
+// agent's page, each concept's byline and the review queue used to credit
+// that work to three different writers.
+test('agents: a run, its agent and what it wrote tell one story', async ({ page }) => {
+  await boot(page);
+  await openAgents(page);
+
+  const row = page.locator('[data-testid="fleet-row"][data-run="run-ingest-2"]');
+  await expect(row.getByTestId('fleet-actor')).toHaveText('Knowledge agent');
+  await row.click();
+  const detail = page.getByTestId('run-detail');
+  await expect(detail.getByTestId('run-detail-knowledge-write')).toHaveCount(2);
+
+  // The run's header is the agent, and opens it.
+  await detail.getByTestId('run-detail-agent').click();
+  await expect(page.getByRole('heading', { level: 2, name: 'Knowledge agent' })).toBeVisible();
+  await expect(page.getByTestId('agent-wrote')).toHaveCount(2);
+  await expect(page.getByTestId('agent-run')).toHaveCount(1);
+
+  // A concept it wrote says so, under its title.
+  await page.getByTestId('agent-wrote').filter({ hasText: 'Warehouse cutover' }).click();
+  await expect(page.getByTestId('review-bar-author')).toContainText('Knowledge agent');
+
+  // And the review queue says who it is new from.
+  await openKnowledgeTab(page, 'review');
+  await expect(
+    page
+      .getByTestId('queue-row')
+      .filter({ hasText: 'Pick queue drain time' })
+      .getByTestId('queue-reason'),
+    // The reason's word in the cell, its sentence on hover (M52.5).
+  ).toHaveAttribute('title', /^New from Knowledge agent/);
 });

@@ -110,12 +110,12 @@ export function LinkPopover({
             const first = matches[0];
             if (first !== undefined) pick(first.path);
           }}
-          className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
+          className="w-full flex-none rounded-xs border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />
         {contested && (
           <div
             data-testid="mermaid-link-contested"
-            className="flex-none rounded bg-n-50 px-1.5 py-1 text-2xs leading-snug text-n-500"
+            className="flex-none rounded-xs bg-n-50 px-1.5 py-1 text-2xs leading-snug text-n-500"
           >
             {current !== null
               ? 'Another click line also links this node, so the diagram may open something else — and removing this one cannot clear it.'

@@ -139,7 +139,7 @@ export function SubgraphToolbar({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') onClose();
           }}
-          className="w-28 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+          className="w-28 rounded-xs border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
         />
         {DIRECTIONS.map((d) => (
           <button
@@ -152,7 +152,7 @@ export function SubgraphToolbar({
               directionRefusal !== null ? SUBGRAPH_REFUSAL_TEXT[directionRefusal] : `Direction ${d}`
             }
             onClick={() => setDirection(d)}
-            className={`rounded border-0 px-1 py-0.5 text-xs hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`rounded-xs border-0 px-1 py-0.5 text-xs hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40 ${
               entry?.direction === d ? 'bg-cortex-50 text-n-800' : 'bg-transparent text-n-600'
             }`}
           >
@@ -170,7 +170,7 @@ export function SubgraphToolbar({
               : "Follow the diagram's own direction"
           }
           onClick={() => setDirection(null)}
-          className={`rounded border-0 px-1 py-0.5 text-xs hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40 ${
+          className={`rounded-xs border-0 px-1 py-0.5 text-xs hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40 ${
             entry !== undefined && entry.direction === null
               ? 'bg-cortex-50 text-n-800'
               : 'bg-transparent text-n-600'
@@ -196,7 +196,7 @@ export function SubgraphToolbar({
             apply(dissolveSubgraph(model, index));
             onClose();
           }}
-          className="rounded border-0 bg-transparent p-1 hover:bg-danger-50 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-xs border-0 bg-transparent p-1 hover:bg-danger-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Icon name="ungroup" size={13} color="var(--danger-600)" />
         </button>

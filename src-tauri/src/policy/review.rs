@@ -38,6 +38,27 @@ pub struct CardTarget {
     /// The world moved under this card. It can still be rejected; approving
     /// it will refuse with `stale_target_version` rather than apply.
     pub stale: bool,
+    /// The concept file a Belief target is (`knowledge/…`), so the card can
+    /// name and open it (M50.3) — it showed the first eight hex of an id.
+    /// `None` for every other class, and for a belief with no projection.
+    pub path: Option<String>,
+    /// For the relation an `edit_relation` card would add or remove: its two
+    /// ends and its kind (M52.5). A relation has no file of its own, so the
+    /// card read "Change a link" and named no concept at all. `None` for
+    /// every other target.
+    pub link: Option<CardLink>,
+}
+
+/// The link a relation target is, by the concepts at its ends.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CardLink {
+    /// `add` or `remove` — the op's own action.
+    pub action: schema::RelationAction,
+    /// `supersedes`, `refines` or `contradicts`.
+    pub relation: schema::RelationKind,
+    /// Each end's concept file, when the belief has one (`knowledge/…`).
+    pub from_path: Option<String>,
+    pub to_path: Option<String>,
 }
 
 /// What a reviewer is being asked about.
@@ -79,6 +100,20 @@ pub struct RevertableApplication {
     /// can prove it is reverting the application it was shown.
     pub applied_event_id: String,
     pub reason: String,
+    /// The concept it changed, by file (M52.5): the first belief target a
+    /// file projects, as a card's target carries it. "Revise — corrected
+    /// the churn definition" named no concept at all. `None` when no belief
+    /// target has a file.
+    pub path: Option<String>,
+}
+
+/// The concept file a belief projects to, when it has one (`knowledge/…`).
+fn belief_path(state: &EpistemicState, belief_id: &str) -> Option<String> {
+    state
+        .projection_paths
+        .iter()
+        .find(|(_, belief)| belief.as_str() == belief_id)
+        .map(|(krel, _)| format!("knowledge/{krel}"))
 }
 
 fn card_of(
@@ -90,6 +125,7 @@ fn card_of(
 ) -> ReviewCard {
     let proposal: &ProposalV1 = &row.proposal;
     let risk = row.queued_risk.unwrap_or(proposal.declared_risk);
+    let path_of = |belief_id: &str| belief_path(state, belief_id);
     ReviewCard {
         proposal_id: proposal.proposal_id.clone(),
         commit_set_id: set.commit_set_id.clone(),
@@ -119,6 +155,28 @@ fn card_of(
                     expected_version: target.expected_version,
                     current_version: current,
                     stale: target.expected_version != current,
+                    path: (target.target_class == TargetClass::Belief)
+                        .then(|| path_of(&target.target_id))
+                        .flatten(),
+                    link: match &proposal.op {
+                        schema::ProposalOp::EditRelation {
+                            relation_id,
+                            action,
+                            from,
+                            to,
+                            relation,
+                        } if target.target_class == TargetClass::Relation
+                            && *relation_id == target.target_id =>
+                        {
+                            Some(CardLink {
+                                action: *action,
+                                relation: *relation,
+                                from_path: path_of(from),
+                                to_path: path_of(to),
+                            })
+                        }
+                        _ => None,
+                    },
                 }
             })
             .collect(),
@@ -176,6 +234,12 @@ pub fn revertable(table: &PolicyTable, state: &EpistemicState) -> Vec<Revertable
                 op: row.proposal.op.kind().to_string(),
                 applied_event_id: row.applied_event_id.clone()?,
                 reason: row.proposal.reason.clone(),
+                path: row
+                    .proposal
+                    .targets
+                    .iter()
+                    .filter(|target| target.target_class == TargetClass::Belief)
+                    .find_map(|target| belief_path(state, &target.target_id)),
             })
         })
         .collect()
@@ -245,15 +309,20 @@ pub fn decide(
     if !complete {
         return Ok(None);
     }
-    commit::resolve_commit_set(
+    let outcome = commit::resolve_commit_set(
         &table,
         writer,
         vault,
         &set.run_id,
         &set.ordered_proposal_ids,
     )
-    .map(Some)
-    .map_err(|e| e.detail)
+    .map_err(|e| e.detail)?;
+    // The other half of the run's row (M49.9): submit time counted these
+    // members as submitted and queued; the decision is what applies or
+    // rejects them. A set's members all carry `set.run_id` — the commit
+    // refuses a member from another run.
+    outcome.book_decision(&set.run_id);
+    Ok(Some(outcome))
 }
 
 /// Undo an applied change by appending a NEW forward mutation.
@@ -504,6 +573,109 @@ mod tests {
         (vault, writer, belief)
     }
 
+    /// Its own run id: the sink is process-global, and every other test here
+    /// decides under `RUN` — a shared id would let them book onto this row.
+    const BOOKED_RUN: &str = "7b00ced0000000000000000000000001";
+
+    /// Queue one HIGH proposal inside a metered run, booking the submit half
+    /// exactly as the production callers (`write_concept_in_run_with`,
+    /// `tool_commit_proposals`) do. The run's row is opened the way an
+    /// attended spawn opens it (M49.9). The caller holds the sink lock.
+    fn queued_in_a_run(name: &str) -> (std::path::PathBuf, LedgerWriter) {
+        let (vault, mut writer, belief) = seeded(name);
+        crate::runtime::sink::arm(&vault).unwrap();
+        let started = chrono::DateTime::parse_from_rfc3339("2026-09-27T10:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        crate::runtime::sink::with_sink(|conn| {
+            crate::runtime::dispatch::begin_attended(
+                conn, BOOKED_RUN, None, None, None, None, started,
+            )
+        })
+        .unwrap()
+        .unwrap();
+        let p = proposal(
+            P1,
+            BOOKED_RUN,
+            ProposalOp::TombstoneBelief {
+                belief_id: belief.clone(),
+                replacement_id: None,
+                reason_code: schema::TombstoneReason::Invalid,
+            },
+            vec![target(TargetClass::Belief, &belief, Some(1))],
+            Risk::High,
+        );
+        submit_proposal(&table(), &mut writer, &actor(), &p).unwrap();
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, BOOKED_RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::InitialQueue);
+        outcome.book(BOOKED_RUN);
+        (vault, writer)
+    }
+
+    /// (submitted, applied, rejected) on the booked run's row.
+    fn counters() -> (i64, i64, i64) {
+        crate::runtime::sink::with_sink(|conn| {
+            conn.query_row(
+                "SELECT proposals_submitted, applied, rejected FROM runs WHERE run_id = ?1",
+                [BOOKED_RUN],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+        })
+        .unwrap()
+        .unwrap()
+    }
+
+    // M49.9: the human half of a queued run is booked. Before it, the
+    // decision path never touched the row, so a run whose card was approved
+    // or rejected read "1 still waiting on a decision" forever.
+    #[test]
+    fn approving_a_queued_set_books_it_applied_and_never_resubmits() {
+        let _sink = crate::runtime::sink::test_lock();
+        let (vault, mut writer) = queued_in_a_run("review-booked-approve");
+        assert_eq!(counters(), (1, 0, 0), "submitted, and waiting");
+        let outcome = decide(&mut writer, &vault, P1, true, REVIEWER, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.transition, TransitionCode::Apply);
+        assert_eq!(
+            counters(),
+            (1, 1, 0),
+            "applied once; submitted is not counted twice"
+        );
+        crate::runtime::sink::disarm();
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn rejecting_a_queued_set_books_it_rejected_and_never_resubmits() {
+        let _sink = crate::runtime::sink::test_lock();
+        let (vault, mut writer) = queued_in_a_run("review-booked-reject");
+        assert_eq!(counters(), (1, 0, 0));
+        let outcome = decide(
+            &mut writer,
+            &vault,
+            P1,
+            false,
+            REVIEWER,
+            Some("still cited"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(outcome.transition, TransitionCode::HumanReject);
+        assert_eq!(counters(), (1, 0, 1));
+        // A second answer to a resolved set resolves nothing and books
+        // nothing.
+        assert!(decide(&mut writer, &vault, P1, true, REVIEWER, None)
+            .unwrap()
+            .is_none());
+        assert_eq!(counters(), (1, 0, 1));
+        crate::runtime::sink::disarm();
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn a_card_says_what_is_being_asked_and_survives_a_restart() {
         // NOTHING IS CACHED. The card is rebuilt from the ledger every
@@ -631,6 +803,15 @@ mod tests {
         let offered = revertable(&table(), &folded(&writer, &vault));
         assert_eq!(offered.len(), 1);
         assert_eq!(offered[0].op, "update_belief");
+        // It names the concept it changed, by the file its belief projects.
+        assert!(
+            offered[0]
+                .path
+                .as_deref()
+                .is_some_and(|path| path.starts_with("knowledge/")),
+            "an application names its concept: {:?}",
+            offered[0].path
+        );
 
         let outcome = revert(
             &mut writer,
@@ -683,6 +864,105 @@ mod tests {
         assert_eq!(state.proposals[P1].state, ProposalState::Applied);
         assert!(state.proposals[P1].revert_plan.is_none());
         assert!(revertable(&table(), &state).is_empty());
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_link_card_names_both_of_its_ends() {
+        // M52.5: a relation has no file, so its card read "Change a link"
+        // and named no concept. The ends are the op's own, each named by the
+        // file its belief projects to — or by nothing, when it has none.
+        let (vault, mut writer, left) = seeded("review-link");
+        let store = writer.store_id().to_string();
+        let right = schema::migrate_id(&store, "belief", "other");
+        let created = schema::BeliefCreated {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: actor(),
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: right.clone(),
+            subject: SubjectRef::Resolved {
+                entity_id: schema::migrate_id(&store, "entity", "other"),
+                aliases: vec!["other.md".into()],
+            },
+            content: "# other\n".into(),
+            fields: serde_json::json!({}),
+            basis: BeliefBasis::Unsupported {
+                reason: "seed".into(),
+            },
+        };
+        writer
+            .append(
+                schema::KIND_BELIEF_CREATED,
+                serde_json::to_value(&created).unwrap(),
+            )
+            .unwrap();
+        let relation_id = schema::derive_relation_id(&left, &right, schema::RelationKind::Refines);
+        let mut targets = vec![
+            target(TargetClass::Belief, &left, Some(1)),
+            target(TargetClass::Belief, &right, Some(1)),
+        ];
+        targets.sort_by(|a, b| a.target_id.cmp(&b.target_id));
+        targets.push(target(TargetClass::Relation, &relation_id, None));
+        let p = proposal(
+            P1,
+            RUN,
+            ProposalOp::EditRelation {
+                relation_id: relation_id.clone(),
+                action: schema::RelationAction::Add,
+                from: left.clone(),
+                to: right.clone(),
+                relation: schema::RelationKind::Refines,
+            },
+            targets,
+            Risk::High,
+        );
+        submit_proposal(&table(), &mut writer, &actor(), &p).unwrap();
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::InitialQueue);
+
+        // One end projects to a file; the other is made to have none.
+        let mut state = folded(&writer, &vault);
+        state.projection_paths.retain(|_, belief| *belief != right);
+        let left_path = state
+            .projection_paths
+            .iter()
+            .find(|(_, belief)| **belief == left)
+            .map(|(krel, _)| format!("knowledge/{krel}"));
+        assert!(left_path.is_some(), "the seeded belief projects");
+        let card = needs_review(&table(), &state).into_iter().next().unwrap();
+        let link = card
+            .targets
+            .iter()
+            .find(|t| t.target_class == "relation")
+            .and_then(|t| t.link.clone())
+            .expect("the relation target names its link");
+        assert_eq!(link.action, schema::RelationAction::Add);
+        assert_eq!(link.relation, schema::RelationKind::Refines);
+        assert_eq!(link.from_path, left_path);
+        // No projection is no name, never a guess.
+        assert_eq!(link.to_path, None);
+        assert!(card
+            .targets
+            .iter()
+            .filter(|t| t.target_class != "relation")
+            .all(|t| t.link.is_none()));
+        // On the wire, as the surface reads it.
+        let wire = serde_json::to_value(&card).unwrap();
+        let relation = wire["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["target_class"] == "relation")
+            .unwrap()
+            .clone();
+        assert_eq!(relation["link"]["action"], "add");
+        assert_eq!(relation["link"]["relation"], "refines");
         drop(writer);
         let _ = std::fs::remove_dir_all(&vault);
     }

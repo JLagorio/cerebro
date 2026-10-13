@@ -1,30 +1,31 @@
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { readThread, type Concept, type Subject, type ThreadReading } from '@/engine/okf';
+import {
+  readThread,
+  recheckLine,
+  type Concept,
+  type Subject,
+  type ThreadReading,
+} from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
 
 /**
- * One subject, read as one thing (M33a.4).
+ * One subject, read as one thing (M33a.4; one list since M51).
  *
- * The Knowledge tab could open a thread and then show you a concept — the head
- * of a list, picked by filename. That answers "what is the first thing filed
- * under this", which is nobody's question. The reader's question is what the
- * base believes about this subject, and answering it means reading the whole
- * thread at once: what is in dispute, what has expired, what moved lately,
- * what is settled, and what any of it rests on.
+ * The reader's question is what Knowledge believes about this subject, so
+ * the whole thread is read at once. M33a.4 answered it in five sections —
+ * contested, stale, changed, known, sources — and every concept with a date
+ * appeared in "changed" AND in whichever other section held it: the same
+ * three concepts, printed seven times, under headings that were mostly
+ * empty. The owner could not follow it.
  *
- * The order is deliberate and contested comes FIRST. A summary that leads with
- * what it is confident about, and mentions the disagreements at the bottom if
- * at all, is the confident-and-wrong shape that makes people stop trusting the
- * whole surface. Nothing here is a queue and nothing counts up at you: the
- * sections are findings, in the order they change what you would do.
- *
- * Every section renders even when it is empty, because "nothing is in dispute"
- * is a finding and omitting the heading turns it into silence. Every count is
- * measured — the concepts no timestamp could place and the concepts citing
- * nothing are carried out and named rather than absorbed, per the absence rule
- * in AGENTS.md.
+ * Now each concept appears ONCE, on the line that most changes what you would
+ * do — contested first, then due a recheck, then newest writing — and the
+ * findings the empty sections used to state stand in one sentence at the top
+ * ("nothing contested" is still said out loud, it just no longer takes a
+ * heading to say it). Every count is measured: undated and uncited concepts
+ * are named, never absorbed.
  *
  * Reads nothing. Everything on screen is derived by `readThread` from the
  * bundle the page already holds, so there is no failure state to render.
@@ -105,140 +106,57 @@ function ConceptLine({
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
-function Contested({
-  reading,
-  onOpen,
-}: {
-  reading: ThreadReading;
-  onOpen: (path: string) => void;
-}) {
-  return (
-    <Section id="thread-contested" icon="git-compare" title="What's contested">
-      {reading.contested.length === 0 ? (
-        <Nothing text="Nothing in this thread is in dispute — no concept here has been replaced or contradicted." />
-      ) : (
-        reading.contested.map(({ concept, reason, others }) => {
-          const named = others.map((o) => o.title).join(', ');
-          return (
-            <ConceptLine
-              key={concept.entry.path}
-              concept={concept}
-              tone="warn"
-              trailing={
-                reason === 'replaced'
-                  ? named === ''
-                    ? 'No longer believed'
-                    : `No longer believed — replaced by ${named}`
-                  : // Never resolved for you: which of two claims is right is
-                    // the judgement this whole model reserves for a person.
-                    `Disagrees with ${named}`
-              }
-              onOpen={onOpen}
-            />
-          );
-        })
-      )}
-    </Section>
-  );
+interface Line {
+  concept: Concept;
+  trailing: string;
+  tone: 'plain' | 'warn';
 }
 
-function Stale({
-  reading,
-  today,
-  onOpen,
-}: {
-  reading: ThreadReading;
-  today: string;
-  onOpen: (path: string) => void;
-}) {
-  return (
-    <Section id="thread-stale" icon="clock-alert" title="What's stale">
-      {reading.stale.length === 0 ? (
-        <Nothing text="Nothing here is past its recheck date." />
-      ) : (
-        reading.stale.map((concept) => {
-          const since = relativeDay(concept.staleAfter, today);
-          return (
-            <ConceptLine
-              key={concept.entry.path}
-              concept={concept}
-              tone="warn"
-              trailing={`Due a recheck since ${concept.staleAfter}${since === null ? '' : ` · ${since}`}`}
-              onOpen={onOpen}
-            />
-          );
-        })
-      )}
-    </Section>
-  );
+/** Every concept once, on its most consequential line. */
+function linesOf(reading: ThreadReading, today: string): Line[] {
+  const lines: Line[] = [];
+  const seen = new Set<string>();
+  const push = (concept: Concept, trailing: string, tone: Line['tone']) => {
+    if (seen.has(concept.entry.path)) return;
+    seen.add(concept.entry.path);
+    lines.push({ concept, trailing, tone });
+  };
+  for (const { concept, reason, others } of reading.contested) {
+    const named = others.map((o) => o.title).join(', ');
+    push(
+      concept,
+      reason === 'replaced'
+        ? named === ''
+          ? 'Replaced'
+          : `Replaced by ${named}`
+        : // Never resolved for you: which of two claims is right is the
+          // judgement this whole model reserves for a person.
+          `Disagrees with ${named}`,
+      'warn',
+    );
+  }
+  // How late, once — the line the review bar and the Knowledge table say.
+  for (const concept of reading.stale) push(concept, recheckLine(concept, today), 'warn');
+  for (const { concept, at } of reading.changed) {
+    push(concept, `Written ${relativeDay(at, today) ?? at}`, 'plain');
+  }
+  // An absent `generated` stamp is NOT an old one, so these are said to be
+  // unplaced rather than sorted to the bottom as if they were.
+  for (const concept of reading.undated)
+    push(concept, 'When it was written is not recorded', 'plain');
+  return lines;
 }
 
-function Changed({
-  reading,
-  today,
-  onOpen,
-}: {
-  reading: ThreadReading;
-  today: string;
-  onOpen: (path: string) => void;
-}) {
-  const { changed, undated } = reading;
-  return (
-    <Section id="thread-changed" icon="activity" title="What changed">
-      {changed.length === 0 ? (
-        <Nothing text="No concept in this thread records when it was written." />
-      ) : (
-        changed.map(({ concept, at }) => (
-          <ConceptLine
-            key={concept.entry.path}
-            concept={concept}
-            trailing={relativeDay(at, today) ?? at}
-            onOpen={onOpen}
-          />
-        ))
-      )}
-      {undated.length > 0 && (
-        <>
-          {/* Skipped, and said so. An absent `generated` stamp is NOT an old
-              one, so these cannot be sorted into the list above without
-              handing them a date they never carried. */}
-          <p data-testid="thread-undated" className="m-0 mt-1.5 text-xs text-n-500">
-            {plural(undated.length, 'concept is', 'concepts are')} not placed above: when{' '}
-            {undated.length === 1 ? 'it was' : 'they were'} written is not recorded.
-          </p>
-          {undated.map((concept) => (
-            <ConceptLine
-              key={concept.entry.path}
-              concept={concept}
-              trailing="Written — not recorded"
-              onOpen={onOpen}
-            />
-          ))}
-        </>
-      )}
-    </Section>
+/** The findings, as one sentence: how much, what is in dispute, what is due. */
+function summaryOf(subject: Subject, reading: ThreadReading): string {
+  const parts = [plural(subject.concepts.length, 'concept', 'concepts')];
+  parts.push(
+    reading.contested.length === 0
+      ? 'nothing contested'
+      : `${reading.contested.length} contested or replaced`,
   );
-}
-
-function Known({ reading, onOpen }: { reading: ThreadReading; onOpen: (path: string) => void }) {
-  return (
-    <Section id="thread-known" icon="brain" title="What's known">
-      {reading.known.length === 0 ? (
-        <Nothing text="Nothing here is settled: every concept in this thread is contested or stale." />
-      ) : (
-        reading.known.map((group) => (
-          <div key={group.conceptType} className="flex flex-col gap-0.5 pt-1">
-            <div className="px-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-              {group.conceptType}
-            </div>
-            {group.concepts.map((concept) => (
-              <ConceptLine key={concept.entry.path} concept={concept} onOpen={onOpen} />
-            ))}
-          </div>
-        ))
-      )}
-    </Section>
-  );
+  if (reading.stale.length > 0) parts.push(`${reading.stale.length} due a recheck`);
+  return parts.join(' · ');
 }
 
 function Provenance({ reading }: { reading: ThreadReading }) {
@@ -299,14 +217,20 @@ export function ThreadView({
   const reading = readThread(subject, concepts, entries);
   return (
     <div data-testid="thread-view" className="flex flex-col gap-5">
-      <p className="m-0 text-xs text-n-500">
-        What the base holds about {subject.label}, in{' '}
-        {plural(subject.concepts.length, 'concept', 'concepts')}.
+      <p data-testid="thread-summary" className="m-0 px-2 text-xs text-n-500">
+        What Knowledge holds about {subject.label}: {summaryOf(subject, reading)}.
       </p>
-      <Contested reading={reading} onOpen={onOpenConcept} />
-      <Stale reading={reading} today={today} onOpen={onOpenConcept} />
-      <Changed reading={reading} today={today} onOpen={onOpenConcept} />
-      <Known reading={reading} onOpen={onOpenConcept} />
+      <div className="flex flex-col gap-0.5">
+        {linesOf(reading, today).map((line) => (
+          <ConceptLine
+            key={line.concept.entry.path}
+            concept={line.concept}
+            trailing={line.trailing}
+            tone={line.tone}
+            onOpen={onOpenConcept}
+          />
+        ))}
+      </div>
       <Provenance reading={reading} />
     </div>
   );

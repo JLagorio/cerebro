@@ -389,9 +389,16 @@ describe('jobQueue', () => {
     });
     const entries = [record, typeDoc, concept];
     const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
-    expect(jobs.map((j) => [j.kind, j.path, j.runKey])).toEqual([
-      ['schema', 'knowledge/systems/phoenix-shape.md', '2026-07-30T12:00:00Z'],
+    expect(jobs.map((j) => [j.kind, j.path])).toEqual([
+      ['schema', 'knowledge/systems/phoenix-shape.md'],
     ]);
+    // M49.7 (K18): keyed on the SCHEMA it was checked against, never an
+    // mtime — the same schema is the same key whenever the doc was touched.
+    expect(jobs[0].runKey).toMatch(/^schema:[0-9a-f]{16}$/);
+    const touched = [record, { ...typeDoc, modifiedAt: '2026-07-31T09:00:00Z' }, concept];
+    expect(jobQueue(touched, listConcepts(touched, TODAY), { ...EMPTY, now })[0].runKey).toBe(
+      jobs[0].runKey,
+    );
     // A type edited BEFORE the concept was generated is not a change to it.
     const older = [record, { ...typeDoc, modifiedAt: '2026-06-01T00:00:00Z' }, concept];
     expect(jobQueue(older, listConcepts(older, TODAY), { ...EMPTY, now })).toEqual([]);
@@ -419,14 +426,89 @@ describe('jobQueue', () => {
     const due = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
     expect(due).toHaveLength(1);
     expect(due[0].kind).toBe('schema');
-    expect(due[0].runKey).toBe('2026-07-30T12:00:00Z');
-    // Recording the composite key suppresses BOTH triggers.
+    // Recording the key suppresses BOTH triggers.
     const after = jobQueue(entries, listConcepts(entries, TODAY), {
       ...EMPTY,
-      attempts: { 'knowledge/systems/phoenix-shape.md': '2026-07-30T12:00:00Z' },
+      attempts: { 'knowledge/systems/phoenix-shape.md': due[0].runKey },
       now,
     });
     expect(after).toEqual([]);
+  });
+
+  it('a new Type queues nothing for concepts anchored to themselves or other concepts (M49.7, K18)', () => {
+    // The live vault, 2026-08-17: creating `types/decision.md` re-queued gcs-5
+    // through its SELF-anchor and the tx-6 pair through a Decision CONCEPT.
+    const decisionType = makeEntry({
+      path: 'types/decision.md',
+      title: 'Decision',
+      type: 'Type',
+      modifiedAt: '2026-08-17T11:50:01Z',
+    });
+    const gcs5 = makeEntry({
+      path: 'knowledge/decisions/gcs-5-supervision-ratio.md',
+      title: 'GCS-5 supervision ratio',
+      type: 'Decision',
+      properties: { generated: { by: 'claude-code', at: '2026-08-16T10:00:00Z' } },
+      relationships: { about: ['GCS-5 supervision ratio'] },
+    });
+    const frb = makeEntry({
+      path: 'knowledge/decisions/frb-118-session-1-disposition.md',
+      title: 'FRB-118 session 1 disposition',
+      type: 'Decision',
+      properties: { generated: { by: 'claude-code', at: '2026-08-16T10:00:00Z' } },
+    });
+    const tx6 = makeEntry({
+      path: 'knowledge/systems/tx-6.md',
+      title: 'TX-6',
+      properties: { generated: { by: 'claude-code', at: '2026-08-16T10:00:00Z' } },
+      relationships: { about: ['FRB-118 session 1 disposition'] },
+    });
+    const entries = [decisionType, gcs5, frb, tx6];
+    expect(jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now })).toEqual([]);
+  });
+
+  it('an attempt recorded under the old mtime key still counts after an upgrade (M49.7)', () => {
+    const concept = makeEntry({
+      path: 'knowledge/systems/old.md',
+      title: 'Old',
+      modifiedAt: '2026-07-10T00:00:00Z',
+      properties: {
+        generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' },
+        stale_after: '2026-07-01',
+      },
+    });
+    const legacy = { [concept.path]: '2026-07-10T00:00:00Z' };
+    expect(
+      jobQueue([concept], listConcepts([concept], TODAY), { ...EMPTY, attempts: legacy, now }),
+    ).toEqual([]);
+    // …but not once the concept has moved past it.
+    const moved = { ...concept, modifiedAt: '2026-07-20T00:00:00Z' };
+    expect(
+      jobQueue([moved], listConcepts([moved], TODAY), { ...EMPTY, attempts: legacy, now }),
+    ).toHaveLength(1);
+  });
+
+  it('a stale recheck that did not move the date does not run again (M49.7, K19)', () => {
+    const concept = makeEntry({
+      path: 'knowledge/systems/old.md',
+      title: 'Old',
+      modifiedAt: '2026-07-10T00:00:00Z',
+      properties: {
+        generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' },
+        stale_after: '2026-07-01',
+      },
+    });
+    const [job] = jobQueue([concept], listConcepts([concept], TODAY), { ...EMPTY, now });
+    expect(job.runKey).toBe('stale:2026-07-01');
+    // The run restamped the file (a new mtime) without moving the date.
+    const restamped = { ...concept, modifiedAt: '2026-07-28T09:00:00Z' };
+    expect(
+      jobQueue([restamped], listConcepts([restamped], TODAY), {
+        ...EMPTY,
+        attempts: { [concept.path]: job.runKey },
+        now,
+      }),
+    ).toEqual([]);
   });
 
   it('a refreshed source wakes the agent watching sources/ — noticed, not pushed (M34.5.4)', () => {

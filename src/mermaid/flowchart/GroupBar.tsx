@@ -82,7 +82,7 @@ export function GroupBar({
             if (claimedByHostEditor(e)) e.stopPropagation();
             if (e.key === 'Enter') group();
           }}
-          className="w-28 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+          className="w-28 rounded-xs border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
         />
         <button
           type="button"

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Select } from '@/components/ui/Select';
+import { actorLabel, CONSTRUCT_ACTORS } from '@/engine/authors';
 import { relativeWhen } from '@/engine/whenText';
 import * as ipc from '@/lib/ipc';
 import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { RunDetailPanel } from './RunDetailPanel';
 
 /**
@@ -22,28 +24,31 @@ import { RunDetailPanel } from './RunDetailPanel';
  * replaced.
  *
  * **Nothing here is a persona.** The internal constructs appear as run
- * HISTORY under the actor names they already answer to, never as standing
+ * HISTORY, labelled "Background ingest" and the like, never as standing
  * agents with faces — a face implies memory and judgment a batched run does
  * not have (D6, and M26's name-discipline trap).
+ *
+ * **Every actor reads in the app's own nouns (M52.3).** A row, the actor
+ * filter and the opened run name an agent by its record's title and the
+ * attended assistant as the Assistant (`actorLabel`); the raw stamp is in the
+ * `title`, and the filter's VALUES stay raw, because that is what the query
+ * matches on.
  *
  * **Absent is never zero, in three separate places.** A run nobody attributed
  * reads "unattributed"; a run whose usage was lost reads "unknown" rather
  * than the zeros sitting in its columns; a run with no cost rows reads "not
  * recorded" rather than $0. The old activity log could express exactly one of
  * these, and could not tell "nothing has run" from "we could not read the
- * runs" at all.
+ * runs" at all. M49.9 adds a fourth: a run whose proposal counters nothing
+ * ever booked reads "proposals not recorded" rather than "0 applied".
  *
  * The read is SELECT-only and recomputed on every filter change. Nothing is
  * cached, so this list cannot drift from what the database holds.
  */
 
-/** The three internal constructs, by the actor names Rust already stamps
- * (`agent::meter::CONSTRUCT_ACTORS`). Offered as filter options even before a
- * page contains one, so "has ingest run at all?" is a question the UI can
- * answer with a no rather than by omitting the option. */
-const CONSTRUCT_ACTORS = ['agent:m26-ingest', 'agent:m26-maintenance', 'agent:m26-synthesis'];
+const MODES = ['attended', 'ambient'].map((mode) => ({ value: mode, label: mode }));
 
-const MODES = ['attended', 'ambient'];
+type Option = { value: string; label: string };
 
 type State = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; runs: FleetRun[] };
 
@@ -61,7 +66,7 @@ function Chip({
   id: string;
   label: string;
   value: string;
-  options: string[];
+  options: Option[];
   onChange: (next: string) => void;
 }) {
   return (
@@ -72,10 +77,7 @@ function Chip({
         size="sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        options={[
-          { value: '', label: 'any' },
-          ...options.map((option) => ({ value: option, label: option })),
-        ]}
+        options={[{ value: '', label: 'any' }, ...options]}
       />
     </label>
   );
@@ -94,6 +96,7 @@ export function FleetSection({
   now?: Date;
 } = {}) {
   const selection = useNavStore((s) => s.selection);
+  const entries = useVaultStore((s) => s.entries);
   // The run a link asked for, if any (M33.7; re-homed under Knowledge in
   // M33a.2, where "what has run" is a tab rather than a section of a hub).
   const requested =
@@ -137,19 +140,23 @@ export function FleetSection({
   }, [load]);
 
   // Every actor the page can currently offer: the constructs, which exist
-  // whether or not they have run, plus whatever else this page is holding.
+  // whether or not they have run — so "has ingest run at all?" is answered
+  // with a no rather than by a missing option — plus whatever else this page
+  // is holding. Labelled in words, valued raw: the query matches the stamp.
   const actorOptions = useMemo(() => {
-    const seen = new Set(CONSTRUCT_ACTORS);
+    const seen = new Set(CONSTRUCT_ACTORS.map((c) => c.actor));
     if (state.kind === 'ready') {
       for (const run of state.runs) if (run.actor !== null) seen.add(run.actor);
     }
-    return [...seen].sort();
-  }, [state]);
+    return [...seen]
+      .map((raw) => ({ value: raw, label: actorLabel(raw, entries).text }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [state, entries]);
 
   const laneOptions = useMemo(() => {
     const seen = new Set<string>();
     if (state.kind === 'ready') for (const run of state.runs) seen.add(run.lane);
-    return [...seen].sort();
+    return [...seen].sort().map((lane) => ({ value: lane, label: lane }));
   }, [state]);
 
   const openRun = useCallback(async (runId: string) => {
@@ -192,58 +199,71 @@ export function FleetSection({
       )}
 
       {state.kind === 'ready' &&
-        state.runs.map((run) => (
-          <button
-            key={run.run_id}
-            type="button"
-            data-testid="fleet-row"
-            data-run={run.run_id}
-            data-outcome={run.outcome}
-            // A table row, not a card (M42.4): hairline below, wash on hover,
-            // and the border box gone with it.
-            className="flex w-full items-center gap-2 rounded-md border-0 border-b border-n-100 px-2.5 py-1.5 text-left last:border-b-0 hover:bg-n-50"
-            onClick={() => void openRun(run.run_id)}
-          >
-            <span className="min-w-0 flex-1 truncate text-xs text-n-800">
-              {/* NULL is a category, not a blank. */}
-              {run.actor ?? 'unattributed'}
-            </span>
-            {/* WHEN. Carried from M33.1–.10: these rows said who, what lane,
+        state.runs.map((run) => {
+          const who = actorLabel(run.actor, entries);
+          return (
+            <button
+              key={run.run_id}
+              type="button"
+              data-testid="fleet-row"
+              data-run={run.run_id}
+              data-outcome={run.outcome}
+              // A table row, not a card (M42.4): hairline below, wash on hover,
+              // and the border box gone with it.
+              className="flex w-full items-center gap-2 rounded-md border-0 border-b border-n-100 px-2.5 py-1.5 text-left last:border-b-0 hover:bg-n-50"
+              onClick={() => void openRun(run.run_id)}
+            >
+              {/* NULL is a category, not a blank; the stamp is a hover away. */}
+              <span
+                data-testid="fleet-actor"
+                title={who.raw ?? undefined}
+                className="min-w-0 flex-1 truncate text-xs text-n-800"
+              >
+                {who.text}
+              </span>
+              {/* WHEN. Carried from M33.1–.10: these rows said who, what lane,
                 what outcome and what it cost, and never once said when — so a
                 run from this morning and one from March read identically, and
                 "newest first" was an ordering nobody could verify. The exact
                 stamp stays in the title; the visible text is the one a reader
                 can act on. */}
-            <span
-              data-testid="fleet-when"
-              title={run.started_at}
-              className="whitespace-nowrap text-2xs text-n-500"
-            >
-              {relativeWhen(run.started_at, now)}
-            </span>
-            <span className="text-2xs text-n-500">{run.lane}</span>
-            {/* Sentence case: the DS reserves capitals for eyebrows, and an
+              <span
+                data-testid="fleet-when"
+                title={run.started_at}
+                className="whitespace-nowrap text-2xs text-n-500"
+              >
+                {relativeWhen(run.started_at, now)}
+              </span>
+              <span className="text-2xs text-n-500">{run.lane}</span>
+              {/* Sentence case: the DS reserves capitals for eyebrows, and an
                 outcome is a fact, not a headline (M42.4). */}
-            <span
-              className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
-              style={{ border: '1px solid var(--n-200)' }}
-              data-testid="fleet-outcome"
-            >
-              {run.outcome.replace(/_/g, ' ')}
-            </span>
-            <span className="tabular-nums text-2xs text-n-600">
-              {run.usage_state === 'exact' ? (
-                `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
-              ) : (
-                // The zeros in the columns are not a measurement.
-                <span data-testid="usage-unknown">unknown</span>
-              )}
-            </span>
-            <span className="tabular-nums text-2xs text-n-500">
-              {run.applied} applied · {run.rejected} rejected
-            </span>
-          </button>
-        ))}
+              <span
+                className="rounded-md px-1.5 py-0.5 text-2xs text-n-600"
+                style={{ border: '1px solid var(--n-200)' }}
+                data-testid="fleet-outcome"
+              >
+                {run.outcome.replace(/_/g, ' ')}
+              </span>
+              <span className="tabular-nums text-2xs text-n-600">
+                {run.usage_state === 'exact' ? (
+                  `${(run.input_tokens + run.output_tokens).toLocaleString()} tokens`
+                ) : (
+                  // The zeros in the columns are not a measurement.
+                  <span data-testid="usage-unknown">unknown</span>
+                )}
+              </span>
+              <span className="tabular-nums text-2xs text-n-500">
+                {run.applied === null || run.rejected === null ? (
+                  // Nothing booked these before M49.9; the zeros the row was
+                  // inserted with are not a measurement.
+                  <span data-testid="proposals-unrecorded">proposals not recorded</span>
+                ) : (
+                  `${run.applied} applied · ${run.rejected} rejected`
+                )}
+              </span>
+            </button>
+          );
+        })}
 
       {open !== null && <RunDetailPanel detail={open} onClose={() => setOpen(null)} />}
     </div>

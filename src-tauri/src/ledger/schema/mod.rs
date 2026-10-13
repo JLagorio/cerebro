@@ -100,7 +100,7 @@ pub use ops::{
     ValidInterval,
 };
 pub use projection::{
-    validate_override_pointer, OverrideChange, OverrideOrigin, OverridePatchOp,
+    validate_override_pointer, OverrideChange, OverrideOrigin, OverridePatchOp, ProjectionMoved,
     ProjectionOverridden,
 };
 pub use proposal::{
@@ -148,6 +148,8 @@ pub const KIND_MIGRATION_STARTED: &str = "migration.started";
 pub const KIND_MIGRATION_COMPLETED: &str = "migration.completed";
 // The M23 additions — the frame envelope stays `v: 0`.
 pub const KIND_PROJECTION_OVERRIDDEN: &str = "projection.overridden";
+/// M49.5 (K29): a projection file moved, bytes unchanged.
+pub const KIND_PROJECTION_MOVED: &str = "projection.moved";
 pub const KIND_LEDGER_DIVERGENCE: &str = "ledger.divergence";
 pub const KIND_RECONCILIATION_RESOLVED: &str = "ledger.reconciliation_resolved";
 
@@ -364,6 +366,7 @@ pub enum EventBody {
     MigrationStarted(Box<MigrationStarted>),
     MigrationCompleted(Box<MigrationCompleted>),
     ProjectionOverridden(Box<ProjectionOverridden>),
+    ProjectionMoved(Box<ProjectionMoved>),
     LedgerDivergence(Box<LedgerDivergence>),
     ReconciliationResolved(Box<ReconciliationResolved>),
     BeliefQualificationChanged(Box<BeliefQualificationChanged>),
@@ -408,6 +411,7 @@ impl EventBody {
             EventBody::MigrationStarted(_) => KIND_MIGRATION_STARTED,
             EventBody::MigrationCompleted(_) => KIND_MIGRATION_COMPLETED,
             EventBody::ProjectionOverridden(_) => KIND_PROJECTION_OVERRIDDEN,
+            EventBody::ProjectionMoved(_) => KIND_PROJECTION_MOVED,
             EventBody::LedgerDivergence(_) => KIND_LEDGER_DIVERGENCE,
             EventBody::ReconciliationResolved(_) => KIND_RECONCILIATION_RESOLVED,
             EventBody::BeliefQualificationChanged(_) => KIND_BELIEF_QUALIFICATION_CHANGED,
@@ -452,6 +456,7 @@ impl EventBody {
             EventBody::MigrationStarted(b) => b.batch_id.as_deref(),
             EventBody::MigrationCompleted(b) => b.batch_id.as_deref(),
             EventBody::ProjectionOverridden(b) => b.batch_id.as_deref(),
+            EventBody::ProjectionMoved(b) => b.batch_id.as_deref(),
             EventBody::LedgerDivergence(b) => b.batch_id.as_deref(),
             EventBody::ReconciliationResolved(b) => b.batch_id.as_deref(),
             EventBody::BeliefQualificationChanged(b) => b.batch_id.as_deref(),
@@ -496,6 +501,7 @@ impl EventBody {
             EventBody::MigrationStarted(b) => b.idempotency_key.as_deref(),
             EventBody::MigrationCompleted(b) => b.idempotency_key.as_deref(),
             EventBody::ProjectionOverridden(b) => b.idempotency_key.as_deref(),
+            EventBody::ProjectionMoved(b) => b.idempotency_key.as_deref(),
             EventBody::LedgerDivergence(b) => b.idempotency_key.as_deref(),
             EventBody::ReconciliationResolved(b) => b.idempotency_key.as_deref(),
             EventBody::BeliefQualificationChanged(b) => b.idempotency_key.as_deref(),
@@ -544,6 +550,7 @@ impl EventBody {
             EventBody::MigrationStarted(b) => b.validate(),
             EventBody::MigrationCompleted(b) => b.validate(),
             EventBody::ProjectionOverridden(b) => b.validate(),
+            EventBody::ProjectionMoved(b) => b.validate(),
             EventBody::LedgerDivergence(b) => b.validate(),
             EventBody::ReconciliationResolved(b) => b.validate(),
             EventBody::BeliefQualificationChanged(b) => b.validate(),
@@ -589,6 +596,7 @@ impl EventBody {
             EventBody::MigrationStarted(b) => serde_json::to_value(b),
             EventBody::MigrationCompleted(b) => serde_json::to_value(b),
             EventBody::ProjectionOverridden(b) => serde_json::to_value(b),
+            EventBody::ProjectionMoved(b) => serde_json::to_value(b),
             EventBody::LedgerDivergence(b) => serde_json::to_value(b),
             EventBody::ReconciliationResolved(b) => serde_json::to_value(b),
             EventBody::BeliefQualificationChanged(b) => serde_json::to_value(b),
@@ -673,6 +681,7 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_MIGRATION_STARTED => EventBody::MigrationStarted(Box::new(gate(kind, body)?)),
         KIND_MIGRATION_COMPLETED => EventBody::MigrationCompleted(Box::new(gate(kind, body)?)),
         KIND_PROJECTION_OVERRIDDEN => EventBody::ProjectionOverridden(Box::new(gate(kind, body)?)),
+        KIND_PROJECTION_MOVED => EventBody::ProjectionMoved(Box::new(gate(kind, body)?)),
         KIND_LEDGER_DIVERGENCE => EventBody::LedgerDivergence(Box::new(gate(kind, body)?)),
         KIND_RECONCILIATION_RESOLVED => {
             EventBody::ReconciliationResolved(Box::new(gate(kind, body)?))

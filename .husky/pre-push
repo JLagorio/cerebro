@@ -29,7 +29,17 @@ if echo "$changed" | grep -q '^src-tauri/'; then
   echo "pre-push: src-tauri changed — fmt, clippy, cargo test"
   cargo fmt --check --manifest-path src-tauri/Cargo.toml
   cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
-  cargo test --manifest-path src-tauri/Cargo.toml
+  # The crash-harness tests (vault/testutil.rs run_crash_scenario) abort a
+  # child mid-write, and on macOS those children can wedge in the kernel (UE
+  # state, cleared only by a reboot) — the push then hangs forever. It did,
+  # twice, on 2026-09-30. CI's ubuntu job runs the full suite, crash tests
+  # included, so a Mac skips only those rather than never pushing.
+  if [ "$(uname)" = "Darwin" ]; then
+    cargo test --manifest-path src-tauri/Cargo.toml -- --skip crash --skip killed_ \
+      --skip kill_and_restart --skip a_kill_ --skip kill_point --skip interrupted_overwrite
+  else
+    cargo test --manifest-path src-tauri/Cargo.toml
+  fi
 else
   echo "pre-push: no src-tauri changes — Rust lane skipped"
 fi

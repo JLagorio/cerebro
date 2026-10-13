@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import { Input } from '@/components/ui/Input';
+import { useDecisions, usePendingVersion } from '@/knowledge/usePendingCards';
 import * as ipc from '@/lib/ipc';
 import type { ReviewCard, RevertableApplication } from '@/lib/ipc';
-import { useUiStore } from '@/stores/uiStore';
+import { useNavStore } from '@/stores/navStore';
+import { useVaultStore } from '@/stores/vaultStore';
+import { ProposalCard } from './ProposalCard';
+import { opVerb, reasonSentence } from './proposalText';
 
 /**
  * The proposal queue, as a section of the Status hub (M33.3) — and, since
@@ -13,10 +16,12 @@ import { useUiStore } from '@/stores/uiStore';
  * CONCEPTS a human has not verified, and two unrelated queues under one
  * string is a nav that lies about where a click lands.
  *
- * This is `ReviewPage`'s body, moved rather than rewritten: the card layout,
- * the approve/reject handlers, the reason guard and the revert list are the
- * same code, and every testid is unchanged so `review.spec.ts` can prove the
- * move dropped nothing.
+ * This is `ReviewPage`'s body, moved rather than rewritten, and every testid
+ * is unchanged so `review.spec.ts` can prove the move dropped nothing. M52.2
+ * moved it once more: the card is `ProposalCard` and the approve, reject and
+ * revert handlers are `useDecisions`, because a concept page shows the same
+ * cards now and two copies of a decision handler are two chances to send
+ * different arguments.
  *
  * **What DID change is the failure state.** `ReviewPage` collapsed a failed
  * read into an empty one — `catch` set the cards to `[]` and the surface said
@@ -26,35 +31,37 @@ import { useUiStore } from '@/stores/uiStore';
  * that did not come back now says so.
  *
  * Every card is still rebuilt from the ledger on each load — nothing here is
- * cached, so this list cannot drift from what the vault actually holds. The
- * card leads with what a reviewer needs to DECIDE with: the operation, the
- * risk, why it is waiting, and which targets moved underneath it.
- *
- * Rejection asks for a reason before it will send. That is not politeness —
- * the server refuses a reasonless rejection, and a refusal nobody can learn
- * from later is the shape this milestone exists to avoid.
+ * cached, so this list cannot drift from what the vault actually holds. A
+ * decision made anywhere (here, or on the concept it targets) bumps the
+ * queue's version and this section re-reads.
  */
 
-const RISK_COLOR: Record<string, string> = {
-  LOW: 'var(--n-500)',
-  MEDIUM: 'var(--info-600)',
-  HIGH: 'var(--warn-600)',
-  CRITICAL: 'var(--danger-500)',
-};
+/** Columns of a reading width that fill the tab: three across at 2000px,
+ * two at 1440, one where one fits. */
+const GRID = 'grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,480px),1fr))]';
 
-/** Who a decision is recorded as. The ledger keeps the reviewer, so this is
- * a name in the permanent record and not a UI label. */
-const REVIEWER = 'human:me';
-
-function riskChip(risk: string) {
+/** The concept an application changed, by name, opening it — or "a concept"
+ * when no file projects it: never a guess. */
+function ConceptOpener({
+  path,
+  title,
+  onOpen,
+}: {
+  path: string | null;
+  title: (path: string) => string;
+  onOpen: (path: string) => void;
+}) {
+  if (path === null) return <>a concept</>;
   return (
-    <span
-      className="rounded px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide"
-      style={{ color: RISK_COLOR[risk] ?? 'var(--n-500)', border: '1px solid currentColor' }}
-      data-testid="card-risk"
+    <button
+      type="button"
+      data-testid="revertable-open"
+      data-path={path}
+      onClick={() => onOpen(path)}
+      className="border-0 bg-transparent p-0 text-sm font-semibold text-cortex-600 hover:underline"
     >
-      {risk}
-    </span>
+      {title(path)}
+    </button>
   );
 }
 
@@ -64,83 +71,40 @@ type Queue = { cards: ReviewCard[]; applications: RevertableApplication[] };
 type State = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: Queue };
 
 export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
-  const toast = useUiStore((s) => s.toast);
+  const entries = useVaultStore((s) => s.entries);
+  const navigate = useNavStore((s) => s.navigate);
+  const version = usePendingVersion();
+  const { busy, decide, undo, isSettled, isReverted } = useDecisions(vaultPath);
   const [state, setState] = useState<State>({ kind: 'loading' });
-  const [reasons, setReasons] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  // `version` is the one deliberate re-read: a decision anywhere bumps it.
+  // `live` (M52.4) drops an answer that lands after a newer read started or
+  // the section unmounted: two reads in flight could land out of order, and
+  // the older one would put a decided card back on screen.
+  useEffect(() => {
     if (vaultPath === null) {
       setState({ kind: 'unavailable' });
       return;
     }
-    try {
-      const [cards, applications] = await Promise.all([
-        ipc.reviewQueue(vaultPath),
-        ipc.revertableApplications(vaultPath),
-      ]);
-      setState({ kind: 'ready', data: { cards, applications } });
-    } catch {
-      // NOT an empty state. See the module note: a vault whose ledger could
-      // not be read has an unknown number of pending decisions, and "nothing
-      // is waiting" would be this surface inventing good news.
-      setState({ kind: 'unavailable' });
-    }
-  }, [vaultPath]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Proposal channels are the AGENTS.md carve-out: the result is READ, not
-  // toasted away. A queued set that did not resolve, and a rejection the
-  // server refused, are different answers and the reviewer sees both.
-  async function decide(card: ReviewCard, approve: boolean) {
-    if (vaultPath === null) return;
-    setBusy(true);
-    try {
-      const transition = await ipc.decideProposal(
-        vaultPath,
-        card.proposal_id,
-        approve,
-        REVIEWER,
-        reasons[card.proposal_id] ?? null,
-      );
-      if (transition === null) {
-        toast('Recorded — the rest of this set is still waiting');
-      } else if (transition === 'apply') {
-        toast('Applied');
-      } else if (transition === 'stale_reject') {
-        toast('Refused: the world moved while this waited');
-      } else {
-        toast('Rejected');
+    let live = true;
+    void (async () => {
+      try {
+        const [cards, applications] = await Promise.all([
+          ipc.reviewQueue(vaultPath),
+          ipc.revertableApplications(vaultPath),
+        ]);
+        if (live) setState({ kind: 'ready', data: { cards, applications } });
+      } catch {
+        // NOT an empty state. See the module note: a vault whose ledger could
+        // not be read has an unknown number of pending decisions, and "nothing
+        // is waiting" would be this surface inventing good news.
+        if (live) setState({ kind: 'unavailable' });
       }
-      await load();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'the decision was refused');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function undo(application: RevertableApplication) {
-    if (vaultPath === null) return;
-    setBusy(true);
-    try {
-      await ipc.revertApplication(
-        vaultPath,
-        application.proposal_id,
-        [application.applied_event_id],
-        REVIEWER,
-      );
-      toast('Reverted — the original change is still in the record');
-      await load();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'the revert was refused');
-    } finally {
-      setBusy(false);
-    }
-  }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [vaultPath, version]);
 
   if (state.kind === 'loading') return <p className="text-xs text-n-400">Reading…</p>;
   if (state.kind === 'unavailable') {
@@ -162,128 +126,64 @@ export function NeedsYouSection({ vaultPath }: { vaultPath: string | null }) {
 
   return (
     <>
-      {cards.map((card) => {
-        const stale = card.targets.some((t) => t.stale);
-        return (
-          <article
-            key={card.proposal_id}
-            data-testid="review-card"
-            data-proposal={card.proposal_id}
-            className="rounded-lg border border-[var(--n-200)] p-4"
-          >
-            <header className="flex items-center gap-2">
-              <span className="font-medium" data-testid="card-op">
-                {card.op}
-              </span>
-              {riskChip(card.effective_risk)}
-              {card.review === 'diff' ? (
-                <span className="text-[11px] text-[var(--danger-500)]" data-testid="card-diff">
-                  diff review
-                </span>
-              ) : null}
-              <span className="ml-auto text-xs text-[var(--n-500)]">{card.actor}</span>
-            </header>
-
-            <p className="mt-1 text-sm text-[var(--n-600)]">{card.reason}</p>
-
-            {/* WHY IT IS WAITING. The table's own words, not a paraphrase. */}
-            {card.queued_for.length > 0 ? (
-              <p className="mt-2 text-xs text-[var(--warn-600)]" data-testid="card-queued-for">
-                {card.queued_for.join(', ')}
-              </p>
-            ) : null}
-
-            {stale ? (
-              <p className="mt-2 text-xs text-[var(--danger-500)]" data-testid="card-stale">
-                The world moved while this waited — approving it will be refused.
-              </p>
-            ) : null}
-
-            <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[var(--n-500)]">
-              <div>
-                <dt className="inline">Intended use </dt>
-                <dd className="inline text-[var(--n-700)]">
-                  {card.intended_use_kind} · {card.intended_use_stakes}
-                </dd>
-              </div>
-              <div>
-                <dt className="inline">Because </dt>
-                <dd className="inline text-[var(--n-700)]">{card.transition_cause}</dd>
-              </div>
-              <div>
-                <dt className="inline">Evidence </dt>
-                <dd className="inline text-[var(--n-700)]">{card.evidence_refs.length}</dd>
-              </div>
-              <div>
-                <dt className="inline">Coverage </dt>
-                <dd className="inline text-[var(--n-700)]">{card.coverage_refs.length}</dd>
-              </div>
-            </dl>
-
-            <ul className="mt-3 space-y-1 text-xs" data-testid="card-targets">
-              {card.targets.map((target) => (
-                <li key={`${target.target_class}/${target.target_id}`} className="font-mono">
-                  <span className="text-[var(--n-500)]">{target.target_class}</span>{' '}
-                  {target.target_id.slice(0, 8)}{' '}
-                  <span className={target.stale ? 'text-[var(--danger-500)]' : ''}>
-                    @{target.expected_version ?? 'new'} → {target.current_version ?? 'absent'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-
-            <div className="mt-3 flex items-center gap-2">
-              <Button
-                variant="primary"
-                disabled={busy}
-                testId="approve"
-                onClick={() => void decide(card, true)}
-              >
-                Approve
-              </Button>
-              <Input
-                value={reasons[card.proposal_id] ?? ''}
-                placeholder="Why not?"
-                testId="reject-reason"
-                onChange={(e) => setReasons((r) => ({ ...r, [card.proposal_id]: e.target.value }))}
-              />
-              <Button
-                disabled={busy || (reasons[card.proposal_id] ?? '').trim() === ''}
-                testId="reject"
-                onClick={() => void decide(card, false)}
-              >
-                Reject
-              </Button>
-            </div>
-          </article>
-        );
-      })}
+      {/* The cards fill the tab's width in columns of a reading width
+          (M52.5), rather than one 880px column beside 800px of nothing:
+          three across at 2000px, two at 1440, one where there is room for
+          one. A row's cards share a height, so their answers line up. */}
+      {cards.length > 0 && (
+        <div data-testid="review-cards" className={GRID}>
+          {cards.map((card) => (
+            <ProposalCard
+              key={card.proposal_id}
+              card={card}
+              busy={busy || isSettled(card.proposal_id)}
+              onDecide={(c, approve, reason) => void decide(c, approve, reason)}
+            />
+          ))}
+        </div>
+      )}
 
       {applications.length > 0 ? (
         <>
-          <h3 className="mb-1 mt-3 text-xs font-medium text-[var(--n-600)]">
-            Applied — still undoable
-          </h3>
-          {applications.map((application) => (
-            <article
-              key={application.proposal_id}
-              data-testid="revertable"
-              data-proposal={application.proposal_id}
-              className="flex items-center gap-3 rounded-lg border border-[var(--n-200)] p-3"
-            >
-              <Icon name="undo-2" size={14} />
-              <span className="text-sm font-medium">{application.op}</span>
-              <span className="text-xs text-[var(--n-500)]">{application.reason}</span>
-              <Button
-                className="ml-auto"
-                disabled={busy}
-                testId="revert"
-                onClick={() => void undo(application)}
+          <h3 className="mb-1 mt-3 text-xs font-medium text-n-600">Applied — still undoable</h3>
+          {/* The cards' columns (M52.5), so Revert sits by its line. */}
+          <div className={GRID}>
+            {applications.map((application) => (
+              <article
+                key={application.proposal_id}
+                data-testid="revertable"
+                data-proposal={application.proposal_id}
+                className="flex items-center gap-3 rounded-lg border border-n-200 p-3"
               >
-                Revert
-              </Button>
-            </article>
-          ))}
+                <Icon name="undo-2" size={14} className="flex-none" />
+                {/* What changed, by name, as a card's headline says it
+                    (M52.5): "Revise" alone named no concept. */}
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span
+                    className="text-sm font-medium text-n-900"
+                    data-op={application.op}
+                    title={application.op}
+                  >
+                    {opVerb(application.op).verb}{' '}
+                    <ConceptOpener
+                      path={application.path ?? null}
+                      title={(path) => entries.find((e) => e.path === path)?.title ?? path}
+                      onOpen={(path) => navigate({ kind: 'doc', path })}
+                    />
+                  </span>
+                  <span className="text-xs text-n-500">{reasonSentence(application.reason)}</span>
+                </span>
+                <Button
+                  className="ml-auto"
+                  disabled={busy || isReverted(application.proposal_id)}
+                  testId="revert"
+                  onClick={() => void undo(application)}
+                >
+                  Revert
+                </Button>
+              </article>
+            ))}
+          </div>
         </>
       ) : null}
     </>

@@ -249,26 +249,23 @@ export interface ResolvedField {
 }
 
 /**
- * Where you are inside the Knowledge tab.
+ * Where you are inside Knowledge.
  *
- * M33a.2 folded the Status hub in here. The first five arms are what the base
- * HOLDS; the last six are what it knows about ITSELF and what its agents have
- * done. One destination, because they were always one subject — a bundle that
- * cannot say what it is unsure of is not a knowledge base, it is a folder.
+ * M51 cut it to three tabs a reader can follow: Concepts (everything, or one
+ * folder of it), Review (what waits for a person) and Activity (what changed,
+ * what Knowledge is unsure of, and the machinery behind it). The eight tabs
+ * M50.5 inherited from the Status hub are sections of those two now.
  */
 export type KnowledgeNav =
   | { tab: 'all' }
-  | { tab: 'review' }
-  | { tab: 'log' }
   | { tab: 'section'; folder: string }
+  | { tab: 'review' }
+  | { tab: 'activity' }
+  // No tab and no nav row since M51: an older deep link to one subject still
+  // lands on what Knowledge holds about it.
   | { tab: 'entity'; key: string }
-  | { tab: 'changed' }
-  | { tab: 'contested' }
-  | { tab: 'waiting' }
-  | { tab: 'background' }
-  // `run` deep-links one run open, the way `entity` deep-links one subject.
-  | { tab: 'runs'; run?: string }
-  | { tab: 'gates' };
+  // `run` deep-links one run open (the AI panel's run list).
+  | { tab: 'runs'; run?: string };
 
 /**
  * Which shelf of the library is open (M18).
@@ -285,9 +282,9 @@ export type Selection =
   // M43 — open work across every database. Capability-gated membership
   // (engine/myWork); no per-entry state rides on the selection.
   | { kind: 'mywork' }
-  // AI knowledge base: OKF bundle, read-only (M5). An absent `nav` means "no
-  // view was asked for", which `defaultKnowledgeNav` answers with the heaviest
-  // thread (M33a.3) — it was a plain `all` from M8.1 until then.
+  // AI knowledge base: OKF bundle (M5). An absent `nav` means "no view was
+  // asked for", which is Concepts (M51 — it was the heaviest thread from
+  // M33a.3, when threads were the nav).
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
   // M33a.2 — and what the base knows about ITSELF: the epistemic tabs `nav`

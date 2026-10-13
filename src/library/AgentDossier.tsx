@@ -166,11 +166,11 @@ export function AgentDossier({
             data-testid="fleet-row"
             data-run={run.run_id}
             data-outcome={run.outcome}
-            className="flex items-center gap-2 rounded border border-n-200 px-2.5 py-1.5"
+            className="flex items-center gap-2 rounded-xs border border-n-200 px-2.5 py-1.5"
           >
             <span className="min-w-0 flex-1 truncate text-2xs text-n-600">{run.started_at}</span>
             <span
-              className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em]"
+              className="rounded-xs px-1.5 py-0.5 text-2xs uppercase tracking-[0.06em]"
               style={{ border: '1px solid var(--n-200)' }}
             >
               {run.outcome.replace(/_/g, ' ')}

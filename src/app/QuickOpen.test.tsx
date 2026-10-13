@@ -26,7 +26,7 @@ describe('QuickOpen', () => {
     // contract); 'Guided onboarding' (prefix match) must rank first among
     // the MATCHES — and carry the default highlight, so Enter still means
     // "open the thing I named".
-    expect(options[0].textContent).toContain('Ask the assistant');
+    expect(options[0].textContent).toContain('Ask the Assistant');
     expect(options[0].getAttribute('aria-selected')).toBe('false');
     expect(options[1].textContent).toContain('Guided onboarding');
     expect(options[1].getAttribute('aria-selected')).toBe('true');
@@ -36,11 +36,15 @@ describe('QuickOpen', () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'why is onboarding stalling');
-    await user.click(screen.getByRole('option', { name: /Ask the assistant/ }));
+    await user.click(
+      screen.getByRole('option', { name: /Ask the Assistant: why is onboarding stalling/ }),
+    );
     expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    // The typed words are the bubble — they are the person's own (M52.3).
     expect(useUiStore.getState().agentPendingPrompt).toEqual({
       text: 'why is onboarding stalling',
       subject: null,
+      label: null,
     });
     expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });

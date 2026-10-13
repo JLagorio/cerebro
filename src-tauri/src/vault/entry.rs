@@ -146,7 +146,19 @@ pub fn build_entry(
         }
     }
 
-    let title = parse::extract_h1_title(body).unwrap_or_else(|| parse::humanize_stem(&stem));
+    // OKF (M50.1): a knowledge file's title is its frontmatter `title`, and
+    // its body's `#` headings are sections. Read by the first H1, a concept
+    // was called "Trigger" or "The number" everywhere but the Knowledge page
+    // — the crumb, Quick Open, a favorite, a run's list of what it changed.
+    let okf_title = crate::knowledge::is_knowledge_path(rel_path)
+        .then(|| properties.get("title").and_then(|v| v.as_str()))
+        .flatten()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    let title = okf_title.unwrap_or_else(|| {
+        parse::extract_h1_title(body).unwrap_or_else(|| parse::humanize_stem(&stem))
+    });
 
     Entry {
         path: rel_path.to_string(),
@@ -167,7 +179,7 @@ pub fn build_entry(
 
 /// A frontmatter value is a relationship when its string content contains at
 /// least one wikilink; returns the targets, or None for a plain value.
-fn relationship_targets(value: &serde_json::Value) -> Option<Vec<String>> {
+pub(crate) fn relationship_targets(value: &serde_json::Value) -> Option<Vec<String>> {
     let mut targets = Vec::new();
     collect_targets(value, &mut targets);
     if targets.is_empty() {
@@ -264,6 +276,25 @@ mod tests {
         let content = "---\ntype: Work item\n---\n\nJust prose, no heading.\n";
         let e = build("items/fix-login-flow.md", content);
         assert_eq!(e.title, "Fix login flow");
+    }
+
+    // M50.1 — OKF keeps a concept's title in frontmatter; its `#` headings
+    // are sections. Everywhere else the first H1 is the title, as before.
+    #[test]
+    fn a_knowledge_file_is_titled_by_its_frontmatter() {
+        let concept = "---\ntype: Playbook\ntitle: \"Warehouse cutover\"\n---\n\n# Trigger\n\nGo-live night.\n";
+        assert_eq!(
+            build("knowledge/playbooks/cutover.md", concept).title,
+            "Warehouse cutover"
+        );
+        // A page elsewhere with the same frontmatter keeps its H1.
+        assert_eq!(build("notes/cutover.md", concept).title, "Trigger");
+        // And a concept without a usable title falls back the usual way.
+        let bare = "---\ntype: Playbook\ntitle: \"  \"\n---\n\n# Trigger\n";
+        assert_eq!(
+            build("knowledge/playbooks/cutover.md", bare).title,
+            "Trigger"
+        );
     }
 
     #[test]

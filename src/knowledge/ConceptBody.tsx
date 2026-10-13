@@ -105,7 +105,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
       nodes.push(
         <code
           key={key++}
-          className="rounded bg-n-100 px-1 py-[1px] [font-family:var(--font-mono)] text-xs text-n-800"
+          className="rounded-xs bg-n-100 px-1 py-[1px] [font-family:var(--font-mono)] text-xs text-n-800"
         >
           {m[1].slice(1, -1)}
         </code>,
@@ -183,6 +183,18 @@ const isDivider = (line: string): boolean => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(l
 
 /** `[^id]: text` definitions render in the Sources panel, not in the body. */
 const isFootnoteDef = (line: string): boolean => /^\[\^[^\]\s]+\]:/.test(line);
+
+/** One list item: its marker (`-`, `*`, `+` or `3.`) and its text. */
+const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+(.*)$/;
+
+/** A line that carries on the list item above it (M52.3): indented two or
+ * more spaces, and neither an item of its own nor the start of a block — a
+ * fence, a quote or a table row (M52.4), each of which renders as itself. */
+const isContinuation = (line: string): boolean =>
+  /^ {2,}\S/.test(line) &&
+  !LIST_ITEM.test(line) &&
+  !/^\s*```/.test(line) &&
+  !/^\s*(>|\|)/.test(line);
 
 const HEADING_CLASS: Record<number, string> = {
   1: 'mb-2 mt-6 text-2xl font-semibold tracking-[-0.01em] text-n-900',
@@ -332,21 +344,48 @@ export function ConceptBody({
       continue;
     }
 
-    const bullet = /^\s*([-*+]|\d+\.)\s+/.exec(line);
+    const bullet = LIST_ITEM.exec(line);
     if (bullet !== null) {
       const ordered = /\d/.test(bullet[1]);
       const items: string[] = [];
       while (i < lines.length) {
-        const item = /^\s*([-*+]|\d+\.)\s+(.*)$/.exec(lines[i]);
-        if (item === null) break;
-        if (/\d/.test(item[1]) !== ordered) break;
-        items.push(item[2]);
-        i += 1;
+        const item = LIST_ITEM.exec(lines[i]);
+        if (item !== null) {
+          if (/\d/.test(item[1]) !== ordered) break;
+          items.push(item[2]);
+          i += 1;
+          continue;
+        }
+        // M52.3 — an item's wrapped lines are part of it. Every numbered
+        // step in an agent's charter wraps, and each wrapped line used to end
+        // the list: four steps rendered as four lists, each numbered 1.
+        if (isContinuation(lines[i])) {
+          items[items.length - 1] += ` ${lines[i].trim()}`;
+          i += 1;
+          continue;
+        }
+        // A blank line ends the list unless what follows it still belongs:
+        // an indented continuation, or the next item of the same kind.
+        if (lines[i].trim() === '') {
+          let next = i;
+          while (next < lines.length && lines[next].trim() === '') next += 1;
+          const after = next < lines.length ? lines[next] : null;
+          const sibling = after === null ? null : LIST_ITEM.exec(after);
+          const belongs =
+            after !== null &&
+            (sibling !== null ? /\d/.test(sibling[1]) === ordered : isContinuation(after));
+          if (!belongs) break;
+          i = next;
+          continue;
+        }
+        break;
       }
       const ListTag = ordered ? 'ol' : 'ul';
       blocks.push(
         <ListTag
           key={key++}
+          // A list that starts at 3 says 3 — the number is the author's.
+          start={ordered ? Number.parseInt(bullet[1], 10) : undefined}
           className={`my-2 flex list-outside flex-col gap-1 pl-5 text-md leading-[21px] text-n-700 ${
             ordered ? 'list-decimal' : 'list-disc'
           }`}

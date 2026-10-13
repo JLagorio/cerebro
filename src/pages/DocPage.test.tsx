@@ -662,3 +662,95 @@ describe('DocPage', () => {
     expect(fs().has(DOC_MAIN)).toBe(true);
   });
 });
+
+// M50.1 — a concept is a page: the same canvas, editor and side panel as any
+// page. What differs is where its title lives (frontmatter), where its review
+// sits (a bar under the title, M51.3), and which actions its folder refuses.
+describe('a concept is a page (M50.1)', () => {
+  const CONCEPT = 'knowledge/playbooks/warehouse-cutover.md';
+
+  beforeEach(async () => {
+    resetMockFs();
+    await useVaultStore.getState().openVault('/demo-vault');
+    useNavStore.setState({
+      selection: { kind: 'doc', path: CONCEPT },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    useUiStore.setState({
+      docPanelOpen: true,
+      conceptPanelOpen: false,
+      conceptPanelTab: 'details',
+      actorId: 'josef',
+    });
+  });
+  afterEach(cleanup);
+
+  it('roots at Knowledge, titles from frontmatter, and puts its review under the title', () => {
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    expect((screen.getByTestId('concept-title') as HTMLTextAreaElement).value).toBe(
+      'Warehouse cutover: go-live and rollback',
+    );
+    // M51.3 — the review is a bar on the page; the panel starts closed even
+    // though the doc panel is open, so the page is not four columns wide.
+    expect(screen.getByTestId('concept-review-bar')).toBeTruthy();
+    expect(screen.queryByTestId('doc-side-panel')).toBeNull();
+    // Written by the Knowledge agent (the corpus stamps it `process:knowledge`
+    // since M52.3), and said so in the app's words — its record's title.
+    const author = screen.getByTestId('review-bar-author');
+    expect(author.dataset.author).toBe('agent');
+    expect(author.textContent).toContain('Knowledge agent');
+    // The panel opens on the concept's details, with no Info tab.
+    fireEvent.click(screen.getByRole('button', { name: 'Show panel' }));
+    expect(screen.getByTestId('knowledge-panel')).toBeTruthy();
+    expect(screen.queryByTestId('doc-panel-tab-info')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Playbooks' }));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'knowledge',
+      nav: { tab: 'section', folder: 'playbooks' },
+    });
+  });
+
+  it('walks the review queue from the page it sends you to, and ends it (M51.2)', () => {
+    // The corpus's last queued concept: never reviewed, and the oldest
+    // writing of the three that are (M52.5 ranks never-reviewed as new,
+    // newest first). The walk ends here with Done, rather than wrapping
+    // round to the first as it used to.
+    render(<DocPage selection={{ kind: 'doc', path: 'knowledge/metrics/sync-error-rate.md' }} />);
+    const pager = screen.getByTestId('review-pager');
+    expect(pager.textContent).toMatch(/^Review (\d+) of \1Done$/);
+    expect(screen.queryByTestId('review-next')).toBeNull();
+    fireEvent.click(screen.getByTestId('review-done'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'knowledge',
+      nav: { tab: 'review' },
+    });
+  });
+
+  it('offers only what its folder allows in the page menu', () => {
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    // M52.3 — the review bar's ask, by the review bar's name.
+    expect(items).toEqual(['Ask to revise', 'Show in Knowledge']);
+  });
+
+  it('verifies the body the editor loaded, through the M49.3 pin', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: CONCEPT }} />);
+    const verify = () => screen.getByRole('button', { name: /^Verify$/ });
+    await waitFor(() => expect(verify().hasAttribute('disabled')).toBe(false), {
+      timeout: 5_000,
+    });
+    fireEvent.click(verify());
+    await waitFor(() => expect(fs().get(CONCEPT)).toContain('human:josef'), { timeout: 5_000 });
+  });
+
+  it('opens the rest of the folder read-only — the log is the system’s', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: 'knowledge/log.md' }} />);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    expect(document.querySelector('[contenteditable="true"]')).toBeNull();
+    expect(screen.queryByTestId('concept-title')).toBeNull();
+  });
+});

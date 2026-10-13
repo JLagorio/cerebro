@@ -336,7 +336,7 @@ export function CalendarView({
                           title={entry.title}
                           aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
                           className={[
-                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
+                            'flex min-w-0 touch-none select-none items-center gap-1 rounded-xs border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
                             drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
                           ].join(' ')}
                         >
@@ -349,7 +349,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(day)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
+                        className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
                       >
                         {`+${stack.length - shown.length} more`}
                       </button>
@@ -358,7 +358,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(null)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
+                        className="rounded-xs border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
                       >
                         Show less
                       </button>
@@ -478,7 +478,7 @@ function DayAdd({
         // chosen day, so without a mouse there was no way to do it at all.
         // Opacity keeps the 4x4 slot reserved, so a day does not reflow when
         // the plus appears.
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/day:opacity-100"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/day:opacity-100"
       >
         <Icon name="plus" size={11} />
       </button>

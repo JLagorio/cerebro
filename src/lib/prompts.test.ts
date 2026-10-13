@@ -3,8 +3,14 @@ import {
   addressedAgentPrompt,
   agentRunPrompt,
   askBasePrompt,
+  askedAbout,
+  conceptAsk,
   currentStatePrompt,
   distillPrompt,
+  RECHECK_LABEL,
+  REVISE_LABEL,
+  reviewConceptPrompt,
+  reviseConceptPrompt,
 } from './prompts';
 import { ALL_TOOLS } from '@/engine/tools';
 
@@ -134,6 +140,52 @@ describe('askBasePrompt (M33a.5)', () => {
     // exactly how a knowledge surface stops being trusted.
     expect(prompt()).toContain('almost nothing yet');
     expect(prompt()).toContain('Not covered');
+  });
+});
+
+/**
+ * M52.3 — the ask a concept offers is chosen by whether it is due. Every
+ * surface used to send the recheck prompt, so a concept due nothing reached
+ * the agent as one whose "recheck date has passed".
+ */
+describe('asking about a concept (M52.3)', () => {
+  const PATH = 'knowledge/systems/pick-queue-drain.md';
+  const TITLE = 'Pick queue drain time';
+
+  it('revises without claiming the recheck date has passed', () => {
+    const text = reviseConceptPrompt(PATH, TITLE);
+    // The mock agent keys on this first line; it is a contract, not copy.
+    expect(text.split('\n')[0]).toBe(`Revise the knowledge concept at ${PATH} ("${TITLE}").`);
+    expect(text).not.toContain('recheck date has passed');
+  });
+
+  it('keeps the staleness claim on the recheck, where it is true', () => {
+    const text = reviewConceptPrompt(PATH, TITLE);
+    expect(text.split('\n')[0]).toBe(
+      `Recheck the knowledge concept at ${PATH} ("${TITLE}"). Its recheck date has passed.`,
+    );
+  });
+
+  it('gives both the same four verdicts, word for word', () => {
+    // One list, so the two asks cannot drift apart on what "done" means.
+    const body = (text: string) => text.split('\n').slice(1).join('\n');
+    expect(body(reviseConceptPrompt(PATH, TITLE))).toBe(body(reviewConceptPrompt(PATH, TITLE)));
+    expect(body(reviseConceptPrompt(PATH, TITLE))).toContain('**No longer true**');
+  });
+
+  it('chooses the recheck only for a concept that is due', () => {
+    expect(conceptAsk({ path: PATH, title: TITLE, stale: true })).toEqual({
+      label: RECHECK_LABEL,
+      text: reviewConceptPrompt(PATH, TITLE),
+    });
+    expect(conceptAsk({ path: PATH, title: TITLE, stale: false })).toEqual({
+      label: REVISE_LABEL,
+      text: reviseConceptPrompt(PATH, TITLE),
+    });
+  });
+
+  it('names the bubble by the act and the page, not by the prompt', () => {
+    expect(askedAbout(REVISE_LABEL, TITLE)).toBe('Ask to revise · Pick queue drain time');
   });
 });
 

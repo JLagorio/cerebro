@@ -1263,6 +1263,13 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
       change: canonChange,
     };
   },
+  'projection.moved': (obj) => ({
+    ...canonCommon(obj),
+    belief_id: asString(obj.belief_id, 'belief_id'),
+    from_path: asString(obj.from_path, 'from_path'),
+    to_path: asString(obj.to_path, 'to_path'),
+    projection_hash: asString(obj.projection_hash, 'projection_hash'),
+  }),
   'ledger.divergence': (obj) => ({
     ...canonCommon(obj),
     detection_key: asString(obj.detection_key, 'detection_key'),
@@ -2356,6 +2363,18 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       break;
     }
+    case 'projection.moved': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      validateProjectionPath(body.from_path as string);
+      validateProjectionPath(body.to_path as string);
+      if (body.from_path === body.to_path) {
+        throw new RefusedError('a move names two different paths');
+      }
+      if (!isSha256(body.projection_hash)) {
+        throw new RefusedError('projection_hash must be SHA-256 hex');
+      }
+      break;
+    }
     case 'projection.overridden': {
       if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
       validateProjectionPath(body.path as string);
@@ -2474,7 +2493,7 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (body.action === 'accept_current_files') {
         const batchId = body.batch_id as string | null;
         if (batchId === null) {
-          throw new RefusedError('accept_current_files commits inside its adoption batch');
+          throw new RefusedError('accept_current_files commits inside its own closing batch');
         }
         if (captures.length !== 1 || captures[0] !== batchId) {
           throw new RefusedError('capture_batch_ids is exactly the singleton own batch id');

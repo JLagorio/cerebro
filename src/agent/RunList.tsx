@@ -112,7 +112,7 @@ export function RunList() {
                 onClick={() => {
                   if (run.run !== null) void stopAgent(run.run).catch(() => undefined);
                 }}
-                className="flex-none rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-danger-500 disabled:opacity-40"
+                className="flex-none rounded-xs border-0 bg-transparent p-0.5 text-n-400 hover:text-danger-500 disabled:opacity-40"
               >
                 <Icon name="square" size={10} />
               </button>

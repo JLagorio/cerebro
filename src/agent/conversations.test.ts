@@ -11,6 +11,7 @@ import {
   titleFrom,
 } from '@/agent/conversations';
 import type { ChatMessage, Conversation } from '@/agent/types';
+import { ASK_BASE_LABEL, askedAbout } from '@/lib/prompts';
 
 const msg = (role: ChatMessage['role'], text: string): ChatMessage => ({
   id: `${role}-${text}`,
@@ -36,6 +37,12 @@ describe('titleFrom', () => {
     expect(title.length).toBeLessThanOrEqual(43);
     expect(title.endsWith('…')).toBe(true);
     expect(title).not.toMatch(/\s…$/);
+  });
+
+  // M52.4 — a labelled ask cut after its label used to end on the `·`.
+  it('does not end a cut title on the separator of a labelled ask', () => {
+    const asked = askedAbout(ASK_BASE_LABEL, 'Offline sync hardening');
+    expect(titleFrom([msg('user', asked)])).toBe('What does Knowledge say about this?…');
   });
 
   it('returns null when there is nothing to title from', () => {

@@ -1,3 +1,4 @@
+import { folderLabel } from '@/engine/okf';
 import type { CollectionFile, Entry, ListFile, Selection } from '@/engine/types';
 
 /**
@@ -58,9 +59,9 @@ export function placeOf(selection: Selection): Place {
       return { kind: 'type', name: selection.name };
     case 'knowledge': {
       // `path` dropped for the same reason the detail panel is: it deep-links
-      // one concept beside your work, it does not move you. The filter tabs
-      // (all/review/log) are lenses over one corpus; a section or an entity
-      // dossier names a subject and keeps its own thread.
+      // one concept beside your work, it does not move you. The tabs
+      // (all/review/activity) are lenses over one corpus; a section or an
+      // entity dossier names a subject and keeps its own thread.
       const nav = selection.nav;
       if (nav !== undefined && (nav.tab === 'section' || nav.tab === 'entity')) {
         return { kind: 'knowledge', nav };
@@ -187,9 +188,14 @@ export function placeLabel(
     case 'settings':
       return 'Settings';
     case 'knowledge': {
+      // Said the way the page itself says it (M51.5): the folder as its
+      // heading reads, the subject by its title. The raw key was a path —
+      // `knowledge/projects/phoenix-warehouse-rollout.md` — in a chip.
       const nav = place.nav;
-      if (nav?.tab === 'section') return `Knowledge / ${stem(nav.folder)}`;
-      if (nav?.tab === 'entity') return `Knowledge / ${nav.key}`;
+      if (nav?.tab === 'section') return `Knowledge / ${folderLabel(nav.folder)}`;
+      if (nav?.tab === 'entity') {
+        return `Knowledge / ${entries.find((e) => e.path === nav.key)?.title ?? nav.key}`;
+      }
       return 'Knowledge';
     }
     case 'doc':
@@ -242,7 +248,7 @@ export function isPlace(raw: unknown): raw is Place {
       const nav = p.nav as Record<string, unknown>;
       if (nav.tab === 'section') return typeof nav.folder === 'string';
       if (nav.tab === 'entity') return typeof nav.key === 'string';
-      return nav.tab === 'all' || nav.tab === 'review' || nav.tab === 'log';
+      return nav.tab === 'all' || nav.tab === 'review' || nav.tab === 'activity';
     }
     case 'doc':
     case 'diagram':

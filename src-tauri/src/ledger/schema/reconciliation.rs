@@ -20,6 +20,9 @@ pub const ACTOR_RECONCILIATION: &str = "system:reconciliation";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DivergenceSignal {
+    /// RESERVED, never produced (M49.10, K36): a git trailer cannot anchor
+    /// a ledger once knowledge syncs through git (see `ledger::head`). Kept
+    /// because recorded events and the TS reducer name the closed set.
     GitAnchorRegression,
     RememberedHeadRegression,
     ManifestReducerDisagreement,
@@ -147,9 +150,10 @@ impl ReconciliationAction {
 
 schema_body! {
     /// The explicit reconciliation exit. The action-specific contract is
-    /// CLOSED: accept commits inside the same logical batch as every
-    /// adoption event and pins matching accepted/resulting digests; restore
-    /// is unbatched with an empty capture list and a null accepted digest.
+    /// CLOSED: accept commits in its own closing batch (`capture_batch_ids`
+    /// = [its batch id]) after the per-file captures, and pins matching
+    /// accepted/resulting digests; restore is unbatched with an empty capture
+    /// list and a null accepted digest.
     pub struct ReconciliationResolved {
         pub divergence_event_id: String,
         pub action: ReconciliationAction,
@@ -192,7 +196,7 @@ impl ReconciliationResolved {
                 let batch_id = self
                     .batch_id
                     .as_deref()
-                    .ok_or("accept_current_files commits inside its adoption batch")?;
+                    .ok_or("accept_current_files commits inside its own closing batch")?;
                 if self.capture_batch_ids != [batch_id.to_string()] {
                     return Err(
                         "accept_current_files capture_batch_ids is exactly its own singleton \

@@ -11,6 +11,30 @@ import { SOURCES_DIR } from '@/engine/ingest';
  * checked — so the prompt says both, every time, in the same words.
  */
 
+/**
+ * What the bubble says when a surface asks for a person (M52.3): the act's
+ * one label, then the page it is about.
+ *
+ * A surface's ask is a structured prompt pages long. Sent as its own bubble
+ * it made the transcript, and every thread's title, read "Recheck the
+ * knowledge concept at knowledge/…" — so the label is what the person sees
+ * and the prompt is what the agent is sent. Every label is defined once,
+ * beside the prompt it names, so a button, a suggestion and the bubble it
+ * leaves behind cannot call one act by three names.
+ */
+export function askedAbout(label: string, title: string): string {
+  return `${label} · ${title}`;
+}
+
+/** The Quick Open row that hands typed words to the Assistant (M42.5). The
+ * words ARE the bubble — they are the person's own, not a prompt. */
+export function askAssistantLabel(query: string): string {
+  return `Ask the Assistant: ${query}`;
+}
+
+/** The distil step's one name (M52.3). */
+export const DISTILL_LABEL = 'Learn from this page';
+
 /** Ask the agent to learn from one working doc — the distil step. */
 export function distillPrompt(path: string, title: string): string {
   return [
@@ -34,6 +58,11 @@ export function distillPrompt(path: string, title: string): string {
   ].join('\n');
 }
 
+/** The fetch's one name, counted (M52.3). */
+export function fetchRefsLabel(count: number): string {
+  return `Fetch ${count} reference${count === 1 ? '' : 's'}`;
+}
+
 /** Ask the agent to fetch external references a note mentions but nobody has cached. */
 export function fetchRefsPrompt(path: string, ids: readonly string[]): string {
   return [
@@ -46,6 +75,9 @@ export function fetchRefsPrompt(path: string, ids: readonly string[]): string {
     'If you have no connector for a system, say so plainly rather than guessing at the contents.',
   ].join('\n');
 }
+
+/** The augment ask's one name (M52.3). */
+export const AUGMENT_LABEL = "What's missing?";
 
 /**
  * The PRD case (M8.3): what does the vault know about this that the draft in
@@ -69,6 +101,9 @@ export function augmentDocPrompt(path: string, title: string): string {
     'Do not edit the document. If a section has nothing in it, say so in one line rather than padding it.',
   ].join('\n');
 }
+
+/** The ask-the-base act's one name (M52.3). */
+export const ASK_BASE_LABEL = 'What does Knowledge say about this?';
 
 /**
  * Ask the base what it knows that bears on the record in front of you
@@ -107,7 +142,8 @@ export function askBasePrompt(path: string, title: string): string {
 }
 
 /**
- * Ask the agent to recheck one concept against what it was built from (M8.8).
+ * What reading a concept again has to end in (M8.8) — shared by the recheck
+ * and the revise ask, so the two cannot drift apart on what "done" means.
  *
  * The instruction to reach a verdict is load-bearing. Told only to "review",
  * a model reliably rewrites the prose slightly and reports success, which
@@ -116,21 +152,89 @@ export function askBasePrompt(path: string, title: string): string {
  * deprecating something an available answer rather than a failure to find
  * work.
  */
+const CONCEPT_VERDICTS: readonly string[] = [
+  'Read it, then read the sources it cites and anything newer in the vault about the same subjects. Reach one of four verdicts:',
+  '',
+  '- **Still true** — call recheck_concept with the next `stale_after`. It changes nothing else; do not rewrite the concept to say so.',
+  '- **Needs revising** — rewrite it in place with write_concept, keeping the sources that still hold.',
+  '- **Replaced** — write the concept that replaces it and set `supersedes` on the NEW one. Do not edit the old one.',
+  '- **No longer true** — set `lifecycle: deprecated`. A wrong concept that stays stable is worse than one that is gone.',
+  '',
+  'Do not rewrite it just to have done something. "Still true, date extended" is a real answer and often the right one.',
+  'While you are in there: any volatile present-tense claim without a date becomes a dated snapshot or a pointer to where truth lives — an undated "currently" is the sentence that rots silently.',
+  'Say which verdict you reached and what evidence decided it.',
+];
+
+/** The recheck ask's one name (M52.3). */
+export const RECHECK_LABEL = 'Ask for a recheck';
+
+/** Ask the agent to recheck one concept whose recheck date has passed (M8.8). */
 export function reviewConceptPrompt(path: string, title: string): string {
   return [
     `Recheck the knowledge concept at ${path} ("${title}"). Its recheck date has passed.`,
     '',
-    'Read it, then read the sources it cites and anything newer in the vault about the same subjects. Reach one of four verdicts:',
-    '',
-    '- **Still true** — extend `stale_after` with write_concept and change nothing else.',
-    '- **Needs revising** — rewrite it in place with write_concept, keeping the sources that still hold.',
-    '- **Replaced** — write the concept that replaces it and set `supersedes` on the NEW one. Do not edit the old one.',
-    '- **No longer true** — set `lifecycle: deprecated`. A wrong concept that stays stable is worse than one that is gone.',
-    '',
-    'Do not rewrite it just to have done something. "Still true, date extended" is a real answer and often the right one.',
-    'While you are in there: any volatile present-tense claim without a date becomes a dated snapshot or a pointer to where truth lives — an undated "currently" is the sentence that rots silently.',
-    'Say which verdict you reached and what evidence decided it.',
+    ...CONCEPT_VERDICTS,
   ].join('\n');
+}
+
+/** The ask a stale proposal card offers in place of Approve (M52.5). */
+export const FRESH_PROPOSAL_LABEL = 'Ask for a fresh proposal';
+
+/**
+ * Ask for a proposal again, against what its target says now (M52.5).
+ *
+ * A card whose target moved while it waited cannot be approved — the ledger
+ * refuses it with `stale_target_version` — and the card still offered
+ * Approve as its primary act. This names the proposal, the change it asked
+ * for and why it is out of date, and asks for it to be re-read and proposed
+ * again only if it still holds: a stale proposal is a question to re-ask,
+ * not an answer to re-send.
+ */
+export function freshProposalPrompt(card: {
+  proposalId: string;
+  change: string;
+  reason: string;
+  moved: string;
+}): string {
+  return [
+    `A proposal waiting for review is out of date: ${card.moved}`,
+    '',
+    `The proposal (${card.proposalId}) asked to ${card.change}, because ${card.reason}.`,
+    '',
+    'Read what it targets as it is now. If the change still holds, propose it again against the current version, with its evidence. If it no longer holds, say so and propose nothing.',
+  ].join('\n');
+}
+
+/** The revise ask's one name (M52.3). */
+export const REVISE_LABEL = 'Ask to revise';
+
+/**
+ * Ask the agent to revise one concept a person is reading (M52.3).
+ *
+ * Every "ask about this concept" used to send the recheck prompt, so a
+ * concept due nothing was handed to the agent as one whose "recheck date has
+ * passed" — a false premise the answer then reasoned from. This one claims
+ * nothing about dates: the person asked, and the same four verdicts apply.
+ */
+export function reviseConceptPrompt(path: string, title: string): string {
+  return [`Revise the knowledge concept at ${path} ("${title}").`, '', ...CONCEPT_VERDICTS].join(
+    '\n',
+  );
+}
+
+/**
+ * The one ask a concept offers, chosen by whether it is due (M52.3): a
+ * recheck when its date has passed, a revision otherwise. One chooser, used
+ * by the review bar, the page menu and the Assistant's suggestions, so the
+ * three name and send the same act.
+ */
+export function conceptAsk(concept: { path: string; title: string; stale: boolean }): {
+  label: string;
+  text: string;
+} {
+  return concept.stale
+    ? { label: RECHECK_LABEL, text: reviewConceptPrompt(concept.path, concept.title) }
+    : { label: REVISE_LABEL, text: reviseConceptPrompt(concept.path, concept.title) };
 }
 
 /**
@@ -147,7 +251,7 @@ export function schemaRecheckPrompt(path: string, title: string): string {
     '',
     'Read it, its sources, and the current Type docs of the records it is about. Reach one of four verdicts:',
     '',
-    '- **Still true** — the schema change does not affect it; extend `stale_after` with write_concept and change nothing else.',
+    '- **Still true** — the schema change does not affect it; call recheck_concept with the next `stale_after` and change nothing else.',
     '- **Needs revising** — rewrite it in place to match the current shape, keeping the sources that still hold.',
     '- **Replaced** — write the concept that replaces it and set `supersedes` on the NEW one. Do not edit the old one.',
     '- **No longer true** — set `lifecycle: deprecated`.',
@@ -156,10 +260,25 @@ export function schemaRecheckPrompt(path: string, title: string): string {
   ].join('\n');
 }
 
+/** The filing ask's one name (M52.3). */
+export const ORGANIZE_LABEL = 'Ask the Assistant to file it';
+
 /** Ask the agent to propose a filing for one Inbox capture. */
 export function organizePrompt(path: string): string {
   return `Look at the Inbox capture at ${path} and propose how to file it. Use propose_organize.`;
 }
+
+/** The Studio build's one name (M52.4). */
+export const STUDIO_BUILD_LABEL = 'Build with the assistant';
+
+/** Ask the agent to build on one Studio prototype, inside its own folder (M40). */
+export function studioBuildPrompt(title: string, folder: string): string {
+  return `Build on the "${title}" prototype. Work only inside ${folder}/ — its index.md is the main page; edit it and add pages beside it as the prototype needs.`;
+}
+
+/** The template fill's one name (M52.4). Its prompt is `templateFillPrompt`
+ * (lib/templates), beside the template parsing it reads. */
+export const TEMPLATE_FILL_LABEL = 'Fill from the template';
 
 /**
  * Run one agent record unattended (M13.4).

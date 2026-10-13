@@ -81,16 +81,38 @@ export async function seedBeforeBoot(page: Page, seam: string, ...args: unknown[
 }
 
 /**
- * Open one of the Knowledge tab's sections.
+ * Open one of the Knowledge page's three tabs (M51): Concepts (`all`),
+ * Review, Activity.
  *
- * M33a.2 folded the Status hub into Knowledge, and M37.3 flattened the rail
- * into the one nav column. M43.10 made Base a SECTION whose rows stand on
- * every surface, so the entry is the knowledge nav row itself. The sections
- * still carry `data-section`, which is what every assertion downstream
- * addresses.
+ * M33a.2 folded the Status hub into Knowledge; M50.5 made its views tabs on
+ * the Knowledge page; M51 cut the eight tabs to three. The status sections
+ * live on as sections of Review (Waiting on you) and Activity (What changed,
+ * the lanes, the log), and still carry `data-section`, which is what every
+ * assertion downstream addresses. (The fleet lives on Agents — `openAgents`.)
  */
-export async function openKnowledgeTab(page: Page, row: string) {
-  await page.getByTestId('knowledge-nav-row').filter({ hasText: row }).click();
+export async function openKnowledgeTab(page: Page, tab: 'all' | 'review' | 'activity') {
+  await page.getByRole('button', { name: 'Open Knowledge' }).click();
+  await page.getByTestId(`knowledge-tab-${tab}`).click();
+}
+
+/** Activity's folded System section: background work and deferral gates. */
+export async function openKnowledgeSystem(page: Page) {
+  await openKnowledgeTab(page, 'activity');
+  const system = page.getByTestId('knowledge-system');
+  if ((await system.getAttribute('open')) === null) await system.locator('summary').click();
+}
+
+/** A concept page's Details — its side panel, closed until asked (M51.3). */
+export async function showConceptDetails(page: Page) {
+  const panel = page.getByTestId('knowledge-panel');
+  if ((await panel.count()) === 0) await page.getByRole('button', { name: 'Show panel' }).click();
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+/** The fleet's one home since M50.5: the Agents surface. */
+export async function openAgents(page: Page) {
+  await page.getByRole('button', { name: 'Open all agents' }).click();
 }
 
 /** Read a file's full text (frontmatter + body) from the mock filesystem. */

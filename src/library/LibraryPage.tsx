@@ -330,13 +330,13 @@ function LibraryEditor({
           <span
             data-testid="library-duty"
             className={`inline-flex flex-none items-center gap-1.5 rounded-md border px-2 py-1 text-2xs ${
-              duty.on ? 'border-ok-500 text-ok-700' : 'border-n-200 text-n-500'
+              duty.on ? 'border-success-500 text-success-700' : 'border-n-200 text-n-500'
             }`}
           >
             <Icon
               name={duty.on ? 'circle-play' : 'circle-pause'}
               size={12}
-              color={duty.on ? 'var(--ok-700)' : 'var(--n-500)'}
+              color={duty.on ? 'var(--success-700)' : 'var(--n-500)'}
             />
             {duty.label}
           </span>

@@ -34,6 +34,12 @@ export interface IconButtonProps {
   variant?: 'ghost' | 'outline';
   /** toggled-on state (cortex tint) */
   active?: boolean;
+  /**
+   * `false` withholds the tooltip (the label stays the accessible name) —
+   * for a toggle whose drawer is open, where a pointer resting on it brought
+   * the tooltip up over the drawer to take the first Escape (M52).
+   */
+  tooltip?: boolean;
   disabled?: boolean;
   onClick?: () => void;
   style?: React.CSSProperties;
@@ -49,6 +55,7 @@ export function IconButton({
   size = 'md',
   variant = 'ghost',
   active,
+  tooltip = true,
   disabled,
   onClick,
   style,
@@ -61,7 +68,7 @@ export function IconButton({
   // explained why it was unavailable explained it to nobody (M16.5). Tooltip
   // clones its handlers onto this button and adds no wrapper node.
   return (
-    <Tooltip label={label}>
+    <Tooltip label={label} disabled={!tooltip}>
       <button
         ref={ref}
         type="button"

@@ -107,6 +107,42 @@ pub fn validate_projection_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+schema_body! {
+    /// A projection's FILE moved (M49.5, K29): the same bytes, at a new
+    /// knowledge-relative path — a rename in Finder, a folder tidied in
+    /// Obsidian. Before this event no transition could change a Belief's
+    /// path, so a moved concept read as one concept deleted and one file
+    /// nobody recorded, and neither half could be kept.
+    ///
+    /// `projection_hash` is the projection the move adopts; the reducer
+    /// refuses unless the Belief's current projection hashes to it, so a
+    /// move can never carry a content change in with it.
+    pub struct ProjectionMoved {
+        pub belief_id: String,
+        pub from_path: String,
+        pub to_path: String,
+        pub projection_hash: String,
+    }
+}
+
+impl ProjectionMoved {
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_common()?;
+        if !is_id128(&self.belief_id) {
+            return Err("belief_id is not a stable 128-bit hex id".into());
+        }
+        validate_projection_path(&self.from_path)?;
+        validate_projection_path(&self.to_path)?;
+        if self.from_path == self.to_path {
+            return Err("a move names two different paths".into());
+        }
+        if !is_sha256(&self.projection_hash) {
+            return Err("projection_hash must be SHA-256 hex".into());
+        }
+        Ok(())
+    }
+}
+
 impl ProjectionOverridden {
     pub fn validate(&self) -> Result<(), String> {
         self.validate_common()?;

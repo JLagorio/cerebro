@@ -7,7 +7,7 @@ about:
   - "[[risk-rollback-unrehearsed]]"
 tags: [operations, phoenix]
 lifecycle: draft
-generated: { by: claude-code, at: 2026-07-28T09:05:00Z }
+generated: { by: process:knowledge, at: 2026-07-28T09:05:00Z }
 sources:
   - id: ops-project
     resource: /records/projects/phoenix-warehouse-rollout.md

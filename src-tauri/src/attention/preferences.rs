@@ -198,6 +198,8 @@ mod tests {
         Lanes {
             rule_version: "lanes-v1".into(),
             items,
+            unassessed: 0,
+            facets: Default::default(),
         }
     }
 

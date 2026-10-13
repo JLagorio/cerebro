@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeEntry } from '@/engine/testHelpers';
 import type {
   ChangesView,
   LanesView,
@@ -20,6 +21,8 @@ import {
   WhatChanged,
   WhatsContested,
 } from './BaseItself';
+import { useNavStore } from '@/stores/navStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 /**
  * What the base knows about itself (M27.8c, re-homed under Knowledge in
@@ -188,9 +191,22 @@ async function openBoard() {
   fireEvent.click(await screen.findByTestId('gates-expand'));
 }
 
+/** Ledger ids as the wire sends them: 32 hex characters, never slugs. */
+const SYNC_BELIEF = 'b'.repeat(32);
+const SYNC_ENTITY = 'e1'.repeat(16);
+
+/** A concept the lanes and the change lines can name (M52.3). */
+const SYNC = makeEntry({
+  path: 'knowledge/metrics/sync-error-rate.md',
+  filename: 'sync-error-rate.md',
+  folder: 'knowledge/metrics',
+  title: 'Sync error rate',
+});
+
 describe('What the base knows about itself', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useVaultStore.setState({ entries: [SYNC] });
     converge.mockResolvedValue(QUIET_CHANGES);
     attentionLanes.mockResolvedValue(EMPTY_LANES);
     reviewQueue.mockResolvedValue([]);
@@ -291,16 +307,16 @@ describe('What the base knows about itself', () => {
           items: [
             {
               lane: 'staleness',
-              belief_id: 'b'.repeat(32),
-              entity_id: 'entity',
+              belief_id: SYNC_BELIEF,
+              entity_id: SYNC_ENTITY,
               path: 'metrics/sync-error-rate.md',
               predicate: 'ci_status',
               state_stage: 'implemented',
-              scope_text: 'ci_status at implemented',
+              scope_text: 'CI status, at the implemented stage',
               reasons: ['freshness_stale'],
-              reason_text: 'past its freshness rule',
+              reason_text: 'past its recheck date',
               reliance: ['qualified'],
-              reliance_text: 'relied on: promoted past draft',
+              reliance_text: 'Relied on — it is no longer a draft',
               edge_id: null,
               relation_id: null,
             },
@@ -313,14 +329,225 @@ describe('What the base knows about itself', () => {
 
     const item = await screen.findByTestId('lane-item');
     expect(item.getAttribute('data-reasons')).toBe('freshness_stale');
-    expect(item.textContent).toContain('metrics/sync-error-rate.md');
-    expect((await screen.findByTestId('lane-withheld')).textContent).toContain('3 more');
+    // M52.3: named by the concept's title, never its path — and it opens it.
+    expect(item.textContent).toContain('Sync error rate');
+    expect(item.textContent).not.toContain('metrics/sync-error-rate.md');
+    const withheld = await screen.findByTestId('lane-withheld');
+    expect(withheld.textContent).toContain('3 more');
+    // Why, so "3 more" is a rule somebody can read (M52.4) — and the right
+    // why: one row listed is not a list cut at ten (M52.5).
+    expect(withheld.textContent).toBe('3 more not shown — dismissed, or shown recently.');
+
+    fireEvent.click(screen.getByTestId('activity-concept'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'knowledge/metrics/sync-error-rate.md',
+    });
+  });
+
+  // M52.5 — one wording for a recheck: the lane said "Past its recheck date"
+  // where the concept's row and page said "Due a recheck · 2 days overdue".
+  it("says a recheck the concept's own file dates as its row and page do", async () => {
+    useVaultStore.setState({
+      entries: [{ ...SYNC, properties: { stale_after: '2020-01-01' } }],
+    });
+    const item = {
+      lane: 'staleness' as const,
+      belief_id: SYNC_BELIEF,
+      entity_id: SYNC_ENTITY,
+      path: 'metrics/sync-error-rate.md',
+      predicate: 'ci_status',
+      state_stage: 'implemented',
+      scope_text: null,
+      reasons: ['freshness_stale'],
+      reason_text: 'past its recheck date',
+      reliance: [],
+      reliance_text: null,
+      edge_id: null,
+      relation_id: null,
+    };
+    attentionLanes.mockResolvedValue({
+      ...EMPTY_LANES,
+      lanes: [
+        lane({
+          id: 'staleness',
+          items: [item, { ...item, belief_id: 'c'.repeat(32), path: null, entity_id: 'x' }],
+        }),
+      ],
+    });
+    render(<WhatsContested vaultPath={VAULT} />);
+    const reasons = await screen.findAllByTestId('lane-reason');
+    expect(reasons[0].textContent).toMatch(/^Due a recheck · \d+ years overdue$/);
+    // A subject no concept answers to keeps Rust's sentence: there is no
+    // file to date it by.
+    expect(reasons[1].textContent).toBe('Past its recheck date');
+    // No scope for a belief's only facet — the wire sends none.
+    expect(screen.queryByTestId('lane-scope')).toBeNull();
+  });
+
+  it('names the ten-per-list cap only when the list is full (M52.5)', async () => {
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      lane: 'staleness' as const,
+      belief_id: `${i}`.padStart(32, 'b'),
+      entity_id: `${i}`.padStart(32, 'e'),
+      path: null,
+      predicate: null,
+      state_stage: null,
+      scope_text: null,
+      reasons: ['freshness_stale'],
+      reason_text: 'past its recheck date',
+      reliance: [],
+      reliance_text: null,
+      edge_id: null,
+      relation_id: null,
+    }));
+    attentionLanes.mockResolvedValue({
+      ...EMPTY_LANES,
+      lanes: [lane({ id: 'staleness', withheld: 2, items })],
+      withheld: 2,
+    });
+    render(<WhatsContested vaultPath={VAULT} />);
+    expect((await screen.findByTestId('lane-withheld')).textContent).toBe(
+      '2 more not shown — each list shows its first ten.',
+    );
+  });
+
+  it('names a subject no concept answers to "A claim", never its raw id (M52.4)', async () => {
+    attentionLanes.mockResolvedValue({
+      ...EMPTY_LANES,
+      lanes: [
+        lane({
+          id: 'contradiction',
+          items: [
+            {
+              lane: 'contradiction',
+              belief_id: 'd'.repeat(32),
+              entity_id: 'e9'.repeat(16),
+              path: null,
+              predicate: null,
+              state_stage: null,
+              scope_text: null,
+              reasons: ['open_edge_genuine_direct'],
+              reason_text: 'genuine direct conflict',
+              reliance: [],
+              reliance_text: null,
+              edge_id: 'e'.repeat(32),
+              relation_id: null,
+            },
+          ],
+        }),
+      ],
+    });
+    render(<WhatsContested vaultPath={VAULT} />);
+
+    const item = await screen.findByTestId('lane-item');
+    // Neutral words, not a humanized id: there are none in 32 hex characters.
+    expect(screen.getByTestId('activity-claim').textContent).toBe('A claim');
+    expect(item.textContent).not.toMatch(/[0-9a-f]{32}/);
+    // The raw id stays one hover away.
+    expect(screen.getByTestId('activity-claim').getAttribute('title')).toBe('d'.repeat(32));
+    // Nothing to open, so no link pretending there is.
+    expect(screen.queryByTestId('activity-concept')).toBeNull();
+  });
+
+  it('names what changed by its concept, and never prints a raw id (M52.3)', async () => {
+    converge.mockResolvedValue({
+      schema_version: 'convergence-v1',
+      window: { from_seq: 1, to_seq: 9 },
+      quiet: false,
+      sections: [
+        {
+          id: 'material',
+          label: 'Concepts that changed',
+          empty_text: 'No concept changed.',
+          lines: [
+            {
+              text: 'was revised, changed its draft status',
+              belief_id: SYNC_BELIEF,
+              entity_id: SYNC_ENTITY,
+              path: 'metrics/sync-error-rate.md',
+            },
+          ],
+        },
+        {
+          id: 'blindness',
+          label: 'What came into and out of view',
+          empty_text: 'Nothing changed about what can be seen.',
+          lines: [{ text: 'A coverage gap closed', belief_id: null, entity_id: null, path: null }],
+        },
+      ],
+    });
+    render(<WhatChanged vaultPath={VAULT} />);
+
+    const lines = await screen.findAllByTestId('change-line');
+    expect(lines.map((l) => l.textContent)).toEqual([
+      'Sync error rate was revised, changed its draft status',
+      // No subject, so the line is its own sentence.
+      'A coverage gap closed',
+    ]);
+    fireEvent.click(screen.getByTestId('activity-concept'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'knowledge/metrics/sync-error-rate.md',
+    });
+  });
+
+  // M52.4: a line Rust composes about a belief alone — no entity — still
+  // names its concept, by the path the backend read from its projection. One
+  // no file projects reads "A claim …", never the hex it carries.
+  it('names a belief-only line by its path, and says "A claim" without one (M52.4)', async () => {
+    converge.mockResolvedValue({
+      schema_version: 'convergence-v1',
+      window: { from_seq: 1, to_seq: 9 },
+      quiet: false,
+      sections: [
+        {
+          id: 'staleness',
+          label: 'Evidence',
+          empty_text: 'No evidence moved.',
+          lines: [
+            {
+              text: 'lost its last support',
+              belief_id: SYNC_BELIEF,
+              entity_id: null,
+              path: 'metrics/sync-error-rate.md',
+            },
+          ],
+        },
+        {
+          id: 'contestation',
+          label: 'New contradictions',
+          empty_text: 'No new contradictions opened.',
+          lines: [
+            {
+              text: 'is in a new genuine direct contradiction, classified agent-supplied',
+              belief_id: 'c'.repeat(32),
+              entity_id: null,
+              path: null,
+            },
+          ],
+        },
+      ],
+    });
+    render(<WhatChanged vaultPath={VAULT} />);
+
+    const lines = await screen.findAllByTestId('change-line');
+    expect(lines.map((l) => l.textContent)).toEqual([
+      'Sync error rate lost its last support',
+      'A claim is in a new genuine direct contradiction, classified agent-supplied',
+    ]);
+    for (const line of lines) expect(line.textContent).not.toMatch(/[0-9a-f]{32}/);
+    expect(screen.getByTestId('activity-concept').getAttribute('data-path')).toBe(
+      'knowledge/metrics/sync-error-rate.md',
+    );
   });
 
   it('names a feed the backend could not see rather than dropping it', async () => {
     attentionLanes.mockResolvedValue({
       ...EMPTY_LANES,
-      incomplete: ['Parked promotions could not be read, so epistemic debt may be under-reported.'],
+      incomplete: [
+        'Parked promotions could not be read, so what is taken on trust may be under-reported.',
+      ],
     });
     render(<WhatsContested vaultPath={VAULT} />);
 
@@ -348,10 +575,15 @@ describe('What the base knows about itself', () => {
 
     const cards = await screen.findAllByTestId('review-card');
     expect(cards).toHaveLength(3);
-    expect(screen.getAllByTestId('card-risk').map((c) => c.textContent)).toEqual([
+    expect(screen.getAllByTestId('card-risk').map((c) => c.dataset.risk)).toEqual([
       'LOW',
       'HIGH',
       'CRITICAL',
+    ]);
+    expect(screen.getAllByTestId('card-risk').map((c) => c.textContent)).toEqual([
+      'Low risk',
+      'High risk',
+      'Critical risk',
     ]);
     expect(screen.getAllByTestId('approve')).toHaveLength(3);
     expect(screen.queryByTestId('review-summary')).toBeNull();
@@ -492,9 +724,11 @@ describe('What the base knows about itself', () => {
     // The one thing loud enough to survive the collapse. A firing is the only
     // news this tab ever has, so it belongs in the line you get for free —
     // collapsing it behind a click would be the tab hiding its one headline.
-    expect((await screen.findByTestId('gates-summary')).textContent).toContain(
-      'R13:root has fired',
-    );
+    // Said by the capability's name; the gate's code is on the hover.
+    const summary = await screen.findByTestId('gates-summary');
+    expect(summary.textContent).toContain('Discovery execution is needed now');
+    expect(summary.getAttribute('data-fired')).toBe('R13:root');
+    expect(summary.getAttribute('title')).toContain('R13:root fired');
     await openBoard();
 
     const row = await screen.findByTestId('gate-row');
@@ -538,7 +772,7 @@ describe('What the base knows about itself', () => {
   it('declaring an R7 scope canonicalizes the lists before anything is sent', async () => {
     render(<DeferralGates vaultPath={VAULT} />);
     expect((await screen.findByTestId('r7-scope-none')).textContent).toContain(
-      'No scope is declared',
+      'Nothing is chosen to cross-check yet',
     );
 
     fireEvent.click(screen.getByTestId('r7-scope-open'));

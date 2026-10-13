@@ -23,7 +23,13 @@ import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
 import { describeIngest, ingestFiles, ingestOne, INGESTIBLE_EXTENSIONS } from '@/lib/ingest';
-import { fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
+import {
+  askedAbout,
+  fetchRefsLabel,
+  fetchRefsPrompt,
+  ORGANIZE_LABEL,
+  organizePrompt,
+} from '@/lib/prompts';
 import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { todayIso } from '@/lib/templates';
@@ -308,10 +314,14 @@ function OrganizePanel({
               variant="secondary"
               icon="sparkles"
               onClick={() => {
-                askAgent(organizePrompt(entry.path), entry.path);
+                askAgent(
+                  organizePrompt(entry.path),
+                  entry.path,
+                  askedAbout(ORGANIZE_LABEL, entry.title),
+                );
               }}
             >
-              Ask the agent to file it
+              {ORGANIZE_LABEL}
             </Button>
           )}
           {unresolved.length > 0 && (
@@ -325,10 +335,11 @@ function OrganizePanel({
                     unresolved.map((r) => r.id),
                   ),
                   entry.path,
+                  askedAbout(fetchRefsLabel(unresolved.length), entry.title),
                 );
               }}
             >
-              {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}
+              {fetchRefsLabel(unresolved.length)}
             </Button>
           )}
           <Button variant="primary" icon="circle-check" onClick={() => onFile(entry.path)}>

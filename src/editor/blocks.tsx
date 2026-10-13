@@ -210,7 +210,7 @@ function AiBlockView({
   return (
     <div
       data-testid="ai-block"
-      className="my-1 w-full rounded-lg border border-synapse-200 bg-synapse-25 px-3 py-2"
+      className="my-1 w-full rounded-lg border border-synapse-200 bg-synapse-50 px-3 py-2"
     >
       <div className="mb-1 flex items-center gap-1.5">
         <Icon name="sparkles" size={12} color="var(--synapse-500)" />
@@ -234,7 +234,7 @@ function AiBlockView({
             }}
             aria-label="What should this block answer?"
             placeholder="The open questions in this document…"
-            className="min-w-0 flex-1 rounded border border-synapse-200 bg-n-0 px-1.5 py-0.5 text-xs outline-none"
+            className="min-w-0 flex-1 rounded-xs border border-synapse-200 bg-n-0 px-1.5 py-0.5 text-xs outline-none"
           />
         ) : (
           <button
@@ -254,7 +254,7 @@ function AiBlockView({
           data-testid="ai-block-run"
           disabled={running || prompt.trim() === ''}
           onClick={onRun}
-          className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-2xs text-synapse-700 hover:bg-synapse-50 disabled:opacity-40"
+          className="flex-none rounded-xs border-0 bg-transparent px-1 py-0.5 text-2xs text-synapse-700 hover:bg-synapse-50 disabled:opacity-40"
         >
           {running ? 'Working…' : generated === '' ? 'Answer' : 'Recompute'}
         </button>

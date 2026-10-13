@@ -71,10 +71,11 @@ export function titleFrom(messages: ChatMessage[]): string | null {
   const text = first.text.replace(/\s+/g, ' ').trim();
   if (text === '') return null;
   if (text.length <= 42) return text;
-  // Cut at a word boundary so the title does not end mid-word.
+  // Cut at a word boundary so the title does not end mid-word — nor on the
+  // separator of a labelled ask ("… about this? ·", M52.4).
   const cut = text.slice(0, 42);
   const lastSpace = cut.lastIndexOf(' ');
-  return `${(lastSpace > 20 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+  return `${(lastSpace > 20 ? cut.slice(0, lastSpace) : cut).replace(/[\s·—:-]+$/, '')}…`;
 }
 
 /** Apply the auto-title, unless the user has named it themselves. */

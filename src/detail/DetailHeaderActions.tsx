@@ -7,6 +7,7 @@ import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { deleteNote } from '@/lib/ipc';
 import { duplicateRecord } from '@/app/recordActions';
+import { dragCeiling, fitWidth } from '@/app/shellLayout';
 import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
@@ -36,7 +37,32 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  *   share with. `Copy link` is the part that does mean something here, and it
  *   copies the wikilink the rest of the app understands.
  */
-export function DetailHeaderActions({ entry }: { entry: Entry }) {
+/**
+ * Below this the header drops the "3/45" beside the pager's arrows (M52): at
+ * the panel's 320px floor the arrows, the count and five controls left the
+ * type label no room at all. The arrows stay: they are what steps, and the
+ * count only says where you are.
+ */
+const PAGER_COUNT_MIN = 360;
+
+export function DetailHeaderActions({
+  entry,
+  drawn = null,
+  room = null,
+  besideAssistant = false,
+}: {
+  entry: Entry;
+  /** The width the panel is drawn at, and the room the shell gave it (M52);
+   *  null (unmeasured) reads the stored width as drawn. */
+  drawn?: number | null;
+  room?: number | null;
+  /**
+   * The assistant is DRAWN beside the panel. Open is not enough: a parked
+   * assistant takes no room, so closing it would widen nothing, and its tab
+   * beside this button already says the opposite — close the record.
+   */
+  besideAssistant?: boolean;
+}) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const entries = useVaultStore((s) => s.entries);
@@ -61,7 +87,23 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
   const at = siblings.indexOf(entry.path);
   const hasPrev = at > 0;
   const hasNext = at !== -1 && at < siblings.length - 1;
-  const wide = width >= DETAIL_WIDTH_MAX;
+  // M52: the toggle reads what is DRAWN, not what is stored. In a room
+  // capped beside the assistant a stored 1000 drew exactly what 560 did, so
+  // « flipped to "Narrow" and changed nothing on screen. Widest is the widest
+  // the room allows; when that is no wider than the default, the toggle has
+  // nothing to do and says why.
+  const shown = drawn ?? width;
+  const widest = dragCeiling(room, DETAIL_WIDTH_MAX);
+  const narrowest = room === null ? DETAIL_WIDTH_DEFAULT : fitWidth(DETAIL_WIDTH_DEFAULT, room);
+  const canWiden = widest > narrowest + 1;
+  const wide = canWiden && shown >= widest - 1 && shown > narrowest;
+  const widthLabel = !canWiden
+    ? besideAssistant
+      ? 'No room to widen — close the Assistant'
+      : 'No room to widen'
+    : wide
+      ? 'Narrow the panel'
+      : 'Widen the panel';
 
   const closeMenu = () => setMenuOpen(false);
 
@@ -138,7 +180,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
             disabled={!hasNext}
             onClick={() => stepDetail(1)}
           />
-          {at !== -1 && (
+          {at !== -1 && shown >= PAGER_COUNT_MIN && (
             <Tooltip label="Position in this view">
               <span className="px-1 text-2xs tabular-nums text-n-400">
                 {at + 1}/{siblings.length}
@@ -162,8 +204,9 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
       />
       <IconButton
         icon={wide ? 'chevrons-right' : 'chevrons-left'}
-        label={wide ? 'Narrow the panel' : 'Widen the panel'}
+        label={widthLabel}
         size="sm"
+        disabled={!canWiden}
         onClick={() => setWidth(wide ? DETAIL_WIDTH_DEFAULT : DETAIL_WIDTH_MAX)}
       />
       <span className="relative inline-flex">

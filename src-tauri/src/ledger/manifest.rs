@@ -181,17 +181,191 @@ pub fn entry_for(
 /// the bytes are ALREADY on disk the file write is skipped entirely — the
 /// manifest identity advances without moving anything the watcher or
 /// distiller could see.
+///
+/// Guarded (M49.3, K6): bytes on disk the ledger did not write here are
+/// never overwritten — the write refuses with `projection_disk_changed`.
+/// Files win (the 2026-09 owner decision): a file someone changed outside
+/// the ledger is reconciled on its own terms, not silently reverted, which
+/// is what clicking Verify on a diverged concept used to do. The one
+/// deliberate overwrite is the Restore exit's (`restore_projection`), and
+/// `knowledge/log.md` is exempt as a derived, system-owned view.
 pub fn write_projection(
     vault: &Path,
     vault_rel: &str,
     projection: &super::reduce::ProjectionResult,
 ) -> Result<(), String> {
-    let file_path = vault.join(vault_rel);
-    let prior = match std::fs::read(&file_path) {
-        Ok(bytes) => Some(crate::ledger::sha256_hex(&bytes)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("{}: {e}", file_path.display())),
+    let guard = if vault_rel == crate::knowledge::LOG_PATH {
+        Guard::Off
+    } else {
+        Guard::On
     };
+    write_projection_as(vault, vault_rel, projection, guard)
+}
+
+/// A capture's write (M49.3): the file on disk is the one the capture just
+/// ADOPTED — its content is in the ledger now — so the canonical projection
+/// may replace exactly those bytes (a formatting normalization), and
+/// nothing else. `adopted_hash` is the SHA-256 of the bytes captured.
+pub fn write_adopted_projection(
+    vault: &Path,
+    vault_rel: &str,
+    projection: &super::reduce::ProjectionResult,
+    adopted_hash: &str,
+) -> Result<(), String> {
+    write_projection_as(vault, vault_rel, projection, Guard::Adopting(adopted_hash))
+}
+
+#[derive(Clone, Copy)]
+enum Guard<'a> {
+    Off,
+    On,
+    Adopting(&'a str),
+}
+
+/// The Restore exit's write: the ledger's projection replaces whatever is
+/// on disk. Only `reconcile::resolve_restore_with` may call it — a person
+/// chose "Restore recorded history" for exactly this.
+pub fn restore_projection(
+    vault: &Path,
+    vault_rel: &str,
+    projection: &super::reduce::ProjectionResult,
+) -> Result<(), String> {
+    write_projection_as(vault, vault_rel, projection, Guard::Off)
+}
+
+/// The refusal a guarded projection write returns rather than destroy
+/// bytes the ledger did not write.
+pub const PROJECTION_DISK_CHANGED: &str = "projection_disk_changed";
+
+pub fn disk_changed(vault_rel: &str) -> String {
+    format!(
+        "{PROJECTION_DISK_CHANGED}: {vault_rel} changed on disk since the recorded history last \
+         wrote it — nothing was overwritten"
+    )
+}
+
+/// What a concept WRITER asks before it commits: `ensure_disk_is_the_ledgers`,
+/// and — because a writer names one concept on purpose — a RECORDED concept
+/// whose file is gone refuses even when no manifest entry proves a write (a
+/// vault that never armed has none). A ledger ahead of a file that never
+/// landed is recovery's to repair, never an agent's to rewrite over what may
+/// be a person's deletion. An interrupted create (pending, nothing before
+/// it) resumes.
+pub fn ensure_writable(
+    vault: &Path,
+    vault_rel: &str,
+    state: &EpistemicState,
+) -> Result<(), String> {
+    ensure_disk_is_the_ledgers(vault, vault_rel, state)?;
+    let recorded = vault_rel
+        .strip_prefix("knowledge/")
+        .is_some_and(|krel| state.projection_paths.contains_key(krel));
+    if !recorded
+        || vault_rel == crate::knowledge::LOG_PATH
+        || disk_hash(vault, vault_rel)?.is_some()
+    {
+        return Ok(());
+    }
+    let resuming = load(vault)?
+        .as_ref()
+        .and_then(|m| m.entries.get(vault_rel))
+        .is_some_and(|e| e.write_state == WriteState::Pending && e.previous_content_hash.is_none());
+    if resuming {
+        Ok(())
+    } else {
+        Err(deleted(vault_rel))
+    }
+}
+
+/// The refusal for a write to a recorded file someone deleted.
+pub fn deleted(vault_rel: &str) -> String {
+    format!(
+        "{PROJECTION_DISK_CHANGED}: {vault_rel} was deleted outside Cerebro — nothing was \
+         written; Restore brings it back"
+    )
+}
+
+/// The SHA-256 of the file on disk, `None` when there is no file.
+fn disk_hash(vault: &Path, vault_rel: &str) -> Result<Option<String>, String> {
+    let file_path = vault.join(vault_rel);
+    match std::fs::read(&file_path) {
+        Ok(bytes) => Ok(Some(crate::ledger::sha256_hex(&bytes))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", file_path.display())),
+    }
+}
+
+/// Does the manifest entry own these disk bytes? A pending entry also owns
+/// the prior file it recorded, which is how an interrupted write resumes.
+fn entry_owns(entry: &ManifestEntry, disk: &str) -> bool {
+    entry.content_hash == disk
+        || (entry.write_state == WriteState::Pending
+            && entry.previous_content_hash.as_deref() == Some(disk))
+}
+
+/// Would writing `vault_rel` destroy bytes the ledger did not write? The
+/// concept writers and in-app capture ask it BEFORE a transition commits
+/// (through `ensure_writable`), so their refusal leaves no event;
+/// `commit::project_applied` asks it AFTER a governed apply committed, per
+/// path the apply moved, and there a refusal keeps the file and leaves the
+/// ledger ahead of it — the quarantine lists it for a person to decide.
+///
+/// The bytes are the ledger's when the manifest entry owns them, or — for a
+/// path the manifest has not recorded yet — when they are the reducer's
+/// current projection of it. Anything else was changed outside the ledger:
+/// a hand edit, a sync, another build. No file is the ledger's where no
+/// file was ever written — a new concept, a write interrupted before its
+/// file landed, or a ledger ahead of its projections (which a write catches
+/// up). A file the MANIFEST recorded as written that is gone was deleted
+/// outside Cerebro, and a write there would bring it back over the person's
+/// choice.
+pub fn ensure_disk_is_the_ledgers(
+    vault: &Path,
+    vault_rel: &str,
+    state: &EpistemicState,
+) -> Result<(), String> {
+    if vault_rel == crate::knowledge::LOG_PATH {
+        return Ok(());
+    }
+    let manifest = load(vault)?;
+    let Some(disk) = disk_hash(vault, vault_rel)? else {
+        let written = manifest
+            .as_ref()
+            .and_then(|m| m.entries.get(vault_rel))
+            .is_some_and(|e| {
+                e.write_state == WriteState::Complete || e.previous_content_hash.is_some()
+            });
+        return if written {
+            Err(deleted(vault_rel))
+        } else {
+            Ok(())
+        };
+    };
+    if let Some(entry) = manifest.as_ref().and_then(|m| m.entries.get(vault_rel)) {
+        return if entry_owns(entry, &disk) {
+            Ok(())
+        } else {
+            Err(disk_changed(vault_rel))
+        };
+    }
+    let current = vault_rel
+        .strip_prefix("knowledge/")
+        .and_then(|krel| state.projection_paths.get(krel))
+        .and_then(|belief| project_belief(state, belief).ok());
+    match current {
+        Some(projection) if projection.content_hash == disk => Ok(()),
+        _ => Err(disk_changed(vault_rel)),
+    }
+}
+
+fn write_projection_as(
+    vault: &Path,
+    vault_rel: &str,
+    projection: &super::reduce::ProjectionResult,
+    guard: Guard<'_>,
+) -> Result<(), String> {
+    let file_path = vault.join(vault_rel);
+    let prior = disk_hash(vault, vault_rel)?;
     let mut manifest = load(vault)?.unwrap_or(Manifest {
         format: MANIFEST_FORMAT,
         entries: BTreeMap::new(),
@@ -206,6 +380,24 @@ pub fn write_projection(
         save(vault, &manifest)?;
         crate::crash::crash_point("projection-manifest-complete");
         return Ok(());
+    }
+
+    // The write-time half of the guard judges what the manifest RECORDED.
+    // An unrecorded path needs the reducer state to judge — whether the
+    // bytes are the ledger's current projection — so it belongs to
+    // `ensure_disk_is_the_ledgers`, which the concept writers run before
+    // anything commits and `commit::project_applied` runs for every path a
+    // governed apply moves. A refusal here keeps the file, and the ledger is
+    // then ahead of a file it did not write: quarantined, for a person.
+    if let (Some(entry), Some(disk)) = (manifest.entries.get(vault_rel), prior.as_deref()) {
+        let owned = match guard {
+            Guard::Off => true,
+            Guard::On => entry_owns(entry, disk),
+            Guard::Adopting(adopted) => disk == adopted || entry_owns(entry, disk),
+        };
+        if !owned {
+            return Err(disk_changed(vault_rel));
+        }
     }
 
     manifest.entries.insert(

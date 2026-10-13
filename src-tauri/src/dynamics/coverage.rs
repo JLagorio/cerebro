@@ -123,14 +123,17 @@ impl Coverage {
         }
     }
 
-    /// The human-readable half of the composed chip line.
+    /// The human-readable half of the composed chip line, said of the
+    /// sources (M52.5): "blind coverage" and "observed coverage" named the
+    /// axis rather than what it found. Nobody having looked still reads
+    /// differently from having looked and seen nothing.
     pub fn describe(&self) -> &'static str {
         match self.summary() {
-            Summary::Observed => "observed coverage",
-            Summary::Partial => "partial coverage",
+            Summary::Observed => "sources observed",
+            Summary::Partial => "sources partly observed",
             Summary::Blind => match self {
-                Coverage::NoAssessments { .. } => "coverage unassessed",
-                Coverage::Assessed { .. } => "blind coverage",
+                Coverage::NoAssessments { .. } => "sources not yet assessed",
+                Coverage::Assessed { .. } => "sources not observed",
             },
         }
     }
@@ -583,7 +586,7 @@ mod tests {
         let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         assert_eq!(coverage.summary(), Summary::Blind);
         assert!(matches!(coverage, Coverage::NoAssessments { .. }));
-        assert_eq!(coverage.describe(), "coverage unassessed");
+        assert_eq!(coverage.describe(), "sources not yet assessed");
     }
 
     #[test]
@@ -607,7 +610,7 @@ mod tests {
         assessed(&mut state, "a2", SOURCE_B, broken);
         let coverage = coverage_of(&state, &load().unwrap(), &only_facet(&state), None);
         assert_eq!(coverage.summary(), Summary::Blind);
-        assert_eq!(coverage.describe(), "blind coverage");
+        assert_eq!(coverage.describe(), "sources not observed");
     }
 
     #[test]

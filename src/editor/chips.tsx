@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
-import { createReactInlineContentSpec } from '@blocknote/react';
+import { useContext, useMemo, useRef, useState } from 'react';
+import type { BlockNoteEditor } from '@blocknote/core';
+import { createReactInlineContentSpec, useEditorState } from '@blocknote/react';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -7,35 +8,32 @@ import {
   chipPropsToDateValue,
   dateValueToChipProps,
   formatDateValue,
-  serializeDateValue,
   type DateChipProps,
   type DateValue,
 } from '@/engine/dates';
+import { parseSources } from '@/engine/okf';
 import { dueBucket } from '@/engine/tasks';
 import { resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
 import { typeStyle } from '@/engine/typeCatalog';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { citationIndexOf, citationName, citationNumber, sourceTarget } from './citations';
+import { assigneeText, citationText, dueText, wikilinkText } from './markdown';
+import { NotePathContext } from './notePath';
 
 /**
- * Inline chips (M2.x docs polish). Three custom inline nodes that keep the
- * file plain markdown while rendering rich in the editor:
+ * Inline chips (M2.x docs polish). Custom inline nodes that keep the file
+ * plain markdown while rendering rich in the editor:
  *
  *   wikilink  `[[target]]` / `[[target|alias]]`  — doc-to-doc link
  *   assignee  `@[[person]]`                      — task assignee
  *   due       `📅 YYYY-MM-DD`                    — task due date
+ *   citation  `[^id]` / `[^id]:`                 — footnote reference / definition (M51.5)
  *
- * toExternalHTML emits exactly the plain-text form, so markdown export
- * round-trips; markdown.ts re-promotes the text back into chips on load.
+ * Each chip's plain-text form lives in markdown.ts, beside the parser that
+ * reads it back: that module writes chips to disk as that text, and
+ * toExternalHTML here emits the same text for the clipboard.
  */
-
-export const wikilinkText = (props: { target: string; alias: string }): string =>
-  props.alias !== '' ? `[[${props.target}|${props.alias}]]` : `[[${props.target}]]`;
-
-export const assigneeText = (props: { target: string }): string => `@[[${props.target}]]`;
-
-export const dueText = (props: Partial<DateChipProps>): string =>
-  serializeDateValue(chipPropsToDateValue(props));
 
 /** Delete the inline node rendered at `dom` (due-chip "Remove"). Best-effort:
  * ProseMirror positions via posAtDOM; on any failure the chip just stays and
@@ -243,5 +241,128 @@ export const DueChip = createReactInlineContentSpec(
       );
     },
     toExternalHTML: (props) => <span>{dueText(props.inlineContent.props)}</span>,
+  },
+);
+
+// The number badge the concept's Sources list draws (KnowledgePanel's
+// SourceRow), a step smaller: the same source should look like the same thing
+// in the text and in the list beside it.
+const CITATION_PILL =
+  'inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full px-[3px] text-2xs font-semibold no-underline [font-family:var(--font-mono)]';
+
+function CitationRender({
+  id,
+  definition,
+  editor,
+}: {
+  id: string;
+  definition: boolean;
+  editor: BlockNoteEditor<any, any, any>;
+}) {
+  const path = useContext(NotePathContext);
+  const entries = useVaultStore((s) => s.entries);
+  const open = useOpenPath();
+  const entry = path === null ? undefined : entries.find((e) => e.path === path);
+  const sources = useMemo(() => (entry === undefined ? [] : parseSources(entry)), [entry]);
+  // Read again on every edit, re-rendered only when THIS chip's answer
+  // changes: deleting a definition renumbers the citations after it and
+  // leaves every other chip alone.
+  const cite = useEditorState({
+    editor,
+    on: 'change',
+    selector: ({ editor: current }) => {
+      const index = citationIndexOf(current);
+      return {
+        number: citationNumber(id, sources, index),
+        defined: index.defined.includes(id),
+        name: citationName(id, sources, index, entries),
+      };
+    },
+  });
+
+  const source = sources.find((s) => s.id === id) ?? null;
+  const target = source === null ? null : sourceTarget(source.resource, entries);
+  const page =
+    target !== null && 'internal' in target
+      ? entries.find((e) => e.path === target.internal)
+      : undefined;
+  // What the Sources list calls it, then what the page's own definition says:
+  // `citationName`, the rule the `[^` menu names a source by too (M52.1).
+  const { name } = cite;
+  // Cited but neither listed nor defined: muted, never hidden — a claim that
+  // cites nothing is what a reviewer most needs to see.
+  const tone =
+    source !== null || cite.defined ? 'bg-cortex-50 text-cortex-600' : 'bg-n-100 text-n-500';
+  // A hook, not a style: editor.css reads a paragraph that OPENS with one as
+  // the sources list (M52.1). A class rather than the `data-citation` below,
+  // because jsdom cannot evaluate an attribute selector inside `:has()`, and
+  // a rule nothing can test is a rule nothing stops from rotting.
+  const pillClass = `${CITATION_PILL} ${tone}${definition ? ' cb-citation-def' : ''}`;
+  const label = cite.number === null ? id : String(cite.number);
+  const common = {
+    // The marker the number stands in for, under the name: it is still in the
+    // file, and it is what anyone citing the same source again has to type.
+    title: `${name}\n${citationText({ id, def: definition ? '1' : '' })}`,
+    'aria-label': `Source ${label}: ${name}`,
+    'data-citation': definition ? 'def' : 'ref',
+    'data-id': id,
+  };
+
+  const pill =
+    target !== null && 'external' in target ? (
+      <a
+        {...common}
+        href={target.external}
+        target="_blank"
+        rel="noreferrer noopener"
+        tabIndex={-1}
+        className={`${pillClass} hover:bg-cortex-100`}
+      >
+        {label}
+      </a>
+    ) : page !== undefined ? (
+      <button
+        {...common}
+        type="button"
+        tabIndex={-1}
+        onClick={() => open(page.path)}
+        className={`${pillClass} cursor-pointer border-0 hover:bg-cortex-100`}
+      >
+        {label}
+      </button>
+    ) : (
+      <span {...common} className={`${pillClass} cursor-default`}>
+        {label}
+      </span>
+    );
+
+  // A reference rides above the line it cites from; a definition's badge
+  // opens its own line, level with the words it introduces. Preflight already
+  // takes a `<sup>` out of the line-height sum (`line-height: 0`, raised by
+  // `top` rather than `vertical-align`), so a cited line is exactly as tall as
+  // an uncited one — measured in the app, both paragraphs 48px.
+  return definition ? pill : <sup>{pill}</sup>;
+}
+
+/**
+ * A footnote citation (M51.5): `[^id]` cites a source and `[^id]:` opens its
+ * definition. Both show the source's NUMBER in place of the raw marker — the
+ * marker is what a file needs, and the number is what a reader does.
+ */
+export const CitationChip = createReactInlineContentSpec(
+  {
+    type: 'citation',
+    propSchema: { id: { default: '' }, def: { default: '' } },
+    content: 'none',
+  },
+  {
+    render: (props) => (
+      <CitationRender
+        id={props.inlineContent.props.id}
+        definition={props.inlineContent.props.def === '1'}
+        editor={props.editor}
+      />
+    ),
+    toExternalHTML: (props) => <span>{citationText(props.inlineContent.props)}</span>,
   },
 );

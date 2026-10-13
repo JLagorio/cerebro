@@ -61,6 +61,27 @@ describe('uiStore', () => {
     });
   });
 
+  // M52.3 — a surface's ask carries the words its bubble shows. The prompt
+  // is pages long; the label is what the person pressed.
+  it('askAgent opens the panel with the prompt, its subject and its label', () => {
+    useUiStore
+      .getState()
+      .askAgent('Revise the knowledge concept at …', 'knowledge/a.md', 'Ask to revise · A');
+    expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    expect(useUiStore.getState().agentPendingPrompt).toEqual({
+      text: 'Revise the knowledge concept at …',
+      subject: 'knowledge/a.md',
+      label: 'Ask to revise · A',
+    });
+    // Typed words are their own label.
+    useUiStore.getState().askAgent('why is onboarding stalling');
+    expect(useUiStore.getState().agentPendingPrompt).toEqual({
+      text: 'why is onboarding stalling',
+      subject: null,
+      label: null,
+    });
+  });
+
   it('setQuickOpen toggles quickOpenVisible', () => {
     useUiStore.getState().setQuickOpen(true);
     expect(useUiStore.getState().quickOpenVisible).toBe(true);
@@ -210,6 +231,30 @@ describe('uiStore', () => {
 });
 
 // M43 — the pin. Ordered pointers, workspace state (the navClosed rule).
+/**
+ * The assistant's width moved here from the panel's own state (M52): the shell
+ * needs it to lay the record out beside it. Same key, so a width chosen before
+ * the move survives it.
+ */
+describe('assistant width', () => {
+  beforeEach(() => window.localStorage.removeItem('cerebro.aiPanelWidth'));
+
+  it('persists under the key the panel used, clamped to its range', () => {
+    useUiStore.getState().setAiPanelWidth(1200);
+    expect(useUiStore.getState().aiPanelWidth).toBe(720);
+    expect(window.localStorage.getItem('cerebro.aiPanelWidth')).toBe('720');
+    useUiStore.getState().setAiPanelWidth(100);
+    expect(useUiStore.getState().aiPanelWidth).toBe(320);
+  });
+
+  it('reads a width stored before the move back on launch', async () => {
+    window.localStorage.setItem('cerebro.aiPanelWidth', '512');
+    vi.resetModules();
+    const fresh = (await import('./uiStore')).useUiStore;
+    expect(fresh.getState().aiPanelWidth).toBe(512);
+  });
+});
+
 describe('favorites', () => {
   const VAULT = '/vaults/one';
   const OTHER = '/vaults/two';

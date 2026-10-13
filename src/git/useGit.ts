@@ -310,12 +310,13 @@ export function useAutoCheckpoint(enabled: boolean, onCommitted: () => void): vo
 }
 
 /**
- * Append the ledger chain head as a commit trailer (M21.7) — PERIODIC
- * ANCHORING, per the master doc's honest language: git cross-attests the
- * ledger when both happen to exist; it is not continuous rollback
- * detection, and ledger correctness never depends on it. Symmetrically, a
- * vault with no ledger, a failing command, or no head changes nothing
- * about the checkpoint — the message goes through untouched.
+ * Append the ledger chain head as a commit trailer (M21.7) — a JOIN KEY from
+ * the commit to the ledger head it was made at. It is not rollback
+ * detection (M49.10): nothing reads it back, and with knowledge synced
+ * through git, other devices' commits carry their own ledgers' heads.
+ * Ledger correctness never depends on it. A vault with no ledger, a failing
+ * command, or no head changes nothing about the checkpoint — the message
+ * goes through untouched.
  */
 export async function withLedgerTrailer(vaultPath: string, message: string): Promise<string> {
   try {

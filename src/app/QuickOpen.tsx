@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { libraryIcon, libraryKind, libraryLabel } from '@/engine/library';
 import { listTypes, typeStyle } from '@/engine/typeCatalog';
+import { askAssistantLabel } from '@/lib/prompts';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -130,7 +131,7 @@ export function QuickOpen() {
       // NAME here, which is what this palette is for.
       {
         id: 'go:knowledge',
-        label: 'Base',
+        label: 'Knowledge',
         icon: 'brain',
         alias: 'knowledge concepts base',
         sel: { kind: 'knowledge' },
@@ -200,7 +201,7 @@ export function QuickOpen() {
     const ask: { target: Target; score: number } = {
       target: {
         id: 'ask:assistant',
-        label: `Ask the assistant: ${q}`,
+        label: askAssistantLabel(q),
         icon: 'sparkles',
         color: 'var(--synapse-500)',
         hint: '',

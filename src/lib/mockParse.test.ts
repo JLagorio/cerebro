@@ -59,6 +59,18 @@ describe('parseNote parity fixtures', () => {
     expect(e.title).toBe('Broken note');
   });
 
+  // M50.1 — parity with entry.rs: OKF titles a concept by its frontmatter.
+  it('titles a knowledge file by its frontmatter, and nothing else', () => {
+    const concept =
+      '---\ntype: Playbook\ntitle: "Warehouse cutover"\n---\n\n# Trigger\n\nGo-live.\n';
+    expect(parseNote('knowledge/playbooks/cutover.md', concept, T, T).title).toBe(
+      'Warehouse cutover',
+    );
+    expect(parseNote('notes/cutover.md', concept, T, T).title).toBe('Trigger');
+    const bare = '---\ntype: Playbook\ntitle: "  "\n---\n\n# Trigger\n';
+    expect(parseNote('knowledge/playbooks/cutover.md', bare, T, T).title).toBe('Trigger');
+  });
+
   it('handles no frontmatter and no H1 (fixture 3)', () => {
     const e = parseNote('notes/meeting-notes.md', FIXTURE_PLAIN, T, T);
     expect(e.title).toBe('Meeting notes');

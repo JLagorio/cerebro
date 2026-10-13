@@ -16,7 +16,7 @@ allowed-tools:
   - cache_source
 ---
 
-# Knowledge
+# Knowledge agent
 
 Maintain the knowledge bundle in `knowledge/` so it stays a defensible index
 over what this vault actually holds.

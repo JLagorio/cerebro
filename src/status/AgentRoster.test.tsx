@@ -118,13 +118,13 @@ describe('liveState (M33b.4, two pauses since M33b.5)', () => {
     );
   });
 
-  it('calls an agent nothing can fire not-activated rather than background-paused', () => {
+  it('calls an agent nothing can fire off duty rather than background-paused', () => {
     // A description is not a stopped daemon, and blaming the background pause
     // for it would point at the wrong control.
     expect(liveState({ ...facts, onDuty: false, backgroundPaused: true })).toBe('inactive');
   });
 
-  it('says paused, not not-activated, when somebody paused this very agent', () => {
+  it('says paused, not off duty, when somebody paused this very agent', () => {
     // The pause is a human act ON THIS ROW and there is a button beside it
     // that undoes it — a row that declined to mention it would be the hidden
     // button spec §6 warns about.
@@ -181,11 +181,16 @@ describe('AgentRoster', () => {
     expect(row.textContent).not.toContain('$0');
   });
 
-  it('says a record with no schedule is a description, not a daemon', async () => {
+  it('says a record with no schedule is off duty, and runs when asked', async () => {
+    // M52.3: "not activated" and "a description, not a daemon" read as a
+    // fault and an architecture lecture. The state is the same; the words
+    // are the ones a person acts on.
     render(roster());
     await screen.findByTestId('agent-row');
-    expect(screen.getByTestId('agent-state').getAttribute('data-state')).toBe('inactive');
-    expect(screen.getByTestId('agent-duty').textContent).toContain('description, not a daemon');
+    const chip = screen.getByTestId('agent-state');
+    expect(chip.getAttribute('data-state')).toBe('inactive');
+    expect(chip.textContent).toBe('off duty');
+    expect(screen.getByTestId('agent-duty').textContent).toBe('Off duty — runs only when you ask');
   });
 
   it('says when an activated agent last ran, and when it fires next', async () => {
@@ -298,9 +303,11 @@ describe('AgentRoster', () => {
 
     expect(await screen.findAllByTestId('agent-row')).toHaveLength(1);
     const note = screen.getByTestId('roster-unowned');
-    expect(note.textContent).toContain('agent:m26-ingest');
-    expect(note.textContent).toContain('agent:m26-maintenance');
-    expect(note.textContent).not.toContain('process:release-scout');
+    // M52.3: named in words, the stamp a hover away — never `agent:m26-…`.
+    expect(note.textContent).toContain('Background ingest, Background maintenance');
+    expect(note.textContent).not.toContain('agent:m26-');
+    expect(note.querySelector('[title="agent:m26-ingest"]')?.textContent).toBe('Background ingest');
+    expect(note.textContent).not.toContain('Release scout');
   });
 
   it('hands the clicked agent up so the history below can narrow to it', async () => {

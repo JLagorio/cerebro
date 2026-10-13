@@ -128,6 +128,62 @@ describe('vaultStore', () => {
     );
   });
 
+  // M49: measured 2026-09-28 — a window titled `test` held the demo vault's
+  // entries and recorded the demo vault, because the first open's slow
+  // start_watcher finished after the second's.
+  it('a second open while the first is still starting its watcher wins, in the backend too', async () => {
+    const started: string[] = [];
+    let releaseFirst: () => void = () => undefined;
+    vi.mocked(ipc.scanVault).mockImplementation(async (vault) =>
+      vault === '/first' ? [] : mockBackend.scanVault(vault),
+    );
+    vi.mocked(ipc.startWatcher).mockImplementation((vault) => {
+      started.push(vault);
+      return vault === '/first'
+        ? new Promise<void>((resolve) => (releaseFirst = resolve))
+        : Promise.resolve();
+    });
+
+    const first = useVaultStore.getState().openVault('/first');
+    await vi.waitFor(() => expect(started).toEqual(['/first']));
+    const second = useVaultStore.getState().openVault('/second');
+    // Queued behind the first: started in the order asked, so the backend
+    // ends on the vault asked for last.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(started).toEqual(['/first']);
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    expect(started).toEqual(['/first', '/second']);
+    const s = useVaultStore.getState();
+    expect(s.vaultPath).toBe('/second');
+    expect(s.status).toBe('ready');
+    expect(s.entries.length).toBeGreaterThan(50);
+  });
+
+  it('an open superseded before its scan ends never starts a watcher or sets entries', async () => {
+    const started: string[] = [];
+    let releaseScan: (entries: Awaited<ReturnType<typeof ipc.scanVault>>) => void = () => undefined;
+    vi.mocked(ipc.scanVault).mockImplementation((vault) =>
+      vault === '/first'
+        ? new Promise((resolve) => (releaseScan = resolve))
+        : mockBackend.scanVault(vault),
+    );
+    vi.mocked(ipc.startWatcher).mockImplementation(async (vault) => {
+      started.push(vault);
+    });
+
+    const first = useVaultStore.getState().openVault('/first');
+    await useVaultStore.getState().openVault('/second');
+    const secondEntries = useVaultStore.getState().entries;
+    releaseScan([]);
+    await first;
+
+    expect(started).toEqual(['/second']);
+    expect(useVaultStore.getState().vaultPath).toBe('/second');
+    expect(useVaultStore.getState().entries).toBe(secondEntries);
+  });
+
   it('createItem returns the new path and the entry appears after rescan', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     const path = await useVaultStore.getState().createItem({

@@ -524,7 +524,7 @@ export function CanvasViewport({
                   <button
                     type="button"
                     aria-label="Reset zoom"
-                    className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring"
+                    className="rounded-xs border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring"
                     // 100% about the CURRENT view centre — what a percentage chip
                     // means in Figma and in Lucidchart. It used to throw the pan
                     // away with the zoom: MEASURED, a diagram centred at

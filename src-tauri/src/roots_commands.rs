@@ -4,14 +4,12 @@
 //! rather than stalling the UI thread — listing a large directory or reading a
 //! file off a slow disk is not instant.
 
-use tauri::Manager;
-
 use crate::roots::read::FileText;
 use crate::roots::tree::DirEntry;
 use crate::roots::{MountRefusal, Root};
 
 fn config_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| e.to_string())
+    crate::app_config::app_dir(app)
 }
 
 fn root_path(app: &tauri::AppHandle, root_id: &str) -> Result<std::path::PathBuf, String> {

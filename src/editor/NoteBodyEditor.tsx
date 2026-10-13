@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { readNote, saveNote } from '@/lib/ipc';
+import { refusalText } from '@/lib/refusal';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
 import type { EditorReadyInfo } from './MarkdownEditor';
+import { NotePathContext } from './notePath';
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
@@ -20,6 +22,9 @@ export function NoteBodyEditor({
   debounceMs,
   onReady,
   onSaveState,
+  onBodyLoaded,
+  readOnly = false,
+  sections = false,
 }: {
   path: string;
   autoFocus?: boolean;
@@ -29,6 +34,19 @@ export function NoteBodyEditor({
   onReady?: (info: EditorReadyInfo) => void;
   /** Save lifecycle, for a visible saved/unsaved indicator in the host. */
   onSaveState?: (state: SaveState) => void;
+  /**
+   * The body exactly as the disk returned it — on load, and again after each
+   * own save (M50.1). A concept page pins Verify to it (M49.3): what a person
+   * attests is the text they had on screen, and an edit of their own is part
+   * of that text once it has landed.
+   */
+  onBodyLoaded?: (path: string, raw: string) => void;
+  /** A file the person reads but does not write here — the knowledge log and
+   *  cached sources are the system's. */
+  readOnly?: boolean;
+  /** `#` headings are sections, not the page title: a concept keeps its title
+   *  in frontmatter (OKF), so its body's H1s render at section size. */
+  sections?: boolean;
 }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
@@ -84,6 +102,8 @@ export function NoteBodyEditor({
 
   const onSaveStateRef = useRef(onSaveState);
   onSaveStateRef.current = onSaveState;
+  const onBodyLoadedRef = useRef(onBodyLoaded);
+  onBodyLoadedRef.current = onBodyLoaded;
   const emitSaveState = useCallback((state: SaveState) => {
     onSaveStateRef.current?.(state);
   }, []);
@@ -109,6 +129,7 @@ export function NoteBodyEditor({
         baseline.current =
           useVaultStore.getState().entries.find((e) => e.path === path)?.modifiedAt ?? null;
         setLoaded({ path, body: text.replace(/^\n+/, ''), gen: generation });
+        onBodyLoadedRef.current?.(path, text);
       })
       .catch(() => {
         if (!cancelled) {
@@ -160,9 +181,11 @@ export function NoteBodyEditor({
       // edit, so a refresh failure must not claim the save failed.
       try {
         await saveNote(vaultPath, forPath, markdown);
-      } catch {
+      } catch (err) {
         emitSaveState('failed');
-        toast("Couldn't save page");
+        // The refusal says why — a knowledge file that differs from its
+        // recorded history, recording paused for the vault (M49.6, K13).
+        toast(`Couldn't save page: ${refusalText(err)}`);
         return;
       }
       emitSaveState('saved');
@@ -181,6 +204,15 @@ export function NoteBodyEditor({
       } finally {
         ownSaveInFlight.current = false;
       }
+      // What the disk holds now — a capture may have canonicalized it.
+      if (onBodyLoadedRef.current !== undefined) {
+        try {
+          onBodyLoadedRef.current(forPath, await readNote(vaultPath, forPath));
+        } catch {
+          // The pin stays on the last body read; a Verify against it refuses
+          // as stale rather than attesting unseen text.
+        }
+      }
     })();
   };
 
@@ -191,10 +223,14 @@ export function NoteBodyEditor({
     return <div data-testid="note-body-loading" />;
   }
 
-  const locked = lossy && !unlocked;
+  const locked = readOnly || (lossy && !unlocked);
 
   return (
-    <div className={`flex min-h-0 flex-1 flex-col${compact ? ' cerebro-editor-compact' : ''}`}>
+    <div
+      className={`flex min-h-0 flex-1 flex-col${compact ? ' cerebro-editor-compact' : ''}${
+        sections ? ' cerebro-editor-sections' : ''
+      }`}
+    >
       {conflict && (
         <div
           role="alert"
@@ -232,7 +268,7 @@ export function NoteBodyEditor({
           </button>
         </div>
       )}
-      {lossy && (
+      {lossy && !readOnly && (
         <div
           role="alert"
           data-testid="lossy-import-banner"
@@ -254,25 +290,30 @@ export function NoteBodyEditor({
           )}
         </div>
       )}
-      <LazyMarkdownEditor
-        // The generation is part of the key: the editor takes `markdown` as an
-        // initial value only, so a reload has to be a remount.
-        key={`${loaded.path}#${loaded.gen}`}
-        markdown={loaded.body}
-        readOnly={locked}
-        onChange={saveFor(loaded.path)}
-        onDirty={() => {
-          dirty.current = true;
-          emitSaveState('dirty');
-        }}
-        onReady={(info: EditorReadyInfo) => {
-          flushRef.current = info.flushPendingSave;
-          setLossy(info.lossyImport);
-          onReady?.(info);
-        }}
-        autoFocus={autoFocus}
-        debounceMs={debounceMs}
-      />
+      {/* The path the body was LOADED for, the one its saves target too: what
+          a chip reads about its own note — a citation's number comes from the
+          note's frontmatter `sources` (M51.5) — is about the file on screen. */}
+      <NotePathContext.Provider value={loaded.path}>
+        <LazyMarkdownEditor
+          // The generation is part of the key: the editor takes `markdown` as an
+          // initial value only, so a reload has to be a remount.
+          key={`${loaded.path}#${loaded.gen}`}
+          markdown={loaded.body}
+          readOnly={locked}
+          onChange={saveFor(loaded.path)}
+          onDirty={() => {
+            dirty.current = true;
+            emitSaveState('dirty');
+          }}
+          onReady={(info: EditorReadyInfo) => {
+            flushRef.current = info.flushPendingSave;
+            setLossy(info.lossyImport);
+            onReady?.(info);
+          }}
+          autoFocus={autoFocus}
+          debounceMs={debounceMs}
+        />
+      </NotePathContext.Provider>
     </div>
   );
 }

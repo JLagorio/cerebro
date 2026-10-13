@@ -123,7 +123,7 @@ export function NodeStyleMenu({
                 }
                 onPatch({ [row.key]: null });
               }}
-              className="rounded border-0 bg-transparent p-0.5 hover:bg-n-50"
+              className="rounded-xs border-0 bg-transparent p-0.5 hover:bg-n-50"
             >
               <Icon name="eraser" size={12} color="var(--n-500)" />
             </button>

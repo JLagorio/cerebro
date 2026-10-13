@@ -106,7 +106,7 @@ export function Picker({
               data-unknown={option === undefined}
               className={`inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-1 text-2xs ${
                 option === undefined
-                  ? 'border-danger-300 bg-danger-50 text-danger-700'
+                  ? 'border-danger-200 bg-danger-50 text-danger-700'
                   : 'border-n-200 bg-n-25 text-n-700'
               }`}
               title={option?.hint ?? 'Not something this vault has — it will do nothing.'}
@@ -117,7 +117,7 @@ export function Picker({
                 type="button"
                 aria-label={`Remove ${option?.label ?? value}`}
                 onClick={() => onChange(selected.filter((v) => v !== value))}
-                className="rounded border-0 bg-transparent p-0 text-n-400 hover:text-n-700"
+                className="rounded-xs border-0 bg-transparent p-0 text-n-400 hover:text-n-700"
               >
                 <Icon name="x" size={11} />
               </button>

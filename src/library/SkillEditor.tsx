@@ -162,7 +162,7 @@ export function SkillEditor({
                     draft.arguments.filter((_, n) => n !== i),
                   )
                 }
-                className="flex-none rounded border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
+                className="flex-none rounded-xs border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
               >
                 <Icon name="x" size={13} />
               </button>

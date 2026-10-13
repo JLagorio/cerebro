@@ -132,6 +132,14 @@ export interface ChatMessage {
    * does not make the whole thread theirs.
    */
   addressed?: { handle: string; title: string | null };
+  /**
+   * User only: what the agent was sent, when it was not the bubble's words
+   * (M52.4) — a surface's labelled ask shows "Ask to revise · ‹title›" and
+   * sends the pages-long prompt behind it. Kept so a retry sends the prompt
+   * again rather than the label. Absent when the bubble IS what was sent,
+   * and on a skill's turn, whose expansion is read inside the turn.
+   */
+  prompt?: string;
 }
 
 /**

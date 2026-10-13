@@ -66,6 +66,86 @@ describe('ConceptBody', () => {
     expect(screen.getByTestId('concept-body').textContent).toBe('See ims-7 for scope.');
   });
 
+  // M52.3 — the knowledge agent's charter (demo-vault/records/agents/
+  // knowledge.md): every step wraps, and each wrapped line used to end the
+  // list, so four steps rendered as four lists, each numbered 1.
+  it('keeps wrapped lines inside their item, so a numbered charter is one list', () => {
+    const markdown = [
+      'Maintain the knowledge bundle.',
+      '',
+      '1. Read what changed — records, docs, and the cached copies under `sources/`.',
+      '   Check `knowledge_about` before writing anything: the bundle may already',
+      '   hold a concept your finding refines, supersedes, or contradicts.',
+      '2. Record findings with `write_concept`, anchored `about` the records they',
+      '   describe and citing the material that shows them.',
+      '3. When a cached source you rely on is past its `stale_after`, refresh it',
+      '   through `cache_source` before re-reading conclusions from the old copy.',
+      '4. Never mark anything verified. Verification is the human’s stamp.',
+      '',
+      '`scope: []` above is deliberate, not a mistake.',
+    ].join('\n');
+    const { container } = render(
+      <ConceptBody markdown={markdown} sources={[]} fromPath="records/agents/knowledge.md" />,
+    );
+    const lists = container.querySelectorAll('ol');
+    expect(lists).toHaveLength(1);
+    const items = lists[0].querySelectorAll(':scope > li');
+    expect(items).toHaveLength(4);
+    expect(items[0].textContent).toBe(
+      'Read what changed — records, docs, and the cached copies under sources/. Check knowledge_about before writing anything: the bundle may already hold a concept your finding refines, supersedes, or contradicts.',
+    );
+    expect(items[2].textContent).toContain('refresh it through cache_source before');
+    // The paragraph after the blank line is not the list's.
+    const paragraphs = [...container.querySelectorAll('p')].map((p) => p.textContent);
+    expect(paragraphs).toEqual([
+      'Maintain the knowledge bundle.',
+      'scope: [] above is deliberate, not a mistake.',
+    ]);
+  });
+
+  it('carries a list across a blank line only when what follows still belongs to it', () => {
+    const markdown = [
+      '- first',
+      '',
+      '  still the first, after a blank line',
+      '',
+      '- second',
+      '',
+      'A paragraph ends it.',
+      '',
+      '3. starts at three',
+      '4. then four',
+      '',
+      '- a bullet is another list',
+    ].join('\n');
+    const { container } = render(
+      <ConceptBody markdown={markdown} sources={[]} fromPath="knowledge/x.md" />,
+    );
+    const bullets = container.querySelectorAll('ul');
+    expect(bullets).toHaveLength(2);
+    expect([...bullets[0].querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'first still the first, after a blank line',
+      'second',
+    ]);
+    // The author's number survives: a list that starts at 3 says 3.
+    const ordered = container.querySelector('ol');
+    expect(ordered?.getAttribute('start')).toBe('3');
+    expect(ordered?.querySelectorAll('li')).toHaveLength(2);
+    expect(container.querySelector('p')?.textContent).toBe('A paragraph ends it.');
+  });
+
+  // M52.4 — an indented quote under an item is a quote, not more of the
+  // item's text: it used to be folded in, `>` and all.
+  it('renders an indented quote under an item as a quote', () => {
+    const { container } = render(
+      <ConceptBody markdown={'- item\n  > quoted'} sources={[]} fromPath="knowledge/x.md" />,
+    );
+    expect(container.querySelector('blockquote')?.textContent).toContain('quoted');
+    const item = container.querySelector('li');
+    expect(item?.textContent).toBe('item');
+    expect(item?.textContent).not.toContain('>');
+  });
+
   it('leaves markdown links and citations alone', () => {
     const opened: string[] = [];
     render(

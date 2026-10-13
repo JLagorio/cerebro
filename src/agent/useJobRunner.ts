@@ -4,7 +4,8 @@ import { buildSystemPrompt } from './systemPrompt';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { diffEntries, type VaultEvent } from '@/engine/events';
-import { jobQueue, type AgentJob } from '@/engine/jobs';
+import { jobQueue, KNOWLEDGE_JOB_KINDS, type AgentJob } from '@/engine/jobs';
+import { isRecording, useLedgerStore, useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import type { Entry } from '@/engine/types';
@@ -76,6 +77,13 @@ export function useJobRunner(): void {
   const entries = useVaultStore((s) => s.entries);
   const rescan = useVaultStore((s) => s.rescan);
   const autoLearn = useUiStore((s) => s.autoLearn);
+  // M49.2: the knowledge lanes wait while the vault is not recording.
+  const recording = useLedgerStore((s) => isRecording(vaultPath, s));
+  // …and never on a QUARANTINED concept: its writes would refuse just the
+  // same, and a claimed attempt would then suppress the recheck after the
+  // person keeps or restores it (review fix).
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
   const attempts = useUiStore((s) => s.learnAttempts);
   const skillRuns = useUiStore((s) => s.skillRuns);
   const triggerRuns = useUiStore((s) => s.triggerRuns);
@@ -205,7 +213,7 @@ export function useJobRunner(): void {
   const next: AgentJob | null = useMemo(() => {
     if (!autoLearn || vaultPath === null || !ledgersReady) return null;
     return (
-      jobQueue(entries, listConcepts(entries, today), {
+      jobQueue(entries, listConcepts(entries, today, quarantine, ledgerReview), {
         attempts,
         // The ledger is vault-scoped (PR #5 review): fire keys are calendar
         // values, so a flat map would let the same relative path in another
@@ -215,11 +223,19 @@ export function useJobRunner(): void {
         connectors,
         events,
         triggerRuns: triggerRuns[vaultPath] ?? {},
-      }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
+      }).find(
+        (j) =>
+          failedReads[vaultPath]?.[j.path] !== j.runKey &&
+          (!KNOWLEDGE_JOB_KINDS.has(j.kind) ||
+            (recording && quarantine !== 'unknown' && !quarantine.has(j.path))),
+      ) ?? null
     );
   }, [
+    ledgerReview,
     attempts,
     autoLearn,
+    quarantine,
+    recording,
     connectors,
     entries,
     failedReads,

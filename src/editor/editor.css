@@ -158,12 +158,21 @@
   text-decoration: line-through;
 }
 
-/* Inline chips (wikilink / assignee / due) sit on the text baseline. */
+/* Inline chips (wikilink / assignee / due / citation) sit on the text baseline. */
 .cerebro-editor [data-inline-content-type='wikilink'],
 .cerebro-editor [data-inline-content-type='assignee'],
-.cerebro-editor [data-inline-content-type='due'] {
+.cerebro-editor [data-inline-content-type='due'],
+.cerebro-editor [data-inline-content-type='citation'] {
   display: inline;
   white-space: nowrap;
+}
+
+/* A page's reading column squeezed narrow (DocPage's `cb-doc-narrow`, M52):
+   BlockNote's 54px right-hand gutter holds nothing, so it goes. The left one
+   stays — it holds the block handles, and the page's title, review bar and
+   Knowledge strip are aligned to it. */
+.cb-doc-narrow .cerebro-editor .bn-editor {
+  padding-right: 8px;
 }
 
 /* Narrow contexts (detail panel): shrink the side-menu gutter and scale
@@ -180,6 +189,101 @@
 }
 .cerebro-editor-compact .bn-block-content[data-content-type='heading'] h3 {
   font-size: 14px;
+}
+
+/* A concept's body (M50.1): its title lives in frontmatter (OKF), so the
+   body's `#` headings are its sections — Trigger, Sequence, Rollback — and
+   render at section size rather than as a second page title. */
+.cerebro-editor-sections .bn-block-content[data-content-type='heading'] h1 {
+  font-size: 22px;
+}
+.cerebro-editor-sections .bn-block-content[data-content-type='heading'] h2 {
+  font-size: 18px;
+}
+.cerebro-editor-sections .bn-block-content[data-content-type='heading'] h3 {
+  font-size: 15px;
+}
+
+/* Sections breathe (M52.1, after the author's screenshots). A section heading
+   sat directly on the paragraph above it — MEASURED 0px between the two
+   blocks' boxes, exactly what separates two paragraphs — so a concept read as
+   one run of text with some of it bold. The room goes ABOVE a heading,
+   scaled to its level, and a little below it, so a heading belongs to what it
+   opens. Not above the first block: that one already sits under the title and
+   the review bar. A margin and not a padding: BlockNote centres its side menu
+   on the block's box (MEASURED, menu centre 374px against heading text 376px),
+   and padding would grow the box upward and lift the menu off the heading.
+   Section pages only; an ordinary page's headings are its own. */
+.cerebro-editor-sections
+  .bn-block-outer:not(:first-child)
+  > .bn-block
+  > .bn-block-content[data-content-type='heading']:has(> h1) {
+  margin-top: 22px;
+}
+.cerebro-editor-sections
+  .bn-block-outer:not(:first-child)
+  > .bn-block
+  > .bn-block-content[data-content-type='heading']:has(> h2) {
+  margin-top: 18px;
+}
+.cerebro-editor-sections
+  .bn-block-outer:not(:first-child)
+  > .bn-block
+  > .bn-block-content[data-content-type='heading']:has(> h3) {
+  margin-top: 14px;
+}
+.cerebro-editor-sections .bn-block-content[data-content-type='heading'] {
+  margin-bottom: 2px;
+}
+
+/* Footnote definitions read as a sources list, not as more body (M52.1).
+ *
+ * A paragraph that OPENS with a definition chip is the `[^id]: …` run OKF ends
+ * a concept with. It was body-sized and body-coloured, so the three lines that
+ * say where each claim came from read as three more claims.
+ *
+ * Keyed on the `cb-citation-def` class a definition's badge carries
+ * (chips.tsx). MEASURED in the browser, the chip's wrapper is not the
+ * paragraph's first child: React node views put a `.react-renderer` span round
+ * it — so both depths are named, the way the column rules name both.
+ * `:first-child` sees elements only, which is what makes it right here: a line
+ * break is a `<br>`, so a definition that opens the SECOND line of a paragraph
+ * is not first, and only a paragraph that begins with one matches.
+ *
+ * The margin sets the list off from the body above it; the rule after this
+ * takes it back between two sources paragraphs, so a run of them — definitions
+ * a blank line apart — stays one list. */
+.cerebro-editor
+  .bn-block-content:has(
+    > .bn-inline-content > :first-child > .bn-inline-content-section > .cb-citation-def,
+    > .bn-inline-content > .bn-inline-content-section:first-child > .cb-citation-def
+  ) {
+  margin-top: 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+  color: var(--n-600);
+}
+.cerebro-editor
+  .bn-block-outer:has(
+    > .bn-block
+      > .bn-block-content
+      > .bn-inline-content
+      > :first-child
+      > .bn-inline-content-section
+      > .cb-citation-def,
+    > .bn-block
+      > .bn-block-content
+      > .bn-inline-content
+      > .bn-inline-content-section:first-child
+      > .cb-citation-def
+  )
+  + .bn-block-outer
+  > .bn-block
+  > .bn-block-content:has(
+    > .bn-inline-content > :first-child > .bn-inline-content-section > .cb-citation-def,
+    > .bn-inline-content > .bn-inline-content-section:first-child > .cb-citation-def
+  ) {
+  margin-top: 0;
 }
 
 /* Page columns (M48.1).

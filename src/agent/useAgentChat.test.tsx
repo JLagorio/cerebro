@@ -149,6 +149,32 @@ describe('useAgentChat send expansion', () => {
     );
   });
 
+  // M52.4 — a surface's labelled ask shows its label and sends its prompt.
+  // Retrying a failed one sent the label: the agent was asked "Ask to revise ·
+  // Sync error rate" with none of the instructions behind it.
+  it('keeps a labelled ask’s prompt on its bubble, and a retry sends the prompt again', async () => {
+    const label = 'Ask to revise · Sync error rate';
+    const prompt = 'Revise the knowledge concept at knowledge/metrics/sync-error-rate.md.';
+    vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send(label, prompt));
+    const question = result.current.messages[0];
+    expect(question).toMatchObject({ role: 'user', text: label, prompt });
+    await vi.waitFor(() => expect(result.current.messages[1].error).toBe('spawn failed'));
+
+    // What the panel's Retry does with the failed turn's question.
+    act(() => result.current.send(question.text, question.prompt));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[1][1].message).toBe(prompt);
+    expect(result.current.messages[2]).toMatchObject({ text: label, prompt });
+  });
+
+  it('keeps no prompt when the bubble is what was sent', () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('what is at risk?', ' what is at risk? '));
+    expect(result.current.messages[0]).not.toHaveProperty('prompt');
+  });
+
   it('a panel turn runs attended — the one run allowed the legacy MCP fallback', async () => {
     // `attended` gates connector_context's absent-file branch (PR #5
     // security review): a person typed this turn and is watching it, which

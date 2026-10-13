@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -19,32 +19,22 @@ import { typeStyle } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import { DISPLAY_DEFAULTS, type Entry } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
-import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
-import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
-import { EntityDossier } from '@/knowledge/EntityDossier';
-import { conceptsAbout, listConcepts } from '@/engine/okf';
+import { PageKnowledge } from '@/knowledge/PageKnowledge';
+import { conceptsAbout, conceptsFrom } from '@/engine/okf';
+import { useConcepts } from '@/knowledge/useConcepts';
 import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
-import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
 import { ownsEscape, useLayer } from '@/components/ui/layers';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
-import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
+import { dragCeiling, fitWidth } from '@/app/shellLayout';
+import {
+  DETAIL_WIDTH_MAX,
+  DETAIL_WIDTH_MIN,
+  RIGHT_PANEL_MIN_WIDTH,
+  useUiStore,
+} from '@/stores/uiStore';
 
-/**
- * Knowledge beside a RECORD (M12): what this note gave the base, and what
- * the base can give it back. The doc side panel carried this as a tab;
- * records open here instead now, so the loop follows them. Collapsed until
- * asked — opening it IS the ask (M8.3: nothing speaks first).
- *
- * Which surface answers is capability-gated, not type-gated (M14.2): when the
- * base holds concepts ABOUT this entry itself, the entry is a subject and gets
- * its full dossier — believed, unsettled, read-from, retired. Otherwise the
- * wide-net related list, which is the right shape for a record the base only
- * knows *around* (via its project or links). Projects became ordinary records
- * (M12.5 aftermath), so the dossier that lived on the project page rides the
- * record panel now — no type name routes specially.
- */
 /**
  * One sentence a cached copy owes its reader (M34.5.3): whether it is past
  * its refresh date, and when it was last fetched. The vault has held both
@@ -82,11 +72,30 @@ function SourceFreshnessLine({ entry }: { entry: Entry }) {
   );
 }
 
+/**
+ * Knowledge beside a RECORD (M12): what this note gave the base, and what
+ * the base can give it back. The doc side panel carried this as a tab;
+ * records open here instead now, so the loop follows them. Its body is the
+ * page tab's, component for component (M52.3, `PageKnowledge`) — a record and
+ * a page read Knowledge the same way. Projects became ordinary records (M12.5
+ * aftermath), so the dossier that lived on the project page rides the record
+ * panel now — no type name routes specially.
+ */
 function KnowledgeSection({ entry }: { entry: Entry }) {
-  const [open, setOpen] = useState(false);
   const entries = useVaultStore((s) => s.entries);
-  const isSubject =
-    open && conceptsAbout(entry.path, listConcepts(entries, todayIso()), entries).length > 0;
+  const concepts = useConcepts();
+  const about = useMemo(
+    () => conceptsAbout(entry.path, concepts, entries),
+    [concepts, entries, entry.path],
+  );
+  const learnedFrom = useMemo(() => conceptsFrom(entry.path, concepts), [concepts, entry.path]);
+  // M50.2: open by default when Knowledge holds something about this record
+  // or learned something from it — it was always collapsed, so what the
+  // agents knew about a record was one click away from nobody. A person's
+  // own toggle wins for as long as the record is open.
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const open = toggled ?? (about.length > 0 || learnedFrom.length > 0);
+  const setOpen = (next: boolean) => setToggled(next);
   return (
     <section data-testid="detail-knowledge" className="mb-3.5 border-t border-n-100 pt-2">
       <button
@@ -100,21 +109,8 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
         Knowledge
       </button>
       {open && (
-        <div className="flex flex-col gap-4 pb-1 pt-2">
-          <KnowledgeCommit entry={entry} variant="panel" />
-          <div className="border-t border-n-100 pt-3.5">
-            {isSubject ? (
-              <EntityDossier entry={entry} variant="panel" />
-            ) : (
-              <RelatedKnowledge
-                entry={entry}
-                variant="panel"
-                askPrompt={augmentDocPrompt(entry.path, entry.title)}
-                askSubject={entry.path}
-                askLabel="What am I missing?"
-              />
-            )}
-          </div>
+        <div className="pb-1 pt-2">
+          <PageKnowledge entry={entry} />
         </div>
       )}
     </section>
@@ -163,12 +159,24 @@ function DetailEscapeLayer({ onClose }: { onClose: () => void }) {
   return null;
 }
 
-export function DetailPanel() {
+export function DetailPanel({
+  room = null,
+  besideAssistant = false,
+}: {
+  /** The widest the shell can draw the panel beside the assistant, measured;
+   *  null until it has (app/shellLayout.ts). */
+  room?: number | null;
+  /** The assistant is DRAWN beside it — open and not parked. */
+  besideAssistant?: boolean;
+} = {}) {
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
   const toast = useUiStore((s) => s.toast);
   const width = useUiStore((s) => s.detailWidth);
   const setWidth = useUiStore((s) => s.setDetailWidth);
+  // M52: the stored width is a preference, drawn at most the room left —
+  // by CSS; this is the width it comes to, for the handle and the header.
+  const drawn = room === null ? width : fitWidth(width, room);
   const entry = useEntry(detailPath);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -331,24 +339,25 @@ export function DetailPanel() {
     <aside
       data-testid="detail-panel"
       aria-label="Detail panel"
-      className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-n-200 bg-n-0"
-      // 100%, not 50%: the parent is now the right-panel SLOT, which is itself
-      // sized from this width and already capped at `100% - CANVAS_MIN_WIDTH`.
-      // A 50% cap here resolved against that slot, so the panel rendered at
-      // half the width the slot had reserved for it and the other half was
-      // blank — the canvas paid for space nothing drew in. AiPanel, added
-      // against the slot, always used 100%; this was the pre-slot value left
-      // behind. Shrinking still works: the slot's cap wins, and 100% follows.
-      style={{ width, maxWidth: '100%' }}
+      // SHRINKABLE, unlike the assistant beside it (M52). Both were
+      // `flex-none` in a slot capped at `100% - CANVAS_MIN_WIDTH`, so a wide
+      // record pushed the assistant past the slot's clipped edge — at 1440px
+      // the « control put it wholly off-screen. Drawn at its stored width,
+      // this is the one panel in the slot that shrinks, down to its floor, so
+      // CSS gives the room beside the assistant in the window's own layout
+      // pass. `drawn` is the same arithmetic measured, for the handle.
+      className="cb-panel-in relative z-30 flex h-full shrink flex-col border-l border-n-200 bg-n-0"
+      style={{ width, minWidth: RIGHT_PANEL_MIN_WIDTH }}
     >
       {/* First, so the panel is on the stack before anything it contains. */}
       <DetailEscapeLayer onClose={closeDetail} />
       <ResizeHandle
         label="Resize detail panel"
         side="left"
-        width={width}
+        width={drawn}
+        preferred={width}
         min={DETAIL_WIDTH_MIN}
-        max={DETAIL_WIDTH_MAX}
+        max={dragCeiling(room, DETAIL_WIDTH_MAX)}
         onResize={setWidth}
       />
       <header className="flex items-center gap-2 border-b border-n-100 px-4 py-3">
@@ -360,9 +369,20 @@ export function DetailPanel() {
         >
           <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
-        <span className="text-xs font-medium text-n-700">{entry.type ?? 'Note'}</span>
+        {/* One line at the 320px floor (M52): it wrapped to "Key / result".
+            The type gives first, to an ellipsis — the icon beside it still
+            says what it is — and the key, the record's own name, not at all. */}
+        <span
+          data-testid="detail-type"
+          title={entry.type ?? 'Note'}
+          className="min-w-0 truncate text-xs font-medium text-n-700"
+        >
+          {entry.type ?? 'Note'}
+        </span>
         {key !== '' && (
-          <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{key}</span>
+          <span className="flex-none whitespace-nowrap [font-family:var(--font-mono)] text-2xs text-n-500">
+            {key}
+          </span>
         )}
         {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
@@ -383,12 +403,20 @@ export function DetailPanel() {
             </button>
           </>
         )}
-        <span className="flex-1" />
         {/* M16.11: everything Notion's peek header offers that means anything
             in a files-first app — see the docblock for the three that do
-            not. */}
-        <DetailHeaderActions entry={entry} />
-        <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
+            not. One group that never shrinks (M52): at the 320px floor the
+            controls were squeezed under their own icons and Close was pushed
+            past the panel's edge, so the type label is what gives. */}
+        <span className="ml-auto flex flex-none items-center gap-0.5">
+          <DetailHeaderActions
+            entry={entry}
+            drawn={drawn}
+            room={room}
+            besideAssistant={besideAssistant}
+          />
+          <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
+        </span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
         <input

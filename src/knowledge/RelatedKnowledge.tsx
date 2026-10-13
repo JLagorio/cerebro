@@ -1,11 +1,12 @@
 import { useMemo } from 'react';
+import { useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { listConcepts, relatedConcepts } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { ReviewChip } from '@/knowledge/ReviewChip';
 import { useNavStore } from '@/stores/navStore';
-import { askBasePrompt } from '@/lib/prompts';
+import { ASK_BASE_LABEL, askBasePrompt, askedAbout, AUGMENT_LABEL } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -21,8 +22,8 @@ import { useVaultStore } from '@/stores/vaultStore';
  * it is a button the user presses, because the difference between an
  * assistant and a nag is who started the conversation.
  *
- * M33a.5 made the read INVOCABLE: `Ask the base` hands the assistant the same
- * question this list renders, and the assistant answers it with the
+ * M33a.5 made the read INVOCABLE: asking the base hands the assistant the
+ * same question this list renders, and the assistant answers it with the
  * `knowledge_about` tool rather than by guessing at the bundle.
  */
 
@@ -36,8 +37,13 @@ export interface RelatedKnowledgeProps {
    * so the agent reads it rather than inferring it from the prompt text. */
   askSubject?: string | null;
   askLabel?: string;
-  /** 'section' sits in a page; 'panel' is the narrower side-panel variant. */
-  variant?: 'section' | 'panel';
+  /**
+   * 'section' sits in a page; 'panel' is the narrower side-panel variant.
+   * 'embedded' is one group of a page's Knowledge (M52.3, `PageKnowledge`):
+   * the rows alone, without the heading, the empty sentence or the asks its
+   * host already carries.
+   */
+  variant?: 'section' | 'panel' | 'embedded';
 }
 
 export function RelatedKnowledge({
@@ -45,7 +51,7 @@ export function RelatedKnowledge({
   limit = 5,
   askPrompt,
   askSubject,
-  askLabel = 'Ask what is missing',
+  askLabel = AUGMENT_LABEL,
   variant = 'section',
 }: RelatedKnowledgeProps) {
   const entries = useVaultStore((s) => s.entries);
@@ -53,10 +59,12 @@ export function RelatedKnowledge({
   const askAgent = useUiStore((s) => s.askAgent);
   const closeDetail = useUiStore((s) => s.closeDetail);
 
+  const quarantine = useQuarantine();
+  const ledgerReview = useLedgerReview();
   const today = todayIso();
   const related = useMemo(
-    () => relatedConcepts(entry, listConcepts(entries, today), entries),
-    [entry, entries, today],
+    () => relatedConcepts(entry, listConcepts(entries, today, quarantine, ledgerReview), entries),
+    [entry, entries, today, quarantine, ledgerReview],
   );
 
   // M33a.6 — a replaced concept sorts BELOW everything still standing.
@@ -79,15 +87,20 @@ export function RelatedKnowledge({
 
   const ask = () => {
     if (askPrompt === undefined) return;
-    askAgent(askPrompt, askSubject ?? null);
+    askAgent(askPrompt, askSubject ?? null, askedAbout(askLabel, entry.title));
   };
 
   // The record travels WITH the prompt (M17.6) — it becomes a context chip,
   // so the agent reads this record rather than whatever surface the user
   // happened to be standing on when they pressed the button.
   const askBase = () => {
-    askAgent(askBasePrompt(entry.path, entry.title), entry.path);
+    askAgent(
+      askBasePrompt(entry.path, entry.title),
+      entry.path,
+      askedAbout(ASK_BASE_LABEL, entry.title),
+    );
   };
+  const embedded = variant === 'embedded';
 
   // An empty state that still offers the ask: "nothing yet" is exactly when
   // asking is most useful, and a section that vanishes teaches nobody it
@@ -96,24 +109,28 @@ export function RelatedKnowledge({
     <section
       data-testid="related-knowledge"
       data-count={related.length}
-      className={variant === 'panel' ? '' : 'mt-8 border-t border-n-100 pt-5'}
+      className={variant === 'section' ? 'mt-8 border-t border-n-100 pt-5' : ''}
     >
-      <div className="flex items-center gap-2">
-        <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
-          What the assistant knows
-        </h3>
-        {related.length > 0 && (
-          <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
-            {related.length}
-          </span>
-        )}
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-2">
+          <Icon name="brain" size={14} color="var(--cortex-500)" />
+          <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
+            Knowledge
+          </h3>
+          {related.length > 0 && (
+            <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
+              {related.length}
+            </span>
+          )}
+        </div>
+      )}
 
       {shown.length === 0 ? (
-        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
+        !embedded && (
+          <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
+        )
       ) : (
-        <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
+        <ul className={`m-0 flex list-none flex-col gap-1 p-0 ${embedded ? '' : 'mt-2'}`}>
           {shown.map((concept) => (
             <li key={concept.entry.path}>
               <button
@@ -124,7 +141,7 @@ export function RelatedKnowledge({
                   // Same rule as the dossier (M14.2): following a concept
                   // leaves the record, so the panel goes with it.
                   closeDetail();
-                  navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path });
+                  navigate({ kind: 'doc', path: concept.entry.path });
                 }}
                 className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
@@ -136,9 +153,10 @@ export function RelatedKnowledge({
                   >
                     {concept.title}
                   </span>
+                  {/* Embedded, a row reads like the dossier's beside it. */}
                   {concept.description !== null &&
                     concept.supersededBy === null &&
-                    variant === 'section' && (
+                    variant !== 'panel' && (
                       <span className="block truncate text-xs text-n-500">
                         {concept.description}
                       </span>
@@ -156,7 +174,11 @@ export function RelatedKnowledge({
                   </span>
                 ) : (
                   <>
-                    <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+                    {/* M52.3 — the Concepts list's rule: only the review
+                        states worth reading. */}
+                    {concept.review !== 'unreviewed' && (
+                      <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
+                    )}
                     {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
                   </>
                 )}
@@ -168,22 +190,25 @@ export function RelatedKnowledge({
 
       {rest > 0 && <p className="m-0 mt-1.5 px-2 text-xs text-n-400">and {rest} more</p>}
 
-      {/* Two questions, and they are genuinely different. "Ask the base" goes
-          to the SUBJECT — knowledge_about answers by anchor, so it reaches
-          concepts this list cannot, the ones filed under entities the record
-          only reaches through its project or a link it never made. The
+      {/* Two questions, and they are genuinely different. Asking the base
+          goes to the SUBJECT — knowledge_about answers by anchor, so it
+          reaches concepts this list cannot, the ones filed under entities the
+          record only reaches through its project or a link it never made. The
           optional second button goes to the DRAFT. Both are buttons, pressed
-          by a person; neither counts up at anyone (M8.1). */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
-          Ask the base
-        </Button>
-        {askPrompt !== undefined && (
-          <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
-            {askLabel}
+          by a person; neither counts up at anyone (M8.1). Embedded (M52.3),
+          the host's one action row carries them. */}
+      {!embedded && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" icon="sparkles" onClick={askBase}>
+            {ASK_BASE_LABEL}
           </Button>
-        )}
-      </div>
+          {askPrompt !== undefined && (
+            <Button variant="secondary" size="sm" icon="sparkles" onClick={ask}>
+              {askLabel}
+            </Button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

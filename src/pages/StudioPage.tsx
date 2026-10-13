@@ -9,6 +9,7 @@ import { STUDIO_DIR, studioProjects, type StudioProject } from '@/engine/studio'
 import type { Selection } from '@/engine/types';
 import { ConceptBody } from '@/knowledge/ConceptBody';
 import { createFolder, readNote } from '@/lib/ipc';
+import { askedAbout, STUDIO_BUILD_LABEL, studioBuildPrompt } from '@/lib/prompts';
 import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -155,12 +156,13 @@ function ProjectView({ project }: { project: StudioProject }) {
           testId="studio-build"
           onClick={() =>
             askAgent(
-              `Build on the "${project.title}" prototype. Work only inside ${project.folder}/ — its index.md is the main page; edit it and add pages beside it as the prototype needs.`,
+              studioBuildPrompt(project.title, project.folder),
               shown?.path ?? project.folder,
+              askedAbout(STUDIO_BUILD_LABEL, project.title),
             )
           }
         >
-          Build with the assistant
+          {STUDIO_BUILD_LABEL}
         </Button>
         {shown !== null && (
           <Button

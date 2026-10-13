@@ -16,7 +16,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -62,6 +62,9 @@ describe('every tracked source file is text', () => {
 
     const offenders: string[] = [];
     for (const path of tracked) {
+      // The index still lists a file deleted or renamed in the working tree
+      // until the change is staged; there are no bytes of it left to check.
+      if (!existsSync(join(REPO, path))) continue;
       const at = controlBytes(readFileSync(join(REPO, path)));
       if (at.length > 0) offenders.push(`${path} (${at.length} at byte ${at[0]})`);
     }

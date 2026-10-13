@@ -182,24 +182,23 @@ describe('Sidebar', () => {
       expect(
         container.querySelectorAll('[data-testid="nav-surfaces"] [aria-current="page"]'),
       ).toHaveLength(0);
-      cleanup();
-
-      // M12.5: projects retired — a container selection is a Collection.
-      useNavStore.setState({ selection: { kind: 'collection', folder: 'projects/x' } });
-      render(<Sidebar />);
-      expect(screen.getByRole('button', { name: 'Home' }).getAttribute('aria-current')).toBe(
-        'page',
-      );
     });
 
     // M15: Home's active state used to be computed by negating every other
-    // slot, so any kind nobody remembered to negate lit it up.
-    it('leaves Home dark on the surfaces another slot owns', () => {
+    // slot, so any kind nobody remembered to negate lit it up. M52: nor is it
+    // the item world's front door any more — a Collection, a List and a Type
+    // are rows of their own, and on the Epic table Home and Epic were both
+    // current.
+    it('leaves Home dark on the surfaces another row owns', () => {
       for (const selection of [
         { kind: 'settings' } as const,
         { kind: 'changes' } as const,
         { kind: 'knowledge' } as const,
         { kind: 'diagram', path: 'diagrams/pipeline.mmd' } as const,
+        // M12.5: projects retired — a container selection is a Collection.
+        { kind: 'collection', folder: 'projects/x' } as const,
+        { kind: 'list', id: 'backlog', collection: 'work' } as const,
+        { kind: 'type', name: 'Epic' } as const,
       ]) {
         useNavStore.setState({ selection });
         render(<Sidebar />);
@@ -261,6 +260,74 @@ describe('Sidebar', () => {
       const rows = screen.getAllByTestId('knowledge-nav-row');
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([]);
+    });
+
+    // M52.3 — a concept is a page (M50.1), and reading one lit nothing: the
+    // nav said you were nowhere in Knowledge.
+    it("lights a concept page's folder row, and only while it is on screen", () => {
+      const conceptAt = (path: string, title: string) =>
+        mkEntry({ path, title, type: 'Metric', folder: path.slice(0, path.lastIndexOf('/')) });
+      useVaultStore.setState({
+        entries: [
+          project,
+          conceptAt('knowledge/metrics/sync-error-rate.md', 'Sync error rate'),
+          conceptAt('knowledge/systems/drain.md', 'Drain time'),
+        ],
+      });
+      useNavStore.setState({
+        selection: { kind: 'doc', path: 'knowledge/metrics/sync-error-rate.md' },
+      });
+      render(<Sidebar />);
+      const lit = () =>
+        screen
+          .getAllByTestId('knowledge-nav-row')
+          .filter((row) => row.getAttribute('aria-current') === 'page')
+          .map((row) => row.textContent);
+      expect(lit()).toEqual(['Metrics1']);
+      // Review stays the last row — the folders, then the queue (M51).
+      const rows = screen.getAllByTestId('knowledge-nav-row');
+      expect(rows[rows.length - 1].dataset.tab).toBe('review');
+      cleanup();
+
+      // An ordinary page is not Knowledge's canvas.
+      useNavStore.setState({ selection: { kind: 'doc', path: 'projects/foundations/project.md' } });
+      render(<Sidebar />);
+      expect(lit()).toEqual([]);
+      cleanup();
+
+      useNavStore.setState({ selection: { kind: 'home' } });
+      render(<Sidebar />);
+      expect(lit()).toEqual([]);
+    });
+
+    // M52.4 — the bundle's own index is structure, not a root concept, so it
+    // does not light "Ungrouped".
+    it("lights no folder for the bundle's own index", () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          mkEntry({ path: 'knowledge/loose.md', title: 'Loose end', type: 'Concept' }),
+          mkEntry({ path: 'knowledge/index.md', title: 'Index' }),
+          mkEntry({ path: 'knowledge/metrics/index.md', title: 'Metrics index' }),
+          mkEntry({ path: 'knowledge/metrics/sync-error-rate.md', title: 'Sync error rate' }),
+        ],
+      });
+      useNavStore.setState({ selection: { kind: 'doc', path: 'knowledge/index.md' } });
+      render(<Sidebar />);
+      const rows = screen.getAllByTestId('knowledge-nav-row');
+      expect(rows.map((row) => row.textContent)).toContain('Ungrouped1');
+      expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([]);
+      cleanup();
+
+      // A folder's own index still lights its folder.
+      useNavStore.setState({ selection: { kind: 'doc', path: 'knowledge/metrics/index.md' } });
+      render(<Sidebar />);
+      expect(
+        screen
+          .getAllByTestId('knowledge-nav-row')
+          .filter((row) => row.getAttribute('aria-current') === 'page')
+          .map((row) => row.textContent),
+      ).toEqual(['Metrics1']);
     });
 
     it('lists the vault agents in the Agents SECTION, whose header folds it (M43)', () => {
@@ -515,6 +582,111 @@ describe('Sidebar', () => {
     expect(wide.container.querySelector('nav')?.style.width).toBe('420px');
   });
 
+  // M52 — verified at 1440 beside a record and the assistant: the drag stored
+  // 460 while the row drew 340, and the sidebar leapt when the record closed.
+  it('stops its drag at the widest it can be drawn, and starts it from the drawn width', () => {
+    useUiStore.setState({ sidebarWidth: 420 });
+    render(<Sidebar maxWidth={340} />);
+    const handle = screen.getByRole('separator', { name: 'Resize sidebar' });
+    expect(handle.getAttribute('aria-valuemax')).toBe('340');
+    expect(handle.getAttribute('aria-valuenow')).toBe('340');
+    // A step that cannot widen it keeps the stored width: writing the drawn
+    // one narrowed the preference (verified at 1280, where a drag to widen
+    // stored 180 over 264 and kept it once the room came back) …
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(useUiStore.getState().sidebarWidth).toBe(420);
+    // … and one that narrows it stores what it draws.
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(useUiStore.getState().sidebarWidth).toBe(328);
+  });
+
+  /**
+   * M52 — the rail: what the shell steps the sidebar down to beside a record
+   * and the assistant, instead of parking the assistant. Derived, like
+   * `narrow`: it must never write the user's collapsed flag.
+   */
+  describe('rail', () => {
+    /** Mounted beside the column, and CSS shows one (jsdom applies no CSS). */
+    const railShown = (nav: HTMLElement) => !nav.className.includes(':hidden');
+    const drawerOpen = () => screen.getByTestId('sidebar').dataset.overlay === 'true';
+
+    it('keeps expand, ask and search in a strip of its own', () => {
+      render(<Sidebar rail railBand="band" />);
+      const rail = screen.getByTestId('sidebar-rail');
+      // Both mounted; the media query shows the rail in 1084–1219 and the
+      // column either side of it.
+      expect(rail.className).toContain('hidden min-[1084px]:max-[1220px]:flex');
+      expect(screen.getByTestId('sidebar').className).toContain('min-[1084px]:max-[1220px]:hidden');
+      for (const name of ['Show sidebar', 'Assistant', 'Search']) {
+        expect(within(rail).getByRole('button', { name })).toBeTruthy();
+      }
+      fireEvent.click(within(rail).getByRole('button', { name: 'Assistant' }));
+      expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    });
+
+    it('opens the whole sidebar as a drawer, and Escape closes it without collapsing', () => {
+      render(<Sidebar rail railBand="band" />);
+      const rail = screen.getByTestId('sidebar-rail');
+      fireEvent.click(within(rail).getByRole('button', { name: 'Show sidebar' }));
+      const drawer = screen.getByTestId('sidebar');
+      expect(drawer.dataset.overlay).toBe('true');
+      // Out of the row, so no media query hides it.
+      expect(railShown(drawer)).toBe(true);
+      // Floating at the stored width, so no handle measures it against the row.
+      expect(within(drawer).queryByRole('separator', { name: 'Resize sidebar' })).toBeNull();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(drawerOpen()).toBe(false);
+      expect(screen.getByTestId('sidebar-rail')).toBeTruthy();
+      expect(useUiStore.getState().sidebarCollapsed).toBe(false);
+    });
+
+    it('closes the drawer on a press past it, on its own hide control, and on going anywhere', () => {
+      render(<Sidebar rail railBand="band" />);
+      const open = () =>
+        fireEvent.click(
+          within(screen.getByTestId('sidebar-rail')).getByRole('button', { name: 'Show sidebar' }),
+        );
+
+      open();
+      fireEvent.click(screen.getByTestId('sidebar-drawer-scrim'));
+      expect(drawerOpen()).toBe(false);
+
+      open();
+      fireEvent.click(within(screen.getByTestId('sidebar')).getByTestId('sidebar-collapse'));
+      expect(drawerOpen()).toBe(false);
+      expect(useUiStore.getState().sidebarCollapsed).toBe(false);
+
+      open();
+      const [surfaces] = screen.getAllByTestId('nav-surfaces');
+      if (surfaces === undefined) throw new Error('no destinations');
+      fireEvent.click(within(surfaces).getByRole('button', { name: 'My work' }));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'mywork' });
+      expect(drawerOpen()).toBe(false);
+    });
+
+    it('gives way to the column the moment there is room, drawer closed', () => {
+      const { rerender } = render(<Sidebar rail railBand="band" />);
+      const nav = screen.getByTestId('sidebar');
+      fireEvent.click(
+        within(screen.getByTestId('sidebar-rail')).getByRole('button', { name: 'Show sidebar' }),
+      );
+      rerender(<Sidebar />);
+      // The same nav throughout: a drawer opening or closing never remounts it.
+      expect(screen.getByTestId('sidebar')).toBe(nav);
+      expect(nav.dataset.overlay).toBeUndefined();
+      expect(screen.queryByTestId('sidebar-rail')).toBeNull();
+      // And the next rail starts closed.
+      rerender(<Sidebar rail railBand="band" />);
+      expect(drawerOpen()).toBe(false);
+    });
+
+    it('holds the rail under all of 1220 once latched', () => {
+      render(<Sidebar rail railBand="below" />);
+      expect(screen.getByTestId('sidebar-rail').className).toContain('hidden max-[1220px]:flex');
+      expect(screen.getByTestId('sidebar').className).toMatch(/(^|\s)max-\[1220px\]:hidden(\s|$)/);
+    });
+  });
+
   // Task 14 / M38.3: the Drive-style file tree is the standing Pages section
   // now — the Docs destination died with its surface, and in a shell where
   // everything is a page the pages ARE navigation, not a mode.
@@ -575,6 +747,15 @@ describe('Sidebar', () => {
       render(<Sidebar />);
       fireEvent.click(screen.getByText('Recipe'));
       expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Recipe' });
+    });
+
+    // M52: Home stayed current beside the type's own row — two rows, one place.
+    it("marks only the type's row current on its screen", () => {
+      useVaultStore.setState({ entries: [project, recipeType] });
+      useNavStore.setState({ selection: { kind: 'type', name: 'Recipe' } });
+      const { container } = render(<Sidebar />);
+      const current = [...container.querySelectorAll('[aria-current="page"]')];
+      expect(current.map((el) => el.textContent)).toEqual(['Recipe0']);
     });
 
     // M39.2: the section wears the word it always meant — Databases. The
@@ -758,9 +939,10 @@ describe('Sidebar', () => {
       expect(screen.getByText('No repositories mounted')).toBeTruthy();
     });
 
-    it('opens the Base home from the section’s ↗ (M43.10)', () => {
+    // M50.5: the section is Knowledge now — one word for what agents learned.
+    it('opens the Knowledge home from the section’s ↗ (M43.10)', () => {
       render(<Sidebar />);
-      fireEvent.click(screen.getByRole('button', { name: 'Open base' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open Knowledge' }));
       expect(useNavStore.getState().selection).toEqual({ kind: 'knowledge' });
     });
 

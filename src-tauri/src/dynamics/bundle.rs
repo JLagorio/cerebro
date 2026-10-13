@@ -4,8 +4,8 @@
 //! asks all of them about the same facet and hands back a row a surface can
 //! draw without deriving anything itself.
 //!
-//! **The composed sentence is built here, in Rust, once.** "single-source,
-//! partial coverage, stale and contested" is not decoration — it is the
+//! **The composed sentence is built here, in Rust, once.** "one source,
+//! sources partly observed, stale and contested" is not decoration — it is the
 //! reading of three orthogonal answers, and a UI that assembled it from three
 //! serialized values would be a second implementation of the sentence, one
 //! translation away from disagreeing with this one. The three `describe()`
@@ -75,7 +75,7 @@ pub struct FacetChips {
     pub key: BeliefFacetKey,
     pub support: support::Support,
     /// WHICH families and proofs produced the Support level — a chip that
-    /// says "corroborated by 2 independent" must be able to show its two.
+    /// says "corroborated by 2 independent sources" must be able to show its two.
     pub families: Vec<support::Family>,
     pub independence_edges: Vec<support::IndependenceEdge>,
     pub coverage: coverage::Coverage,
@@ -87,7 +87,7 @@ pub struct FacetChips {
     ///
     /// Carried per-axis as well as joined because a surface draws three chips
     /// and one sentence, and the alternative is a UI that maps
-    /// `(kind, summary)` to "coverage unassessed" on its own — the same fold
+    /// `(kind, summary)` to "sources not yet assessed" on its own — the same fold
     /// rule, spelled a second time in another language. [`Self::line`] is
     /// exactly these three joined, so there is still ONE wording.
     pub support_text: String,
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(facet.key.state_stage, StateStage::Unknown);
         assert_eq!(facet.support.level(), "unsupported");
         assert_eq!(
-            facet.line, "unsupported, coverage unassessed, freshness unknown",
+            facet.line, "no evidence offered, sources not yet assessed, freshness unknown",
             "no rule matched an unknown predicate, and nothing has been assessed"
         );
         assert_eq!(facet.freshness_basis.predicate_class, None);
@@ -334,7 +334,7 @@ mod tests {
             .find(|f| f.key.predicate.value() == Some("ci_status"))
             .expect("the ci_status facet");
         assert_eq!(
-            facet.line, "single-source, coverage unassessed, stale and contested",
+            facet.line, "one source, sources not yet assessed, stale and contested",
             "support, then coverage, then validity"
         );
         assert_eq!(facet.review.as_str(), "current");
@@ -366,7 +366,11 @@ mod tests {
         let chips = one(&state, B_TWO);
         let facet = &chips.facets[0];
         assert_eq!(facet.support.level(), "unsupported");
-        assert!(facet.line.starts_with("unsupported"), "{}", facet.line);
+        assert!(
+            facet.line.starts_with("no evidence offered"),
+            "{}",
+            facet.line
+        );
         assert_eq!(facet.review.as_str(), "current");
         assert_eq!(
             facet.support.independent_family_count(),

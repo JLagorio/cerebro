@@ -1,21 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import {
-  defaultKnowledgeNav,
-  listConcepts,
+  folderLabel,
+  listSections,
   listSubjects,
-  needsReview,
-  verifyPatch,
-  type Concept,
+  reviewQueue,
+  type QueuedConcept,
 } from '@/engine/okf';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import type { KnowledgeNav, Selection } from '@/engine/types';
-import { resolveTarget } from '@/engine/wikilink';
 import { NewRecordDialog } from '@/app/CreateMenu';
 import { useOpenPath } from '@/app/useOpenPath';
-import { reviewConceptPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import {
   AgentWork,
@@ -25,133 +22,54 @@ import {
   WhatChanged,
   WhatsContested,
 } from '@/knowledge/BaseItself';
-import { ConceptBody } from '@/knowledge/ConceptBody';
 import { KnowledgeLog } from '@/knowledge/KnowledgeLog';
-import { KnowledgePanel } from '@/knowledge/KnowledgePanel';
-import { ReviewChip } from '@/knowledge/ReviewChip';
+import { ConceptTable, ReviewQueueList } from '@/knowledge/ConceptTable';
+import { clearReviewWalk, useReviewStart } from '@/knowledge/ReviewQueue';
 import { ThreadView } from '@/knowledge/ThreadView';
-import { chipsFor, useBeliefChips } from '@/knowledge/useBeliefChips';
-import { readNote, verifyConcept } from '@/lib/ipc';
+import { useConcepts } from '@/knowledge/useConcepts';
+import { proposalsByPath, usePendingCards } from '@/knowledge/usePendingCards';
+import type { ReviewCard } from '@/lib/ipc';
+import { DocPage } from '@/pages/DocPage';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { VIEW_TAB_STRIP, viewTabClass } from '@/views/ViewTabs';
 
 /**
- * Knowledge (M5, reworked in M8.1) — the AI knowledge base as its own surface.
+ * Knowledge (M5, M8.1; rebuilt as lists in M50, three tabs in M51, tables in
+ * M52.5) — what agents have learned about this vault, and what that learning
+ * knows about itself.
  *
- * `knowledge/` is an OKF bundle the agent writes and maintains. Humans do not
- * edit it; they VERIFY it. So this page is a reading surface with a provenance
- * ledger, not an editor: browse the bundle, read a concept, judge it against
- * its sources, and record that judgement.
+ * `knowledge/` is an OKF bundle agents write and people verify. A concept is
+ * a PAGE (M50.1): it opens in the same canvas, editor and side panel as any
+ * page, with its review in a bar under its title, and an in-app edit is
+ * captured as the person's own (M23.7). This surface is the way into the
+ * bundle, in three tabs a reader can follow (M51):
  *
- * The read-only rule is enforced in the IPC layer (src-tauri/knowledge.rs and
- * the mock's guardHumanWrite), not by omitting an editor here — a missing
- * button is a suggestion, a rejected command is a rule.
+ * - **Concepts** — everything, filed by folder; a sidebar folder row narrows
+ *   it to one.
+ * - **Review** — what waits for a person, each row saying why, in the order
+ *   to work it; then the changes agents proposed and queued for a decision.
+ * - **Activity** — what changed, what Knowledge is unsure of, the update log,
+ *   and (folded away) the machinery: background work and deferral gates.
  *
- * What changed in M8.1: the page no longer carries its own navigation. Which
- * concepts are on screen is decided by the Knowledge sidebar — by section, by
- * the entity they are ABOUT, or by whether they want review — and the list
- * that remains is the contents of that choice, the same relationship Docs has
- * between its file tree and its editor.
+ * It had eight tabs (M50.5), inherited from the Status hub, half of them
+ * bookkeeping a reader never asked for; the owner, 2026-09-29: "still bad
+ * and hard to follow".
  */
 
-function ConceptRow({
-  concept,
-  active,
-  onClick,
-}: {
-  concept: Concept;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="row"
-      aria-selected={active}
-      data-testid="concept-row"
-      data-path={concept.entry.path}
-      title={concept.supersededBy !== null ? 'Replaced by a newer concept' : undefined}
-      onClick={onClick}
-      className={[
-        'flex flex-col gap-1 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left',
-        active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
-      ].join(' ')}
-    >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span
-          className={[
-            'truncate text-sm',
-            // M8.7 — a replaced concept is struck through in the list. The
-            // alternative is hiding it, which loses the record of what was
-            // believed before; this keeps it readable and unmistakable.
-            concept.supersededBy !== null
-              ? 'font-medium text-n-400 line-through'
-              : active
-                ? 'font-semibold text-n-900'
-                : 'font-medium text-n-800',
-          ].join(' ')}
-        >
-          {concept.title}
-        </span>
-      </span>
-      {concept.description !== null && (
-        <span className="line-clamp-2 text-xs leading-[16px] text-n-500">
-          {concept.description}
-        </span>
-      )}
-      <span className="flex flex-wrap items-center gap-1.5">
-        <span className="text-2xs text-n-400">{concept.conceptType}</span>
-        {/* M15: a strikethrough alone is a legend nobody has — deleted,
-            deprecated, done and filtered-out all look like this. */}
-        {concept.supersededBy !== null && (
-          <span data-testid="replaced-tag" className="rounded-sm bg-n-100 px-1 text-2xs text-n-500">
-            Replaced
-          </span>
-        )}
-        <ReviewChip status={concept.review} by={concept.reviewedBy} size="sm" />
-        {concept.stale && (
-          <span className="inline-flex items-center gap-1 text-2xs text-warn-600">
-            <Icon name="clock-alert" size={10} />
-            Stale
-          </span>
-        )}
-      </span>
-    </button>
-  );
-}
+type Tab = 'all' | 'review' | 'activity';
 
-/**
- * The tabs that describe the base ITSELF rather than list its concepts
- * (M33a.2 — what used to be the Status hub).
- *
- * `null` for every tab that has a concept list. The six that do not carry no
- * heading of their own here: each section already renders its `<h2>` and its
- * blurb, exactly as it did on the hub, and repeating the same three words in
- * an `<h1>` above it would be the merge inventing chrome rather than moving a
- * surface.
- */
-function baseItself(nav: KnowledgeNav, vaultPath: string | null): React.ReactNode {
-  switch (nav.tab) {
-    case 'changed':
-      return <WhatChanged vaultPath={vaultPath} />;
-    case 'contested':
-      return <WhatsContested vaultPath={vaultPath} />;
-    case 'waiting':
-      return <WaitingOnYou vaultPath={vaultPath} />;
-    case 'background':
-      return <Background vaultPath={vaultPath} />;
-    case 'runs':
-      // The vault IS needed now (M33b.3): agents are records in it, and the
-      // proposal queue and the pause are read against it. The run history
-      // below still spans vaults, and the run a link asked for still rides on
-      // the selection, which FleetSection reads itself.
-      return <AgentWork vaultPath={vaultPath} />;
-    case 'gates':
-      return <DeferralGates vaultPath={vaultPath} />;
-    default:
-      return null;
-  }
+/** A body that is read rather than scanned sits on the page's 20px edge; the
+ * tables — Concepts, and Review's queue — run flush under the tab strip
+ * instead, as a view's does. */
+const PADDED = 'px-5 pb-10 pt-4';
+
+/** Which tab a nav lights. A folder is a filter of Concepts; a subject and a
+ * run deep link are no tab at all. */
+function tabOf(nav: KnowledgeNav): Tab | null {
+  if (nav.tab === 'all' || nav.tab === 'section') return 'all';
+  if (nav.tab === 'review' || nav.tab === 'activity') return nav.tab;
+  return null;
 }
 
 export function KnowledgePage({
@@ -159,513 +77,476 @@ export function KnowledgePage({
 }: {
   selection: Extract<Selection, { kind: 'knowledge' }>;
 }) {
+  // A deep link to ONE concept (M8.3, still carried by older links and
+  // history) is that concept's page now (M50.1).
+  if (selection.path !== undefined) {
+    return <DocPage selection={{ kind: 'doc', path: selection.path }} />;
+  }
+  return <KnowledgeLists nav={selection.nav} />;
+}
+
+/** Review — what waits for a person, then what agents queued for a decision.
+ * Concepts lead because the count on the tab and in the sidebar is theirs.
+ *
+ * One measure for the whole tab (M52.5): the queue runs edge to edge as
+ * Concepts does, under a band that names it, and the cards beneath it fill
+ * the same width in a grid. It was a 1,700px table over 880px cards, a
+ * ragged right edge and 800px of nothing beside them.
+ *
+ * A row whose concept also has a queued card marks it (M52.2); the cards
+ * themselves stay whole under Waiting on you, and a queue that could not be
+ * read marks no row — that section says it could not tell. */
+function ReviewBody({
+  vaultPath,
+  queue,
+  proposals,
+}: {
+  vaultPath: string | null;
+  queue: QueuedConcept[];
+  proposals: ReadonlyMap<string, readonly ReviewCard[]> | undefined;
+}) {
+  return (
+    <div className="flex flex-col">
+      <section data-testid="review-to-verify">
+        {queue.length === 0 ? (
+          <div className="px-5 pt-4">
+            <h2 className="m-0 text-sm font-semibold text-n-800">To verify</h2>
+            <div className="flex justify-center py-10">
+              <EmptyState
+                icon="shield-check"
+                title="Everything is reviewed"
+                description="No concept is waiting for a person to verify it."
+              />
+            </div>
+          </div>
+        ) : (
+          <ReviewQueueList queue={queue} proposals={proposals} />
+        )}
+      </section>
+      <div className="px-5 pb-10 pt-8">
+        <WaitingOnYou vaultPath={vaultPath} />
+      </div>
+    </div>
+  );
+}
+
+/** Activity — what moved and what Knowledge is unsure of; the machinery
+ * behind it folded under System, where it waits for whoever wants it. */
+function ActivityBody({
+  vaultPath,
+  onOpenConcept,
+}: {
+  vaultPath: string | null;
+  onOpenConcept: (path: string) => void;
+}) {
+  const [systemOpen, setSystemOpen] = useState(false);
+  return (
+    <div className={`flex flex-col gap-8 ${PADDED}`}>
+      <WhatChanged vaultPath={vaultPath} />
+      <WhatsContested vaultPath={vaultPath} />
+      <KnowledgeLog onOpenConcept={onOpenConcept} />
+      <details
+        data-testid="knowledge-system"
+        className="group"
+        onToggle={(e) => setSystemOpen(e.currentTarget.open)}
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-sm font-semibold text-n-800">
+          <Icon
+            name="chevron-right"
+            size={14}
+            color="var(--n-400)"
+            className="transition-transform group-open:rotate-90"
+          />
+          System
+          {/* A sentence, as every blurb on the page (M52.5): "background
+              work, budgets and deferral gates" was three nouns of jargon. */}
+          <span className="text-xs font-normal text-n-500">
+            What runs in the background, what it may spend, and what is held back.
+          </span>
+        </summary>
+        {/* Mounted when opened: each section reads its own feed, and a
+            folded one has no business reading anything. */}
+        {systemOpen && (
+          <div className="mt-4 flex flex-col gap-8">
+            <Background vaultPath={vaultPath} />
+            <DeferralGates vaultPath={vaultPath} />
+          </div>
+        )}
+      </details>
+    </div>
+  );
+}
+
+function KnowledgeLists({ nav: asked }: { nav: KnowledgeNav | undefined }) {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const rescan = useVaultStore((s) => s.rescan);
-  const toast = useUiStore((s) => s.toast);
-  const actorId = useUiStore((s) => s.actorId);
-  const askAgent = useUiStore((s) => s.askAgent);
   const navigate = useNavStore((s) => s.navigate);
   const openPath = useOpenPath();
-
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [body, setBody] = useState<string>('');
-  const [verifying, setVerifying] = useState(false);
   // The D1 boundary, as UI state: the agent never creates a workspace record,
   // so this flag can only be raised by a click. See the header button.
   const [promoting, setPromoting] = useState(false);
-  // Loaded once for the page rather than once per concept: the axes are a
-  // fold of the whole ledger either way, and asking again on every selection
-  // would re-read it to answer about one row.
-  const chipIndex = useBeliefChips(vaultPath);
-
-  /**
-   * How much room the three columns actually have (M15).
-   *
-   * They used to be `flex-none` at 280 + 320 with a shrinkable middle, i.e. a
-   * 600px hard floor inside a canvas whose own floor is 400 — so with the
-   * assistant open the concept body vanished and the provenance column, which
-   * holds the only two actions on this surface, was clipped away entirely.
-   * Measured rather than assumed because what matters is the CANVAS's width,
-   * not the viewport's.
-   */
-  const [rowWidth, setRowWidth] = useState(0);
-  const observer = useRef<ResizeObserver | null>(null);
-  const rowRef = useCallback((node: HTMLDivElement | null) => {
-    observer.current?.disconnect();
-    observer.current = null;
-    if (node === null || typeof ResizeObserver === 'undefined') return;
-    const next = new ResizeObserver((entries) => {
-      setRowWidth(entries[0]?.contentRect.width ?? 0);
-    });
-    next.observe(node);
-    observer.current = next;
-  }, []);
-  useEffect(() => () => observer.current?.disconnect(), []);
-  // 280 list + a readable concept body + 320 provenance. Below it the third
-  // column becomes a drawer instead of eating the other two.
-  const narrow = rowWidth > 0 && rowWidth < 900;
-  const [provenanceOpen, setProvenanceOpen] = useState(false);
-
-  // A deep link from elsewhere in the app (M8.3) wins over whatever was last
-  // open here — arriving from "what the assistant knows" has to land on the
-  // concept that was clicked, not on the head of the list.
-  const linkedPath = selection.path ?? null;
-  useEffect(() => {
-    if (linkedPath !== null) setSelectedPath(linkedPath);
-  }, [linkedPath]);
 
   // M35.3 — who maintains this. Resolved by CAPABILITY, never by slug or
   // title: `capabilities: knowledge` is what hands an agent the bundle's
-  // conventions (M34.1.3), so it is also what earns the byline. No record →
-  // null, and the header keeps its anonymous label — the tab predates the
-  // agent and an absent record is not a failure.
+  // conventions (M34.1.3), so it is also what earns the byline.
   const maintainer = useMemo(() => {
     const record = entries.find(
       (e) => isAgentEntry(e) && agentRef(e).capabilities.includes('knowledge'),
     );
-    return record === undefined ? null : { path: record.path, title: record.title };
+    return record === undefined ? null : { actor: agentRef(record).actor, title: record.title };
   }, [entries]);
 
   const today = todayIso();
-  const all = useMemo(() => listConcepts(entries, today), [entries, today]);
-  const subjects = useMemo(() => listSubjects(all, entries), [all, entries]);
-  // Memoized so downstream useMemos key on the nav VALUE — an inline
-  // `?? defaultKnowledgeNav(subjects)` would mint a fresh object every render
-  // and defeat them. `subjects` is itself memoized, so the default is stable
-  // until the bundle actually changes.
-  const nav: KnowledgeNav = useMemo(
-    () => selection.nav ?? defaultKnowledgeNav(subjects),
-    [selection.nav, subjects],
+  const all = useConcepts();
+  const sections = useMemo(() => listSections(all), [all]);
+  const queue = useMemo(() => reviewQueue(all), [all]);
+  const nav: KnowledgeNav = asked ?? { tab: 'all' };
+  // A subject is a deep link from before M51 — no row or tab leads there now.
+  const subjects = useMemo(
+    () => (nav.tab === 'entity' ? listSubjects(all, entries) : []),
+    [nav.tab, all, entries],
   );
-
   const subject = nav.tab === 'entity' ? (subjects.find((s) => s.key === nav.key) ?? null) : null;
-  const concepts = useMemo(() => {
-    switch (nav.tab) {
-      case 'review':
-        return all.filter(needsReview);
-      case 'section':
-        return all.filter((c) => c.section === nav.folder);
-      case 'entity':
-        return subject?.concepts ?? [];
-      default:
-        return all;
-    }
-  }, [all, nav, subject]);
+  const folder = nav.tab === 'section' ? nav.folder : null;
+  const section = folder === null ? null : (sections.find((s) => s.folder === folder) ?? null);
+  const tab = tabOf(nav);
+  // What the header counts and Start review walks: the folder a view narrows
+  // to, else the whole bundle.
+  const filed = useMemo(
+    () => (folder === null ? undefined : all.filter((c) => c.section === folder)),
+    [all, folder],
+  );
+  // A folder's Start review is a walk of that folder: the pager counts it
+  // and stops at its last concept (M52.5).
+  const { waiting, start } = useReviewStart(
+    all,
+    filed,
+    folder === null
+      ? undefined
+      : {
+          label: section?.label ?? folderLabel(folder),
+          back: { kind: 'knowledge', nav: { tab: 'section', folder } },
+        },
+  );
+  // Arriving here is leaving any walk: what is opened from here starts its
+  // own — a Review-tab row, or the unscoped Start review, the whole queue's.
+  useEffect(() => clearReviewWalk(), []);
+  // M52.2 — a row whose concept has a card waiting says so. Read once here
+  // for both tables; a queue that could not be read marks no row.
+  const pending = usePendingCards(vaultPath);
+  const proposals = useMemo(
+    () => (pending.kind === 'ready' ? proposalsByPath(pending.data) : undefined),
+    [pending],
+  );
+  // How many cards wait on a decision, of this view: every one, or those
+  // naming a concept in the folder. Null when the queue could not be read —
+  // never 0, which would say "nothing waits".
+  const proposalCount = useMemo(() => {
+    if (pending.kind !== 'ready') return null;
+    if (filed === undefined) return pending.data.length;
+    const here = new Set(filed.map((c) => c.entry.path));
+    return pending.data.filter((card) =>
+      card.targets.some((t) => t.path != null && here.has(t.path)),
+    ).length;
+  }, [pending, filed]);
 
-  /**
-   * A thread does not auto-select (M33a.4).
-   *
-   * Every other view here is a LIST of concepts and opening the head of it is
-   * a reasonable guess. A thread is one subject, and the answer to "what does
-   * the base believe about this" is the whole thread — so landing on whichever
-   * concept sorted first would answer a question nobody asked and hide the
-   * four that matter more. The other tabs keep the guess.
-   */
-  const selected =
-    concepts.find((c) => c.entry.path === selectedPath) ??
-    (nav.tab === 'entity' ? null : (concepts[0] ?? null));
-  const selectedConceptPath = selected?.entry.path ?? null;
-  /** The thread reads as one thing until a concept is asked for by name. */
-  const showThread = nav.tab === 'entity' && subject !== null && selected === null;
+  const openConcept = (path: string) => navigate({ kind: 'doc', path });
+  const openFolder = (at: string) =>
+    navigate({ kind: 'knowledge', nav: { tab: 'section', folder: at } });
 
-  // A replaced concept carries no back-pointer of its own (M8.7: the
-  // replacement is what holds `supersedes`), so the title of what replaced it
-  // is looked up in the bundle.
-  const replacedBy = selected?.supersededBy ?? '';
-  const replacement =
-    replacedBy === '' ? null : (all.find((c) => c.entry.path === replacedBy) ?? null);
+  // The crumb after "Knowledge": the folder or subject a view narrows to.
+  const crumb =
+    nav.tab === 'entity'
+      ? (subject?.label ?? 'Unknown subject')
+      : folder !== null
+        ? (section?.label ?? folderLabel(folder))
+        : null;
 
-  // Concept bodies are read on demand rather than held in the store: the
-  // bundle can be large and only one concept is on screen at a time.
-  useEffect(() => {
-    if (vaultPath === null || selectedConceptPath === null) {
-      setBody('');
-      return;
-    }
-    let cancelled = false;
-    readNote(vaultPath, selectedConceptPath)
-      .then((text) => {
-        if (!cancelled) setBody(text);
-      })
-      .catch(() => {
-        if (!cancelled) setBody('');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedConceptPath, vaultPath]);
-
-  // M15: one sign-off per actor per day. "Verify again" used to append an
-  // identical `{by, at}` row on every click, which is how the ledger filled
-  // with four copies of the same stamp.
-  const verifiedToday =
-    selected !== null &&
-    selected.verified.some(
-      (stamp) =>
-        stamp.by.kind === 'human' &&
-        stamp.by.label === actorId &&
-        (stamp.at ?? '').slice(0, 10) === today,
-    );
-
-  const verify = () => {
-    if (vaultPath === null || selected === null || verifiedToday) return;
-    setVerifying(true);
-    void (async () => {
-      try {
-        const patch = verifyPatch(selected.entry, `human:${actorId}`, new Date().toISOString());
-        await verifyConcept(vaultPath, selected.entry.path, patch);
-        await rescan();
-        // Said plainly, because verifying does NOT clear staleness: the
-        // recheck date is the agent's to move (verify_concept may write
-        // `verified` and nothing else), so a stale concept stays in the
-        // review queue and the toast must not imply otherwise.
-        toast(
-          selected.stale
-            ? `Verified "${selected.title}" — still due a recheck, so it stays in Needs review`
-            : `Verified "${selected.title}"`,
-        );
-      } catch (err) {
-        toast(`Couldn't verify: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        setVerifying(false);
-      }
-    })();
-  };
-
-  /** Jump to a concept by path from anywhere — the log, a cross-link. */
-  const openConcept = (path: string) => {
-    if (!all.some((c) => c.entry.path === path)) {
-      // Broken cross-links are legitimate in OKF (§6.1) — they may just be
-      // knowledge nobody has written yet.
-      toast(`No concept at ${path} yet`);
-      return;
-    }
-    // The log shows no concept list at all, and a narrowed slice may not
-    // contain the target — either way, land somewhere it is actually visible.
-    const visibleHere = nav.tab !== 'log' && concepts.some((c) => c.entry.path === path);
-    if (!visibleHere) navigate({ kind: 'knowledge', nav: { tab: 'all' } });
-    setSelectedPath(path);
-  };
-
-  /**
-   * A `[[wikilink]]` in a concept body, followed (M33a.4).
-   *
-   * Resolution happens here rather than in the renderer because it needs the
-   * whole vault — and because only the page knows what to DO with a hit: a
-   * concept opens in this reading pane, anything else is the user's own
-   * record and opens wherever that record lives.
-   */
-  const openWikilink = (target: string) => {
-    const entry = resolveTarget(target, entries);
-    if (entry === null) {
-      // A dangling link is legitimate (OKF §6.1) and, per D7, an open thread:
-      // the base is tracking something the workspace has not written up. It is
-      // reported as an absence, never as damage.
-      toast(`Nothing in the vault is named "${target}" yet`);
-      return;
-    }
-    if (all.some((c) => c.entry.path === entry.path)) openConcept(entry.path);
-    else openPath(entry.path);
-  };
-
-  // M33a.2 — the six tabs that describe the base itself short-circuit for the
-  // same reason `log` does below: there is no concept list to put beside them,
-  // so the three-column layout has nothing to lay out. They sit ABOVE the
-  // empty-bundle guard as well, because what the base knows about itself does
-  // not stop being true when nobody has written a concept yet — a vault with
-  // no bundle still has runs, a budget and a proposal queue.
-  const itself = baseItself(nav, vaultPath);
-  if (itself !== null) {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          {/* Left-aligned and capped: these are sentences to read, not a
-              dashboard to spread. */}
-          <div className="flex w-full min-w-0 max-w-[860px] flex-col gap-6 px-6 py-4">{itself}</div>
-        </div>
+  let body: React.ReactNode;
+  if (nav.tab === 'review') {
+    body = <ReviewBody vaultPath={vaultPath} queue={queue} proposals={proposals} />;
+  } else if (nav.tab === 'activity') {
+    body = <ActivityBody vaultPath={vaultPath} onOpenConcept={openConcept} />;
+  } else if (nav.tab === 'runs') {
+    // No tab (M50.5) — the fleet lives on Agents — but the AI panel's run
+    // list still deep-links one run open here.
+    body = (
+      <div className={PADDED}>
+        <AgentWork vaultPath={vaultPath} />
       </div>
     );
-  }
-
-  if (all.length === 0) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center" data-testid="knowledge-page">
+  } else if (all.length === 0) {
+    body = (
+      <div className="flex justify-center py-16">
         <EmptyState
           icon="brain"
           title="No knowledge yet"
-          description="This is the AI knowledge base — an Open Knowledge Format bundle in knowledge/. The agent writes and maintains it; you review and verify what it claims."
+          description="Agents write what they learn about this vault into knowledge/, as concepts you can open, edit and verify."
         />
       </div>
     );
-  }
-
-  if (nav.tab === 'log') {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
-        <KnowledgeLog onOpenConcept={openConcept} />
+  } else if (nav.tab === 'entity') {
+    body = (
+      <div className={PADDED}>
+        {subject === null ? (
+          <p className="text-sm text-n-500">Knowledge holds nothing about that subject.</p>
+        ) : (
+          <ThreadView
+            subject={subject}
+            concepts={all}
+            entries={entries}
+            today={today}
+            onOpenConcept={openConcept}
+          />
+        )}
       </div>
     );
-  }
-
-  const heading =
-    nav.tab === 'review'
-      ? 'Needs review'
-      : nav.tab === 'section'
-        ? nav.folder === ''
-          ? 'Ungrouped'
-          : nav.folder.replace(/^\w/, (c) => c.toUpperCase())
-        : nav.tab === 'entity'
-          ? (subject?.label ?? 'Unknown entity')
-          : 'All concepts';
-
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
-      <header className="flex flex-none items-center gap-2.5 border-b border-n-200 px-5 py-2.5">
-        {/* h1, like the other five page-chrome titles (Docs, Changes, Pulse,
-            List, Type). Knowledge was the last page with no h1 at all, so a
-            screen reader's heading list started at the selected concept. */}
-        <h1 className="m-0 text-lg font-semibold text-n-900" data-testid="knowledge-heading">
-          {heading}
-        </h1>
-        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
-          {concepts.length}
-        </span>
-        {/* On an entity slice the subject itself is one click away — that link
-            is the whole point of anchoring knowledge to the vault. */}
-        {subject?.entry != null && (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon="arrow-up-right"
-            onClick={() => openPath(subject.entry!.path)}
-          >
-            Open {subject.label}
-          </Button>
-        )}
-        {/* And where there is nothing to open, the offer to write it (D7/D1).
-            This is the ONE place a knowledge thread becomes a workspace
-            record, and it happens because a human clicked: the agent is
-            sovereign inside `knowledge/` and nowhere else, so a thread it has
-            been tracking for weeks stays a thread until somebody says
-            otherwise. The dialog is the New menu's own — same types, same
-            `createTarget` — pre-filled with the thread's name and editable,
-            and creating navigates to the new page. */}
-        {subject !== null && subject.entry === null && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              testId="promote-thread"
-              onClick={() => setPromoting(true)}
-            >
-              + Create page
-            </Button>
-            {promoting && (
-              <NewRecordDialog defaultTitle={subject.target} onClose={() => setPromoting(false)} />
-            )}
-          </>
-        )}
-        <span className="flex-1" />
-        {/* The only way to Verify or ask for a recheck once the provenance
-            column has stepped out of the row. */}
-        {narrow && selected !== null && (
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="shield-check"
-            onClick={() => setProvenanceOpen(!provenanceOpen)}
-          >
-            {provenanceOpen ? 'Hide provenance' : 'Provenance'}
-          </Button>
-        )}
-        {/* M35.3 — the base's judgement has a face: the byline names the
-            knowledge-capable Agent record and opens it. Without one the
-            anonymous label stands, as it always has. */}
-        {!narrow &&
-          (maintainer !== null ? (
-            <button
-              type="button"
-              data-testid="knowledge-maintainer"
-              onClick={() => openPath(maintainer.path)}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:text-n-800"
-            >
-              <Icon name="lock" size={12} />
-              Maintained by {maintainer.title}
-            </button>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
-              <Icon name="lock" size={12} />
-              Maintained by the agent
-            </span>
-          ))}
-      </header>
-
-      {selected === null && !showThread ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center">
+  } else if (folder !== null && filed !== undefined) {
+    body =
+      filed.length === 0 ? (
+        <div className="flex justify-center py-16">
           <EmptyState
-            icon={nav.tab === 'review' ? 'shield-check' : 'brain'}
-            title={nav.tab === 'review' ? 'Everything is reviewed' : 'Nothing here'}
-            description={
-              nav.tab === 'review'
-                ? 'No concept is unverified, stale, or deprecated.'
-                : 'No concept is filed under this yet.'
-            }
-            action={
-              <Button
-                variant="secondary"
-                onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
-              >
-                Show all
-              </Button>
-            }
+            icon="folder"
+            title="Nothing here"
+            description="No concept is filed under this folder."
           />
         </div>
       ) : (
-        <div
-          ref={rowRef}
-          // `overflow-hidden` + a relative box: nothing in here may paint
-          // outside the canvas, and the provenance drawer anchors to it.
-          className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
-        >
-          <div
-            className={[
-              'flex flex-none flex-col overflow-y-auto border-r border-n-200',
-              narrow ? 'w-[220px]' : 'w-[280px]',
-            ].join(' ')}
-          >
-            {/* The way back to the whole thread once a concept has been
-                opened. It leads the column because the thread is what the tab
-                landed on — without it, reading one concept is a one-way door
-                out of the only view that reads the subject as a subject. */}
-            {nav.tab === 'entity' && subject !== null && (
-              <button
-                type="button"
-                data-testid="thread-overview-row"
-                aria-selected={selected === null}
-                onClick={() => setSelectedPath(null)}
-                className={[
-                  'flex items-center gap-1.5 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left text-sm',
-                  selected === null
-                    ? 'bg-cortex-50 font-semibold text-n-900'
-                    : 'bg-transparent font-medium text-n-800 hover:bg-n-25',
-                ].join(' ')}
-              >
-                <Icon name="layers" size={13} color="var(--n-500)" />
-                Thread overview
-              </button>
-            )}
-            {concepts.map((c) => (
-              <ConceptRow
-                key={c.entry.path}
-                concept={c}
-                active={c.entry.path === selected?.entry.path}
-                onClick={() => setSelectedPath(c.entry.path)}
-              />
-            ))}
-          </div>
+        // One section and no band: the crumb already names the folder.
+        <ConceptTable
+          sections={[{ folder, label: folderLabel(folder), concepts: filed }]}
+          queue={queue}
+          proposals={proposals}
+        />
+      );
+  } else {
+    // Everything, filed under the folders the sidebar lists; a band's name
+    // opens its folder, as the sidebar row does.
+    body = (
+      <ConceptTable
+        sections={sections.map((s) => ({
+          folder: s.folder,
+          label: s.label,
+          concepts: all.filter((c) => c.section === s.folder),
+        }))}
+        queue={queue}
+        proposals={proposals}
+        onOpenFolder={openFolder}
+      />
+    );
+  }
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6">
-            <div className="mx-auto w-full max-w-[760px] px-6">
-              {selected === null ? (
-                // The thread, read as one thing. `subject` is non-null
-                // whenever `selected` is not — see `showThread`.
-                subject !== null && (
-                  <ThreadView
-                    subject={subject}
-                    concepts={all}
-                    entries={entries}
-                    today={today}
-                    onOpenConcept={setSelectedPath}
-                  />
-                )
-              ) : (
+  // The tab counts are the bundle's, so a folder's view draws none: there
+  // they would count one thing while the tab opened another, and the header
+  // already counts the folder (M52.5).
+  const bundleWide = folder === null;
+  const tabs: { tab: Tab; label: string; icon: string; count?: number }[] = [
+    { tab: 'all', label: 'Concepts', icon: 'table-2', count: bundleWide ? all.length : undefined },
+    {
+      tab: 'review',
+      label: 'Review',
+      icon: 'shield-check',
+      // Review holds two queues — concepts to verify and the changes agents
+      // proposed — and its count is both. The cards are left out only when
+      // they could not be read.
+      count: bundleWide ? queue.length + (proposalCount ?? 0) : undefined,
+    },
+    { tab: 'activity', label: 'Activity', icon: 'activity' },
+  ];
+
+  // "9 to verify · 3 proposals" — of the folder in a folder's view. The
+  // concept count sits beside the title, as a view's record count does.
+  const counted = filed ?? all;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const summary =
+    all.length === 0
+      ? null
+      : waiting.length === 0 && (proposalCount ?? 0) === 0
+        ? 'nothing to review'
+        : [
+            waiting.length === 0 ? 'nothing to verify' : `${waiting.length} to verify`,
+            proposalCount === null || proposalCount === 0
+              ? null
+              : plural(proposalCount, 'proposal', 'proposals'),
+          ]
+            .filter((part) => part !== null)
+            .join(' · ');
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
+      {/* A type's page shell (M52.5): the title row padded like its header,
+          then the tab strip edge to edge with the page's one primary act at
+          its end, then the table flush beneath it. */}
+      {/* A container of its own (M52.5), so the byline steps aside before
+          the counts beside it are ever cut: "3 to verify · 3 pro…" was the
+          header giving up its one useful number for a name. */}
+      <header className="@container/khead flex flex-none px-5 pt-3.5">
+        <div className="mb-2.5 flex min-w-0 flex-1 items-center gap-2">
+          <span className="flex h-7 w-7 flex-none items-center justify-center">
+            <Icon name="brain" size={16} color="var(--n-600)" />
+          </span>
+          {/* `px-1` is the inset a type page's title has from its rename
+              button, so the two headings start at one x (M52.5). */}
+          <h1
+            className="m-0 min-w-0 flex-[0_1_auto] px-1 text-lg font-semibold leading-6 tracking-[-0.005em]"
+            data-testid="knowledge-heading"
+          >
+            {crumb === null ? (
+              'Knowledge'
+            ) : (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => navigate({ kind: 'knowledge', nav: { tab: 'all' } })}
+                  className="border-0 bg-transparent p-0 text-lg font-semibold text-n-500 hover:text-n-800"
+                >
+                  Knowledge
+                </button>
+                <Icon name="chevron-right" size={14} color="var(--n-300)" className="flex-none" />
+                <span className="truncate">{crumb}</span>
+              </span>
+            )}
+          </h1>
+          {/* How many, as a view's header counts its records. */}
+          {nav.tab !== 'entity' && (
+            <span
+              data-testid="knowledge-count"
+              className="flex-none [font-family:var(--font-mono)] text-xs text-n-400"
+            >
+              {counted.length}
+            </span>
+          )}
+          {summary !== null && nav.tab !== 'entity' && (
+            <p
+              data-testid="knowledge-summary"
+              className="m-0 ml-1 flex min-w-0 items-center gap-1.5 text-xs text-n-500"
+            >
+              {/* Never cut: the counts are the header's reason to be. */}
+              <span className="flex-none whitespace-nowrap">{summary}</span>
+              {/* M35.3 — Knowledge's judgement has a face: the byline names
+                  the knowledge-capable agent and opens it on Agents (M50.3).
+                  With no such agent there is no byline — "Maintained by
+                  agents" named nobody. */}
+              {maintainer !== null && (
                 <>
-                  {/* M15: the reading pane gave no sign at all that the bundle
-                      no longer believes this — a retired claim read as
-                      current. */}
-                  {selected.supersededBy !== null && (
-                    <div
-                      data-testid="superseded-banner"
-                      className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
-                    >
-                      <Icon name="archive" size={12} />
-                      <span>No longer believed. Replaced by</span>
-                      <button
-                        type="button"
-                        data-path={selected.supersededBy}
-                        onClick={() => openConcept(replacedBy)}
-                        className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
-                      >
-                        {replacement?.title ?? 'a newer concept'}
-                      </button>
-                    </div>
-                  )}
-                  <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
-                    <span className="[font-family:var(--font-mono)]">{selected.id}</span>
-                  </div>
-                  {/* h2: the concept is a section of the Knowledge page, not
-                      the page itself. Size is unchanged — the level is the
-                      fix. */}
-                  <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
-                    {selected.title}
-                  </h2>
-                  {selected.description !== null && (
-                    <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
-                      {selected.description}
-                    </p>
-                  )}
-                  <ConceptBody
-                    key={selected.entry.path}
-                    markdown={body}
-                    sources={selected.sources}
-                    fromPath={selected.entry.path}
-                    onOpenConcept={openConcept}
-                    onOpenWikilink={openWikilink}
-                  />
+                  <span aria-hidden className="text-n-300 @max-[640px]/khead:hidden">
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="knowledge-maintainer"
+                    onClick={() => navigate({ kind: 'agents', actor: maintainer.actor })}
+                    className="inline-flex min-w-0 cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent p-0 text-xs text-n-500 hover:text-n-800 @max-[640px]/khead:hidden"
+                  >
+                    <Icon name="bot" size={12} color="var(--synapse-500)" className="flex-none" />
+                    <span className="truncate">Maintained by {maintainer.title}</span>
+                  </button>
                 </>
               )}
-            </div>
-          </div>
-
-          {/* Beside the concept when there is room for it; a drawer over the
-              reading pane when there is not — never a third fixed column
-              squeezing the other two off the canvas. */}
-          {narrow && provenanceOpen && (
-            <button
-              type="button"
-              aria-label="Close provenance"
-              onClick={() => setProvenanceOpen(false)}
-              className="absolute inset-0 z-10 cursor-default border-0 bg-transparent"
-            />
+            </p>
           )}
-          {/* No concept, no provenance ledger: the thread view is a read of
-              many concepts and there is no single one to attest to. */}
-          {(!narrow || provenanceOpen) && selected !== null && (
-            <KnowledgePanel
-              concept={selected}
-              today={today}
-              verifying={verifying}
-              verifiedToday={verifiedToday}
-              chips={chipsFor(chipIndex, selected.entry.path)}
-              className={
-                narrow
-                  ? 'absolute inset-y-0 right-0 z-20 w-[300px] max-w-full shadow-[var(--shadow-lg)]'
-                  : 'w-[320px] flex-none'
-              }
-              onVerify={verify}
-              onOpenEntity={openPath}
-              onOpenConcept={openConcept}
-              onAskAgent={() => {
-                askAgent(
-                  reviewConceptPrompt(selected.entry.path, selected.title),
-                  selected.entry.path,
-                );
-              }}
-            />
+          {/* On a subject the subject itself is one click away — that link is
+              the whole point of anchoring knowledge to the vault. */}
+          {subject?.entry != null && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="arrow-up-right"
+              onClick={() => openPath(subject.entry!.path)}
+            >
+              Open page
+            </Button>
+          )}
+          {/* And where there is nothing to open, the offer to write it (D7/D1):
+              a subject becomes a workspace record because a human clicked. The
+              dialog is the New menu's own, pre-filled. */}
+          {subject !== null && subject.entry === null && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                testId="promote-thread"
+                onClick={() => setPromoting(true)}
+              >
+                + Create page
+              </Button>
+              {promoting && (
+                <NewRecordDialog
+                  defaultTitle={subject.target}
+                  onClose={() => setPromoting(false)}
+                />
+              )}
+            </>
           )}
         </div>
-      )}
+      </header>
+      {/* A container of its own (M52.5): at 1100px with the Assistant open,
+          Start review sat on top of the Activity tab. Narrow, the button
+          keeps its glyph and count and its words go to screen readers only;
+          narrower still, the tabs scroll under their own edge rather than
+          under the button. */}
+      <div className={`${VIEW_TAB_STRIP} @container/ktabs px-5`}>
+        <nav
+          aria-label="Knowledge views"
+          className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {tabs.map((t) => {
+            const on = tab === t.tab;
+            return (
+              <button
+                key={t.tab}
+                type="button"
+                data-testid={`knowledge-tab-${t.tab}`}
+                aria-current={on ? 'page' : undefined}
+                onClick={() => navigate({ kind: 'knowledge', nav: { tab: t.tab } })}
+                className={viewTabClass(on)}
+                style={{ borderBottomStyle: 'solid' }}
+              >
+                <Icon name={t.icon} size={13} />
+                {t.label}
+                {t.count !== undefined && (
+                  <span className="[font-family:var(--font-mono)] text-2xs font-normal text-n-400">
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        {/* The queue's front door, where a view keeps its New button: the
+            first concept in the order Review works them (a folder's own, in
+            a folder), opened as its page, where the review bar and its pager
+            take over. Its count is the number that matters most on the page,
+            so it rides on the button. With nothing waiting there is no
+            button — the summary says so. */}
+        {waiting.length > 0 && (
+          <div className="flex flex-none items-center gap-0.5 pb-1 pl-2">
+            <Button
+              variant="primary"
+              size="sm"
+              icon="play"
+              testId="knowledge-start-review"
+              onClick={start}
+            >
+              <span className="@max-[440px]/ktabs:sr-only">Start review</span>
+              <span
+                data-testid="knowledge-start-count"
+                className="[font-family:var(--font-mono)] text-2xs opacity-80"
+              >
+                {waiting.length}
+              </span>
+            </Button>
+          </div>
+        )}
+      </div>
+      {/* The page's scroll, and only up and down (M52.5): a table too wide
+          for its room scrolls sideways in its own box (`ConceptTable`), so
+          the headings and cards around it stay put. Concepts' table is the
+          page, and its box takes this whole column — a flex child that
+          fills it — so its header stays pinned while its rows scroll. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        {body}
+      </div>
     </div>
   );
 }

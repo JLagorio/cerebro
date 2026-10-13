@@ -89,7 +89,7 @@ function ListRow({
           e.stopPropagation();
           onToggle();
         }}
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
       </button>
@@ -244,7 +244,7 @@ function BandHeader({
         aria-expanded={!collapsed}
         aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
         onClick={onToggle}
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
       </button>

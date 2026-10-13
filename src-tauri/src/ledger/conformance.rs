@@ -2225,6 +2225,70 @@ fn body_patch(before: &str, after: &str) -> Vec<OverridePatchOp> {
     }]
 }
 
+fn moved_body(belief_id: &str, from: &str, to: &str, projected: &str) -> ProjectionMoved {
+    let (schema, batch_id, idempotency_key, actor) = common("unattributed:out_of_band");
+    ProjectionMoved {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        belief_id: belief_id.into(),
+        from_path: from.into(),
+        to_path: to.into(),
+        projection_hash: crate::ledger::sha256_hex(projected.as_bytes()),
+    }
+}
+
+/// M49.5 (K29): a projection file moved, bytes unchanged — and the three
+/// ways a move is refused.
+fn scenario_moves() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF_B, ENTITY_B, "concepts/beta.md"),
+    );
+    let acme = acme_projection(BODY_V1, None);
+    // The move: same bytes, a new path.
+    b.push_body(
+        KIND_PROJECTION_MOVED,
+        &moved_body(BELIEF, ACME_PATH, "vendors/acme.md", &acme),
+    );
+    // Refused: it no longer projects at the old path.
+    b.push_body(
+        KIND_PROJECTION_MOVED,
+        &moved_body(BELIEF, ACME_PATH, "vendors/acme-2.md", &acme),
+    );
+    // Refused: the destination is another Belief's.
+    b.push_body(
+        KIND_PROJECTION_MOVED,
+        &moved_body(BELIEF, "vendors/acme.md", "concepts/beta.md", &acme),
+    );
+    // Refused: a move carries no content change.
+    b.push_body(
+        KIND_PROJECTION_MOVED,
+        &moved_body(
+            BELIEF,
+            "vendors/acme.md",
+            "vendors/acme-3.md",
+            &acme_projection(BODY_V2, None),
+        ),
+    );
+    (
+        "moves",
+        "A projection file moved with its bytes unchanged: the path claim follows it and the \
+         projection head advances. Refused: a Belief not projecting at from_path, a claimed \
+         destination, and bytes that are not the current projection.",
+        b.frames,
+    )
+}
+
 fn scenario_overrides() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let created = b.push_body(
@@ -5713,6 +5777,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_plumbing(),
         scenario_migration(),
         scenario_overrides(),
+        scenario_moves(),
         scenario_projection_identity(),
         scenario_reconciliation(),
         scenario_capture(),

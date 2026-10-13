@@ -1,21 +1,24 @@
-import { useMemo } from 'react';
-import { Button } from '@/components/ui/Button';
+import { useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Tag } from '@/components/ui/Tag';
+import { NewRecordDialog } from '@/app/CreateMenu';
 import {
   conceptEdges,
-  humanReviewed,
-  listConcepts,
+  localDayOf,
   nearDuplicates,
   type Concept,
   type Source,
   type Stamp,
 } from '@/engine/okf';
+import { sourceTarget } from '@/editor/citations';
+import { resolveAuthor } from '@/engine/authors';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
 import { FacetChips } from '@/knowledge/FacetChips';
-import { FlagChip, ReviewChip } from '@/knowledge/ReviewChip';
+import { useConcepts } from '@/knowledge/useConcepts';
 import type { BeliefChips } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -30,13 +33,20 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
-/** "3 days ago" — freshness is what makes a trust tier actionable. */
+/**
+ * "3 days ago" — freshness is what makes a trust tier actionable. Counted in
+ * the reader's calendar days (M52.4): `today` is a local day, so the stamp is
+ * read as one too — a Verify made this morning in Sydney is still yesterday
+ * in UTC, and must not read "yesterday" beside a bar that says "today".
+ */
 export function relativeDay(iso: string | null, today: string): string | null {
   if (iso === null) return null;
-  const then = Date.parse(iso);
-  const now = Date.parse(`${today}T23:59:59Z`);
+  const day = localDayOf(iso);
+  if (day === null) return null;
+  const then = Date.parse(`${day}T00:00:00Z`);
+  const now = Date.parse(`${today}T00:00:00Z`);
   if (Number.isNaN(then) || Number.isNaN(now)) return null;
-  const days = Math.floor((now - then) / 86_400_000);
+  const days = Math.round((now - then) / 86_400_000);
   if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
   if (days < 30) return `${days}d ago`;
@@ -44,32 +54,135 @@ export function relativeDay(iso: string | null, today: string): string | null {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-function ActorLine({ stamp, today }: { stamp: Stamp; today: string }) {
+/**
+ * One stamp, read as the app's own nouns (M50.3): an agent's stamp is that
+ * agent and opens it, the assistant's is the Assistant and opens the panel,
+ * a person is a person — by name, opening their page when exactly one page
+ * answers to them (M52.3), so `human:tom-keller` reads "Tom Keller". The raw
+ * stamp stays in the tooltip.
+ */
+export function ActorLine({
+  stamp,
+  today,
+  onOpenEntity,
+}: {
+  stamp: Stamp;
+  today: string;
+  /** Opens a person's page. Without it, a person is a name and not a link. */
+  onOpenEntity?: (path: string) => void;
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  const navigate = useNavStore((s) => s.navigate);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const when = relativeDay(stamp.at, today);
+  const author = resolveAuthor(stamp.by, entries);
+  const whenTail = when !== null && <span className="flex-none text-2xs text-n-400">{when}</span>;
+  if (author.kind === 'agent' || author.kind === 'assistant') {
+    return (
+      <button
+        type="button"
+        data-testid="concept-author"
+        data-author={author.kind}
+        title={stamp.by.raw}
+        onClick={() =>
+          author.kind === 'agent'
+            ? navigate({ kind: 'agents', actor: author.actor })
+            : setAiPanelOpen(true)
+        }
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-left text-xs text-n-700 hover:text-cortex-600"
+      >
+        <Icon
+          name={author.kind === 'agent' ? 'bot' : 'sparkles'}
+          size={12}
+          color="var(--synapse-500)"
+        />
+        <span className="truncate">{author.kind === 'agent' ? author.title : 'Assistant'}</span>
+        {whenTail}
+      </button>
+    );
+  }
   const icon =
     stamp.by.kind === 'human' ? 'user-round' : stamp.by.kind === 'process' ? 'cog' : 'bot';
+  if (author.kind === 'human' && author.path !== undefined && onOpenEntity !== undefined) {
+    const person = author.path;
+    return (
+      <button
+        type="button"
+        data-testid="concept-person"
+        data-path={person}
+        title={stamp.by.raw}
+        onClick={() => onOpenEntity(person)}
+        className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-left text-xs text-n-700 hover:text-cortex-600"
+      >
+        <Icon name={icon} size={12} color="var(--n-500)" />
+        <span className="truncate">{author.label}</span>
+        {whenTail}
+      </button>
+    );
+  }
   return (
-    <div className="flex items-center gap-1.5 text-xs text-n-700">
+    <div className="flex items-center gap-1.5 text-xs text-n-700" title={stamp.by.raw}>
       <Icon name={icon} size={12} color="var(--n-500)" />
-      <span className="truncate [font-family:var(--font-mono)] text-xs">{stamp.by.label}</span>
-      {when !== null && <span className="flex-none text-2xs text-n-400">{when}</span>}
+      <span className="truncate">{author.label}</span>
+      {whenTail}
     </div>
   );
 }
 
-function SourceRow({ source, index }: { source: Source; index: number }) {
-  const external = /^[a-z][a-z0-9+.-]*:/i.test(source.resource);
+function SourceRow({
+  source,
+  index,
+  today,
+  onOpenEntity,
+}: {
+  source: Source;
+  index: number;
+  today: string;
+  onOpenEntity: (path: string) => void;
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  // A vault-relative resource (`/records/…`) is a page in this vault, and
+  // opens like one (M50.1) — it used to render as plain text. One rule for
+  // this list and the body's citation chips (M51.5), so a source never opens
+  // from one and not the other.
+  const target = sourceTarget(source.resource, entries);
+  const external = target !== null && 'external' in target;
+  const internal =
+    target !== null && 'internal' in target
+      ? (entries.find((e) => e.path === target.internal) ?? null)
+      : null;
+  // Who wrote the source, in the app's nouns (M52.3) — a person by their
+  // page's title, and that page one click away; the stamp in the tooltip.
+  const author = source.author === null ? null : resolveAuthor(source.author, entries);
+  const authorName =
+    author === null
+      ? null
+      : author.kind === 'agent'
+        ? author.title
+        : author.kind === 'assistant'
+          ? 'Assistant'
+          : author.label;
+  const person = author?.kind === 'human' ? (author.path ?? null) : null;
+  // Dates as the rest of the page says them — "3d ago", as the table's
+  // Updated and the byline do (M52.5) — and the dates themselves on hover.
+  const day = (iso: string) => relativeDay(iso, today) ?? iso;
   const signals: string[] = [];
-  if (source.author !== null) signals.push(source.author.label);
+  const dates: string[] = [];
   if (source.usageCount !== null) {
     const window = source.usageWindow;
     const range =
-      window?.from != null && window.to != null ? ` (${window.from} → ${window.to})` : '';
+      window?.from != null && window.to != null
+        ? ` (${day(window.from)} to ${day(window.to)})`
+        : '';
+    if (window?.from != null && window.to != null) dates.push(`used ${window.from} → ${window.to}`);
     // A coarse liveness signal, comparable at the alive-vs-dead and
     // order-of-magnitude level — not a precise cross-kind ranking (§5.1).
     signals.push(`${source.usageCount.toLocaleString()} uses${range}`);
   }
-  if (source.lastModified !== null) signals.push(`changed ${source.lastModified}`);
+  if (source.lastModified !== null) {
+    signals.push(`changed ${day(source.lastModified)}`);
+    dates.push(`changed ${source.lastModified}`);
+  }
 
   return (
     <li className="flex gap-2 py-1.5">
@@ -86,14 +199,42 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
           >
             {source.title ?? source.resource}
           </a>
+        ) : internal !== null ? (
+          <button
+            type="button"
+            data-testid="concept-source"
+            data-path={internal.path}
+            onClick={() => onOpenEntity(internal.path)}
+            className="block max-w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
+          >
+            {source.title ?? internal.title}
+          </button>
         ) : (
           // Not every resource is followable: OKF also allows a scope
           // descriptor ("all queries in project X"), which has no link.
           <span className="block text-xs text-n-700">{source.title ?? source.resource}</span>
         )}
-        {signals.length > 0 && (
+        {(authorName !== null || signals.length > 0) && (
           <span className="mt-0.5 block text-2xs leading-[15px] text-n-500">
-            {signals.join(' · ')}
+            {authorName !== null &&
+              (person !== null ? (
+                <button
+                  type="button"
+                  data-testid="source-author"
+                  data-path={person}
+                  title={source.author?.raw}
+                  onClick={() => onOpenEntity(person)}
+                  className="border-0 bg-transparent p-0 text-2xs text-n-600 hover:text-cortex-600 hover:underline"
+                >
+                  {authorName}
+                </button>
+              ) : (
+                <span title={source.author?.raw}>{authorName}</span>
+              ))}
+            {authorName !== null && signals.length > 0 && ' · '}
+            <span title={dates.length === 0 ? undefined : dates.join(' · ')}>
+              {signals.join(' · ')}
+            </span>
           </span>
         )}
       </span>
@@ -117,10 +258,16 @@ function AboutBlock({
 }) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
+  // The D1 boundary, as UI state: the agent never creates a workspace record,
+  // so this can only be set by a click.
+  const [promoting, setPromoting] = useState<string | null>(null);
   if (concept.about.length === 0) return null;
   return (
     <div className="mt-4">
       <div className={LABEL}>About</div>
+      {promoting !== null && (
+        <NewRecordDialog defaultTitle={promoting} onClose={() => setPromoting(null)} />
+      )}
       <div className="mt-1.5 flex flex-col gap-1">
         {concept.about.map((target) => {
           const entry = resolveTarget(target, entries);
@@ -128,11 +275,12 @@ function AboutBlock({
           if (entry === null) {
             // An anchor naming an entity that does not exist yet is an OPEN
             // THREAD, not a broken link (OKF §6.1, M33a.3 / D7): the base is
-            // tracking something the workspace has not written up, and the
-            // Knowledge tab offers `+ Create page` as the way to write it.
-            // So it reads as ordinary text that happens not to be clickable —
-            // the same treatment an unfollowable source gets above — rather
-            // than a greyed-out broken-link glyph reporting damage.
+            // tracking something the workspace has not written up. So it
+            // reads as ordinary text that happens not to be clickable — the
+            // same treatment an unfollowable source gets above — rather than
+            // a greyed-out broken-link glyph reporting damage. And it offers
+            // `+ Create page` here (M51), where the subject is met: the
+            // subject view that offered it has no row leading to it now.
             return (
               <span
                 key={target}
@@ -141,6 +289,14 @@ function AboutBlock({
               >
                 <Icon name="circle-dashed" size={12} color="var(--n-500)" />
                 <span className="truncate">{target}</span>
+                <button
+                  type="button"
+                  data-testid="promote-subject"
+                  onClick={() => setPromoting(target)}
+                  className="ml-auto flex-none border-0 bg-transparent p-0 text-2xs text-n-500 hover:text-cortex-600"
+                >
+                  + Create page
+                </button>
               </span>
             );
           }
@@ -175,15 +331,13 @@ function AboutBlock({
  */
 function RelationsBlock({
   concept,
-  today,
   onOpenConcept,
 }: {
   concept: Concept;
-  today: string;
   onOpenConcept: (path: string) => void;
 }) {
   const entries = useVaultStore((s) => s.entries);
-  const concepts = useMemo(() => listConcepts(entries, today), [entries, today]);
+  const concepts = useConcepts();
   const edges = useMemo(
     () => conceptEdges(concept, concepts, entries),
     [concept, concepts, entries],
@@ -244,74 +398,35 @@ function RelationsBlock({
 export function KnowledgePanel({
   concept,
   today,
-  onVerify,
-  onAskAgent,
   onOpenEntity,
   onOpenConcept,
-  verifying = false,
-  verifiedToday = false,
   chips = null,
-  className = 'w-[320px] flex-none',
+  className = '',
 }: {
   concept: Concept;
   today: string;
-  onVerify: () => void;
-  onAskAgent: () => void;
   onOpenEntity: (path: string) => void;
   onOpenConcept: (path: string) => void;
-  verifying?: boolean;
   /** The three axes for this concept's belief, or null when nobody derived
    * them — a vault with no ledger, or a file the ledger does not hold. */
   chips?: BeliefChips | null;
-  /** This actor already stamped this concept today (M15) — a second identical
-   * row in the ledger is noise, so the button says so instead of adding one. */
-  verifiedToday?: boolean;
-  /** How the page places this column — beside the concept, or as an overlay
-   * when the canvas is too narrow for three columns. */
   className?: string;
 }) {
-  const lastVerified = relativeDay(concept.lastVerified, today);
-  const alreadyReviewed = humanReviewed(concept);
-
+  // The Details tab of a concept page's side panel (M50.1). Its two acts and
+  // its status moved to the review bar under the title in M51.3 — here is
+  // the evidence behind them, a click away rather than a column wide.
   return (
-    <aside
-      aria-label="Provenance"
+    <section
+      aria-label="Details"
       data-testid="knowledge-panel"
-      className={`flex flex-col overflow-y-auto border-l border-n-200 bg-n-0 px-4 pb-5 pt-3.5 ${className}`}
+      className={`flex flex-col px-1.5 pb-3 pt-1.5 ${className}`}
     >
-      <div className="flex flex-wrap items-center gap-1.5">
-        <ReviewChip status={concept.review} by={concept.reviewedBy} detail={lastVerified} />
-        {concept.stale && (
-          <>
-            <FlagChip icon="clock-alert" label={`Stale since ${concept.staleAfter}`} tone="warn" />
-            {/* M15: verifying does NOT clear staleness — `stale_after` is the
-                agent's to move, and verify_concept may write `verified` and
-                nothing else. So the remedy for the amber chip sits next to
-                it, rather than leaving Verify looking like it. */}
-            <button
-              type="button"
-              data-testid="recheck-concept"
-              onClick={onAskAgent}
-              className="rounded-md border border-n-200 bg-transparent px-1.5 py-0.5 text-2xs text-warn-600 hover:bg-warn-50"
-            >
-              Recheck
-            </button>
-          </>
-        )}
-        {concept.lifecycle === 'deprecated' && (
-          <FlagChip icon="archive" label="Deprecated" tone="muted" />
-        )}
-        {concept.lifecycle === 'draft' && (
-          <FlagChip icon="pencil-line" label="Draft" tone="muted" />
-        )}
-      </div>
-
-      {/* The three axes, per facet. They sit under the review chip and beside
-          it, never inside it: whether a person looked and what rests
+      {/* The three axes, per facet. Kept apart from the review status in the
+          bar, never folded into it: whether a person looked and what rests
           underneath are different questions, and a migrated concept somebody
           verified answers "yes" to the first and "nothing" to the second. */}
       {chips !== null && (
-        <div className="mt-3" data-testid="belief-axes">
+        <div data-testid="belief-axes">
           <div className={LABEL}>What this rests on</div>
           <div className="mt-1.5">
             <FacetChips chips={chips} />
@@ -321,13 +436,13 @@ export function KnowledgePanel({
 
       <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
 
-      <RelationsBlock concept={concept} today={today} onOpenConcept={onOpenConcept} />
+      <RelationsBlock concept={concept} onOpenConcept={onOpenConcept} />
 
       <div className="mt-4">
         <div className={LABEL}>Written by</div>
         <div className="mt-1.5">
           {concept.generated !== null ? (
-            <ActorLine stamp={concept.generated} today={today} />
+            <ActorLine stamp={concept.generated} today={today} onOpenEntity={onOpenEntity} />
           ) : (
             <span className="text-xs text-n-400">Not recorded</span>
           )}
@@ -340,7 +455,9 @@ export function KnowledgePanel({
           {concept.verified.length > 0 ? (
             // Multiple entries capture INDEPENDENT checks — a human sign-off
             // and a nightly process are different claims, so both are shown.
-            concept.verified.map((stamp, i) => <ActorLine key={i} stamp={stamp} today={today} />)
+            concept.verified.map((stamp, i) => (
+              <ActorLine key={i} stamp={stamp} today={today} onOpenEntity={onOpenEntity} />
+            ))
           ) : concept.verifiedNotice !== null ? (
             // M23.4: the review happened, the content moved on. Say so —
             // never render a stale stamp, never pretend nobody reviewed it.
@@ -358,7 +475,13 @@ export function KnowledgePanel({
           <div className={LABEL}>Sources</div>
           <ul className="m-0 mt-1 list-none p-0">
             {concept.sources.map((source, i) => (
-              <SourceRow key={source.id ?? i} source={source} index={i} />
+              <SourceRow
+                key={source.id ?? i}
+                source={source}
+                index={i}
+                today={today}
+                onOpenEntity={onOpenEntity}
+              />
             ))}
           </ul>
         </div>
@@ -388,26 +511,6 @@ export function KnowledgePanel({
           </a>
         </div>
       )}
-
-      <div className="mt-auto flex flex-col gap-2 border-t border-n-100 pt-3">
-        {/* M15: "Verify again" invited a second identical stamp, which is
-            what filled the ledger above with duplicate rows. Once you have
-            signed off today there is nothing left for you to add. */}
-        <Button
-          variant="primary"
-          icon="shield-check"
-          disabled={verifying || verifiedToday}
-          onClick={onVerify}
-        >
-          {verifiedToday ? 'Verified by you today' : alreadyReviewed ? 'Verify again' : 'Verify'}
-        </Button>
-        <Button variant="secondary" icon="sparkles" onClick={onAskAgent}>
-          Ask the agent to revise
-        </Button>
-        <span className="text-center text-2xs leading-[15px] text-n-400">
-          The agent writes this bundle. You confirm it.
-        </span>
-      </div>
-    </aside>
+    </section>
   );
 }

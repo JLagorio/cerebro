@@ -274,13 +274,15 @@ fn claim_inner(
 
     // The run row comes FIRST: a claim points at its owner with a foreign
     // key, so an item can never be owned by a run that does not exist.
+    // `counters_booked = 1`: its three zeros are measured-at-zero, because
+    // `CommitOutcome::book`/`book_decision` count against this row (M49.9).
     conn.execute(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, lease_expires_at, proposals_submitted, \
-         applied, rejected, actor) \
+         applied, rejected, actor, counters_booked) \
          VALUES (?1, ?2, ?3, 'ambient', ?4, ?5, 'running', 'pending', 0, 0, 0, 0, ?6, ?7, ?8, \
-                 0, 0, 0, ?9)",
+                 0, 0, 0, ?9, 1)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -690,10 +692,12 @@ pub fn recover_expired_leases(conn: &Connection, now: DateTime<Utc>) -> Result<u
 /// ambient ceiling: a chain is one job fanned out, and what one background
 /// run may spend is what its whole chain may spend.
 ///
-/// Enforcement grows as rows land, and that is stated rather than hidden:
-/// an attended caller's own row is only written when it FINISHES, so a
-/// chain of still-running attended turns sums what its finished members
-/// spent. The two-hop budget bounds what that window can cost.
+/// Enforcement grows as TOKENS land, and that is stated rather than hidden:
+/// an attended row is opened before its child spawns ([`begin_attended`],
+/// M49.9), so the chain is walkable to its real root mid-run, but its
+/// tokens are only written when it FINISHES — a chain of still-running
+/// attended turns sums what its finished members spent. The two-hop budget
+/// bounds what that window can cost.
 pub fn refuse_if_chain_spent(
     conn: &Connection,
     caller_run_id: &str,
@@ -709,8 +713,8 @@ pub fn refuse_if_chain_spent(
             [caller_run_id],
             |row| row.get(0),
         )
-        // No row yet (the caller is mid-run and unfinished): the caller IS
-        // the root as far as the table can see.
+        // No row: a caller whose meter could not open one (no runtime DB at
+        // its spawn). The caller IS the root as far as the table can see.
         .unwrap_or_else(|_| caller_run_id.to_string());
     let spent: i64 = conn
         .query_row(
@@ -737,8 +741,127 @@ pub fn refuse_if_chain_spent(
     Ok(())
 }
 
-/// Record one attended run. Metered, never gated: no reservation, no lease,
-/// no budget debit, and no way for a full day to stop it.
+/// Open one attended run's row, BEFORE its child exists (M49.9, K25).
+///
+/// An attended run used to have no row until [`meter_attended`] wrote one
+/// at the end — so every `CommitOutcome::book` made DURING it matched no
+/// row, and the finish then stamped `counters_booked = 1` over three zeros
+/// nobody measured: "0 applied" for a run that applied. The row now stands
+/// while the run does, `running` and `pending` exactly like the ambient
+/// claim's, and booked because in-run booking reaches it.
+///
+/// A run that dies with its process stays `running` until
+/// [`recover_orphaned_attended`] closes it `abandoned_usage_unknown` — the
+/// ambient lease sweep's outcome, without a lease: an attended run holds no
+/// reservation and has no deadline, so what marks it orphaned is only that
+/// the process that could finish it is gone.
+pub fn begin_attended(
+    conn: &Connection,
+    run_id: &str,
+    vault_id: Option<&str>,
+    store_uuid: Option<&str>,
+    actor: Option<&str>,
+    parent_run_id: Option<&str>,
+    started_at: DateTime<Utc>,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
+         usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+         reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
+         actor, parent_run_id, counters_booked) \
+         VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, 'running', 'pending', 0, 0, 0, 0, 0, 0, \
+                 0, 0, 0, ?5, ?6, 1)",
+        rusqlite::params![
+            run_id,
+            vault_id,
+            store_uuid,
+            stamp(started_at),
+            actor,
+            parent_run_id
+        ],
+    )
+    .map_err(|e| format!("runs (attended, open): {e}"))?;
+    Ok(())
+}
+
+/// Take back an attended row whose child never spawned.
+///
+/// Nothing ran, nothing could present the run's token, and nothing was
+/// booked — so the run did not happen and leaves no row, exactly as before
+/// rows were opened at spawn. Matches only an attended row still `running`:
+/// never a finished run, never an ambient claim.
+pub fn discard_unstarted_attended(conn: &Connection, run_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM runs WHERE run_id = ?1 AND mode = 'attended' AND outcome = 'running'",
+        [run_id],
+    )
+    .map_err(|e| format!("runs (attended, discard): {e}"))?;
+    Ok(())
+}
+
+/// Close every attended row a dead process left `running` (M49.9).
+///
+/// `started_before` is THIS process's start: an attended row is finished
+/// only by the reader thread of the process that spawned it, so a row still
+/// `running` from before this process began has no finisher left. It closes
+/// `abandoned_usage_unknown` with `unknown` usage — tokens were spent and
+/// nobody counted them — through [`finalize`], whose attended arm touches no
+/// budget, lease or item. Its booked counters stand: they were counted as
+/// the run wrote. A row this process opened is never touched.
+///
+/// If another process sharing this app-data dir is in fact still running
+/// such a run, its finish re-closes the row with the real numbers (see
+/// [`meter_attended`]); an attended row carries no debit that closing it
+/// twice could double.
+pub fn recover_orphaned_attended(
+    conn: &Connection,
+    started_before: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> Result<usize, String> {
+    let orphaned: Vec<String> = {
+        let mut statement = conn
+            .prepare(
+                "SELECT run_id FROM runs WHERE mode = 'attended' AND outcome = 'running' \
+                 AND started_at < ?1 ORDER BY run_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map([stamp(started_before)], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+    for run_id in &orphaned {
+        finalize(
+            conn,
+            run_id,
+            RunOutcome::AbandonedUsageUnknown,
+            None,
+            // No stream survived to read facts from.
+            None,
+            // An attended run claims no items; the argument is inert.
+            ItemOutcome::Requeue,
+            now,
+        )?;
+    }
+    Ok(orphaned.len())
+}
+
+/// Close one attended run's books. Metered, never gated: no reservation, no
+/// lease, no budget debit, and no way for a full day to stop it.
+///
+/// Finalizes the row [`begin_attended`] opened: outcome, end, and usage, and
+/// NOTHING else — the proposal counters are what `CommitOutcome::book`
+/// counted while the run wrote, and `counters_booked` stays the 1 the open
+/// stamped. A row still `abandoned_usage_unknown` is re-closed too: that is
+/// [`recover_orphaned_attended`] having given up on a run whose process
+/// turned out to be alive, and the finisher knows better. Any other closed
+/// row, or an ambient one, is refused rather than overwritten.
+///
+/// With no row to finalize — the open failed, or a caller that never opened
+/// one — the row is inserted whole, with `counters_booked = 0`: no row
+/// stood while the run wrote, so no booking reached it, and its zeros read
+/// as NOT RECORDED rather than as a measurement.
 #[allow(clippy::too_many_arguments)]
 pub fn meter_attended(
     conn: &Connection,
@@ -754,30 +877,46 @@ pub fn meter_attended(
     now: DateTime<Utc>,
 ) -> Result<(), String> {
     let counted = usage.unwrap_or_default();
-    conn.execute(
-        "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
+    // The DO UPDATE names only what a finish learns; see the doc above for
+    // why the counters and `counters_booked` are absent from it (M49.9).
+    let written = conn
+        .execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
          outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
-         actor, parent_run_id) \
+         actor, parent_run_id, counters_booked) \
          VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, \
-                 0, ?12, ?13)",
-        rusqlite::params![
-            run_id,
-            vault_id,
-            store_uuid,
-            stamp(started_at),
-            stamp(now),
-            outcome.as_str(),
-            if usage.is_some() { "exact" } else { "unknown" },
-            counted.input_tokens as i64,
-            counted.output_tokens as i64,
-            counted.cache_read as i64,
-            counted.cache_write as i64,
-            actor,
-            parent_run_id,
-        ],
-    )
-    .map_err(|e| format!("runs (attended): {e}"))?;
+                 0, ?12, ?13, 0) \
+         ON CONFLICT (run_id) DO UPDATE SET ended_at = excluded.ended_at, \
+         outcome = excluded.outcome, usage_state = excluded.usage_state, \
+         input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, \
+         cache_read = excluded.cache_read, cache_write = excluded.cache_write \
+         WHERE runs.mode = 'attended' \
+         AND runs.outcome IN ('running', 'abandoned_usage_unknown')",
+            rusqlite::params![
+                run_id,
+                vault_id,
+                store_uuid,
+                stamp(started_at),
+                stamp(now),
+                outcome.as_str(),
+                if usage.is_some() { "exact" } else { "unknown" },
+                counted.input_tokens as i64,
+                counted.output_tokens as i64,
+                counted.cache_read as i64,
+                counted.cache_write as i64,
+                actor,
+                parent_run_id,
+            ],
+        )
+        .map_err(|e| format!("runs (attended): {e}"))?;
+    if written == 0 {
+        // The conflict's WHERE declined: finished already, or not attended.
+        return Err(format!(
+            "run {run_id} is not an open attended run — already finalized, or ambient. \
+             Closing it again would overwrite a finished record."
+        ));
+    }
     if let Some(facts) = facts {
         write_facts(conn, run_id, facts)?;
         route_denials(conn, run_id, store_uuid, facts);
@@ -2231,6 +2370,258 @@ mod tests {
             Some("root-1"),
             "a handed-to run names the run whose tool call started it"
         );
+    }
+
+    /// A commit of `applied` applied members and `queued` queued ones.
+    fn committed(applied: usize, queued: usize) -> crate::policy::commit::CommitOutcome {
+        use crate::policy::submit::SubmitResult;
+        let mut results = Vec::new();
+        for n in 0..applied {
+            results.push(SubmitResult::Applied {
+                proposal_id: format!("applied-{n}"),
+                resulting_versions: vec![],
+            });
+        }
+        for n in 0..queued {
+            results.push(SubmitResult::Queued {
+                proposal_id: format!("queued-{n}"),
+                effective_risk: crate::policy::table::Risk::High,
+                escalated_by: vec![],
+            });
+        }
+        crate::policy::commit::CommitOutcome {
+            commit_set_id: "set".into(),
+            transition: crate::policy::commit::TransitionCode::Apply,
+            results,
+            batch_id: "batch".into(),
+            replayed: false,
+            kept: vec![],
+        }
+    }
+
+    /// (outcome, usage_state, submitted, applied, rejected, counters_booked)
+    type Books = (String, String, i64, i64, i64, i64);
+
+    fn books(conn: &Connection, run_id: &str) -> Books {
+        conn.query_row(
+            "SELECT outcome, usage_state, proposals_submitted, applied, rejected, \
+             counters_booked FROM runs WHERE run_id = ?1",
+            [run_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .unwrap()
+    }
+
+    // M49.9 (K25): the bug this pins. An attended run had no row while it
+    // ran, so `book` matched nothing and the finish INSERTed 0/0/0 stamped
+    // booked — "0 applied" for a run that applied. The row opens at spawn
+    // now, and the finish closes it without touching what was booked.
+    #[test]
+    fn book_then_meter_attended_keeps_the_booked_counts() {
+        let _sink = crate::runtime::sink::test_lock();
+        let (dir, conn, vault) = fixture("dispatch-attended-booked");
+        let now = at("2026-09-27T10:00:00Z");
+        begin_attended(
+            &conn,
+            "chat-booked",
+            Some(&vault),
+            Some("store"),
+            Some("process:librarian"),
+            Some("root-0"),
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            books(&conn, "chat-booked"),
+            ("running".into(), "pending".into(), 0, 0, 0, 1),
+            "open while the run is, and booked from the start"
+        );
+
+        crate::runtime::sink::arm(&dir).unwrap();
+        committed(2, 1).book("chat-booked");
+        crate::runtime::sink::disarm();
+
+        meter_attended(
+            &conn,
+            "chat-booked",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            Some(Usage {
+                input_tokens: 3,
+                output_tokens: 40,
+                cache_read: 0,
+                cache_write: 0,
+            }),
+            None,
+            Some("process:librarian"),
+            Some("root-0"),
+            now,
+            at("2026-09-27T10:05:00Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            books(&conn, "chat-booked"),
+            ("succeeded".into(), "exact".into(), 3, 2, 0, 1),
+            "the finish lands usage and outcome and leaves the counts it did not count"
+        );
+        let (ended, output, parent): (Option<String>, i64, Option<String>) = conn
+            .query_row(
+                "SELECT ended_at, output_tokens, parent_run_id FROM runs \
+                 WHERE run_id = 'chat-booked'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(ended.as_deref(), Some("2026-09-27T10:05:00.000Z"));
+        assert_eq!(output, 40);
+        assert_eq!(parent.as_deref(), Some("root-0"));
+
+        let twice = meter_attended(
+            &conn,
+            "chat-booked",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Failed,
+            None,
+            None,
+            None,
+            None,
+            now,
+            now,
+        );
+        assert!(twice.is_err(), "a finished run is never closed again");
+        assert_eq!(books(&conn, "chat-booked").0, "succeeded");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M49.9: the ambient lease sweep's attended twin. A process that died
+    // mid-run leaves its row `running`; the next process closes what began
+    // before it did as unknown — never zero — keeps the bookings, and never
+    // touches its own runs or the day's budget.
+    #[test]
+    fn an_attended_row_a_dead_process_left_running_closes_unknown_and_keeps_its_books() {
+        let _sink = crate::runtime::sink::test_lock();
+        let _lock = status::test_lock();
+        status::clear();
+        let (dir, conn, vault) = fixture("dispatch-attended-orphan");
+        let before = at("2026-09-27T09:00:00Z");
+        let started = at("2026-09-27T10:00:00Z");
+        let now = at("2026-09-27T10:01:00Z");
+        begin_attended(
+            &conn,
+            "orphan",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            before,
+        )
+        .unwrap();
+        begin_attended(&conn, "mine", Some(&vault), Some("store"), None, None, now).unwrap();
+        crate::runtime::sink::arm(&dir).unwrap();
+        committed(1, 0).book("orphan");
+        crate::runtime::sink::disarm();
+
+        assert_eq!(recover_orphaned_attended(&conn, started, now).unwrap(), 1);
+        assert_eq!(
+            books(&conn, "orphan"),
+            (
+                "abandoned_usage_unknown".into(),
+                "unknown".into(),
+                1,
+                1,
+                0,
+                1
+            ),
+            "closed as unknown, with what it booked intact"
+        );
+        assert_eq!(
+            books(&conn, "mine").0,
+            "running",
+            "this process's run is its own"
+        );
+        assert_eq!(
+            status::current(),
+            status::RuntimeStatus::Ready,
+            "an attended run holds no budget, so its loss pauses nothing"
+        );
+        let window = budget::ensure_day(&conn, now).unwrap().window_start_utc;
+        assert!(budget::read_day(&conn, &window).unwrap().accounting_exact);
+        assert_eq!(
+            recover_orphaned_attended(&conn, started, now).unwrap(),
+            0,
+            "and a second sweep finds nothing"
+        );
+
+        // The owner was alive after all (a second process on this app-data):
+        // its finish knows better than the sweep did.
+        meter_attended(
+            &conn,
+            "orphan",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            Some(Usage::default()),
+            None,
+            None,
+            None,
+            before,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            books(&conn, "orphan"),
+            ("succeeded".into(), "exact".into(), 1, 1, 0, 1)
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_child_that_never_spawned_leaves_no_attended_row() {
+        let (dir, conn, vault) = fixture("dispatch-attended-discard");
+        let now = at("2026-09-27T10:00:00Z");
+        begin_attended(&conn, "never", Some(&vault), Some("store"), None, None, now).unwrap();
+        discard_unstarted_attended(&conn, "never").unwrap();
+        let count = |run_id: &str| -> i64 {
+            conn.query_row(
+                "SELECT count(*) FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count("never"), 0, "a run that never started is no run");
+
+        meter_attended(
+            &conn,
+            "done",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            None,
+            None,
+            now,
+            now,
+        )
+        .unwrap();
+        discard_unstarted_attended(&conn, "done").unwrap();
+        assert_eq!(count("done"), 1, "a finished run is never taken back");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

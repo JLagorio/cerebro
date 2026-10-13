@@ -9,9 +9,11 @@ import {
   spliceTitleIntoBlocks,
 } from './markdown';
 import { cerebroSchema, type CerebroEditor } from './MarkdownEditor';
+import { splitFrontmatter } from '@/lib/mockParse';
 
 // The app schema, not the default one: markdownToBlocks promotes chip text
-// (wikilinks, 📅 dates) into custom inline nodes that only exist there.
+// (wikilinks, 📅 dates, [^citations]) into custom inline nodes that only exist
+// there.
 let editor: CerebroEditor;
 beforeAll(() => {
   editor = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
@@ -19,6 +21,17 @@ beforeAll(() => {
 
 const roundTrip = async (md: string) =>
   blocksToMarkdown(editor, await markdownToBlocks(editor, md));
+
+/** The demo vault's concepts, read the way the mock backend seeds them. */
+const KNOWLEDGE = import.meta.glob('/demo-vault/knowledge/**/*.md', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+/** A concept's body as the editor receives it: frontmatter off, like read_note. */
+const knowledgeBody = (path: string): string =>
+  splitFrontmatter(KNOWLEDGE[path] ?? '').body.replace(/^\n+/, '');
 
 /**
  * The M2 fixture corpus. `out` pins the normalized serialization; every
@@ -301,6 +314,266 @@ describe('the ::: column containers', () => {
     const blocks = await markdownToBlocks(editor, sample);
     expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
     expect(await roundTrip(sample)).toBe(sample);
+  });
+});
+
+// M50.1 — concepts open in this editor now, and OKF cites its sources with
+// footnotes. The serializer escapes single brackets, so a saved concept used
+// to come back as `\[^id]` — every citation broken, and the lossy-import
+// check (letters and digits only) blind to it.
+describe('footnote citations', () => {
+  const concept =
+    'A completed account finished every step.[^kr-onboarding]\n\n' +
+    '[^kr-onboarding]: KR — Onboarding completion\n';
+
+  it('round-trips a footnote reference and its definition unescaped', async () => {
+    const out = await roundTrip(concept);
+    expect(out).toContain('step.[^kr-onboarding]');
+    expect(out).toContain('[^kr-onboarding]: KR — Onboarding completion');
+    expect(out).not.toContain('\\[');
+  });
+
+  it('is stable across a second trip', async () => {
+    const once = await roundTrip(concept);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('reads a run of definitions and a citation inside code as written', async () => {
+    const md = 'Claim.[^a] See `[^not-a-cite]`.\n\n[^a]: First source\n\n[^b]: Second source\n';
+    const out = await roundTrip(md);
+    expect(out).toContain('Claim.[^a] See `[^not-a-cite]`.');
+    expect(out).toContain('[^a]: First source');
+    expect(out).toContain('[^b]: Second source');
+    expect(isLossyImport(md, out)).toBe(false);
+  });
+
+  // M51.5 — the text above is a chip in the editor and the same text on disk.
+
+  it('promotes a reference into a citation chip', async () => {
+    const [block] = await markdownToBlocks(editor, 'A claim.[^kr-sync] More.\n');
+    expect(block.content).toEqual([
+      { type: 'text', text: 'A claim.', styles: {} },
+      { type: 'citation', props: { id: 'kr-sync', def: '' } },
+      { type: 'text', text: ' More.', styles: {} },
+    ]);
+  });
+
+  /* OKF writes its definitions one per line with nothing between them, so the
+     parser hands over ONE paragraph with a line break before each definition
+     after the first — every line start is a place a definition begins. */
+  it('promotes a definition on every line of a run, keeping the rest of each line as text', async () => {
+    const [block] = await markdownToBlocks(editor, '[^a]: First source\n[^b]: Second source\n');
+    expect(block.type).toBe('paragraph');
+    expect(block.content).toEqual([
+      { type: 'citation', props: { id: 'a', def: '1' } },
+      { type: 'text', text: ' First source\n', styles: {} },
+      { type: 'citation', props: { id: 'b', def: '1' } },
+      { type: 'text', text: ' Second source', styles: {} },
+    ]);
+  });
+
+  it('reads no citation out of code, styled text, or a wikilink', async () => {
+    const md = 'See `[^code]`, *a claim[^styled]*, and [[^linked]].\n\n```text\n[^fenced]\n```\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(JSON.stringify(blocks)).not.toContain('"citation"');
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  /* Everything a concept body cites with, at once. The table is written in the
+     padding the serializer normalizes every table to (M2), so the whole body
+     can be held to byte identity: this is what a saved concept looks like. */
+  const BODY = [
+    '# Definition',
+    '',
+    '`failed_syncs / total_sync_attempts`, bucketed hourly.[^syn-project] Never `[^code]`.',
+    '',
+    '```text',
+    'a fence keeps [^fenced] as written',
+    '```',
+    '',
+    '| Window | Behaviour         |',
+    '| ------ | ----------------- |',
+    '| 0–72h  | Clean merge[^dec] |',
+    '',
+    'Two sources at once.[^syn-project][^dec] See [[offline-sync-hardening]].',
+    '',
+    '[^syn-project]: Offline sync hardening',
+    '[^dec]: Decision — conflicts are resolved by a person',
+    '',
+  ].join('\n');
+
+  it('round-trips a concept body byte for byte', async () => {
+    const out = await roundTrip(BODY);
+    expect(out).toBe(BODY);
+    expect(isLossyImport(BODY, out)).toBe(false);
+  });
+
+  it('writes the same bytes on a second save', async () => {
+    const once = await roundTrip(BODY);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('reads the body into chips — a table cell included — and leaves its code as text', async () => {
+    const blocks = await markdownToBlocks(editor, BODY);
+    const chips = JSON.stringify(blocks).match(/"type":"citation","props":\{[^}]*\}/g);
+    expect(chips).toEqual([
+      '"type":"citation","props":{"id":"syn-project","def":""}',
+      '"type":"citation","props":{"id":"dec","def":""}',
+      '"type":"citation","props":{"id":"syn-project","def":""}',
+      '"type":"citation","props":{"id":"dec","def":""}',
+      '"type":"citation","props":{"id":"syn-project","def":"1"}',
+      '"type":"citation","props":{"id":"dec","def":"1"}',
+    ]);
+    expect(blocks[1].content).toContainEqual({
+      type: 'text',
+      text: '[^code]',
+      styles: { code: true },
+    });
+    expect(blocks[2].content[0].text).toBe('a fence keeps [^fenced] as written');
+  });
+
+  /* The corpus the feature exists for. Several concepts hold a table or a
+     numbered list, which the M2 fidelity policy normalizes on any page; the
+     rest have nothing BUT prose and citations, and must come back untouched. */
+  it.each([
+    'metrics/sync-error-rate.md',
+    'metrics/webinar-attendance.md',
+    'systems/offline-window-pilot.md',
+    'systems/pick-queue-drain.md',
+  ])('round-trips the demo vault concept %s byte for byte', async (name) => {
+    const body = knowledgeBody(`/demo-vault/knowledge/${name}`);
+    expect(body).toContain('[^');
+    const once = await roundTrip(body);
+    expect(once).toBe(body);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('writes back every citation of every concept in the demo vault as written', async () => {
+    const tokens = (md: string) => md.match(/\[\^[^\]\s]+\]:?/g) ?? [];
+    const definitions = (md: string) => md.split('\n').filter((l) => /^\[\^[^\]\s]+\]:/.test(l));
+    let cited = 0;
+    for (const path of Object.keys(KNOWLEDGE)) {
+      const body = knowledgeBody(path);
+      if (!body.includes('[^')) continue;
+      cited += 1;
+      const out = await roundTrip(body);
+      expect(tokens(out), path).toEqual(tokens(body));
+      expect(definitions(out), path).toEqual(definitions(body));
+      expect(out, path).not.toContain('\\[');
+    }
+    // Not a vacuous pass over a vault that stopped citing anything.
+    expect(cited).toBeGreaterThanOrEqual(5);
+  });
+});
+
+/*
+ * M52.1 — a citation INSIDE emphasis. It stays the text it is on disk, and
+ * that is a measured decision, not a gap: the tests below hold the bytes, and
+ * the last one holds the reason.
+ */
+describe('citations inside emphasis', () => {
+  const chipsIn = (blocks: unknown[]) =>
+    JSON.stringify(blocks).match(/"type":"citation","props":\{"id":"[^"]*","def":""\}/g) ?? [];
+
+  it.each([
+    'Only *a claim[^id]* here.\n',
+    'Some **bold [^id] more** words.\n',
+    'A run *a[^x] b[^y]* and ***both[^z]***.\n',
+    'Mixed *emphasis[^in]* and plain.[^out]\n\n[^in]: Inside\n[^out]: Outside\n',
+  ])('keeps %j byte for byte across two saves', async (md) => {
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  /* The corpus with emphasis put round a cited word, as an author would: the
+     first reference glued to a plain word is wrapped, in italic and in bold.
+     Some concepts hold a table or a numbered list, which the M2 fidelity
+     policy normalizes on any page — so what the emphasized body must come back
+     as is the plain body's own saved form, wrapped the same way. */
+  const CITED_WORD = /(?<![*\w])[A-Za-z][\w.,()-]*\[\^[^\]\s]+\](?![:*])/;
+  const wrapCited = (body: string, mark: string): string =>
+    body.replace(CITED_WORD, (word) => `${mark}${word}${mark}`);
+  const EMPHASIZED = Object.keys(KNOWLEDGE)
+    .filter((path) => CITED_WORD.test(knowledgeBody(path)))
+    .flatMap((path) =>
+      ['*', '**'].map((mark) => [path.replace('/demo-vault/knowledge/', ''), mark] as const),
+    );
+
+  it('has concepts to try it on', () => {
+    expect(EMPHASIZED.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it.each(EMPHASIZED)('round-trips %s with %s round a cited word, twice', async (name, mark) => {
+    const plain = knowledgeBody(`/demo-vault/knowledge/${name}`);
+    const body = wrapCited(plain, mark);
+    const once = await roundTrip(body);
+    expect(once).toBe(wrapCited(await roundTrip(plain), mark));
+    expect(await roundTrip(once)).toBe(once);
+    // The wrapped marker is text; every other reference is still a chip.
+    const chips = chipsIn(await markdownToBlocks(editor, body));
+    expect(chips).toHaveLength(chipsIn(await markdownToBlocks(editor, plain)).length - 1);
+  });
+
+  /* Why it is text (the measurement M52.1 made). A chip CAN carry a mark in
+     ProseMirror — but BlockNote's block JSON, which is what the serializer
+     reads, has no styles on custom inline content, so the mark is dropped on
+     the way out and the marker is written outside the emphasis it was in.
+     Keeping it inside would take a second copy of the chip's marks in a prop
+     kept in step by hand. If this test ever fails, BlockNote has started
+     carrying the mark, and the limit is worth revisiting. */
+  it('would lose the emphasis if the marker were a chip', async () => {
+    const live = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+    live.replaceBlocks(live.document, [
+      { type: 'paragraph', content: [{ type: 'text', text: 'a claim', styles: { italic: true } }] },
+    ]);
+    const view = live._tiptapEditor.view;
+    const { schema } = view.state;
+    let at = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === 'a claim') at = pos + node.nodeSize;
+    });
+    expect(at).toBeGreaterThan(0);
+    const tr = view.state.tr.insert(at, schema.nodes.citation.create({ id: 'id', def: '' }));
+    view.dispatch(tr.addMark(at, at + 1, schema.marks.italic.create()));
+    let marks: string[] = [];
+    view.state.doc.descendants((node) => {
+      if (node.type.name === 'citation') marks = node.marks.map((m) => m.type.name);
+    });
+    expect(marks).toEqual(['italic']);
+    const chip = (live.document[0].content as { type: string }[]).find(
+      (item) => item.type === 'citation',
+    );
+    expect(chip).toEqual({ type: 'citation', props: { id: 'id', def: '' } });
+    expect(await blocksToMarkdown(live)).toBe('*a claim*[^id]\n');
+  });
+});
+
+/*
+ * M52.4 — the rule is every chip's, not only a citation's. A wikilink, an
+ * assignee or a date promoted out of emphasis came back from the serializer
+ * outside it, exactly as a citation did, so each stays the text it is there.
+ */
+describe('chips inside emphasis', () => {
+  it.each([
+    'See **[[kickoff]]** here.\n',
+    'See *the [[kickoff]] notes* here.\n',
+    '* [ ] **Ship @[[jane]]** now\n',
+    'Due *soon 📅 2026-08-01* ok.\n',
+  ])('keeps %j byte for byte across two saves, as text', async (md) => {
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(await roundTrip(once)).toBe(once);
+    const blocks = JSON.stringify(await markdownToBlocks(editor, md));
+    expect(blocks).not.toMatch(/"type":"(wikilink|assignee|due|citation)"/);
+  });
+
+  it('still reads the same chips out of the plain text beside it', async () => {
+    const md = 'See **bold** then [[kickoff]], @[[jane]] and 📅 2026-08-01.\n';
+    const blocks = JSON.stringify(await markdownToBlocks(editor, md));
+    for (const type of ['wikilink', 'assignee', 'due'])
+      expect(blocks).toContain(`"type":"${type}"`);
+    expect(await roundTrip(md)).toBe(md);
   });
 });
 

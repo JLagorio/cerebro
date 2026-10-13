@@ -84,7 +84,9 @@ impl Validity {
     /// The human-readable half of the composed chip line ("stale and
     /// contested"). Lifecycle is named only when it is not `active`, because
     /// "active" is the unremarkable case and saying it every time makes the
-    /// exceptional case harder to see.
+    /// exceptional case harder to see — and named in the app's words (M52.5),
+    /// "replaced" as the Concepts table says it, never the ledger's
+    /// "superseded" or "tombstoned".
     pub fn describe(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
         match self.freshness {
@@ -95,8 +97,11 @@ impl Validity {
         if self.conflict == Conflict::Contested {
             parts.push("contested");
         }
-        if self.lifecycle != Lifecycle::Active {
-            parts.push(self.lifecycle.as_str());
+        match self.lifecycle {
+            Lifecycle::Active => {}
+            Lifecycle::Superseded => parts.push("replaced"),
+            Lifecycle::Archived => parts.push("archived"),
+            Lifecycle::Tombstoned => parts.push("retired"),
         }
         parts.join(" and ")
     }
@@ -314,7 +319,7 @@ mod tests {
                 lifecycle: Lifecycle::Superseded,
             }
             .describe(),
-            "freshness unknown and superseded"
+            "freshness unknown and replaced"
         );
     }
 }

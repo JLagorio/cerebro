@@ -10,6 +10,7 @@ import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { useSortableList } from '@/hooks/useSortableList';
 import type { ViewDefinition, ViewType } from '@/engine/types';
 import { layoutLabel } from '@/engine/views';
+import { FADE_RIGHT, useOverflowRight } from '@/views/useOverflowRight';
 import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
 
 /**
@@ -25,6 +26,23 @@ import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
  * created, and changed from the tab's own menu — not from a control that sits
  * permanently in the toolbar inviting you to overwrite your configuration.
  */
+
+/**
+ * A tab's look, spelled once (M52.5) — the strip and the underlined tab. The
+ * strip carries no side padding: this row pads it, and Knowledge's three
+ * tabs, which borrow the look without the saved-view machinery, line the
+ * strip up with the table beneath them instead.
+ */
+export const VIEW_TAB_STRIP = 'flex min-w-0 flex-none items-end border-b border-n-200';
+
+export function viewTabClass(active: boolean): string {
+  return [
+    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-sm',
+    active
+      ? 'border-cortex-500 font-semibold text-n-900'
+      : 'border-transparent font-normal text-n-500 hover:text-n-800',
+  ].join(' ');
+}
 
 export interface ViewTabsProps {
   views: ViewDefinition[];
@@ -92,6 +110,7 @@ export function ViewTabs({
   const activeIndex = views.findIndex((v) => v.id === activeId);
   const focusIndex = activeIndex >= 0 ? activeIndex : 0;
   const stripRef = useRef<HTMLDivElement>(null);
+  const moreRight = useOverflowRight(stripRef, views.length);
 
   const onTabsKeyDown = (e: React.KeyboardEvent) => {
     // Only the tabs themselves rove. The reorder grip beside each tab takes
@@ -155,7 +174,9 @@ export function ViewTabs({
   };
 
   return (
-    <div className="flex min-w-0 flex-none items-end border-b border-n-200 px-5">
+    // A container of its own (M52.5): the strip answers to the column it is
+    // in, which a peek and the Assistant can narrow to 400px.
+    <div className={`${VIEW_TAB_STRIP} @container/viewtabs px-5`}>
       {deleting !== null && (
         <Dialog
           open
@@ -201,7 +222,10 @@ export function ViewTabs({
         // Scrolls rather than wraps: a tab row that reflows onto a second line
         // moves every other tab under the cursor as the window narrows. The
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
+        // Its scrollbar is hidden, so while it continues past the edge that
+        // edge fades (M52.5) — a hard cut read "+ Vi".
         className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={moreRight ? FADE_RIGHT : undefined}
       >
         {/* The tabs get their own box, so the sortable measures ONLY them: its
             slot maths reads `container.children`, and the "+ View" button
@@ -282,12 +306,7 @@ export function ViewTabs({
                     e.preventDefault();
                     setMenu({ x: e.clientX, y: e.clientY, id: view.id });
                   }}
-                  className={[
-                    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-sm',
-                    active
-                      ? 'border-cortex-500 font-semibold text-n-900'
-                      : 'border-transparent font-normal text-n-500 hover:text-n-800',
-                  ].join(' ')}
+                  className={viewTabClass(active)}
                   style={{ borderBottomStyle: 'solid' }}
                 >
                   <Icon name={view.icon ?? kind.icon} size={13} />
@@ -333,7 +352,8 @@ export function ViewTabs({
             className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="plus" size={13} />
-            View
+            {/* A narrow column keeps the glyph and the name (its aria-label). */}
+            <span className="@max-[400px]/viewtabs:hidden">View</span>
           </button>
           {creating && (
             <NewViewForm

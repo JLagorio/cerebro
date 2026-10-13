@@ -225,20 +225,23 @@ impl Support {
 
     /// The human-readable half of the composed chip line. The honest words
     /// the design asks for — "independence unknown" is said out loud rather
-    /// than left as an absence.
+    /// than left as an absence — in a reader's words (M52.5): "unsupported"
+    /// read as a verdict on the claim, "single-source" as a code, and
+    /// "corroborated by 2 independent" stopped before its noun. Each starts
+    /// with its level's words (`level_words`), which is how a shift between
+    /// levels says them too.
     pub fn describe(&self) -> String {
+        let words = level_words(self.level());
         match self {
-            Support::Unsupported { .. } => "unsupported".to_string(),
+            Support::Unsupported { .. } => words.to_string(),
             Support::SingleSource {
                 independence_unknown_count,
                 ..
             } => {
                 if *independence_unknown_count > 1 {
-                    format!(
-                        "single-source ({independence_unknown_count} with independence unknown)"
-                    )
+                    format!("{words} ({independence_unknown_count} whose independence is unknown)")
                 } else {
-                    "single-source".to_string()
+                    words.to_string()
                 }
             }
             Support::Corroborated {
@@ -248,17 +251,17 @@ impl Support {
             } => {
                 if *independence_unknown_count > 0 {
                     format!(
-                        "corroborated by {independent_family_count} independent \
-                         ({independence_unknown_count} with independence unknown)"
+                        "{words} by {independent_family_count} independent sources \
+                         ({independence_unknown_count} whose independence is unknown)"
                     )
                 } else {
-                    format!("corroborated by {independent_family_count} independent")
+                    format!("{words} by {independent_family_count} independent sources")
                 }
             }
             Support::AuthoritativeForPredicateStage {
                 authority_scope, ..
             } => format!(
-                "authoritative for {} at {} ({})",
+                "{words} for {} at {} ({})",
                 authority_scope.predicate,
                 authority_scope.state_stage,
                 authority_scope.authority_class.as_str()
@@ -267,8 +270,24 @@ impl Support {
     }
 }
 
+/// A support level in the chip's words (M52.5) — the one place a level code
+/// becomes words, so the chip (`Support::describe`) and a shift between
+/// levels (`attention::status`'s "went from … to …") say one level one way.
+/// "unsupported" read as a verdict on the claim; nobody has offered evidence,
+/// which says nothing about it. A code this build does not know is read with
+/// its underscores as spaces rather than dropped.
+pub fn level_words(code: &str) -> std::borrow::Cow<'static, str> {
+    match code {
+        "unsupported" => "no evidence offered".into(),
+        "single_source" => "one source".into(),
+        "corroborated" => "corroborated".into(),
+        "authoritative_for_predicate_stage" => "authoritative".into(),
+        other => other.replace('_', " ").into(),
+    }
+}
+
 /// What one derivation found, whole. The families and edges are carried
-/// because a chip that says "corroborated by 2 independent" must be able to
+/// because a chip that says "corroborated by 2 independent sources" must be able to
 /// show WHICH two and under which rules.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Derived {
@@ -755,7 +774,7 @@ mod tests {
         assert_eq!(derived.support.level(), "unsupported");
         assert_eq!(derived.support.ancestral_family_count(), 0);
         assert!(derived.families.is_empty());
-        assert_eq!(derived.support.describe(), "unsupported");
+        assert_eq!(derived.support.describe(), "no evidence offered");
     }
 
     #[test]
@@ -828,7 +847,7 @@ mod tests {
             .all(|f| f.independence == Independence::IndependenceUnknown));
         assert_eq!(
             derived.support.describe(),
-            "single-source (3 with independence unknown)"
+            "one source (3 whose independence is unknown)"
         );
     }
 
@@ -1162,6 +1181,6 @@ mod tests {
             support.independent_family_count() + support.independence_unknown_count()
         );
         assert_eq!(support.independent_family_count(), 3);
-        assert_eq!(support.describe(), "corroborated by 3 independent");
+        assert_eq!(support.describe(), "corroborated by 3 independent sources");
     }
 }

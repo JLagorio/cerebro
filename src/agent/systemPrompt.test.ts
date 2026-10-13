@@ -16,6 +16,15 @@ describe('buildSystemPrompt capabilities', () => {
     expect(undeclared).not.toContain('supersededBy');
   });
 
+  // M52.3 — the snapshot carries learned-from concepts beside anchored ones,
+  // and `relation` is the only thing telling the two apart.
+  it('says how to read a knowledge note’s relation', () => {
+    const declared = buildSystemPrompt({ kind: 'none' }, { capabilities: ['knowledge'] });
+    expect(declared).toContain('`relation`');
+    expect(declared).toContain('`learned from`');
+    expect(declared).not.toContain('reached by `about:` anchor');
+  });
+
   it('keeps everything that is not the knowledge fragment for everyone', () => {
     const undeclared = buildSystemPrompt({ kind: 'none' }, {});
     expect(undeclared).toContain('assistant inside cerebro');

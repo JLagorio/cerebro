@@ -7,12 +7,13 @@ import type { Entry } from '@/engine/types';
 import { ThreadView } from './ThreadView';
 
 /**
- * The thread reads as one thing (M33a.4).
+ * The thread reads as one thing (M33a.4), in one list (M51).
  *
- * What is under test is the ORDER of findings and the honesty of the counts —
- * not the derivation, which okf.test.ts owns. A section that disappears when
- * it is empty and a concept sorted into a position its absent timestamp did
- * not earn are the two failures this surface is here to prevent.
+ * What is under test is that each concept appears ONCE, on its most
+ * consequential line, in the order a reader should meet them, and the honesty
+ * of the counts — not the derivation, which okf.test.ts owns. The findings
+ * the empty sections used to state ("nothing contested") are still said, in
+ * the summary line.
  */
 
 afterEach(cleanup);
@@ -63,61 +64,65 @@ function mount(entries: Entry[], onOpenConcept = vi.fn()) {
     expect(found).not.toBeNull();
     return found as HTMLElement;
   };
-  return { ...view, section, onOpenConcept };
+  const rows = () =>
+    [...view.container.querySelectorAll('[data-testid="thread-concept"]')] as HTMLElement[];
+  const summary = () => view.getByTestId('thread-summary').textContent ?? '';
+  return { ...view, section, rows, summary, onOpenConcept };
 }
 
 describe('ThreadView', () => {
-  it('leads with what is contested, and keeps it out of what is known', () => {
-    const { section } = mount([
+  it('lists each concept once, what is contested first', () => {
+    const { rows } = mount([
       project,
-      knows('offline-window', { title: 'The offline window' }),
+      knows('offline-window', {
+        title: 'The offline window',
+        properties: { generated: { by: 'claude-code', at: '2026-05-01T00:00:00Z' } },
+      }),
       knows('offline-guarantee', {
         title: 'The offline guarantee',
         relations: { supersedes: ['offline-window'] },
+        properties: { generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' } },
       }),
     ]);
-    const contested = section('contested');
-    expect(contested.textContent).toContain('The offline window');
-    expect(contested.textContent).toContain('replaced by The offline guarantee');
-    // A retired claim listed under "what's known" would be the surface saying
-    // the base believes something it has explicitly stopped believing.
-    expect(section('known').textContent).not.toContain('The offline window');
-    expect(section('known').textContent).toContain('The offline guarantee');
+    // M51 — it was printed under "contested" AND under "what changed".
+    expect(rows().map((r) => r.dataset.path)).toEqual([
+      'knowledge/offline-window.md',
+      'knowledge/offline-guarantee.md',
+    ]);
+    expect(rows()[0].textContent).toContain('Replaced by The offline guarantee');
   });
 
-  it('still renders the contested section on a settled thread, with a plain line', () => {
-    // Omitting the heading turns a finding into silence: "nothing is in
-    // dispute" is something the reader came here to learn.
-    const { section } = mount([project, knows('one', { title: 'One' })]);
-    const contested = section('contested');
-    expect(contested.textContent).toContain("What's contested");
-    expect(contested.textContent).toContain('Nothing in this thread is in dispute');
+  it('still says nothing is contested on a settled thread — in one line, not a heading', () => {
+    const { summary, container } = mount([project, knows('one', { title: 'One' })]);
+    expect(summary()).toContain('1 concept · nothing contested');
+    expect(container.querySelector('[data-section="thread-contested"]')).toBeNull();
   });
 
   it('reports an undated concept as not recorded rather than sorting it last', () => {
-    const { section } = mount([
+    const { rows } = mount([
       project,
+      knows('undated', { title: 'Undated' }),
       knows('old', {
         title: 'Old',
         properties: { generated: { by: 'claude-code', at: '2026-05-01T00:00:00Z' } },
       }),
-      knows('undated', { title: 'Undated' }),
     ]);
-    const changed = section('changed');
-    expect(changed.textContent).toContain('1 concept is not placed above');
-    expect(changed.textContent).toContain('when it was written is not recorded');
     // The dated one keeps its position, and the undated one is not given one.
-    const rows = changed.querySelectorAll('[data-testid="thread-concept"]');
-    expect(rows[0].getAttribute('data-path')).toBe('knowledge/old.md');
+    expect(rows().map((r) => r.dataset.path)).toEqual(['knowledge/old.md', 'knowledge/undated.md']);
+    expect(rows()[1].textContent).toContain('When it was written is not recorded');
   });
 
-  it('names what is stale and how long it has been due', () => {
-    const { section } = mount([
+  it('names what is stale and how long it has been due, before the rest', () => {
+    const { rows, summary } = mount([
       project,
+      knows('fresh', {
+        title: 'Fresh',
+        properties: { generated: { by: 'claude-code', at: '2026-07-27T00:00:00Z' } },
+      }),
       knows('due', { title: 'Due a recheck', properties: { stale_after: '2026-07-26' } }),
     ]);
-    expect(section('stale').textContent).toContain('Due a recheck since 2026-07-26');
-    expect(section('stale').textContent).toContain('2d ago');
+    expect(rows()[0].textContent).toContain('Due a recheck · 2 days overdue');
+    expect(summary()).toContain('1 due a recheck');
   });
 
   it('counts what cites each source, and counts what cites nothing', () => {
@@ -147,16 +152,14 @@ describe('ThreadView', () => {
   it('says so when a concept carries no description', () => {
     // M33a.0 made `description` a requirement; a bundle written before it has
     // none, and every row saying nothing at all is how that stayed invisible.
-    const { section } = mount([project, knows('one', { title: 'One' })]);
-    expect(section('known').textContent).toContain('No description recorded');
+    const { rows } = mount([project, knows('one', { title: 'One' })]);
+    expect(rows()[0].textContent).toContain('No description recorded');
   });
 
-  it('opens a concept from any row it appears in', () => {
+  it('opens a concept from its row', () => {
     const onOpenConcept = vi.fn();
-    const { section } = mount([project, knows('one', { title: 'One' })], onOpenConcept);
-    const row = section('known').querySelector('[data-testid="thread-concept"]');
-    expect(row).not.toBeNull();
-    fireEvent.click(row as HTMLElement);
+    const { rows } = mount([project, knows('one', { title: 'One' })], onOpenConcept);
+    fireEvent.click(rows()[0]);
     expect(onOpenConcept).toHaveBeenCalledWith('knowledge/one.md');
   });
 });

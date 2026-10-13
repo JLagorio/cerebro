@@ -11,13 +11,15 @@ import type { BeliefChips, FacetChips as FacetChipsRow } from '@/lib/ipc';
  * **Every word arrives from Rust.** `support_text`, `coverage_text` and
  * `validity_text` are composed beside their derivations; this file chooses
  * placement and colour and maps nothing. A component that turned
- * `(kind, summary)` into "coverage unassessed" would be the fold rule spelled
+ * `(kind, summary)` into "sources not yet assessed" would be the fold rule spelled
  * a second time in a language that never loaded the fold artifact.
  *
  * **A multi-facet belief gets separate scoped rows.** One revision can rest
  * on a claim about `ci_status` at `implemented` and another about
  * `bill_of_materials` at `shipping`; they go stale on different clocks, and a
- * merged row would have to pick one and be wrong about the other.
+ * merged row would have to pick one and be wrong about the other. The row
+ * names its scope in words (`scopeWords`) — the one phrase here not composed
+ * in Rust, because the wire carries only the key.
  */
 
 const AXIS_TONE = {
@@ -57,12 +59,77 @@ function AxisChip({
   );
 }
 
-/** "ci_status at implemented" — what this row is about. Rendered only when
- * there is more than one row, because a single facet's scope is the whole
- * belief's scope and naming it every time is noise. */
+/** Words that are initials, said as initials — Rust's `INITIALISMS`. */
+const INITIALISMS = new Set([
+  'api',
+  'arr',
+  'cd',
+  'ci',
+  'cpu',
+  'crm',
+  'db',
+  'eta',
+  'id',
+  'kpi',
+  'mrr',
+  'nps',
+  'qa',
+  'sdk',
+  'sku',
+  'sla',
+  'slo',
+  'sql',
+  'sso',
+  'ui',
+  'url',
+  'ux',
+]);
+
+/** What a facet with no recorded predicate is about — Rust's
+ * `UNRECORDED_SCOPE`. It is a row and not an absence. */
+const UNRECORDED_SCOPE = "what it is about isn't recorded";
+
+/**
+ * A facet in words — "CI status, at the implemented stage" — as Activity
+ * says it (M52.5): Rust's `attention::status::scope_words`, which composes
+ * the lane and change lines, says exactly this, and the two change together.
+ * The chips' wire carries the key and not the words, so they are said here:
+ * the field, initials upper-cased and the first word capitalised, and the
+ * stage as a stage. An `unknown` stage is no stage.
+ */
+export function scopeWords(predicate: string | null, stage: string): string {
+  if (predicate === null) return UNRECORDED_SCOPE;
+  const field = predicate
+    .split('_')
+    .filter((word) => word !== '')
+    .map((word, n) =>
+      INITIALISMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : n === 0
+          ? word.charAt(0).toUpperCase() + word.slice(1)
+          : word,
+    )
+    .join(' ');
+  return stage === 'unknown' ? field : `${field}, at the ${stage.replaceAll('_', ' ')} stage`;
+}
+
+const predicateOf = (facet: FacetChipsRow) =>
+  facet.key.predicate.kind === 'known' ? facet.key.predicate.value : null;
+
+/** What this row is about, in words. Rendered only when there is more than
+ * one row, because a single facet's scope is the whole belief's scope and
+ * naming it every time is noise. */
 function scopeOf(facet: FacetChipsRow): string {
-  const predicate = facet.key.predicate.kind === 'known' ? facet.key.predicate.value : null;
-  if (predicate === null) return 'no recorded predicate';
+  const words = scopeWords(predicateOf(facet), facet.key.state_stage);
+  // A row's label, so it starts with a capital, as a known field's does.
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The row's key as the ledger names it — `ci_status at implemented` — kept
+ * on the element for whoever needs the code, never shown. */
+function keyOf(facet: FacetChipsRow): string {
+  const predicate = predicateOf(facet);
+  if (predicate === null) return 'unknown';
   return facet.key.state_stage === 'unknown'
     ? predicate
     : `${predicate} at ${facet.key.state_stage}`;
@@ -70,9 +137,13 @@ function scopeOf(facet: FacetChipsRow): string {
 
 export function FacetChipRow({ facet, showScope }: { facet: FacetChipsRow; showScope: boolean }) {
   return (
-    <div data-testid="facet-chips" data-facet={scopeOf(facet)} className="flex flex-col gap-1">
+    <div data-testid="facet-chips" data-facet={keyOf(facet)} className="flex flex-col gap-1">
       {showScope && (
-        <span className="text-2xs uppercase tracking-[0.06em] text-n-500">{scopeOf(facet)}</span>
+        // As Activity's lane rows say it: the field it names ("CI status"),
+        // never its key.
+        <span data-testid="facet-scope" className="text-xs font-medium text-n-600">
+          {scopeOf(facet)}
+        </span>
       )}
       <div className="flex flex-wrap items-center gap-1">
         <AxisChip
@@ -121,7 +192,7 @@ export function FacetLines({ chips }: { chips: BeliefChips | null }) {
     <>
       {chips.facets.map((facet) => (
         <span
-          key={`${facet.key.belief_revision_event_id}:${scopeOf(facet)}`}
+          key={`${facet.key.belief_revision_event_id}:${keyOf(facet)}`}
           data-testid="facet-line"
           className="block truncate text-2xs text-n-500"
         >
@@ -137,7 +208,7 @@ export function FacetLines({ chips }: { chips: BeliefChips | null }) {
  *
  * `chips` is null when the surface has no answer — a vault with no ledger, or
  * a load that failed. Nothing renders then, and that is the honest reading:
- * saying "unsupported" about a belief nobody derived would be inventing an
+ * saying "no evidence offered" about a belief nobody derived would be inventing an
  * answer. The case where the ledger IS readable and this file simply is not
  * in it is said out loud by the caller, which is the only place that knows
  * the difference.
@@ -149,7 +220,7 @@ export function FacetChips({ chips }: { chips: BeliefChips | null }) {
     <div className="flex flex-col gap-2">
       {chips.facets.map((facet) => (
         <FacetChipRow
-          key={`${facet.key.belief_revision_event_id}:${scopeOf(facet)}`}
+          key={`${facet.key.belief_revision_event_id}:${keyOf(facet)}`}
           facet={facet}
           showScope={showScope}
         />

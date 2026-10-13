@@ -34,8 +34,9 @@ import type { ModifiedFile } from '@/engine/git';
 
 const file = (path: string): ModifiedFile => ({ path, status: 'modified', staged: false });
 
-// M21.7: the trailer is periodic anchoring — appended when a ledger head
-// exists, and NOTHING about a checkpoint changes when one does not.
+// M21.7: the trailer is a join key between a commit and the ledger head —
+// nothing reads it back (M49.10) — appended when a ledger head exists, and
+// NOTHING about a checkpoint changes when one does not.
 describe('withLedgerTrailer', () => {
   it('appends the chain head as a trailer when the vault has a ledger', async () => {
     vi.mocked(ledgerHead).mockResolvedValueOnce({ seq: 7, hash: 'abc123' });

@@ -155,7 +155,7 @@ export function IconPicker({
             const first = matches[0] ?? freeText;
             if (first !== null) onPick(`lucide:${first}`);
           }}
-          className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
+          className="w-full flex-none rounded-xs border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />
         {current !== null && (
           <button
@@ -178,7 +178,7 @@ export function IconPicker({
                 aria-label={`Icon ${n}`}
                 aria-pressed={current === `lucide:${n}`}
                 onClick={() => onPick(`lucide:${n}`)}
-                className={`flex h-7 w-7 items-center justify-center rounded border-0 hover:bg-n-50 ${
+                className={`flex h-7 w-7 items-center justify-center rounded-xs border-0 hover:bg-n-50 ${
                   current === `lucide:${n}` ? 'bg-cortex-50' : 'bg-transparent'
                 }`}
               >

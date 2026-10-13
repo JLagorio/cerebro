@@ -33,6 +33,7 @@ import { formatWikilink, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
+import { TABLE_ANATOMY } from '@/views/tableAnatomy';
 
 const pathStem = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '');
 
@@ -96,6 +97,36 @@ export type FieldPlaceholder = 'ghost' | 'blank';
  * it has height either.
  */
 const BLANK_FILL = 'min-h-[22px] flex-1 self-stretch';
+
+/**
+ * A picker's chevron, beside its values and never under them (M52).
+ *
+ * The values and the chevron used to share one wrapping row, so at the
+ * peek's 320px floor a long value ellipsised and the chevron dropped to a
+ * line of its own — and beside two lines of values sat between them. The
+ * values wrap among themselves now (`PICKER`), and this sits on their first
+ * line: `line` is that line's height, and the button is top-aligned.
+ */
+function Chevron({ testId, line }: { testId: string; line: number }) {
+  return (
+    <span data-testid={testId} className="flex flex-none items-center" style={{ height: line }}>
+      <Icon name="chevron-down" size={11} color="var(--n-400)" />
+    </span>
+  );
+}
+
+/** A picker button: one row, never wrapped — its values group wraps inside it. */
+const PICKER = 'inline-flex min-w-0 max-w-full flex-nowrap gap-1 text-left text-sm text-n-800';
+
+/** The first line's height for each kind of value, for `Chevron`. */
+const LINE = {
+  /** A 13px label on the shell's 20px leading. */
+  text: 20,
+  /** `OptionTag`: 16px leading and 1px padding either side. */
+  tag: 18,
+  /** A relation chip: 17px leading and 1px padding either side. */
+  chip: 19,
+} as const;
 
 /**
  * Which surface's value CELL this control is (M46.2 Task 7, reference §A.1
@@ -294,24 +325,39 @@ export function FieldEditor({
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
+          // A single value is one line (it truncates), so it stays centred; a
+          // multi-select's tags can wrap, so the chevron rides their first
+          // line instead (`Chevron`).
+          className={`${PICKER} ${blank ? BLANK_FILL : ''} ${multi ? 'items-start' : 'items-center'} ${CHROME[chrome]}`}
         >
-          {chips.length === 0 ? (
-            blank ? null : (
-              <span className="text-n-400">Empty</span>
-            )
-          ) : multi ? (
-            chips.map((c) => <OptionTag key={c.id} label={c.label} color={c.color} />)
-          ) : (
-            <>
-              <span
-                className="box-border h-[9px] w-[9px] flex-none rounded-full"
-                style={{ background: resolveOptionColor(chips[0].color).solid }}
-              />
-              {chips[0].label}
-            </>
-          )}
-          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+          {/* Only tags wrap. A single value's dot and label never do: a wrapping
+              row moved a long label under its dot before its `truncate` could
+              shrink it, so the peek drew on two lines what the table drew on
+              one. */}
+          <span
+            data-testid="option-values"
+            className={`inline-flex min-w-0 max-w-full ${multi ? wrapClass : 'flex-nowrap'} items-center gap-1`}
+          >
+            {chips.length === 0 ? (
+              blank ? null : (
+                <span className="text-n-400">Empty</span>
+              )
+            ) : multi ? (
+              chips.map((c) => <OptionTag key={c.id} label={c.label} color={c.color} />)
+            ) : (
+              // The table's anatomy (views/tableAnatomy), so a status reads the
+              // same in a cell and in the peek: its dot, and a label that
+              // truncates on one line rather than wrapping away from the dot.
+              <>
+                <span
+                  className={TABLE_ANATOMY.selectDot}
+                  style={{ background: resolveOptionColor(chips[0].color).solid }}
+                />
+                <span className="min-w-0 truncate">{chips[0].label}</span>
+              </>
+            )}
+          </span>
+          {!blank && <Chevron testId="option-chevron" line={multi ? LINE.tag : LINE.text} />}
         </button>
         {open && (
           <FieldPopover
@@ -436,16 +482,21 @@ export function FieldEditor({
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
+          className={`${PICKER} ${blank ? BLANK_FILL : ''} items-start ${CHROME[chrome]}`}
         >
-          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
-          {values.map((v) => (
-            <span key={v} className="inline-flex min-w-0 items-center gap-[5px]">
-              <Avatar name={labelOf(v)} size={18} />
-              <span className="truncate">{labelOf(v)}</span>
-            </span>
-          ))}
-          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+          <span
+            data-testid="person-values"
+            className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1`}
+          >
+            {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
+            {values.map((v) => (
+              <span key={v} className="inline-flex min-w-0 max-w-full items-center gap-[5px]">
+                <Avatar name={labelOf(v)} size={18} />
+                <span className="min-w-0 truncate">{labelOf(v)}</span>
+              </span>
+            ))}
+          </span>
+          {!blank && <Chevron testId="person-chevron" line={LINE.text} />}
         </button>
         {open && (
           <FieldPopover
@@ -525,31 +576,36 @@ export function FieldEditor({
           aria-label={`Edit ${humanize(def.name)}`}
           data-cell-primary
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 ${CHROME[chrome]} text-left text-sm text-n-800`}
+          className={`${PICKER} ${blank ? BLANK_FILL : ''} items-start ${CHROME[chrome]}`}
         >
-          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
-          {values.map((v) => {
-            const target = targetOf(v);
-            // M11: a related record is a CHIP. It used to carry an
-            // `arrow-up-right` glyph, which said "this is a link" — something
-            // the chip shape already says — and cost a fifth of the width in a
-            // narrow cell. The per-view setting swaps it for the icon of the
-            // type it points at, which is information rather than decoration.
-            const style = chips === 'type-icon' ? typeStyle(target?.type ?? null, schema) : null;
-            return (
-              <span
-                key={v}
-                data-testid="relation-chip"
-                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-sm bg-n-100 px-1.5 py-px leading-[17px] text-n-700"
-              >
-                {style !== null && (
-                  <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
-                )}
-                <span className="truncate">{target?.title ?? v}</span>
-              </span>
-            );
-          })}
-          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+          <span
+            data-testid="relation-chips"
+            className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1`}
+          >
+            {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
+            {values.map((v) => {
+              const target = targetOf(v);
+              // M11: a related record is a CHIP. It used to carry an
+              // `arrow-up-right` glyph, which said "this is a link" — something
+              // the chip shape already says — and cost a fifth of the width in a
+              // narrow cell. The per-view setting swaps it for the icon of the
+              // type it points at, which is information rather than decoration.
+              const style = chips === 'type-icon' ? typeStyle(target?.type ?? null, schema) : null;
+              return (
+                <span
+                  key={v}
+                  data-testid="relation-chip"
+                  className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-sm bg-n-100 px-1.5 py-px leading-[17px] text-n-700"
+                >
+                  {style !== null && (
+                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                  )}
+                  <span className="min-w-0 truncate">{target?.title ?? v}</span>
+                </span>
+              );
+            })}
+          </span>
+          {!blank && <Chevron testId="relation-chevron" line={LINE.chip} />}
         </button>
         {open && (
           // M11: a dialog, not a 240px popover. Choosing what to link and

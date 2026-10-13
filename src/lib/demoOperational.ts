@@ -6,6 +6,7 @@ import type {
   PipelineOverview,
   ReviewCard,
   RevertableApplication,
+  RunWrite,
 } from './mockIpc';
 
 /**
@@ -43,13 +44,20 @@ export const AMBIENT_CONCURRENCY_MAX = 4;
  * - a run with `actor: null` → "unattributed" (a row written before M33.1)
  * - a run with `usage_state: 'unknown'` → "unknown", never its zero columns
  * - a run with no cost rows → "not recorded", never $0
+ * - a run whose proposal counters were never booked (`null`, pre-M49.9) →
+ *   "proposals not recorded", never "0 applied"
  * - a run WITH cost rows, one of them `estimated` → the estimate marked
  * - a run with proposals still undecided → the door to the needs section
  * - all three constructs, so the actor filter has real options
  * - a `quota_failed` and an `abandoned_usage_unknown`, so outcome styling is
  *   visible without contriving one
+ * - an addressed turn of the Knowledge agent that applied two concepts → the
+ *   run, the agent's page and each concept's "Written by" telling one story
+ *   (M52.3): the concepts are stamped `process:knowledge` at the times this
+ *   run spans, as Rust stamps a run's writes with the run's actor
  * - a HIGH card whose target moved → the stale warning before anyone clicks
  * - a CRITICAL card → the diff-review mark
+ * - a MEDIUM card the high-stakes rule holds → why it waits, beyond its risk
  * - an applied-but-undoable change → the revert list
  *
  * **The dates are VAULT_TODAY's.** The corpus is read on 2026-07-28 (see
@@ -101,13 +109,18 @@ export function demoFleetRuns(): FleetRun[] {
       parent_run_id: null,
     },
     {
+      // The Knowledge agent, asked in the panel (M52.3) — it is off duty in
+      // the demo, so an addressed chat turn is the only way it runs. Its two
+      // applied proposals are the two concepts stamped `process:knowledge`,
+      // written at 09:05 and 09:26. The id predates the reattribution and is
+      // kept: specs open this run by it.
       run_id: 'run-ingest-2',
-      actor: 'agent:m26-ingest',
+      actor: 'process:knowledge',
       vault_id: 'demo',
-      mode: 'ambient',
-      lane: 'filed',
-      started_at: at('08:30'),
-      ended_at: at('08:32'),
+      mode: 'attended',
+      lane: 'agent',
+      started_at: at('09:00'),
+      ended_at: at('09:27'),
       outcome: 'succeeded',
       usage_state: 'exact',
       input_tokens: 9_240,
@@ -173,6 +186,8 @@ export function demoFleetRuns(): FleetRun[] {
     {
       // A row from before M33.1 added the column: nothing attributed it, and
       // nothing ever will. It renders "unattributed", which is the truth.
+      // Nor did anything book its proposal counters (pre-M49.9), so they are
+      // null — not recorded — rather than the zeros the row was inserted with.
       run_id: 'run-legacy-1',
       actor: null,
       vault_id: 'demo',
@@ -184,12 +199,29 @@ export function demoFleetRuns(): FleetRun[] {
       usage_state: 'exact',
       input_tokens: 800,
       output_tokens: 0,
-      proposals_submitted: 0,
-      applied: 0,
-      rejected: 0,
+      proposals_submitted: null,
+      applied: null,
+      rejected: null,
       parent_run_id: null,
     },
   ];
+}
+
+/**
+ * What each run changed in Knowledge (M50.3), keyed by run — one per state
+ * the run detail renders: the Knowledge agent's turn that applied two
+ * concepts names them, the synthesis run that applied nothing is
+ * measured-at-zero, and every other run is absent, which is "not recorded",
+ * never "changed nothing".
+ */
+export function demoRunWrites(): Record<string, RunWrite[]> {
+  return {
+    'run-ingest-2': [
+      { path: 'knowledge/playbooks/warehouse-cutover.md', state: 'applied' },
+      { path: 'knowledge/systems/pick-queue-drain.md', state: 'applied' },
+    ],
+    'run-assembly-1': [],
+  };
 }
 
 export function demoFleetDetails(): Record<string, FleetRunDetail> {
@@ -304,9 +336,13 @@ export function demoReviewCards(): ReviewCard[] {
           // say so BEFORE anyone clicks approve.
           current_version: 4,
           stale: true,
+          // The concept it is (M50.3) — the card names it and opens it.
+          path: 'knowledge/systems/offline-guarantee.md',
         },
       ],
-      reason: 'the sync error rate has been above its threshold for six days, not two',
+      // About the concept it targets (M52.5): its reason was the sync error
+      // rate's, on a card that revises the offline guarantee.
+      reason: 'three field reports show devices syncing after four days offline, not three',
       set_members: ['p0000000000000000000000000000001'],
       set_ready: true,
     },
@@ -320,9 +356,12 @@ export function demoReviewCards(): ReviewCard[] {
       // The CRITICAL rung's review mode: this one is read as a diff.
       review: 'diff',
       queued_for: [],
-      intended_use_kind: 'IrreversibleWork',
+      // Codes the schema can hold (M52.4): `IntendedUseKind` and
+      // `TransitionCause` have no `IrreversibleWork` or `superseded`, and a
+      // fixture that invented them showed words no real card could carry.
+      intended_use_kind: 'ProductionRelease',
       intended_use_stakes: 'CRITICAL',
-      transition_cause: 'superseded',
+      transition_cause: 'new_evidence',
       evidence_refs: ['e4'],
       coverage_refs: [],
       authority_refs: ['a1'],
@@ -333,6 +372,7 @@ export function demoReviewCards(): ReviewCard[] {
           expected_version: 1,
           current_version: 1,
           stale: false,
+          path: 'knowledge/metrics/webinar-attendance.md',
         },
       ],
       reason: 'the onboarding walkthrough this described was replaced in the Q3 rewrite',
@@ -344,40 +384,77 @@ export function demoReviewCards(): ReviewCard[] {
       commit_set_id: 'c0000000000000000000000000000003',
       run_id: 'run-maint-1',
       actor: 'agent:m26-maintenance',
-      op: 'add_relation',
+      // A real op (`add_relation` is not one — linking is `edit_relation`),
+      // at the table's MEDIUM base risk. It waits anyway: it is meant for an
+      // operational decision at HIGH stakes, so the high-stakes rule queues
+      // it — the demo's one MEDIUM chip, and a card that waits for a reason
+      // other than its risk.
+      op: 'edit_relation',
       effective_risk: 'MEDIUM',
       review: null,
-      queued_for: [],
-      intended_use_kind: 'ReversibleWork',
-      intended_use_stakes: 'LOW',
-      transition_cause: 'freshness_recheck',
+      queued_for: ['high_stakes_verification_required'],
+      intended_use_kind: 'OperationalDecision',
+      intended_use_stakes: 'HIGH',
+      transition_cause: 'maintenance',
       evidence_refs: ['e5', 'e6'],
       coverage_refs: ['c2', 'c3'],
       authority_refs: [],
+      // A link between two concepts the demo holds, named at both ends
+      // (M52.5) — the card read "Change a link" and named neither. Its
+      // targets are Rust's (`policy::review` builds an `edit_relation` card
+      // this way): both linked beliefs, sorted by id, each naming its
+      // concept file, then the relation itself — so each end's page and row
+      // shows the card, as they do against the real queue.
       targets: [
+        {
+          target_class: 'belief',
+          target_id: 'b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4',
+          expected_version: 1,
+          current_version: 1,
+          stale: false,
+          path: 'knowledge/systems/pick-queue-drain.md',
+        },
+        {
+          target_class: 'belief',
+          target_id: 'b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5',
+          expected_version: 1,
+          current_version: 1,
+          stale: false,
+          path: 'knowledge/playbooks/warehouse-cutover.md',
+        },
         {
           target_class: 'relation',
           target_id: 'r3r3r3r3r3r3r3r3r3r3r3r3r3r3r3r3',
           expected_version: null,
           current_version: null,
           stale: false,
+          link: {
+            action: 'add',
+            relation: 'refines',
+            from_path: 'knowledge/systems/pick-queue-drain.md',
+            to_path: 'knowledge/playbooks/warehouse-cutover.md',
+          },
         },
       ],
       reason:
-        'the retention metric and the activation metric move together in every window measured',
+        'the cutover window is sized by how long the pick queue takes to drain, so the drain time narrows the playbook',
       set_members: ['p0000000000000000000000000000003'],
       set_ready: true,
     },
   ];
 }
 
+/** A revise already applied and still undoable, naming the concept it
+ * changed (M52.5), as Rust's `revertable` does. The demo has no churn
+ * concept, and "corrected the churn definition" named nothing on screen. */
 export function demoRevertables(): RevertableApplication[] {
   return [
     {
       proposal_id: 'p0000000000000000000000000000009',
       op: 'update_belief',
       applied_event_id: 'e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9',
-      reason: 'corrected the churn definition to exclude trialists',
+      reason: 'counted only conflicts a person still has to resolve',
+      path: 'knowledge/metrics/sync-error-rate.md',
     },
   ];
 }
@@ -421,7 +498,9 @@ export function demoPipelineOverview(lanes: string[]): PipelineOverview {
     banners: [
       {
         kind: 'ingestion',
-        detail: 'two notes could not be parsed and were left alone',
+        // The count is the banner's to say, once: "two notes … — 2 items"
+        // said it twice.
+        detail: 'notes that could not be parsed were left alone',
         count: 2,
       },
     ],
@@ -429,15 +508,25 @@ export function demoPipelineOverview(lanes: string[]): PipelineOverview {
   };
 }
 
+/** Ledger ids are 32 hex characters, never slugs (M52.4): a fixture that
+ * named an entity `sync-error-rate` let the surface pass by matching a file
+ * name the real wire never sends. These pair with each concept's `path`. */
+const SYNC_BELIEF = 'b'.repeat(32);
+const SYNC_ENTITY = 'e1'.repeat(16);
+const ONBOARDING_ENTITY = 'e2'.repeat(16);
+
 /**
  * The four attention lanes, with one item where it teaches something.
  *
  * Every sentence here is normally COMPOSED IN RUST, beside the rule that
  * produced it — `reason_text`, `scope_text`, `reliance_text`, `empty_text`.
- * The fixture repeats that shape rather than inventing a UI-side vocabulary,
- * because a mock that phrased these itself would be the twin-implementation
- * defect: the surface would look right here and wrong against the real
- * command.
+ * The fixture repeats those sentences VERBATIM rather than inventing a
+ * UI-side vocabulary: the lane words are `attention::status::lane_words`,
+ * character for character (M52.3), because a mock that phrased these itself
+ * would be the twin-implementation defect — the surface would look right here
+ * and wrong against the real command. Until M52.3 it did exactly that: "Gone
+ * stale" and "Owed work" here, "Stale understanding" and "Epistemic debt"
+ * there.
  *
  * Three lanes are deliberately EMPTY. A lane that only appeared when it had
  * contents would make "no coverage gaps" and "coverage was never computed"
@@ -460,57 +549,67 @@ export function demoLanes(): LanesView {
       lane(
         'contradiction',
         'Contradictions',
-        'Two things this base believes that cannot both be true.',
-        'Nothing is contested.',
+        'Two things Knowledge holds that cannot both be true.',
+        'No open contradictions.',
         true,
       ),
       lane(
         'blindness',
-        'What it cannot see',
-        'Questions this base has no evidence either way about.',
-        'No gaps it can name.',
+        'Gaps',
+        'Where Knowledge looked for evidence and found none, and how much nobody has checked yet.',
+        'No gaps.',
         true,
       ),
       lane(
         'staleness',
-        'Gone stale',
-        'Beliefs past the freshness their own rule asked for.',
-        'Nothing has gone stale.',
+        'Due a recheck',
+        'Past the date it was due to be rechecked. Not wrong — unchecked.',
+        'Nothing is due a recheck.',
         false,
         [
           {
             lane: 'staleness',
-            belief_id: 'b'.repeat(32),
-            entity_id: 'sync-error-rate',
+            belief_id: SYNC_BELIEF,
+            entity_id: SYNC_ENTITY,
             path: 'metrics/sync-error-rate.md',
             predicate: 'ci_status',
             state_stage: 'implemented',
-            scope_text: 'ci_status at implemented',
+            // Its belief's only facet, so no scope: Rust's `view` leaves a
+            // sole facet's unsaid (M52.5) — the belief's scope is its own.
+            scope_text: null,
             reasons: ['freshness_stale'],
-            reason_text: 'past its freshness rule',
+            reason_text: 'past its recheck date',
             reliance: ['qualified'],
-            reliance_text: 'relied on: promoted past draft',
+            reliance_text: 'Relied on — it is no longer a draft',
             edge_id: null,
             relation_id: null,
           },
         ],
-        2,
       ),
       lane(
         'epistemic_debt',
-        'Owed work',
-        'What was accepted on the promise of evidence that never came.',
-        'Nothing is owed.',
+        'Taken on trust',
+        'What Knowledge is relied on for but cannot yet back with evidence.',
+        'Nothing is taken on trust.',
         false,
       ),
     ],
-    withheld: 2,
+    // Nothing held back: with the default attention settings a lane holds
+    // back only past its first ten, and this one lists one. "2 more not
+    // shown" beside a single row was a count no real answer could carry.
+    withheld: 0,
     incomplete: [],
   };
 }
 
 /** A window in which two things actually moved. `quiet: false` is M26's own
- * answer to "did anything move", not a recount of the sections below it. */
+ * answer to "did anything move", not a recount of the sections below it.
+ *
+ * Rust's shape, verbatim (M52.4): all five of `attention::status::
+ * change_sections`' sections in its order, under its labels and empty lines,
+ * and lines whose text Rust can compose — a predicate that follows the
+ * concept's name. Until M52.4 this sent three sections, one of them an id
+ * Rust has never had ("coverage"), with sentences no `match` arm writes. */
 export function demoChanges(): ChangesView {
   return {
     schema_version: 'convergence-v1',
@@ -519,36 +618,40 @@ export function demoChanges(): ChangesView {
     sections: [
       {
         id: 'material',
-        label: 'Beliefs that moved',
-        empty_text: 'No beliefs moved.',
+        label: 'Concepts that changed',
+        empty_text: 'No concept changed.',
         lines: [
           {
-            // The surface prints the entity ahead of this line, so the line
-            // does not restate it — "sync-error-rate the sync error rate was
-            // …" is what happens when a fixture forgets that.
-            text: 'was promoted from draft to implemented on two new measurements',
-            belief_id: 'b'.repeat(32),
-            entity_id: 'sync-error-rate',
+            // Revised + QualificationChanged, joined as Rust joins them.
+            text: 'was revised, changed its draft status',
+            belief_id: SYNC_BELIEF,
+            entity_id: SYNC_ENTITY,
+            path: 'metrics/sync-error-rate.md',
           },
         ],
       },
+      {
+        id: 'blindness',
+        label: 'What came into and out of view',
+        empty_text: 'Nothing changed about what can be seen.',
+        lines: [
+          {
+            // Entity-only, as `SubjectNoLongerBlind` is: the path is the
+            // entity's projected concept, which the surface names.
+            text: 'is no longer a gap — 2 checks now cover it',
+            belief_id: null,
+            entity_id: ONBOARDING_ENTITY,
+            path: 'metrics/onboarding-completion.md',
+          },
+        ],
+      },
+      { id: 'staleness', label: 'Evidence', empty_text: 'No evidence moved.', lines: [] },
+      { id: 'certainty', label: 'Support', empty_text: 'No support changed.', lines: [] },
       {
         id: 'contestation',
         label: 'New contradictions',
         empty_text: 'No new contradictions opened.',
         lines: [],
-      },
-      {
-        id: 'coverage',
-        label: 'What it can now see',
-        empty_text: 'No coverage changed.',
-        lines: [
-          {
-            text: 'gained a second independent source, classified firsthand',
-            belief_id: 'c'.repeat(32),
-            entity_id: 'activation-rate',
-          },
-        ],
       },
     ],
   };

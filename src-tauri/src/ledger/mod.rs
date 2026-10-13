@@ -48,6 +48,13 @@ pub fn ledger_dir(vault: &Path) -> PathBuf {
     vault.join(LEDGER_DIR)
 }
 
+/// Does this vault have a ledger store? Only one that has none — never
+/// armed — may answer knowledge questions from its files alone; a store
+/// that exists and cannot be read is unavailable, never absent.
+pub fn has_store(vault: &Path) -> bool {
+    store::load(&ledger_dir(vault)).map_or(true, |store| store.is_some())
+}
+
 /// Lowercase-hex SHA-256, the one digest format the ledger speaks.
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
@@ -126,11 +133,18 @@ pub struct LedgerHead {
 }
 
 /// Best-effort read of the vault ledger's committed head — for checkpoint
-/// trailers, which are PERIODIC ANCHORING (D2), never a dependency: an
-/// absent, locked-out-of-nothing, torn-tailed (the committed prefix still
-/// anchors) or outright faulted ledger yields None and the checkpoint
-/// proceeds identically. Ledger correctness must not depend on git, and
-/// git behavior must not depend on the ledger.
+/// trailers, which JOIN a commit to the ledger head it was made at and are
+/// never a dependency: an absent, locked-out-of-nothing, torn-tailed or
+/// outright faulted ledger yields None and the checkpoint proceeds
+/// identically. Ledger correctness must not depend on git, and git behavior
+/// must not depend on the ledger.
+///
+/// Not rewind detection (M49.10, K36): nothing reads the trailer back, and
+/// nothing can. With knowledge synced through git (the 2026-09 owner
+/// decision) other devices' commits carry THEIR ledgers' heads and
+/// `.cerebro/` is not in git, so "a head this ledger does not hold" is the
+/// normal state of a second device. Same-machine rewinds are caught by the
+/// remembered head and the per-path store record (`shadow::activate`).
 pub fn head(vault: &Path) -> Option<LedgerHead> {
     read_ledger(&ledger_dir(vault)).ok().map(|read| LedgerHead {
         seq: read.head_seq,
@@ -474,8 +488,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
-    // M21.7: the head read is best-effort BY DESIGN — checkpoints are
-    // periodic anchoring, never a ledger dependency.
+    // M21.7: the head read is best-effort BY DESIGN — a checkpoint trailer
+    // is only a join key (nothing reads it back, M49.10), never a ledger
+    // dependency.
     #[test]
     fn the_anchoring_head_is_best_effort_never_an_error() {
         // No ledger at all → None, no error.

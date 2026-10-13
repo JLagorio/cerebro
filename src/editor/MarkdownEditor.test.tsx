@@ -84,6 +84,29 @@ describe('MarkdownEditor', () => {
     expect(onChange.mock.calls[0][0]).toContain('last words');
   });
 
+  /* That flush runs inside React's commit, where React will not render — and
+     every chip used to be serialized by rendering it. Measured before M51.5
+     demoted chips to text first: this page flushed as `See and a claim.` and
+     `The source`, the link and both citation markers gone. */
+  it('flushes chips on unmount as the text they are on disk', async () => {
+    const markdown = 'See [[kickoff]] and a claim.[^a]\n\n[^a]: The source\n';
+    const onChange = vi.fn();
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={markdown}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    appendParagraph(onReady.mock.calls[0][0].editor, 'last words');
+    unmount();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls[0][0]).toBe(`${markdown}\nlast words\n`);
+  });
+
   it('reports a lossy import for raw HTML content', async () => {
     const info = await renderReady({ markdown: '<div align="center">centered</div>\n' });
     expect(info.lossyImport).toBe(true);

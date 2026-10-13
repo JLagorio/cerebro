@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { DrawerScrim, useDrawerFocus } from '@/components/ui/DrawerScrim';
 import { Icon } from '@/components/ui/Icon';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import {
@@ -16,6 +17,7 @@ import { CreateMenu } from '@/app/CreateMenu';
 import { createPageIn, deleteCollection, deleteList } from '@/app/listActions';
 import { createDatabase } from '@/app/typeActions';
 import { SectionHeader } from '@/app/SectionHeader';
+import { SHELL_CLASSES, SIDEBAR_RAIL_WIDTH, type ShellBands } from '@/app/shellLayout';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass } from '@/app/sidebarChrome';
 import { agentRef, isAgentEntry } from '@/engine/agents';
@@ -23,8 +25,13 @@ import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { inboxCounts } from '@/engine/inbox';
 import { isPaused } from '@/engine/jobs';
 import { openWork } from '@/engine/myWork';
+import { isKnowledgePath, RESERVED_FILENAMES, sectionOfPath } from '@/engine/okf';
 import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
-import type { CollectionFile, CollectionNode } from '@/engine/types';
+import type {
+  CollectionFile,
+  CollectionNode,
+  KnowledgeNav as KnowledgeNavState,
+} from '@/engine/types';
 import { SyncBadge } from '@/git/SyncBadge';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
@@ -45,17 +52,30 @@ export interface SidebarProps {
    * left to fight a ceiling it cannot pass.
    */
   narrow?: boolean;
+  /**
+   * Where the window's width steps the sidebar down to its icon rail, so a
+   * record and the assistant both fit — or, narrower still, the parked
+   * assistant's tab (M52, app/shellLayout.ts `shellBands`).
+   * CSS draws the step, in the same layout pass as the width that calls for
+   * it: the column and the rail are both mounted, and a media query shows
+   * one. Derived, like `narrow`: the stored collapsed flag is not asked or
+   * written.
+   */
+  railBand?: ShellBands['rail'];
+  /**
+   * The rail is what is drawn now (`shellPlan`) — a frame behind the CSS, so
+   * it decides nothing on screen. The rail's expand control opens the whole
+   * sidebar as a drawer over the canvas, and this closes that drawer once
+   * the rail is gone.
+   */
+  rail?: boolean;
+  /**
+   * The widest the sidebar can be drawn beside the main column's floor (M52,
+   * `sidebarCeiling`). Its drag stops here, so it never stores a width it
+   * cannot draw.
+   */
+  maxWidth?: number;
 }
-
-/**
- * The surfaces Home is the front door to (M15).
- *
- * A Collection, a List and a Type screen are the item world, and HomePage is
- * where you enter it — so the nav marks Home on all four. Spelled out rather
- * than derived by negating every other slot, which is how `changes` and
- * `settings` had to be remembered in a boolean expression to keep Home dark.
- */
-const HOME_KINDS = new Set(['home', 'collection', 'list', 'type']);
 
 /** The footer's theme cycle (M43): what each mode wears, and what follows it. */
 const THEME_ICONS: Record<ThemeMode, string> = { system: 'monitor', light: 'sun', dark: 'moon' };
@@ -64,6 +84,55 @@ const THEME_NEXT: Record<ThemeMode, ThemeMode> = { system: 'light', light: 'dark
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
 type CollectionDialogState = { mode: 'new' } | { mode: 'rename'; collection: CollectionFile };
+
+/** The header controls a sidebar with no column keeps (M43), shared by the
+ * user's collapsed cluster and the shell's rail (M52). */
+const CHROME_BUTTON =
+  'flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0';
+
+/**
+ * Expand, ask and search: the chrome's whole promise, kept when the sidebar
+ * has no column (M43). The user's collapse floats them over the canvas's
+ * corner; the shell's rail stacks them in a strip of their own (M52).
+ */
+function CollapsedControls({ onExpand }: { onExpand: () => void }) {
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const setQuickOpen = useUiStore((s) => s.setQuickOpen);
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Show sidebar"
+        data-testid="sidebar-expand"
+        onClick={onExpand}
+        className={`${CHROME_BUTTON} bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900`}
+      >
+        <Icon name="panel-left" size={15} />
+      </button>
+      <button
+        type="button"
+        aria-label="Assistant"
+        aria-pressed={aiPanelOpen}
+        onClick={() => setAiPanelOpen(!aiPanelOpen)}
+        className={`${CHROME_BUTTON} ${
+          aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
+        } hover:bg-n-100`}
+      >
+        <Icon name="zap" size={15} color="var(--synapse-500)" />
+      </button>
+      <button
+        type="button"
+        aria-label="Search"
+        title="Search  ⌘K"
+        onClick={() => setQuickOpen(true)}
+        className={`${CHROME_BUTTON} bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900`}
+      >
+        <Icon name="search" size={15} />
+      </button>
+    </>
+  );
+}
 
 /**
  * One destination row of the flattened nav (M37.3).
@@ -135,7 +204,12 @@ function SurfaceRow({
  * design's `sec()` treats a roster the way Databases already reads: a
  * labelled shelf of subjects, not a place with children.
  */
-export function Sidebar({ narrow = false }: SidebarProps) {
+export function Sidebar({
+  narrow = false,
+  railBand = 'none',
+  rail = false,
+  maxWidth,
+}: SidebarProps) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
@@ -168,11 +242,38 @@ export function Sidebar({ narrow = false }: SidebarProps) {
     null,
   );
   const pagesCreate = useRef<{ newPage(): void; newFolder(): void } | null>(null);
+  // M52: the rail's drawer, held as the selection it was opened on, so going
+  // anywhere closes it. Once the rail goes, so does the drawer: the next rail
+  // starts closed.
+  const [drawerAt, setDrawerAt] = useState<typeof selection | null>(null);
+  if (!rail && drawerAt !== null) setDrawerAt(null);
+  const drawer = rail && drawerAt === selection;
+  const drawerRef = useDrawerFocus<HTMLElement>(drawer);
 
   // M8.1: Base navigates by its own axes rather than borrowing Views and
   // Types, which describe a corpus with a different author; its rows nest
   // under the Base row (always available since M42.2).
-  const knowledgeMode = selection.kind === 'knowledge';
+  //
+  // M52.3 — a concept opens as a page (M50.1), and on that page no row lit:
+  // the nav said you were nowhere in Knowledge while you read one of its
+  // concepts. Its folder row lights, the way the Pages tree lights the page
+  // you are on. The bundle's own `index.md`/`log.md` are structure, not
+  // concepts (M52.4): at the root they would light "Ungrouped", a folder they
+  // are not counted in. A folder's own index still lights its folder.
+  const onConcept =
+    selection.kind === 'doc' &&
+    isKnowledgePath(selection.path) &&
+    !(
+      sectionOfPath(selection.path) === '' &&
+      RESERVED_FILENAMES.includes(selection.path.split('/').pop() ?? '')
+    );
+  const knowledgeNav: KnowledgeNavState | undefined =
+    selection.kind === 'knowledge'
+      ? selection.nav
+      : onConcept
+        ? { tab: 'section', folder: sectionOfPath(selection.path) }
+        : undefined;
+  const knowledgeMode = selection.kind === 'knowledge' || onConcept;
 
   // M42.2 — the Notion turn: a destination that owns subjects is a GROUP, and
   // its subjects nest under it on every surface. Open unless closed, so a new
@@ -196,7 +297,11 @@ export function Sidebar({ narrow = false }: SidebarProps) {
   }, [loadRoots]);
   // M9.4: the two git surfaces share one slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
-  const homeActive = HOME_KINDS.has(selection.kind);
+  // Home is current on Home alone (M52). M15 lit it on every Collection, List
+  // and Type screen as the item world's front door, which was true while
+  // those rows lived in a sidebar of Home's own; in the one column they are
+  // rows of their own, so on the Epic table Home and Epic were both current.
+  const homeActive = selection.kind === 'home';
 
   // M15: the badge counts what the page will SHOW — the persisted period, not
   // the unfiltered total.
@@ -377,47 +482,46 @@ export function Sidebar({ narrow = false }: SidebarProps) {
   if (collapsed) {
     return (
       <div className="absolute left-2.5 top-2.5 z-20 flex items-center gap-0.5">
-        <button
-          type="button"
-          aria-label="Show sidebar"
-          data-testid="sidebar-expand"
-          onClick={() => setCollapsed(false)}
-          className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
-        >
-          <Icon name="panel-left" size={15} />
-        </button>
-        <button
-          type="button"
-          aria-label="Assistant"
-          aria-pressed={aiPanelOpen}
-          onClick={() => setAiPanelOpen(!aiPanelOpen)}
-          className={`flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 ${
-            aiPanelOpen ? 'bg-surface-selected' : 'bg-transparent'
-          } hover:bg-n-100`}
-        >
-          <Icon name="zap" size={15} color="var(--synapse-500)" />
-        </button>
-        <button
-          type="button"
-          aria-label="Search"
-          title="Search  ⌘K"
-          onClick={() => setQuickOpen(true)}
-          className="flex h-[26px] w-[26px] items-center justify-center rounded-md border-0 bg-transparent text-n-600 hover:bg-n-100 hover:text-n-900"
-        >
-          <Icon name="search" size={15} />
-        </button>
+        <CollapsedControls onExpand={() => setCollapsed(false)} />
       </div>
     );
   }
+
+  // M52 — the rail: what the shell steps the sidebar down to before it parks
+  // the assistant, and again under 932 to keep the parked tab on screen. A
+  // column of its own, not the floating cluster, so it never
+  // sits on a page's title. Mounted beside the column whenever the window
+  // could call for it, and `band` shows one or the other — decided by React
+  // it was a frame late, and for that frame the column's width came out of
+  // the assistant. `inert` while its drawer is open: the drawer's own header
+  // has the same three controls, and the scrim covers these.
+  const band = SHELL_CLASSES.rail[railBand];
+  const railStrip = railBand !== 'none' && (
+    <nav
+      aria-label="Sidebar rail"
+      data-testid="sidebar-rail"
+      inert={drawer}
+      className={`${band.rail} flex-none flex-col items-center gap-1 border-r border-n-200 bg-surface-sunken pt-3`}
+      style={{ width: SIDEBAR_RAIL_WIDTH }}
+    >
+      <CollapsedControls onExpand={() => setDrawerAt(selection)} />
+    </nav>
+  );
+
+  // The widest this can be drawn, and so where its drag stops (M52).
+  const ceiling = maxWidth ?? SIDEBAR_WIDTH_MAX;
 
   // The vault, named as its folder — worn as the header tile (M43), which
   // keeps answering "which vault" from the slot the design gives an avatar.
   const vaultName = vaultPath?.split('/').filter(Boolean).pop() ?? 'Vault';
 
-  return (
+  const nav = (
     <nav
+      ref={drawerRef}
       aria-label="Sidebar"
       data-testid="sidebar"
+      data-overlay={drawer || undefined}
+      tabIndex={drawer ? -1 : undefined}
       // `relative` hosts the drag handle; the width is a stored preference
       // rather than a constant, because 264px is only right for some vaults
       // and some window sizes (M11 responsiveness).
@@ -426,23 +530,43 @@ export function Sidebar({ narrow = false }: SidebarProps) {
       // before the canvas gives up anything, which is the whole layout contract.
       // DS: the sidebar is a SUNKEN surface — the canvas is the white thing
       // (M42.1). One token, so dark theme remaps it by role.
-      className="relative flex flex-col overflow-hidden border-r border-n-200 bg-surface-sunken"
-      style={{ width: narrow ? SIDEBAR_WIDTH_MIN : width, minWidth: SIDEBAR_WIDTH_MIN }}
+      // M52: opened from the rail it is a drawer, over the canvas and out of
+      // the row — the row had no room for it, which is why it was a rail.
+      className={[
+        'flex flex-col overflow-hidden border-r border-n-200 bg-surface-sunken',
+        drawer
+          ? 'fixed inset-y-0 left-0 z-40 shadow-[var(--shadow-lg)] outline-none'
+          : `relative ${band.column}`,
+      ].join(' ')}
+      style={
+        drawer
+          ? { width, maxWidth: '85vw' }
+          : { width: narrow ? SIDEBAR_WIDTH_MIN : width, minWidth: SIDEBAR_WIDTH_MIN }
+      }
     >
       {/* Withdrawn while narrow: the sidebar is already pinned at its minimum,
           so a handle there could only fight a ceiling — and dragging it would
-          overwrite the width the user chose for a wide window. */}
-      {!narrow && (
+          overwrite the width the user chose for a wide window. Withdrawn from
+          the drawer too, which floats at the stored width rather than in the
+          row the handle measures against. */}
+      {!narrow && !drawer && (
         <ResizeHandle
           label="Resize sidebar"
           side="right"
-          width={width}
+          width={Math.min(width, ceiling)}
+          preferred={width}
           min={SIDEBAR_WIDTH_MIN}
-          max={SIDEBAR_WIDTH_MAX}
+          max={ceiling}
           onResize={setWidth}
         />
       )}
-      <div className="flex items-center gap-2 py-3 pl-3.5 pr-2.5">
+      {/* A size container (M52): the shell now squeezes the sidebar to its
+          180px floor to keep the assistant whole, and at that width the
+          wordmark pushed Hide sidebar out past the clipped edge. The
+          wordmark goes first; the three controls never do. Only this row is
+          the container — containment on the whole nav would re-anchor every
+          fixed-position menu the nav opens. */}
+      <div className="@container flex items-center gap-2 py-3 pl-3.5 pr-2.5">
         <span
           data-testid="vault-tile"
           title={vaultName}
@@ -450,7 +574,10 @@ export function Sidebar({ narrow = false }: SidebarProps) {
         >
           {vaultName.charAt(0).toUpperCase()}
         </span>
-        <span className="text-[15px] font-bold tracking-[-0.02em] text-n-900">
+        <span
+          data-testid="sidebar-wordmark"
+          className="min-w-0 truncate text-[15px] font-bold tracking-[-0.02em] text-n-900 @max-[200px]:hidden"
+        >
           cerebro<span className="text-synapse-500">.</span>
         </span>
         <span className="flex-1" />
@@ -477,11 +604,13 @@ export function Sidebar({ narrow = false }: SidebarProps) {
         >
           <Icon name="search" size={15} />
         </button>
+        {/* In the drawer, hiding closes the drawer: the rail was the shell's
+            doing, and collapsing is the user's word — never written for it. */}
         <button
           type="button"
           aria-label="Hide sidebar"
           data-testid="sidebar-collapse"
-          onClick={() => setCollapsed(true)}
+          onClick={() => (drawer ? setDrawerAt(null) : setCollapsed(true))}
           className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
         >
           <Icon name="panel-left" size={15} />
@@ -670,33 +799,28 @@ export function Sidebar({ narrow = false }: SidebarProps) {
             </div>
           ))}
         {/* M5: the agent's corpus — different author, different rules — worn
-            as a section since M43.10, the same anatomy as Pages. M33a.2
-            folded the Status hub in, so this one shelf is both what the base
-            holds and what it knows about itself. Still no badge, deliberately
-            (M8.1/M27.8): a shelf may say how big it is; nothing counts up at
-            you from the chrome. `nav` passed through undefined on a nav-less
-            selection: which view that lands on is the nav's own answer
-            (M33a.3), and defaulting it here would make the sidebar a second
-            opinion. `current` keeps an un-current nav from electing a default
-            row for a canvas some other surface owns. */}
+            as a section since M43.10, the same anatomy as Pages. M50.5 named
+            it Knowledge (it was "Base"; the group key and `data-section` keep
+            the old word); M51 made its rows the bundle's folders and the
+            review queue, and the ↗ opens every concept. Still no badge,
+            deliberately (M8.1/M27.8): a shelf may say how big it is; nothing
+            counts up at you from the chrome. `current` keeps an un-current
+            nav from lighting a row for a canvas some other surface owns. */}
         <SectionHeader
-          label="Base"
+          label="Knowledge"
           open={groupOpen('base')}
           onToggle={() => setNavGroupOpen('base', !groupOpen('base'))}
           actions={[
             {
               icon: 'arrow-up-right',
-              label: 'Open base',
+              label: 'Open Knowledge',
               onClick: () => navigate({ kind: 'knowledge' }),
             },
           ]}
         />
         {groupOpen('base') && (
           <div data-section="nav-base">
-            <KnowledgeNav
-              nav={selection.kind === 'knowledge' ? selection.nav : undefined}
-              current={knowledgeMode}
-            />
+            <KnowledgeNav nav={knowledgeNav} current={knowledgeMode} />
           </div>
         )}
         {/* M43 — Agents is a SECTION now, the design's sec(): the fleet is a
@@ -895,5 +1019,23 @@ export function Sidebar({ narrow = false }: SidebarProps) {
       )}
       {adopting && <AdoptSchemaDialog onClose={() => setAdopting(false)} />}
     </nav>
+  );
+  // One shape whether or not there is a rail or a drawer, so neither ever
+  // remounts the nav and everything open inside it.
+  return (
+    <>
+      {railStrip}
+      {/* Under the drawer, over everything else — the record panel sits at
+          z-30 — so a press anywhere past the drawer closes it (M52). */}
+      {drawer && (
+        <DrawerScrim
+          onDismiss={() => setDrawerAt(null)}
+          label="Close the sidebar"
+          testId="sidebar-drawer-scrim"
+          className="fixed inset-0 z-40"
+        />
+      )}
+      {nav}
+    </>
   );
 }

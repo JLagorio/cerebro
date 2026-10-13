@@ -129,7 +129,7 @@ function CollectionRow({
               e.stopPropagation();
               toggle(key);
             }}
-            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-700"
+            className="flex h-4 w-4 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-700"
           >
             <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
           </button>
@@ -161,7 +161,7 @@ function CollectionRow({
               const box = e.currentTarget.getBoundingClientRect();
               onAdd(node, { x: box.left, y: box.bottom });
             }}
-            className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+            className="flex h-5 w-5 flex-none items-center justify-center rounded-xs border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
           >
             <Icon name="plus" size={13} />
           </button>

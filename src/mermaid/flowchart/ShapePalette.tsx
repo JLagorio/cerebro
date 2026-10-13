@@ -100,12 +100,12 @@ export function ShapePalette({
             const first = visible[0];
             if (first !== undefined) onPick(first.name);
           }}
-          className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
+          className="w-full flex-none rounded-xs border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />
         {supersededByIcon !== null && (
           <div
             data-testid="shape-superseded-note"
-            className="flex-none rounded bg-n-50 px-1.5 py-1 text-2xs leading-snug text-n-500"
+            className="flex-none rounded-xs bg-n-50 px-1.5 py-1 text-2xs leading-snug text-n-500"
           >
             {supersededByIcon} is drawn instead of a shape. A shape picked here is kept and appears
             when the icon is removed.
@@ -132,7 +132,7 @@ export function ShapePalette({
                       aria-label={`Shape: ${s.label}`}
                       aria-pressed={current === s.name}
                       onClick={() => onPick(s.name)}
-                      className={`flex items-center justify-center rounded border-0 p-1.5 hover:bg-n-50 ${
+                      className={`flex items-center justify-center rounded-xs border-0 p-1.5 hover:bg-n-50 ${
                         current === s.name ? 'bg-cortex-50' : 'bg-transparent'
                       }`}
                     >

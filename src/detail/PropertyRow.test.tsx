@@ -119,15 +119,15 @@ describe('PropertyRow', () => {
    * The regression the M46.2 re-measure found in the browser: the tooltip
    * turned itself off again.
    *
-   * `Tooltip` renders its child bare while disabled and inside a fragment once
-   * enabled, so the name element is UNMOUNTED by the state that enables it.
-   * The watcher that measured it was set up once, keyed on the label, and went
-   * on reporting the detached node — which measures 0 — so the next callback
-   * put `clipped` back to false and nothing ever measured the live node again.
-   * jsdom ships no ResizeObserver, so the failure needs one stubbed to appear
-   * at all: without this case the whole thing is invisible to the suite.
+   * `Tooltip` rendered its child bare while disabled and inside a fragment
+   * once enabled, so the name element was UNMOUNTED by the state that enabled
+   * it (M52 keeps the node). The watcher that measured it was set up once,
+   * keyed on the label, and went on reporting the detached node — which
+   * measures 0 — so the next callback put `clipped` back to false and nothing
+   * ever measured the live node again. jsdom ships no ResizeObserver, so the
+   * failure needs one stubbed to appear at all.
    */
-  it('keeps measuring the name element the tooltip swap mounts', async () => {
+  it('keeps measuring the live name element once the tooltip is enabled', async () => {
     const user = userEvent.setup();
     const observed: Element[] = [];
     let fire: () => void = () => {};
@@ -162,7 +162,7 @@ describe('PropertyRow', () => {
       await user.hover(name());
       await waitFor(() => expect(screen.getByRole('tooltip')).toBeTruthy(), { timeout: 2000 });
 
-      // The watcher followed the swap: what it points at is on screen.
+      // What the watcher points at is on screen.
       expect(observed.at(-1)?.isConnected).toBe(true);
       // And a report from it does not undo the measurement that opened it.
       await act(async () => fire());

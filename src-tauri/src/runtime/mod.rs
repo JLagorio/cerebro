@@ -51,6 +51,7 @@ pub mod recovery;
 pub mod scheduler;
 pub mod schema;
 pub mod scope;
+pub mod sessions;
 pub mod settings;
 pub mod sink;
 #[cfg(test)]
@@ -59,6 +60,7 @@ pub mod status;
 pub mod surface;
 pub mod taint;
 pub mod triggers;
+pub mod vault_writes;
 
 use std::path::{Path, PathBuf};
 
@@ -89,8 +91,11 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// keyed by `run_id` at 14, retiring the singleton column. M34.3 adds
 /// `runs.parent_run_id`, nullable — NULL is a root, and every run before
 /// this was one — at 15. M34.2 adds `job_ledger` — the renderer's three
-/// scheduling ledgers, durably — at 16.
-pub const USER_VERSION: i64 = 16;
+/// scheduling ledgers, durably — at 16. M49.10 adds `vault_writes` — where
+/// the `vault.*` write hashes moved out of the epistemic ledger — at 17.
+/// M49.9 adds `runs.counters_booked` — 0 on every row that predates
+/// booking, so its zeros read as not recorded — at 18.
+pub const USER_VERSION: i64 = 18;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -258,7 +263,34 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V16,
         validate: validate_v16,
     },
+    Migration {
+        to: 17,
+        sql: schema::SCHEMA_V17,
+        validate: validate_v17,
+    },
+    Migration {
+        to: 18,
+        sql: schema::SCHEMA_V18,
+        validate: validate_v18,
+    },
 ];
+
+/// v18's promise: a run row says whether its proposal counters were ever
+/// booked (M49.9).
+fn validate_v18(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT counters_booked FROM runs")
+        .map_err(|e| format!("validating runs.counters_booked: {e}"))?;
+    Ok(())
+}
+
+/// v17's promise: the operational vault-write log exists (M49.10).
+fn validate_v17(conn: &Connection) -> Result<(), String> {
+    conn.prepare(
+        "SELECT vault_id, kind, path, to_path, content_hash, actor, recorded_at FROM vault_writes",
+    )
+    .map_err(|e| format!("validating vault_writes: {e}"))?;
+    Ok(())
+}
 
 /// v16's promise is one table with its claim-bearing primary key. The CHECK
 /// vocabulary is asserted by job_ledger's own tests; here it is enough that

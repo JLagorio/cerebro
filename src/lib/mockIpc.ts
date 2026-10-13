@@ -7,6 +7,7 @@
 import YAML, { type Document } from 'yaml';
 import { isKnowledgePath } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 import { sha256Hex } from './sha256';
@@ -15,6 +16,7 @@ import {
   AMBIENT_CONCURRENCY_MAX,
   demoChanges,
   demoFleetDetails,
+  demoRunWrites,
   demoFleetRuns,
   demoLanes,
   demoPipelineOverview,
@@ -25,6 +27,27 @@ import { loadRegistry } from './trigger/registry';
 import type { ParentRule, Variant as TriggerVariant } from './trigger/registry';
 
 const SEED_TIME = '2026-07-24T00:00:00.000Z';
+
+/**
+ * When each of the demo's knowledge files was last written (M52.5), as the
+ * story tells it — the update log's days and each concept's own stamps. At
+ * the seed time every concept read "Updated 4d ago", beside an update log
+ * that said Sync error rate was rewritten yesterday and a page that said it
+ * was written nine days ago. A file this map does not name keeps the seed
+ * time.
+ */
+const DEMO_KNOWLEDGE_MODIFIED: Record<string, string> = {
+  'knowledge/index.md': '2026-07-28T09:27:00.000Z',
+  'knowledge/log.md': '2026-07-28T09:27:00.000Z',
+  'knowledge/metrics/onboarding-completion.md': '2026-07-24T10:12:00.000Z',
+  'knowledge/metrics/sync-error-rate.md': '2026-07-27T15:40:00.000Z',
+  'knowledge/metrics/webinar-attendance.md': '2026-07-27T08:20:00.000Z',
+  'knowledge/playbooks/warehouse-cutover.md': '2026-07-28T09:05:00.000Z',
+  'knowledge/systems/offline-guarantee.md': '2026-07-26T11:20:00.000Z',
+  'knowledge/systems/offline-window-pilot.md': '2026-07-26T11:25:00.000Z',
+  'knowledge/systems/pick-queue-drain.md': '2026-07-28T09:26:00.000Z',
+  'knowledge/systems/status-model.md': '2026-07-25T14:20:00.000Z',
+};
 
 const seededNotes = import.meta.glob('/demo-vault/**/*.md', {
   query: '?raw',
@@ -71,6 +94,7 @@ export function resetOperational(): void {
   pipeline = demoPipelineOverview(LANES);
   fleetRuns = demoFleetRuns();
   fleetDetails = demoFleetDetails();
+  runWrites = demoRunWrites();
   fleetAvailable = true;
   resetAgentPauses();
 }
@@ -90,7 +114,7 @@ function seedFiles(): void {
   })) {
     const rel = absPath.replace(/^\/demo-vault\//, '');
     files.set(rel, raw);
-    times.set(rel, { createdAt: SEED_TIME, modifiedAt: SEED_TIME });
+    times.set(rel, { createdAt: SEED_TIME, modifiedAt: DEMO_KNOWLEDGE_MODIFIED[rel] ?? SEED_TIME });
   }
 }
 seedFiles();
@@ -222,13 +246,24 @@ export async function updateFrontmatter(
         throw new Error(`provenance forgery: the ${key} stamp is never a human edit — refused`);
       }
     }
+    for (const key of RELATION_FIELDS) {
+      if (key in patch) refuseAmbiguousLinks(patch[key], frontmatterValue(path, key));
+    }
     if ('aliases' in patch) {
       const { yaml } = splitFrontmatter(mustGet(path));
       const doc: Document = YAML.parseDocument(yaml ?? '');
       const existing = (doc.toJS() as Record<string, unknown> | null)?.aliases;
-      const before = Array.isArray(existing) ? existing.map(String) : [];
-      const after = Array.isArray(patch.aliases) ? patch.aliases.map(String) : [];
-      if (before.some((a) => !after.includes(a))) {
+      // Compared NORMALIZED, as Rust does (M49.6, K28): `Churn` → `churn`
+      // is not a removal, and a raw-string compare called it one.
+      const norms = (list: unknown) =>
+        new Set(
+          (Array.isArray(list) ? list.map(String) : [])
+            .map(normalizeAliasV1)
+            .filter((a) => a !== ''),
+        );
+      const before = norms(existing);
+      const after = norms(patch.aliases);
+      if ([...before].some((a) => !after.has(a))) {
         throw new Error(
           'unsupported_alias_removal: alias removal has no v1 event — keep the alias or wait ' +
             'for the maintenance channel',
@@ -242,9 +277,10 @@ export async function updateFrontmatter(
 /** The one sanctioned human write into the bundle: `verified` and nothing
  * else. Scoping lives here so it cannot become a general-purpose bypass. */
 export async function verifyConcept(
-  _vault: string,
+  vault: string,
   path: string,
   patch: Record<string, unknown>,
+  viewedBodyHash: string,
 ): Promise<void> {
   if (!isKnowledgePath(path)) {
     throw new Error('verify_concept only applies to knowledge/ concepts');
@@ -255,6 +291,10 @@ export async function verifyConcept(
     throw new Error(`verify_concept may only write \`verified\`, not \`${offending}\``);
   }
   if (keys.length === 0) throw new Error('verify_concept requires a `verified` value');
+  // M49.3: the stamp attests the body the person READ. Mirrors verify_with.
+  if (sha256Hex(await readNote(vault, path)) !== viewedBodyHash) {
+    throw new Error(`stale_view: ${path} changed since you opened it — reopen it and verify again`);
+  }
   return writeFrontmatter(path, patch);
 }
 
@@ -313,6 +353,12 @@ export async function captureConceptEdit(
       throw new Error('an empty capture request captures nothing');
     }
     for (const edit of fields) validateFieldPath(String(edit.field_path ?? ''));
+    // Rust's capture refuses an alias that normalizes to nothing (M49.6).
+    for (const alias of aliases) {
+      if (normalizeAliasV1(alias) === '') {
+        throw new Error(`alias ${JSON.stringify(alias)} normalizes to empty`);
+      }
+    }
     applyCaptureOps(path, fields);
     if (aliases.length > 0) {
       const { yaml } = splitFrontmatter(mustGet(path));
@@ -568,24 +614,268 @@ export async function ledgerHead(_vault: string): Promise<null> {
   return null;
 }
 
-/** No ledger, no reconciliation: the mock's mode is never open, so the
- * exits are unreachable — parity is the command existing on both sides. */
-export async function resolveReconciliation(_vault: string, _action: string): Promise<void> {
-  throw new Error('no ledger in the browser — reconciliation is a Tauri-only surface');
-}
-
-/** Fixed no-ledger status (M21.8): the browser mock has no ledger, and the
- * parity test asserts only that the command exists on both sides. */
-export async function ledgerStatus(_vault: string): Promise<{
+/** Ledger diagnostics (M21.8): the live verdict on a vault's ledger.
+ * Verdict tags are the Rust recovery states (kebab-case). The recording and
+ * reconciliation banners read it (M49.2, M49.6). */
+export interface LedgerStatus {
   verdict: string;
   detail: string;
-  head: null;
-  seq: null;
+  head: string | null;
+  seq: number | null;
   segments: number;
   anomalies: number;
+  /** The M23.6 circuit breaker: the named reconciliation mode is open. */
   reconciliation_open: boolean;
+  /** Unresolved divergence detection keys while the mode is open. */
   divergences: string[];
-}> {
+  /** Every knowledge file that is not the ledger's, with why (M49.6). */
+  quarantined: QuarantinedPath[];
+  /** Capture is stopped for the WHOLE vault (a mass mismatch, a migration
+   * refusal, a rewound history) rather than per file (M49.5). */
+  stopped: boolean;
+  /** The vault HAS a ledger and its history could not be read, so
+   * `quarantined` could not be computed — never "nothing quarantined". */
+  history_unreadable: boolean;
+  /** `[replacement, replaced]` supersessions a person approved on a card
+   * (M49.8) — what `listConcepts` gates retirement on. */
+  approved_supersessions: [string, string][];
+  /** Concepts whose current review the ledger records as a person's (M49.8)
+   * — what `listConcepts` gates supersession on when a ledger answers. */
+  recorded_human: string[];
+  /** Whether THIS process is recording the vault right now (M49.2). The
+   * verdict is read from disk and cannot say it. */
+  writer: WriterStatus;
+}
+
+/** One quarantined file (M49.6). `adoptable`: Keep can record it.
+ * `refused`: Keep cannot (`reason` says why); Restore can. `deleted`: the
+ * file is gone; Restore brings it back. `unrecorded`: Cerebro never
+ * recorded it; Restore sets it aside. */
+export interface QuarantinedPath {
+  path: string;
+  class: 'adoptable' | 'refused' | 'deleted' | 'unrecorded';
+  reason: string;
+}
+
+/** `held` records. Every other state refuses knowledge writes (M49.1):
+ * `lost-lock` (another Cerebro holds the vault), `refused` (the startup
+ * verdict), `fail-stopped`, `other-vault`, `inactive`. `none` is the browser
+ * mock, which keeps no ledger and writes its fake disk directly. */
+export interface WriterStatus {
+  state: 'held' | 'lost-lock' | 'refused' | 'fail-stopped' | 'other-vault' | 'inactive' | 'none';
+  detail: string | null;
+}
+
+/** The relation fields whose wikilinks name other concepts. */
+const RELATION_FIELDS = ['supersedes', 'refines', 'contradicts'] as const;
+
+/** One frontmatter key of the file at `path`, as parsed. */
+function frontmatterValue(path: string, key: string): unknown {
+  const { yaml } = splitFrontmatter(mustGet(path));
+  return (YAML.parse(yaml ?? '') as Record<string, unknown> | null)?.[key];
+}
+
+/**
+ * Mirrors `migrate::resolve_link` + `ambiguous_link` (M49.10): a relation
+ * link an edit ADDS whose stem two concepts share names neither, and is
+ * refused with the same sentence Rust returns. A path-form link
+ * (`[[metrics/churn]]`) names exactly one, and a link the file already
+ * carried (`previous`) is not re-judged — as Rust's `relation_diff`.
+ */
+function refuseAmbiguousLinks(value: unknown, previous: unknown): void {
+  const before = (Array.isArray(previous) ? previous : []).filter(
+    (item): item is string => typeof item === 'string',
+  );
+  const after = (Array.isArray(value) ? value : []).filter(
+    (item): item is string => typeof item === 'string',
+  );
+  const concepts = [...files.keys()]
+    .filter((p) => p.startsWith('knowledge/') && p.endsWith('.md'))
+    .map((p) => p.slice('knowledge/'.length))
+    .sort();
+  const linkOf = (item: string) => /^\[\[(.*)\]\]$/.exec(item)?.[1] ?? null;
+  const targetOf = (link: string) => (link.split('|')[0] ?? '').trim();
+  const stemOf = (krel: string) => krel.replace(/^.*\//, '').replace(/\.md$/, '');
+  // The concepts a bare link's stem names, when it names more than one.
+  const ambiguity = (link: string): string[] | null => {
+    const target = targetOf(link);
+    if (target.includes('/')) return null;
+    const hits = concepts.filter((krel) => stemOf(krel) === target);
+    return hits.length > 1 ? hits : null;
+  };
+  const refuse = (link: string, hits: string[]): never => {
+    const example = hits[0].replace(/\.md$/, '');
+    throw new Error(
+      `[[${link}]] names more than one concept (${hits.map((h) => `knowledge/${h}`).join(', ')}) — link by path, e.g. [[${example}]]`,
+    );
+  };
+  for (const item of after.filter((i) => !before.includes(i))) {
+    const link = linkOf(item);
+    const hits = link === null ? null : ambiguity(link);
+    if (link !== null && hits !== null) refuse(link, hits);
+  }
+  // A path link removed beside a KEPT ambiguous link that could be read as
+  // keeping it cannot be told apart from keeping it (Rust `relation_diff`).
+  const removed = before
+    .filter((i) => !after.includes(i))
+    .map(linkOf)
+    .filter((l): l is string => l !== null)
+    .map((l) =>
+      targetOf(l)
+        .replace(/^\//, '')
+        .replace(/^knowledge\//, '')
+        .replace(/\.md$/, ''),
+    );
+  for (const item of after.filter((i) => before.includes(i))) {
+    const link = linkOf(item);
+    const hits = link === null ? null : ambiguity(link);
+    if (link === null || hits === null) continue;
+    if (removed.some((r) => hits.some((h) => h.replace(/\.md$/, '') === r))) refuse(link, hits);
+  }
+}
+
+/**
+ * The mock's ledger picture (M49.6, K28). The browser keeps no ledger, so by
+ * default this is the fixed no-ledger status below; a spec seeds a diverged
+ * one through `window.__cerebroSeedLedger` to render and drive the banners —
+ * the incident path had never been rendered in any test.
+ */
+interface MockLedger {
+  quarantined: QuarantinedPath[];
+  stopped: boolean;
+  open: boolean;
+  writer: { state: WriterStatus['state']; detail: string | null };
+  /** When set, `ledgerStatus` FAILS with this message — the read that
+   * could not be made, which must never render as "all is well". */
+  unreadable: string | null;
+  historyUnreadable: boolean;
+  approvedSupersessions: [string, string][];
+  recordedHuman: string[];
+}
+
+let mockLedger: MockLedger | null = null;
+
+/** Test-only seam, mirroring `__cerebroSeedReview`. `null` restores the
+ * no-ledger default. */
+export function __seedLedger(seed: Partial<MockLedger> | null): void {
+  mockLedger =
+    seed === null
+      ? null
+      : {
+          quarantined: seed.quarantined ?? [],
+          stopped: seed.stopped ?? false,
+          open: seed.open ?? (seed.quarantined ?? []).length > 0,
+          writer: seed.writer ?? { state: 'held', detail: null },
+          unreadable: seed.unreadable ?? null,
+          historyUnreadable: seed.historyUnreadable ?? false,
+          approvedSupersessions: seed.approvedSupersessions ?? [],
+          recordedHuman: seed.recordedHuman ?? [],
+        };
+}
+
+// A spec can seed BEFORE the app loads (the banners read the status as the
+// vault opens): `page.addInitScript` sets `window.__cerebroLedgerSeed`.
+if (typeof window !== 'undefined') {
+  const initial = (window as unknown as { __cerebroLedgerSeed?: Partial<MockLedger> })
+    .__cerebroLedgerSeed;
+  if (initial !== undefined) __seedLedger(initial);
+}
+
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedLedger: (s: Partial<MockLedger> | null) => void }
+  ).__cerebroSeedLedger = __seedLedger;
+}
+
+/** Why Keep cannot record a file — the Rust refusals, verbatim in shape. */
+function keepRefusal(q: QuarantinedPath): string | null {
+  switch (q.class) {
+    case 'adoptable':
+      return null;
+    case 'refused':
+      return q.reason;
+    case 'deleted':
+      return 'the file was deleted, and a deletion is not something Keep can record yet — Restore brings it back';
+    case 'unrecorded':
+      return 'Cerebro never recorded this file, so there is no history to adopt it into — move it out of knowledge/, or Restore to set it aside';
+  }
+}
+
+/** Mirrors `reconcile::resolve` / `resolve_path`: per file, or the whole
+ * vault — Keep-all keeps what it can and names what it could not. */
+export async function resolveReconciliation(
+  _vault: string,
+  action: string,
+  path?: string,
+): Promise<void> {
+  const ledger = mockLedger;
+  if (ledger === null) {
+    throw new Error('no ledger in the browser — reconciliation is a Tauri-only surface');
+  }
+  const close = () => {
+    if (ledger.quarantined.length === 0) ledger.open = false;
+  };
+  if (path !== undefined) {
+    const q = ledger.quarantined.find((item) => item.path === path);
+    if (q === undefined) throw new Error(`${path} is not quarantined`);
+    if (action === 'keep') {
+      const refusal = keepRefusal(q);
+      if (refusal !== null) throw new Error(refusal);
+    } else if (action !== 'restore') {
+      throw new Error(`unknown per-file action "${action}"`);
+    }
+    ledger.quarantined = ledger.quarantined.filter((item) => item !== q);
+    close();
+    return;
+  }
+  if (!ledger.open) throw new Error('no open reconciliation to resolve');
+  if (action === 'restore_ledger_authority') {
+    ledger.quarantined = [];
+    close();
+    return;
+  }
+  if (action !== 'accept_current_files') {
+    throw new Error(`unknown reconciliation action "${action}"`);
+  }
+  const all = ledger.quarantined;
+  const refused = all.flatMap((q) => {
+    const refusal = keepRefusal(q);
+    return refusal === null ? [] : [{ q, refusal }];
+  });
+  ledger.quarantined = refused.map(({ q }) => q);
+  close();
+  if (refused.length > 0) {
+    throw new Error(
+      `kept ${all.length - refused.length} of ${all.length} files; these could not be kept — Restore them, or fix them and Keep again: ${refused.map(({ q, refusal }) => `${q.path}: ${refusal}`).join('; ')}`,
+    );
+  }
+}
+
+/** Fixed no-ledger status (M21.8) unless a spec seeded one: the browser mock
+ * has no ledger, and the parity test asserts only that the command exists on
+ * both sides. Its writer is `none` (M49.2) — not `held`, which would claim a
+ * recording that does not exist, and not a refusal, which would put a "Not
+ * recording" banner on every browser session. */
+export async function ledgerStatus(_vault: string): Promise<LedgerStatus> {
+  if (mockLedger?.unreadable != null) throw new Error(mockLedger.unreadable);
+  if (mockLedger !== null) {
+    return {
+      verdict: 'valid',
+      detail: 'seeded by a spec',
+      head: null,
+      seq: null,
+      segments: 1,
+      anomalies: 0,
+      reconciliation_open: mockLedger.open,
+      divergences: mockLedger.open ? ['seeded-divergence'] : [],
+      quarantined: mockLedger.quarantined.map((q) => ({ ...q })),
+      stopped: mockLedger.stopped,
+      history_unreadable: mockLedger.historyUnreadable,
+      approved_supersessions: mockLedger.approvedSupersessions.map(([a, b]) => [a, b]),
+      recorded_human: [...mockLedger.recordedHuman],
+      writer: { ...mockLedger.writer },
+    };
+  }
   return {
     verdict: 'no-ledger',
     detail: 'no ledger exists here yet',
@@ -595,6 +885,12 @@ export async function ledgerStatus(_vault: string): Promise<{
     anomalies: 0,
     reconciliation_open: false,
     divergences: [],
+    quarantined: [],
+    stopped: false,
+    history_unreadable: false,
+    approved_supersessions: [],
+    recorded_human: [],
+    writer: { state: 'none', detail: 'the browser mock keeps no ledger' },
   };
 }
 
@@ -803,6 +1099,20 @@ export interface CardTarget {
   current_version: number | null;
   /** The world moved under this card: approving it will refuse. */
   stale: boolean;
+  /** The concept file a belief target is (M50.3), or null. Optional on the
+   *  wire so an older fixture reads as "not known", never as a path. */
+  path?: string | null;
+  /** For a relation an `edit_relation` card would add or remove: its kind
+   *  and the concept file at each end (M52.5). Mirrors `review.rs`'s
+   *  `CardLink`; optional so an older fixture reads as "not known". */
+  link?: CardLink | null;
+}
+
+export interface CardLink {
+  action: 'add' | 'remove';
+  relation: 'supersedes' | 'refines' | 'contradicts';
+  from_path: string | null;
+  to_path: string | null;
 }
 
 /** What a reviewer is being asked about. Mirrors policy/review.rs — every
@@ -836,6 +1146,10 @@ export interface RevertableApplication {
   op: string;
   applied_event_id: string;
   reason: string;
+  /** The concept it changed, by file (M52.5), or null when no belief target
+   * projects one. Optional for a spec's hand-built fixture: absent reads as
+   * null. */
+  path?: string | null;
 }
 
 interface ReviewFixture {
@@ -1026,7 +1340,7 @@ export interface FacetChips {
   freshness_basis: FreshnessBasis;
   review: ReviewStatus;
   /** Each axis, already read aloud. A chip renders one of these verbatim —
-   * mapping `(kind, summary)` to "coverage unassessed" on this side would be
+   * mapping `(kind, summary)` to "sources not yet assessed" on this side would be
    * the fold rule spelled a second time in another language. */
   support_text: string;
   coverage_text: string;
@@ -1077,7 +1391,8 @@ export interface LaneItem {
   path: string | null;
   predicate: string | null;
   state_stage: string | null;
-  /** "ci_status at implemented", or null for the contradiction lane, whose
+  /** "CI status, at the implemented stage", or null for a belief's only
+   * facet (its scope is the belief's) and for the contradiction lane, whose
    * subject is a belief PAIR and not a facet. */
   scope_text: string | null;
   reasons: string[];
@@ -1112,11 +1427,16 @@ export interface LanesView {
   incomplete: string[];
 }
 
-/** One thing that moved (M26 convergence, read aloud by M27.8). */
+/** One thing that moved (M26 convergence, read aloud by M27.8). With a
+ * subject, `text` follows the concept's name ("was revised"); with none, it
+ * is a whole sentence. */
 export interface ChangeLine {
   text: string;
   belief_id: string | null;
   entity_id: string | null;
+  /** The subject's knowledge-relative file, as on a lane item (M52.4). Null
+   * with no subject, or when no file projects it. */
+  path: string | null;
 }
 
 export interface ChangeSection {
@@ -1360,7 +1680,7 @@ export async function askQuestion(
     state: 'refused',
     code: 'retrieval_unavailable',
     detail:
-      'This is the browser mock. Asking the base needs a real ledger and a real CLI run, and a ' +
+      'This is the browser mock. Asking Knowledge needs a real ledger and a real CLI run, and a ' +
       'made-up answer would cite evidence that never existed.',
   };
 }
@@ -1388,9 +1708,12 @@ export interface FleetRun {
   usage_state: string;
   input_tokens: number;
   output_tokens: number;
-  proposals_submitted: number;
-  applied: number;
-  rejected: number;
+  /** The proposal counters (M49.9). `null` is NOT RECORDED: a row written
+   * before anything booked them, whose zeros were never a measurement. On a
+   * booked row, `0` is measured-at-zero. All three are null or none are. */
+  proposals_submitted: number | null;
+  applied: number | null;
+  rejected: number | null;
   /** M34.3's hop lineage (M41): the run this one was spawned FROM; null is
    * a root. Mirrors fleet.rs — the parity the mock owes the wire. */
   parent_run_id: string | null;
@@ -1508,6 +1831,24 @@ export async function fleetRunsPage(filter: FleetFilter = {}): Promise<FleetRun[
     (a, b) => b.started_at.localeCompare(a.started_at) || b.run_id.localeCompare(a.run_id),
   );
   return ordered.slice(0, Math.min(filter.limit ?? FLEET_DEFAULT_LIMIT, FLEET_MAX_LIMIT));
+}
+
+/** One concept a run's proposals named (M50.3, `knowledge::RunWrite`). */
+export interface RunWrite {
+  path: string;
+  state: 'submitted' | 'queued' | 'rejected' | 'applied' | 'reverted';
+}
+
+let runWrites: Record<string, RunWrite[]> = demoRunWrites();
+
+/** What one run changed in Knowledge. `null` is not recorded: the mock keeps
+ *  no ledger, and a run the fixture does not name is not a run that changed
+ *  nothing. */
+export async function runKnowledgeWrites(
+  _vault: string,
+  runId: string,
+): Promise<RunWrite[] | null> {
+  return runWrites[runId] ?? null;
 }
 
 export async function fleetRunDetail(runId: string): Promise<FleetRunDetail> {

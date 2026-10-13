@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source('..');
 
 @import './tokens/fonts.css';
 @import './tokens/colors.css';
@@ -73,6 +73,7 @@
   --color-success-600: var(--success-600);
   --color-success-700: var(--success-700);
   --color-warn-50: var(--warn-50);
+  --color-warn-300: var(--warn-300);
   --color-warn-500: var(--warn-500);
   --color-warn-600: var(--warn-600);
   --color-warn-700: var(--warn-700);

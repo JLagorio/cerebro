@@ -1,9 +1,10 @@
 /**
  * Synchronous SHA-256 (FIPS 180-4) over a UTF-8 string, lowercase hex out.
  *
- * Hand-rolled on purpose: the one caller (stdio approval keys) needs the
- * digest SYNCHRONOUSLY — store initialization and render-time membership
- * checks — and `crypto.subtle` is async-only. This is integrity matching,
+ * Hand-rolled on purpose: its callers (stdio approval keys, the Verify
+ * button's viewed-body pin, the mock's verification scope) need the digest
+ * SYNCHRONOUSLY — store initialization, render-time membership checks, a
+ * click handler — and `crypto.subtle` is async-only. This is integrity matching,
  * not secrecy, so a plain reference implementation is enough; correctness
  * is pinned by the FIPS test vectors in sha256.test.ts and byte-for-byte
  * against Rust's sha2 crate by the twin approval-key literals in

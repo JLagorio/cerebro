@@ -37,6 +37,9 @@ function entry(path: string, title: string, partial: Partial<Entry> = {}): Entry
 
 const RECORD = entry('records/reqs/rq-84b.md', 'RQ-84B Kestrel', { type: 'Requirement' });
 
+/** The ask-the-base act, by the one name every surface gives it (M52.3). */
+const ASK = 'What does Knowledge say about this?';
+
 const CONCEPT = entry('knowledge/risks/thermal-margin.md', 'Thermal margin unproven', {
   type: 'Risk',
   properties: { description: 'The 60C case has never been run.' },
@@ -53,7 +56,7 @@ afterEach(cleanup);
 describe('asking the base from the work', () => {
   it('hands the assistant a question that names knowledge_about and the record', () => {
     render(<RelatedKnowledge entry={RECORD} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Ask the base' }));
+    fireEvent.click(screen.getByRole('button', { name: ASK }));
 
     const pending = useUiStore.getState().agentPendingPrompt;
     expect(pending?.text).toContain('knowledge_about');
@@ -61,6 +64,8 @@ describe('asking the base from the work', () => {
     // The record travels as the SUBJECT too (M17.6) — a context chip, so the
     // agent reads this record rather than whatever surface was on screen.
     expect(pending?.subject).toBe('records/reqs/rq-84b.md');
+    // And the bubble says what was pressed, about what (M52.3).
+    expect(pending?.label).toBe(`${ASK} · RQ-84B Kestrel`);
   });
 
   it('offers the ask when the base holds nothing, which is when it is most useful', () => {
@@ -69,7 +74,7 @@ describe('asking the base from the work', () => {
     const section = screen.getByTestId('related-knowledge');
     expect(section.getAttribute('data-count')).toBe('0');
     expect(section.textContent).toContain('Nothing yet about this.');
-    expect(screen.getByRole('button', { name: 'Ask the base' })).toBeDefined();
+    expect(screen.getByRole('button', { name: ASK })).toBeDefined();
   });
 
   it('never speaks first — nothing is asked until the button is pressed', () => {
@@ -81,14 +86,17 @@ describe('asking the base from the work', () => {
   });
 
   it('keeps the draft question and the subject question apart', () => {
-    // `askPrompt` reads the DRAFT in front of you; `Ask the base` asks about
+    // `askPrompt` reads the DRAFT in front of you; asking the base asks about
     // the SUBJECT. Two questions, two buttons — collapsing them would lose
     // the one that reaches concepts this list cannot.
-    render(<RelatedKnowledge entry={RECORD} askPrompt="what am I missing" askLabel="Missing?" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Missing?' }));
+    render(<RelatedKnowledge entry={RECORD} askPrompt="what am I missing" />);
+    fireEvent.click(screen.getByRole('button', { name: "What's missing?" }));
     expect(useUiStore.getState().agentPendingPrompt?.text).toBe('what am I missing');
+    expect(useUiStore.getState().agentPendingPrompt?.label).toBe(
+      "What's missing? · RQ-84B Kestrel",
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask the base' }));
+    fireEvent.click(screen.getByRole('button', { name: ASK }));
     expect(useUiStore.getState().agentPendingPrompt?.text).toContain('knowledge_about');
   });
 });
@@ -140,5 +148,30 @@ describe('a retired concept in the workspace', () => {
       .getAllByTestId('related-concept')
       .find((el) => el.getAttribute('data-path') === 'knowledge/risks/thermal-old.md');
     expect(row?.textContent).not.toContain('Superseded by the measured run.');
+  });
+});
+
+/**
+ * M52.3 — embedded in a page's Knowledge, the list is its rows and nothing
+ * else, and a row names only the review states worth reading.
+ */
+describe('embedded in a page’s Knowledge', () => {
+  it('draws rows only — no heading, no empty sentence, no asks', () => {
+    render(<RelatedKnowledge entry={RECORD} variant="embedded" askPrompt="missing" />);
+    const section = screen.getByTestId('related-knowledge');
+    expect(section.querySelector('h3')).toBeNull();
+    expect(screen.queryAllByRole('button').map((b) => b.getAttribute('data-testid'))).toEqual([
+      'related-concept',
+    ]);
+    cleanup();
+    useVaultStore.setState({ entries: [RECORD] });
+    render(<RelatedKnowledge entry={RECORD} variant="embedded" />);
+    expect(screen.getByTestId('related-knowledge').textContent).toBe('');
+  });
+
+  it('says nothing of a review nobody gave', () => {
+    // "Unreviewed" on every row was a tag on none (the Concepts list's rule).
+    render(<RelatedKnowledge entry={RECORD} variant="embedded" />);
+    expect(screen.queryByTestId('review-chip')).toBeNull();
   });
 });

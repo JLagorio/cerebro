@@ -94,6 +94,21 @@ describe('InboxPage', () => {
     expect(checklist.textContent).toContain('Connected to something');
   });
 
+  // M52.3 — one name per act: the button, and the bubble it leaves, say what
+  // was pressed and about which capture — never the prompt behind it.
+  it('asks the Assistant to file it by the same name it wears', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ agentPendingPrompt: null });
+    render(<InboxPage />);
+    // The standalone section keeps one Learn button, by the one name.
+    expect(screen.getByRole('button', { name: 'Learn from this page' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Ask the Assistant to file it' }));
+    const pending = useUiStore.getState().agentPendingPrompt;
+    expect(pending?.label).toBe('Ask the Assistant to file it · Capture a');
+    expect(pending?.subject).toBe('inbox/capture-a.md');
+    expect(pending?.text).toContain('propose_organize');
+  });
+
   it('writes _organized when the note is marked organized', async () => {
     const user = userEvent.setup();
     render(<InboxPage />);
