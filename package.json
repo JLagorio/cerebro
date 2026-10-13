@@ -32,7 +32,7 @@
     "@tauri-apps/plugin-dialog": "^2.3.0",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "lucide-react": "^0.525.0",
-    "mermaid": "^11.16.0",
+    "mermaid": "^11.16.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
