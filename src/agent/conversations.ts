@@ -125,8 +125,9 @@ function healToolIds(conversation: Conversation): Conversation {
  * Drop a stored place this build cannot read (M17.5).
  *
  * localStorage holds whatever an older — or newer — build wrote, and a place
- * is a Selection, which the app has already reshaped once (M12.5 retired
- * `project`). An unreadable anchor reads as "not anchored", which renders as
+ * is a Selection, whose kinds the app keeps retiring: `view` (M10), `project`
+ * (M12.5), `review` (M33.3), `pipeline` (M33.4), `status` (M33a.2) and `docs`
+ * (M38.3). An unreadable anchor reads as "not anchored", which renders as
  * nothing; the transcript itself is never at risk over it.
  */
 function healPlace(conversation: Conversation): Conversation {

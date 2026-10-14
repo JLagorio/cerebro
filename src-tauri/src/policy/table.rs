@@ -971,6 +971,10 @@ mod tests {
     /// Re-stamp the digest after a deliberate table edit.
     #[test]
     #[ignore = "run explicitly after a deliberate policy-table edit"]
+    #[expect(
+        clippy::print_stdout,
+        reason = "an #[ignore]d writer run by hand; what it wrote is its whole output"
+    )]
     fn write_policy_digest() {
         let digest = crate::ledger::sha256_hex(POLICY_JSON.as_bytes());
         std::fs::write(repo(POLICY_DIGEST_PATH), format!("{digest}\n")).unwrap();
@@ -1379,6 +1383,88 @@ mod tests {
                 "update_belief",
             ])
         );
+    }
+
+    #[test]
+    fn grant_refusals_are_operational_transport_codes() {
+        // M54.10. A call its grant or the corpus refuses fails at the
+        // server's door, against its bearer, before any tool body runs or any
+        // proposal exists: where `run_actor_mismatch` already fails. So the
+        // four are transport codes, operational, in no op's row, and never a
+        // proposal's refusal.
+        use crate::ledger::schema::TypedValue;
+        use crate::policy::rejection::{OperationalRefusal, Rejection};
+        let table = PolicyTable::load().unwrap();
+        for code in [
+            "read_outside_scope",
+            "target_outside_corpus",
+            "tool_outside_grant",
+            "write_outside_scope",
+        ] {
+            assert_eq!(table.destiny(code), Some(Destiny::Operational), "{code}");
+            assert!(
+                table.transport_rejections.iter().any(|c| c == code),
+                "{code}"
+            );
+            for (name, op) in &table.ops {
+                assert!(
+                    !op.possible_rejections.iter().any(|c| c == code),
+                    "{name} lists {code}"
+                );
+            }
+            assert_eq!(
+                table.retry_verdict(code, 0),
+                RetryVerdict::NotRetryable,
+                "{code}"
+            );
+            let proposal = Rejection::new(
+                &table,
+                code,
+                "commit_set",
+                TypedValue::string("applied"),
+                TypedValue::string("refused"),
+            );
+            assert!(
+                proposal.is_err_and(|e| e.contains("transport failure")),
+                "{code}"
+            );
+            assert!(
+                OperationalRefusal::new(&table, code, "get_note", "refused").is_ok(),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_content_is_an_operational_transport_code() {
+        // M55.3 (D2). A note write whose `expect_hash` names other bytes
+        // fails at the write door before a byte is written: one call bounded,
+        // nothing claimed, so it is operational and a transport code. It is
+        // neither the ledger's `stale_target_version` nor a person's
+        // `stale_view`, and the agent must re-read before it tries again.
+        use crate::ledger::schema::TypedValue;
+        use crate::policy::rejection::{OperationalRefusal, Rejection};
+        let table = PolicyTable::load().unwrap();
+        let code = "stale_content";
+        assert_eq!(table.destiny(code), Some(Destiny::Operational));
+        assert!(table.transport_rejections.iter().any(|c| c == code));
+        for (name, op) in &table.ops {
+            assert!(
+                !op.possible_rejections.iter().any(|c| c == code),
+                "{name} lists {code}"
+            );
+        }
+        assert_eq!(table.retry_verdict(code, 0), RetryVerdict::NotRetryable);
+        assert!(OperationalRefusal::new(&table, code, "append_to_note", "stale").is_ok());
+        let proposal = Rejection::new(
+            &table,
+            code,
+            "target_version",
+            TypedValue::string("expected"),
+            TypedValue::string("actual"),
+        );
+        assert!(proposal.is_err_and(|e| e.contains("transport failure")));
+        assert_eq!(table.destiny("stale_target_version"), Some(Destiny::Ledger));
     }
 
     #[test]

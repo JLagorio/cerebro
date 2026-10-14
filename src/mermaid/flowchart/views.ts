@@ -210,8 +210,9 @@ export interface NodeLink {
  * 'strict'`, where mermaid attaches no click handlers (`setClickFun` returns
  * early unless the level is 'loose', flowDb.ts:498). It does still emit a real
  * `<a href="…">` around the node label even at strict — measured — so the
- * picture is not inert and a relative target is a live navigation inside the
- * app. Neutralizing that belongs to whoever binds the svg.
+ * picture is not inert. The packaged app's shell guard refuses a relative
+ * target (M53.12), but under `pnpm dev` it is still a live navigation inside
+ * the app. Neutralizing that belongs to whoever binds the svg.
  */
 export function nodeLinks(model: FlowchartModel): Map<string, NodeLink> {
   const owned = new Map<string, Set<number>>();

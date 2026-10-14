@@ -7,6 +7,7 @@ pub mod connectors;
 pub mod convergence;
 pub mod crash;
 pub mod demo;
+pub mod diagnostics;
 pub mod dynamics;
 #[cfg(test)]
 mod eval;
@@ -19,11 +20,16 @@ pub mod maintain;
 pub mod mcp;
 pub mod monitor;
 pub mod policy;
+#[cfg(test)]
+mod rails;
 pub mod retrieval;
 pub mod roots;
 pub mod roots_commands;
+pub mod roots_git_commands;
 pub mod runtime;
 pub mod search;
+pub mod shell;
+pub mod spawn;
 pub mod trigger;
 pub mod vault;
 
@@ -114,20 +120,24 @@ fn update_frontmatter(
     vault: String,
     path: String,
     patch: serde_json::Map<String, serde_json::Value>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     // The M23.7 capture valve, frontmatter half: presentation keys become
     // editorial ops, epistemic keys become assertion+revision, relation and
     // alias keys their exact paired events. Provenance stamps and alias
     // removal remain hard-refused.
+    //
+    // The answer is the hash of the bytes written (M55.2), which the store
+    // puts on its optimistic entry. A captured write answers None: the
+    // projection is the ledger's to write, and the next scan reads its hash.
     if knowledge::is_knowledge_path(&path) {
         if let Some(result) =
             ledger::capture::capture_frontmatter_patch(Path::new(&vault), &path, &patch)
         {
-            return result;
+            return result.map(|()| None);
         }
         knowledge::guard_human_write(&path)?;
     }
-    vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
+    vault::write::update_frontmatter(Path::new(&vault), &path, &patch).map(Some)
 }
 
 /// The M24.9 review surface. Every read rebuilds from the ledger — nothing
@@ -1180,18 +1190,6 @@ fn purge_agent_workspace(vault: String) -> Result<usize, String> {
     agent::purge_cli_workspace(Path::new(&vault))
 }
 
-/// Start (or retarget) the loopback MCP endpoint and return its address. The
-/// token is handed to the CLI through a private config file; the frontend
-/// carries it only to pass it back into `run_agent`.
-#[tauri::command(async)]
-fn start_mcp(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, mcp::McpState>,
-    vault: String,
-) -> Result<mcp::McpInfo, String> {
-    state.ensure(&app, Path::new(&vault))
-}
-
 /// M34.1.1: the tools half of the grant, taken from the REQUEST like the
 /// scope half always was. `None` is unrestricted (the panel's own turns: a
 /// person is watching them and no record narrowed them); `Some([])` is
@@ -1237,17 +1235,27 @@ pub(crate) fn start_handoff_run(
         runtime::dispatch::refuse_if_chain_spent(&conn, &caller.run_id, chrono::Utc::now())?;
     }
     let mcp_state = app.state::<mcp::McpState>();
+    // M53.10: the endpoint and the bearer are set here, in Rust, as for
+    // every run. A handed-to run's request used to reach `agent::stream`
+    // with no endpoint at all, so `hand_to` never started anything.
+    request.mcp_url = Some(mcp_state.ensure(app)?.url);
+    // Before the mint (M53.11): from the mint on, every failure is
+    // `agent::stream`'s, and it revokes the bearer it was handed.
+    let dir = config_dir(app)?;
     let run_id = ledger::new_run_id();
     let durable = run_id.clone();
+    // M56.7 — a hand-off records its caller, and its message opens with the
+    // WHY block that names the caller as data.
+    let cause = runtime::cause::RunCause::handoff(&caller.actor);
+    request.message = runtime::cause::with_preamble(&request.message, &cause, chrono::Utc::now());
     request.mcp_token = Some(mcp_state.handoff_token(
         &actor,
         request.scope.clone(),
         request.read_scope.clone(),
         request.allowed_tools.clone(),
         run_id.clone(),
-        &caller.chain,
+        caller,
     )?);
-    let dir = config_dir(app)?;
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
         run_id,
@@ -1259,6 +1267,7 @@ pub(crate) fn start_handoff_run(
         actor: Some(actor),
         // The whole point of M34.3.1: this run knows who started it.
         parent_run_id: Some(caller.run_id.clone()),
+        cause: Some(cause),
     };
     let agent_state = app.state::<agent::AgentState>();
     agent::stream(
@@ -1336,6 +1345,14 @@ fn run_agent(
         })
         .unwrap_or(Ok(()))?;
     }
+    // M56.7 — why this run started, admitted before any endpoint, bearer or
+    // claim, so a refused cause leaks none of them. An attended turn is
+    // always `attended`; an unattended one names its cause or records NULL.
+    let cause = runtime::cause::admit(request.attended.unwrap_or(false), request.cause.as_ref())?;
+    // M53.10: the endpoint this run dials, started here if it is not up yet.
+    // Rust sets it for every run — the wire cannot name it — and before any
+    // lease is claimed, so an endpoint that cannot start leaks none.
+    request.mcp_url = Some(mcp_state.ensure(&app)?.url);
     // M34.2.4 — an unattended run that names its lane is AMBIENT spend, and
     // spec §8.3 is answered here: `mode='attended', lane='agent'` on every
     // renderer-started run was a gap, not intent. The claim is the same call
@@ -1375,6 +1392,7 @@ fn run_agent(
                     reservation,
                     &[],
                     request.actor.as_deref(),
+                    cause.as_ref(),
                     now,
                 )? {
                     runtime::dispatch::Dispatched::Started(l) => lease = Some(l),
@@ -1413,13 +1431,22 @@ fn run_agent(
     // M17.13: the scope rides the same token. It is taken from the REQUEST,
     // which the app builds from the Agent record — the CLI never sees it and
     // therefore cannot argue with it. M34.1.1: so do the tools. argv
-    // narrowing was always advice; this is the boundary behind it.
+    // narrowing was always advice; this is the boundary behind it. M53.10:
+    // and so does the vault, so a run's tool calls stay in the vault it was
+    // started in, whatever is opened while it runs.
+    // The WHY block opens an unattended run's message (M56.7). An attended
+    // turn's cause has none, so what a person typed goes to the CLI as typed.
+    if let Some(cause) = cause.as_ref() {
+        request.message =
+            runtime::cause::with_preamble(&request.message, cause, chrono::Utc::now());
+    }
     request.mcp_token = Some(mcp_state.run_token(
         request.actor.as_deref(),
         request.scope.clone(),
         request.read_scope.clone(),
         grant_tools(&request),
         run_id.clone(),
+        Path::new(&vault),
     )?);
     let meter = agent::meter::Meter {
         data_dir: dir.clone(),
@@ -1445,6 +1472,8 @@ fn run_agent(
         actor: request.actor.clone(),
         // Root by construction (M34.3): no tool call started this run.
         parent_run_id: None,
+        // Written by the attended open; a leased run's claim already wrote it.
+        cause,
     };
     agent::stream(
         app.clone(),
@@ -1480,20 +1509,37 @@ fn save_connectors(vault: String, json: String) -> Result<(), String> {
     connectors::save_raw(Path::new(&vault), &json)
 }
 
-/// Returns the killed run's id (if anything was running) so the frontend can
-/// recognize and drop that run's trailing events (PR #5 review).
+/// Each connector in the vault's list with the last status a run saw it in
+/// (M54.11): one row per entry, with why its name can't be granted when it
+/// can't. An entry no run has seen comes back with no state, which Settings
+/// says as "not observed yet". The vault's id is derived, not registered, so
+/// a read writes nothing. A runtime DB or list that can't be read is an
+/// error, which Settings shows as unavailable, never as unobserved.
 #[tauri::command(async)]
+fn connector_status(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<Vec<connectors::StatusRow>, String> {
+    let vault = Path::new(&vault);
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let seen = runtime::connector_status::read(&conn, &runtime::scope::derive_vault_id(vault))?;
+    connectors::status_rows(vault, &seen)
+}
+
 /// Stop ONE run (M17.3). `false` means it had already finished — a race, not
 /// an error. Taking a run id is the point: a global kill was safe only while
 /// there could be one child, and it is how closing the assistant used to
-/// abort a background distill that had nothing to do with it.
+/// abort a background distill that had nothing to do with it. It answers at
+/// once; the run's process group gets TERM, then KILL once the grace has
+/// passed (M53.10).
+#[tauri::command(async)]
 fn stop_agent(state: tauri::State<'_, agent::AgentState>, run: u64) -> Result<bool, String> {
     state.stop(run)
 }
 
-/// Stop everything, reporting what died. For shutdown and vault switches: a
-/// child left pointed at the vault you just closed is worse than one
-/// interrupted.
+/// Stop everything, reporting what was stopped. The manual door: Rust already
+/// stops every run on quit (`RunEvent::Exit`) and the old vault's runs on a
+/// vault switch (`start_watcher`), so nothing has to call this for either.
 #[tauri::command(async)]
 fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
     state.stop_all()
@@ -1521,9 +1567,18 @@ fn start_watcher(
     app: tauri::AppHandle,
     state: tauri::State<'_, WatcherState>,
     ambient: tauri::State<'_, ingest::ambient::AmbientState>,
+    agents: tauri::State<'_, agent::AgentState>,
     vault: String,
 ) -> Result<(), String> {
     let vault_path = PathBuf::from(&vault);
+    // M53.10: a run never outlives its vault. Opening one stops every run in
+    // any other, Cerebro's own included; reopening this one (a webview
+    // reload) stops nothing, and a run started here while it opened is kept.
+    agents.stop_other_vaults(&vault_path);
+    // M53.11: a connectors.json an older build wrote world-readable holds the
+    // vault's connector credentials. Opening the vault narrows it to its
+    // owner, best effort, and never stops the open.
+    connectors::tighten(&vault_path);
     // M21.8 startup: run the M21.4 verification, record the verdict, start
     // shadow recording for this vault. Never blocks watching — a refused
     // ledger holds no writer, so knowledge writes refuse and ledger_status
@@ -1536,7 +1591,7 @@ fn start_watcher(
         // opening the vault: it would trade a working workspace for a
         // diagnostic, and every refusal is still returned to its caller.
         if let Err(e) = runtime::sink::arm(&dir) {
-            eprintln!("runtime db unavailable, operational refusals go unrecorded: {e}");
+            log::warn!("runtime db unavailable, operational refusals go unrecorded: {e}");
         }
         // M49.9: after the arm, which migrated the database. An attended row
         // a previous process left `running` has no finisher left; the cutoff
@@ -1568,6 +1623,9 @@ fn process_started() -> chrono::DateTime<chrono::Utc> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // M53.24: first, so every line and panic from here on is kept; lines
+    // wait in memory until `RunEvent::Ready` opens the file.
+    diagnostics::init();
     let _ = process_started();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1575,6 +1633,9 @@ pub fn run() {
         .manage(agent::AgentState::default())
         .manage(mcp::McpState::default())
         .manage(ingest::ambient::AmbientState::default())
+        // M53.12: tauri.conf.json declares the window `create: false`, so it
+        // is built here, with the link guard tauri's own path never attaches.
+        .setup(|app| shell::build_main_window(app))
         .invoke_handler(tauri::generate_handler![
             pick_vault,
             open_demo_vault,
@@ -1640,13 +1701,14 @@ pub fn run() {
             start_watcher,
             read_connectors,
             save_connectors,
+            connector_status,
             check_agent,
             agent_workspace,
             purge_agent_workspace,
-            start_mcp,
             run_agent,
             stop_agent,
             stop_all_agents,
+            diagnostics::log_frontend,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
             git_commands::git_workspace_info,
@@ -1680,16 +1742,33 @@ pub fn run() {
             roots_commands::mount_root,
             roots_commands::unmount_root,
             roots_commands::list_dir,
-            roots_commands::read_file_text
+            roots_commands::read_file_text,
+            roots_git_commands::root_git_workspace_info,
+            roots_git_commands::root_git_remote_status,
+            roots_git_commands::root_git_modified_files,
+            roots_git_commands::root_git_pulse,
+            roots_git_commands::root_git_file_url,
+            roots_git_commands::root_git_fetch,
+            roots_git_commands::root_git_pull_ff
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
-            // M49.9: a clean exit closes the session exactly; anything else
-            // leaves its last heartbeat as the honest lower bound.
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            // M53.24: tauri raises Ready right after `setup` (tauri-2.11.5
+            // app.rs:1423-1428), so the log opens here and lib.rs keeps one
+            // `.setup()`: a second would replace the window builder's.
+            tauri::RunEvent::Ready => diagnostics::arm(app),
+            tauri::RunEvent::Exit => {
+                use tauri::Manager;
+                // M53.10: quitting ends every run — TERM, the grace, KILL —
+                // admits no new one, and gives the readers a moment to book
+                // theirs `cancelled`. About three seconds at most.
+                app.state::<agent::AgentState>().shut_down();
+                // M49.9: a clean exit closes the session exactly; anything
+                // else leaves its last heartbeat as the honest lower bound.
                 runtime::sessions::close_current();
             }
+            _ => {}
         });
 }
 
@@ -1716,7 +1795,9 @@ mod tests {
             scope: None,
             read_scope: None,
             allowed_tools: None,
+            disallowed_tools: None,
             lane: None,
+            cause: None,
             internal: false,
         }
     }
@@ -1740,6 +1821,11 @@ mod tests {
     /// now refuse the same targets, through the same mechanism.
     #[test]
     fn the_ipc_note_commands_refuse_what_is_not_a_note() {
+        // The bundle under a spelling APFS folds onto it: past the capture
+        // valve, a plain write would land on a concept. The commands'
+        // knowledge check hears it as the bundle (M53.28), so each refuses it
+        // as read-only, where the others are refused as not notes.
+        const KELVIN: &str = "\u{212a}nowledge/metrics/churn.md";
         let dir = vault::testutil::temp_vault("ipc-note-targets");
         let seeded = [
             (".git/config", "[core]\n\tbare = false\n"),
@@ -1748,13 +1834,7 @@ mod tests {
             ("views/x.yml", "name: X\n"),
             ("boards/plan.canvas", "{\"nodes\":[]}\n"),
             ("data/table.csv", "a,b\n"),
-            // The bundle under a spelling APFS folds onto it, which the
-            // commands' knowledge check (ASCII folding) does not read: past
-            // the capture valve, a plain write would land on a concept.
-            (
-                "\u{212a}nowledge/metrics/churn.md",
-                "---\ntype: Metric\n---\n\n# Churn\n",
-            ),
+            (KELVIN, "---\ntype: Metric\n---\n\n# Churn\n"),
         ];
         for (rel, bytes) in seeded {
             vault::testutil::write(&dir, rel, bytes);
@@ -1781,12 +1861,17 @@ mod tests {
             "data/TABLE.CSV",
         ]);
         for target in targets {
-            let saved = save_note(v.clone(), target.into(), "pwned\n".into());
-            assert!(saved.unwrap_err().contains(target));
-            let patched = update_frontmatter(v.clone(), target.into(), patch.clone());
-            assert!(patched.unwrap_err().contains(target));
-            let titled = set_note_title(v.clone(), target.into(), "Pwned".into());
-            assert!(titled.unwrap_err().contains(target));
+            let named = if target == KELVIN {
+                "read-only"
+            } else {
+                target
+            };
+            let saved = save_note(v.clone(), target.into(), "pwned\n".into()).unwrap_err();
+            assert!(saved.contains(named), "{target}: {saved}");
+            let patched = update_frontmatter(v.clone(), target.into(), patch.clone()).unwrap_err();
+            assert!(patched.contains(named), "{target}: {patched}");
+            let titled = set_note_title(v.clone(), target.into(), "Pwned".into()).unwrap_err();
+            assert!(titled.contains(named), "{target}: {titled}");
         }
         for folder in [".git/hooks", ".cerebro"] {
             let created = create_note(
@@ -1820,6 +1905,73 @@ mod tests {
             landed.contains("status: done") && landed.contains("# Titled"),
             "{landed}"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// M53.28: these five check the bundle's name and then reach `safe_join`,
+    /// which judges no note target. While the check folded ASCII alone, the
+    /// spelling APFS folds onto `knowledge/` walked through all five, and
+    /// `delete_note` could send a concept to the trash.
+    #[test]
+    fn the_bundle_doors_refuse_the_spelling_apfs_folds_onto_knowledge() {
+        let dir = vault::testutil::temp_vault("ipc-bundle-doors");
+        let kelvin = "\u{212a}nowledge";
+        let concept = format!("{kelvin}/metrics/churn.md");
+        vault::testutil::write(&dir, &concept, "---\ntype: Metric\n---\n\n# Churn\n");
+        vault::testutil::write(&dir, "records/x.md", "# X\n");
+        // Folders as well as bytes: two of the doors only make a folder.
+        let snapshot = || -> std::collections::BTreeMap<std::path::PathBuf, Option<Vec<u8>>> {
+            walkdir::WalkDir::new(&dir)
+                .into_iter()
+                .filter_map(Result::ok)
+                .map(|e| {
+                    let bytes = e
+                        .file_type()
+                        .is_file()
+                        .then(|| std::fs::read(e.path()).unwrap());
+                    (e.path().to_path_buf(), bytes)
+                })
+                .collect()
+        };
+        let before = snapshot();
+        let v = dir.to_string_lossy().to_string();
+        let doors = [
+            (
+                "rename_note out",
+                rename_note(v.clone(), concept.clone(), "records/stolen.md".into()),
+            ),
+            (
+                "rename_note in",
+                rename_note(v.clone(), "records/x.md".into(), format!("{kelvin}/x.md")),
+            ),
+            ("delete_note", delete_note(v.clone(), concept.clone())),
+            (
+                "delete_note, the folder",
+                delete_note(v.clone(), kelvin.into()),
+            ),
+            (
+                "create_folder",
+                create_folder(v.clone(), format!("{kelvin}/new")),
+            ),
+            (
+                "save_collection",
+                save_collection(v.clone(), kelvin.into(), "name: Knowledge\n".into()),
+            ),
+            (
+                "save_list",
+                save_list(
+                    v.clone(),
+                    format!("{kelvin}/metrics"),
+                    "churn".into(),
+                    "name: Churn\n".into(),
+                ),
+            ),
+        ];
+        for (door, outcome) in doors {
+            let err = outcome.expect_err(door);
+            assert!(err.contains("read-only"), "{door}: {err}");
+        }
+        assert_eq!(snapshot(), before, "every byte and folder where it was");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

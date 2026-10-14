@@ -1,14 +1,15 @@
 //! The M24 policy layer: mutation governance as DATA.
 //!
-//! `shared/policy/policy.v2.json` is the one table (`format: 2` since M26.3b;
-//! `policy.v1.json` is frozen beside it as the registration gate's negative
-//! control). `authority-routes.v1.json` and its content-addressed snapshots
-//! are the one authority artifact. Rust compiles them in with `include_str!`;
-//! the TS side imports the identical files through vite. Neither language
-//! holds a rule the other has to be trusted to have copied correctly —
-//! parity is the shared artifact plus the shared goldens in
-//! `shared/policy/goldens/`, and a rule written twice as Rust and TS code is
-//! a review-blocking defect.
+//! `shared/policy/policy.v3.json` is the one table (`format: 3` since M27.4;
+//! `policy.v1.json` and `policy.v2.json` are frozen beside it as the
+//! registration gates' negative controls), and `tools.v1.json` is the one tool
+//! manifest (M54.1, `tools`). `authority-routes.v1.json` and its
+//! content-addressed snapshots are the one authority artifact. Rust compiles
+//! them in with `include_str!`; the TS side imports the identical files
+//! through vite. Neither language holds a rule the other has to be trusted to
+//! have copied correctly — parity is the shared artifact plus the shared
+//! goldens in `shared/policy/goldens/`, and a rule written twice as Rust and
+//! TS code is a review-blocking defect.
 //!
 //! **Agents are no longer off by construction (M26.3c).** M24 built this
 //! whole skeleton with nothing registered as an MCP tool, and that absence
@@ -36,9 +37,10 @@ pub mod review;
 pub mod risk;
 pub mod submit;
 pub mod table;
+pub mod tools;
 pub mod verdict;
 
-/// **The tripwire list** (the `write_target` pattern, mcp.rs:1362).
+/// **The tripwire list.**
 ///
 /// Every proposal op the codebase can construct, named once. The table must
 /// map exactly these — no more, no fewer. An op that ships unmapped would

@@ -1,0 +1,106 @@
+import { describe, expect, it } from 'vitest';
+import TOOL_GRANTS from '../../src-tauri/fixtures/tool-grants.json';
+import { agentFacingOps, POLICY } from '@/lib/policy/table';
+import { TOOLS } from '@/lib/policy/tools';
+import {
+  editsNotes,
+  grantedTools,
+  holds,
+  mentionedTools,
+  NOTE_EDITORS,
+  type PromptGrant,
+} from './toolGrant';
+
+const sorted = (names: Iterable<string>) => [...names].sort();
+
+/**
+ * M54.7 — the TS half of Rust's `narrow`. Both languages replay the same
+ * cases (granted_tools_match_the_shared_cases in src-tauri/src/agent/mod.rs),
+ * so a declared name the CLI is granted is a name the prompt may use, and one
+ * it is refused is a name the prompt never says.
+ */
+describe('grantedTools replays src-tauri/fixtures/tool-grants.json', () => {
+  it('agrees with Rust on every case', () => {
+    const all = sorted(grantedTools(null));
+    expect(TOOL_GRANTS.cases.length).toBeGreaterThan(0);
+    for (const { allowed_tools: declared, granted } of TOOL_GRANTS.cases) {
+      expect(sorted(grantedTools(declared)), JSON.stringify(declared)).toEqual(
+        granted === 'all' ? all : granted,
+      );
+    }
+  });
+
+  it('holds every base row a picker offers, and nothing else, when nothing narrows', () => {
+    // The same set the Rust replay checks its own `all` against.
+    const offered = TOOLS.tools
+      .filter((row) => row.surface === 'base' && row.toolset !== null)
+      .map((row) => row.name);
+    expect(sorted(grantedTools(null))).toEqual(sorted(offered));
+  });
+
+  it('never holds a generated proposal tool, a window or an answer tool', () => {
+    // TS cannot read the proposal switch, so it fails closed.
+    const generated = agentFacingOps(POLICY).map((op) => `${TOOLS.generated.prefix}${op}`);
+    const never = [...generated, 'commit_proposals', 'report_window_outcome', 'submit_answer'];
+    expect(sorted(grantedTools(never))).toEqual([]);
+    const all = grantedTools(null);
+    for (const name of never) expect(all.has(name), name).toBe(false);
+  });
+});
+
+describe('holds and editsNotes', () => {
+  const grant = (tools: string[], shell = false): PromptGrant => ({
+    tools: new Set(tools),
+    shell,
+    attended: true,
+  });
+
+  it('holds only when every name is held', () => {
+    expect(holds(grant(['get_note', 'search_notes']), 'get_note', 'search_notes')).toBe(true);
+    expect(holds(grant(['get_note']), 'get_note', 'search_notes')).toBe(false);
+    expect(holds(grant([]))).toBe(true);
+  });
+
+  it('reads the note editors off the manifest', () => {
+    expect(sorted(NOTE_EDITORS)).toEqual(['append_to_note', 'edit_note', 'update_frontmatter']);
+  });
+
+  it('edits notes through a note editor or the shell, and through nothing else', () => {
+    expect(editsNotes(grant(['update_frontmatter']))).toBe(true);
+    expect(editsNotes(grant([], true))).toBe(true);
+    // create_note makes a new note and edits none; write_concept writes the bundle.
+    expect(editsNotes(grant(['create_note', 'write_concept', 'get_note']))).toBe(false);
+  });
+});
+
+describe('mentionedTools', () => {
+  it('finds bare and mcp__cerebro__-prefixed names', () => {
+    expect(mentionedTools('read it with get_note, then search_notes.')).toEqual([
+      'get_note',
+      'search_notes',
+    ]);
+    expect(mentionedTools('call mcp__cerebro__open_note now')).toEqual(['open_note']);
+    expect(mentionedTools('`mcp__cerebro__write_concept`')).toEqual(['write_concept']);
+  });
+
+  it('ignores names that only contain a tool name', () => {
+    expect(mentionedTools('get_notes and xget_note and get_note_x')).toEqual([]);
+    expect(mentionedTools('mcp__other__get_notes')).toEqual([]);
+  });
+
+  it('counts navigate only in backticks', () => {
+    expect(mentionedTools('navigate the vault and get oriented')).toEqual([]);
+    expect(mentionedTools('call `navigate` to move the app')).toEqual(['navigate']);
+    expect(mentionedTools('or `mcp__cerebro__navigate`')).toEqual(['navigate']);
+  });
+
+  it('tells propose_organize apart from the generated propose_ names', () => {
+    const generated = agentFacingOps(POLICY).map((op) => `${TOOLS.generated.prefix}${op}`);
+    expect(generated).toContain('propose_cache_source');
+    expect(mentionedTools('use propose_organize so the user can accept it')).toEqual([
+      'propose_organize',
+    ]);
+    expect(mentionedTools('call propose_cache_source')).toEqual(['propose_cache_source']);
+    expect(mentionedTools('then cache_source')).toEqual(['cache_source']);
+  });
+});

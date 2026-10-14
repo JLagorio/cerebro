@@ -1,0 +1,555 @@
+{
+  "cli_version": "2.1.250",
+  "scenario": "allow-rule",
+  "source": "derived",
+  "derived_from": ["06-agents study (prompt tool and hook order, from the bundle)"],
+  "steps": [
+    {
+      "argv": [
+        "-p",
+        "Call slow_echo once with text 'rule' and seconds 0, then reply done.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "default",
+        "--allowedTools",
+        "Read",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--settings",
+        "/RECORD/probe/settings-allow.json",
+        "--permission-prompt-tool",
+        "mcp__probe__approve",
+        "--model",
+        "haiku",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-000000000002",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "default",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "AskUserQuestion",
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__slow_echo",
+            "ExitPlanMode"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000003",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000001",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "tool_use",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_000000000000000000000001",
+                "name": "mcp__probe__slow_echo",
+                "input": {
+                  "text": "rule",
+                  "seconds": 0
+                }
+              }
+            ],
+            "usage": {
+              "input_tokens": 6100,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 40,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "user",
+          "uuid": "00000000-0000-4000-8000-000000000004",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "toolu_000000000000000000000001",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "rule"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000005",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000002",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "done"
+              }
+            ],
+            "usage": {
+              "input_tokens": 6200,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 4,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-000000000006",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "is_error": false,
+          "num_turns": 2,
+          "result": "done",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 12300,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 44,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000007",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Call slow_echo once with text 'rule' and seconds 0, then reply done."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000008",
+            "parentUuid": "00000000-0000-4000-8000-000000000007",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "tool_use",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_000000000000000000000001",
+                  "name": "mcp__probe__slow_echo",
+                  "input": {
+                    "text": "rule",
+                    "seconds": 0
+                  }
+                }
+              ],
+              "usage": {
+                "input_tokens": 6100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000009",
+            "parentUuid": "00000000-0000-4000-8000-000000000008",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_000000000000000000000001",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "rule"
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-00000000000a",
+            "parentUuid": "00000000-0000-4000-8000-000000000009",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000002",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "done"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6200,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Call slow_echo once with text 'rule' and seconds 0, then reply done.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "default",
+        "--allowedTools",
+        "Read",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--settings",
+        "/RECORD/probe/settings-allow-hook.json",
+        "--permission-prompt-tool",
+        "mcp__probe__approve",
+        "--model",
+        "haiku",
+        "--session-id",
+        "00000000-0000-4000-8000-00000000000b"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-00000000000c",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "default",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "AskUserQuestion",
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__slow_echo",
+            "ExitPlanMode"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-00000000000d",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000003",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "tool_use",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_000000000000000000000002",
+                "name": "mcp__probe__slow_echo",
+                "input": {
+                  "text": "rule",
+                  "seconds": 0
+                }
+              }
+            ],
+            "usage": {
+              "input_tokens": 6100,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 40,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-00000000000e",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "",
+          "stop_reason": "tool_deferred",
+          "terminal_reason": "tool_deferred",
+          "total_cost_usd": 0,
+          "permission_denials": [],
+          "deferred_tool_use": {
+            "id": "toolu_000000000000000000000002",
+            "name": "mcp__probe__slow_echo",
+            "input": {
+              "text": "rule",
+              "seconds": 0
+            }
+          },
+          "usage": {
+            "input_tokens": 6100,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 40,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-00000000000b.jsonl",
+        "files": [
+          "00000000-0000-4000-8000-000000000001.jsonl",
+          "00000000-0000-4000-8000-00000000000b.jsonl"
+        ],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000f",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Call slow_echo once with text 'rule' and seconds 0, then reply done."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000010",
+            "parentUuid": "00000000-0000-4000-8000-00000000000f",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000003",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "tool_use",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_000000000000000000000002",
+                  "name": "mcp__probe__slow_echo",
+                  "input": {
+                    "text": "rule",
+                    "seconds": 0
+                  }
+                }
+              ],
+              "usage": {
+                "input_tokens": 6100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": [
+        {
+          "mode": "hook",
+          "input": {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__probe__slow_echo",
+            "tool_input": {
+              "text": "rule",
+              "seconds": 0
+            },
+            "tool_use_id": "toolu_000000000000000000000002",
+            "session_id": "00000000-0000-4000-8000-00000000000b",
+            "permission_mode": "default"
+          },
+          "answer": {
+            "hookSpecificOutput": {
+              "hookEventName": "PreToolUse",
+              "permissionDecision": "defer",
+              "permissionDecisionReason": "Waiting for the person to answer."
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

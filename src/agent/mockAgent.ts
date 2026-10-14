@@ -1,4 +1,5 @@
 import type { AgentStreamEvent, UiAction } from './types';
+import type { QuoteEdit } from '@/engine/quote';
 
 /**
  * Scripted agent for browser dev, vitest, and Playwright (M6).
@@ -24,11 +25,39 @@ interface Script {
    * propose-and-review path with no test running through it.
    */
   uiAction?: UiAction;
+  /**
+   * What its `append_to_note` call writes (M53.6) — one of the two scripts
+   * that change the vault, so a page open on the file has a real write to
+   * hear mid-turn.
+   */
+  append?: { path: string; content: string };
+  /** What its `edit_note` call replaces (M55.5) — the other one. */
+  edit?: { path: string; edits: QuoteEdit[] };
   text: string;
 }
 
+/** `append "<content>" to <note>.md`, as typed: a write script (M53.6). */
+const APPEND = /^append "([^"]+)" to (\S+\.md)$/;
+
+/** `edit "<old>" to "<new>" in <note>.md`, as typed: the other write script
+ * (M55.5). Inside the quotes `\n` is a line break, and `<new>` may be empty,
+ * which deletes the passage. */
+const EDIT = /^edit "([^"]+)" to "([^"]*)" in (\S+\.md)$/;
+
+/** A quoted script argument, its `\n`s made line breaks. */
+const unquote = (text: string): string => text.replace(/\\n/g, '\n');
+
 /** A capture that exists in the demo vault, so the proposal has a real target. */
 const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
+
+/**
+ * What the default script says the vault is (M54.8), in the model the app has
+ * today. src/lib/productBrief.test.ts holds it to no retired term. One line,
+ * and it keeps its first words: e2e/ai-block.spec.ts and
+ * src/editor/MarkdownEditor.test.tsx find an AI block's answer by them.
+ */
+export const VAULT_OVERVIEW_REPLY =
+  'This vault tracks work as typed markdown: every note is a page, typed notes are records in their databases, and a knowledge bundle I maintain waits for you to verify. Ask me to find something, file an Inbox capture, or write up what I have learned.';
 
 /** `<path> ("<title>")` — how every surface prompt names its subject
  * (src/lib/prompts.ts). Null when the message does not name one. */
@@ -100,8 +129,8 @@ function citeLine(note: SnapshotNote): string {
 /**
  * The mock's answers to the questions the app's own surfaces ask about
  * Knowledge (M52.3). Every reply names the subject it read and claims no
- * write: the mock writes nothing, and a transcript that says "written to the
- * knowledge bundle" over a bundle that did not change is the panel lying —
+ * write: none of these scripts writes, and a transcript that says "written to
+ * the knowledge bundle" over a bundle that did not change is the panel lying —
  * the catch-all that did exactly that for any prompt mentioning a concept is
  * gone.
  */
@@ -205,6 +234,27 @@ function knowledgeScript(prompt: string, message: string, systemPrompt?: string)
 }
 
 function scriptFor(message: string, systemPrompt?: string): Script {
+  // First, and on the raw message: the content is quoted as typed, and a
+  // note path may name an inbox or a risk without this being about either.
+  const edit = EDIT.exec(message.trim());
+  if (edit !== null) {
+    const [, old, replacement, path] = edit;
+    const edits = [{ old: unquote(old), new: unquote(replacement) }];
+    return {
+      tools: [{ name: 'edit_note', input: JSON.stringify({ path, edits }) }],
+      edit: { path, edits },
+      text: `I edited ${path}.`,
+    };
+  }
+  const append = APPEND.exec(message.trim());
+  if (append !== null) {
+    const [, content, path] = append;
+    return {
+      tools: [{ name: 'append_to_note', input: JSON.stringify({ path, content }) }],
+      append: { path, content },
+      text: `I appended that to ${path}.`,
+    };
+  }
   const prompt = message.toLowerCase();
 
   // Checked before the Inbox branch: these prompts name the note they are
@@ -237,7 +287,7 @@ function scriptFor(message: string, systemPrompt?: string): Script {
   return {
     thinking: 'Reading the vault context first.',
     tools: [{ name: 'get_vault_context', input: '{}' }],
-    text: 'This vault tracks work as typed markdown: objectives and key results as records, work items inside project folders, and a knowledge bundle I maintain for you to verify. Ask me to find something, file an Inbox capture, or write up what I have learned.',
+    text: VAULT_OVERVIEW_REPLY,
   };
 }
 
@@ -255,6 +305,10 @@ export interface MockRun {
 /**
  * Replay a scripted run. Returns a handle whose `cancel` stops emission —
  * the mock equivalent of killing the child process.
+ *
+ * Steps run in order, one `delayMs` apart, and a step that writes is awaited
+ * before the next starts: the reply streams after the tool result, as it does
+ * from a real child.
  */
 export function runMockAgent(
   message: string,
@@ -262,10 +316,19 @@ export function runMockAgent(
   {
     delayMs = 12,
     onUiAction,
+    onAppend,
+    onEdit,
     systemPrompt,
   }: {
     delayMs?: number;
     onUiAction?: (action: UiAction) => void;
+    /** Carries out the write script's `append_to_note` (M53.6): the mock
+     * backend's `agentAppend` in browser mode. Absent, the tool refuses. */
+    onAppend?: (path: string, content: string) => Promise<void>;
+    /** Carries out the edit script's `edit_note` (M55.5): the mock backend's
+     * `agentEdit`, which answers with the tool's report. Absent, the tool
+     * refuses. */
+    onEdit?: (path: string, edits: QuoteEdit[]) => Promise<string>;
     /** The turn's system prompt, whose context snapshot says what the page
      * in front of the user holds (M52.3) — the mock reads Knowledge there. */
     systemPrompt?: string;
@@ -274,34 +337,109 @@ export function runMockAgent(
   const script = scriptFor(message, systemPrompt);
   let cancelled = false;
   const timers: ReturnType<typeof setTimeout>[] = [];
+  // What the run says once its tools are done; a refused write rewrites it,
+  // so the transcript never claims a write that did not happen.
+  let reply = script.text;
 
-  const steps: (() => void)[] = [];
-  steps.push(() => emit({ kind: 'Init', session_id: SESSION }));
+  /** A write script's tool call: `write` it, then report as the server
+   * does. A refusal rewrites the reply as `failed` words it. */
+  const writeStep = async (
+    id: string,
+    path: string,
+    write: () => Promise<string>,
+    failed: (refusal: string) => string,
+  ) => {
+    let output: string;
+    try {
+      output = await write();
+    } catch (err) {
+      const refusal = err instanceof Error ? err.message : String(err);
+      reply = failed(refusal);
+      if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output: refusal, is_error: true });
+      return;
+    }
+    // The write landed, so it is announced whether or not the run was
+    // stopped meanwhile — as mcp.rs does, before the tool result goes back.
+    onUiAction?.({ action: 'vault_changed', paths: [path] });
+    if (!cancelled) emit({ kind: 'ToolDone', tool_id: id, output });
+  };
+
+  const append = (id: string, target: { path: string; content: string }) =>
+    writeStep(
+      id,
+      target.path,
+      async () => {
+        if (onAppend === undefined) throw new Error('append_to_note is not available here');
+        await onAppend(target.path, target.content);
+        return `Appended to ${target.path}`;
+      },
+      (refusal) => `I could not append to ${target.path}: ${refusal}`,
+    );
+
+  const edit = (id: string, target: { path: string; edits: QuoteEdit[] }) =>
+    writeStep(
+      id,
+      target.path,
+      async () => {
+        if (onEdit === undefined) throw new Error('edit_note is not available here');
+        return onEdit(target.path, target.edits);
+      },
+      (refusal) => `I could not edit ${target.path}: ${refusal}`,
+    );
+
+  type Step = () => void | Promise<void>;
+  const acting: Step[] = [];
+  acting.push(() => emit({ kind: 'Init', session_id: SESSION }));
   if (script.thinking !== undefined) {
-    steps.push(() => emit({ kind: 'ThinkingDelta', text: script.thinking as string }));
+    acting.push(() => emit({ kind: 'ThinkingDelta', text: script.thinking as string }));
   }
   (script.tools ?? []).forEach(({ name, input }, i) => {
     const id = `t-${i + 1}`;
-    steps.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
-    steps.push(() => emit({ kind: 'ToolDone', tool_id: id }));
+    acting.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
+    const appended = name === 'append_to_note' ? script.append : undefined;
+    const edited = name === 'edit_note' ? script.edit : undefined;
+    acting.push(
+      appended !== undefined
+        ? () => append(id, appended)
+        : edited !== undefined
+          ? () => edit(id, edited)
+          : () => emit({ kind: 'ToolDone', tool_id: id }),
+    );
   });
   if (script.uiAction !== undefined) {
     const action = script.uiAction;
-    steps.push(() => onUiAction?.(action));
+    acting.push(() => onUiAction?.(action));
   }
-  for (const piece of chunk(script.text)) {
-    steps.push(() => emit({ kind: 'TextDelta', text: piece }));
-  }
-  steps.push(() => emit({ kind: 'Result', text: script.text, session_id: SESSION }));
-  steps.push(() => emit({ kind: 'Done' }));
 
-  steps.forEach((step, i) => {
-    timers.push(
-      setTimeout(() => {
-        if (!cancelled) step();
-      }, i * delayMs),
-    );
-  });
+  const pause = (ms: number) =>
+    new Promise<void>((resolve) => {
+      timers.push(setTimeout(resolve, ms));
+    });
+  let first = true;
+  /** Play `steps` in order; false once the run has been cancelled. */
+  const play = async (steps: Step[]): Promise<boolean> => {
+    for (const step of steps) {
+      await pause(first ? 0 : delayMs);
+      first = false;
+      if (cancelled) return false;
+      await step();
+    }
+    return true;
+  };
+  void (async () => {
+    if (!(await play(acting))) return;
+    // Chunked as it streams rather than when scripted: a refused write has
+    // rewritten the reply by now.
+    await play([
+      ...chunk(reply).map(
+        (piece): Step =>
+          () =>
+            emit({ kind: 'TextDelta', text: piece }),
+      ),
+      () => emit({ kind: 'Result', text: reply, session_id: SESSION }),
+      () => emit({ kind: 'Done' }),
+    ]);
+  })();
 
   return {
     cancel: () => {

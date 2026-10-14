@@ -10,7 +10,7 @@ use crate::git;
 use crate::git::conflict::{ConflictMode, Resolution};
 use crate::git::history::GitCommit;
 use crate::git::provider::GitProviderStatus;
-use crate::git::pulse::{LastCommitInfo, PulseCommit};
+use crate::git::pulse::{LastCommitInfo, VaultPulse};
 use crate::git::remote::{GitRemoteStatus, RemoteResult};
 use crate::git::status::ModifiedFile;
 use crate::git::workspace::GitWorkspaceInfo;
@@ -74,7 +74,7 @@ pub fn get_commit_diff(vault: String, commit: String) -> Result<String, String> 
 }
 
 #[tauri::command(async)]
-pub fn get_vault_pulse(vault: String) -> Result<Vec<PulseCommit>, String> {
+pub fn get_vault_pulse(vault: String) -> Result<VaultPulse, String> {
     git::pulse::vault_pulse(&git::workspace_for(&vault), HISTORY_LIMIT)
 }
 

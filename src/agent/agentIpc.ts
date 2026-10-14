@@ -1,6 +1,7 @@
 import { runMockAgent, type MockRun } from './mockAgent';
-import type { AgentEvent, AgentStatus, CliWorkspace, McpInfo, UiAction } from './types';
-import { refuseIfAgentPaused } from '@/lib/mockIpc';
+import type { AgentEvent, AgentStatus, CliWorkspace, UiAction } from './types';
+import type { RunCauseRequest } from '@/engine/jobs';
+import { agentAppend, agentEdit, refuseIfAgentPaused } from '@/lib/mockIpc';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -50,12 +51,6 @@ export function purgeAgentWorkspace(vault: string): Promise<number> {
   return inTauri() ? invokeTauri<number>('purge_agent_workspace', { vault }) : Promise.resolve(0);
 }
 
-export function startMcp(vault: string): Promise<McpInfo> {
-  return inTauri()
-    ? invokeTauri('start_mcp', { vault })
-    : Promise.resolve({ url: 'mock://cerebro', token: 'mock' });
-}
-
 export interface RunOptions {
   message: string;
   systemPrompt?: string;
@@ -65,28 +60,43 @@ export interface RunOptions {
   shell: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
-  /** Whether a person is watching this run. Only an attended run may fall
-   * back to the user's global MCP config when the vault has no
-   * connectors.json (PR #5 security review) — a background job executing
-   * vault-authored content unattended never inherits it; for that job the
-   * absent file is the absence of a vault-scoped opt-in, not a grant. */
+  /** Whether a person is watching this run. Only an attended run that names
+   * no connector, in its record's `connectors:` or in its declared tools
+   * (M54.9), may fall back to the user's global MCP config when the vault has
+   * no connectors.json (PR #5 security review) — a background
+   * job executing vault-authored content unattended never inherits it; for
+   * that job the absent file is the absence of a vault-scoped opt-in, not a
+   * grant. And only an attended run reaches connectors its record does not
+   * name (M54.9). */
   attended: boolean;
   /** Attribute this run's writes to a process identity (M13.4) —
    * `process:<slug>` for an agent record's run; omitted = the default. */
   actor?: string | null;
-  /** Fingerprints of the vault's stdio connectors approved to run on this
-   * machine (PR #5 security review) — engine/connectors.stdioFingerprint.
-   * Absent reads as none approved: a missing field must never widen access. */
+  /** Approval keys of the vault's connectors approved on this machine: the
+   * digests of stdio fingerprints (PR #5 security review) and of http ones
+   * (M54.9) — engine/connectors.approvalKey. Absent reads as none approved:
+   * a missing field must never widen access. */
   approvedStdio?: string[];
   /** A NARROWING of this run's tools, declared by the vault file that started
    * it (M17.8). Intersected with the policy in Rust, never unioned — a vault
    * file may subtract from what Settings granted and can never add to it.
-   * Absent means "do not narrow"; [] means "narrow to nothing". */
+   * Absent means "do not narrow"; [] means "narrow to nothing". An entry that
+   * names one of the run's connectors narrows its grant too (M54.9), and
+   * with no connectors.json, one that names any connector keeps the run off
+   * the user's global MCP config. */
   allowedTools?: string[] | null;
+  /** Connector tools this run may never call, from the record's
+   * `disallowed-tools:` (M54.9). Only entries that name one of the run's
+   * connectors count, and they can only subtract; with no connectors.json,
+   * one that names any connector keeps the run off the user's global MCP
+   * config, which no deny could bind. Enforced in Rust. */
+  disallowedTools?: string[] | null;
   /** Connectors this run may reach, when the record named some (M18.4). The
-   * same narrowing contract as allowedTools: absent means "whatever the vault
-   * enabled", [] means none, and a name the vault has not enabled is dropped
-   * rather than conjured. Enforced in connectors.rs. */
+   * same narrowing contract as allowedTools: absent means every enabled,
+   * approved one for an attended run and none for an unattended one (M54.9),
+   * [] means none, and a name the vault has not enabled is dropped rather
+   * than conjured, then named in the run's prompt with why (M54.11).
+   * Enforced in connectors.rs. */
   connectorNames?: string[] | null;
   /** Vault-relative folders this run may WRITE inside (M17.13). Absent is
    * unrestricted. Enforced in Rust against the bearer the child presents, so
@@ -100,7 +110,11 @@ export interface RunOptions {
    * and faces the ambient gate; the answer can be `{ deferred }` and the
    * caller must read it. Absent keeps the legacy attended booking. */
   lane?: string;
-  mcp: McpInfo | null;
+  /** Why an UNATTENDED run started (M56.7), as `causeOfJob` names it. Rust
+   * admits it or refuses the run, records it on the run's row, and opens the
+   * message with it quoted as data. Absent records NULL, "why not recorded";
+   * an attended run is always recorded as attended, whatever this says. */
+  cause?: RunCauseRequest | null;
 }
 
 /** Live mock runs by id (M17.3) — a Map for the same reason AgentState is one:
@@ -161,6 +175,10 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
     // makes that parity a rule, and spec §6 makes this particular one the
     // point of the phase.
     refuseIfAgentPaused(vault, options.actor);
+    // No cause check here (M56.7), unlike the pause: the vocabulary and its
+    // refusals live once, in src-tauri/src/runtime/cause.rs, and a second
+    // copy of the kinds on this side is the twin list that rule forbids. The
+    // browser records no runs, so there is no row a bad kind could reach.
     const run = ++mockRunSeq;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
@@ -174,8 +192,16 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
         if (event.kind === 'Done') mockRuns.delete(run);
       },
       // The system prompt rides along (M52.3) so a scripted answer about
-      // Knowledge can read the snapshot the real agent would.
-      { onUiAction: emitUiAction, systemPrompt: options.systemPrompt },
+      // Knowledge can read the snapshot the real agent would. The write
+      // scripts land on the mock disk through the same refusals as Rust's:
+      // the append as tool_append's (M53.6), the edit as tool_edit_note's
+      // (M55.5).
+      {
+        onUiAction: emitUiAction,
+        onAppend: (path, content) => agentAppend(vault, path, content),
+        onEdit: (path, edits) => agentEdit(vault, path, edits),
+        systemPrompt: options.systemPrompt,
+      },
     );
     mockRuns.set(run, mock);
     // No runtime database in the browser, so no durable row and no id to
@@ -195,12 +221,12 @@ export async function runAgent(vault: string, options: RunOptions): Promise<RunS
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       allowed_tools: options.allowedTools ?? null,
+      disallowed_tools: options.disallowedTools ?? null,
       read_scope: options.readScope ?? null,
       connector_names: options.connectorNames ?? null,
       scope: options.scope ?? null,
       lane: options.lane ?? null,
-      mcp_url: options.mcp?.url ?? null,
-      mcp_token: options.mcp?.token ?? null,
+      cause: options.cause ?? null,
     },
   }).then((result) =>
     'deferred' in result ? result : { run: result.run, durableId: result.run_id },
@@ -226,8 +252,9 @@ export async function stopAgent(run: number): Promise<boolean> {
   return invokeTauri<boolean>('stop_agent', { run });
 }
 
-/** Kill everything. For shutdown and vault switches — never for "I am done
- * with this turn", which is what stopAgent(run) is for. */
+/** Stop everything: the manual door. Rust already stops every run on quit
+ * and the old vault's runs on a vault switch (M53.10), so neither needs this
+ * — and "I am done with this turn" is what stopAgent(run) is for. */
 export async function stopAllAgents(): Promise<number[]> {
   if (!inTauri()) {
     const dead = [...mockRuns.keys()];
@@ -285,7 +312,8 @@ type UiListener = (action: UiAction) => void;
 const uiListeners = new Set<UiListener>();
 let uiBound = false;
 
-/** UI actions the agent drives: open_note, navigate, propose_organize. */
+/** UI actions the agent drives: open_note, navigate, propose_organize, and
+ *  vault_changed, which its write tools announce (M53.6). */
 export function onUiAction(listener: UiListener): () => void {
   uiListeners.add(listener);
   if (inTauri() && !uiBound) {

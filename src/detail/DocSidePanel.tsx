@@ -4,12 +4,14 @@ import { Icon } from '@/components/ui/Icon';
 import { DocProperties } from '@/detail/DocProperties';
 import { OutlineTab } from '@/editor/DocOutline';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
+import { agentRef, isAgentEntry } from '@/engine/agents';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Concept } from '@/engine/okf';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ConceptDetailsTab } from '@/knowledge/ConceptDetailsTab';
+import { FileNote } from '@/library/chrome';
 import { PageKnowledge } from '@/knowledge/PageKnowledge';
 import {
   DOC_PANEL_MIN_WIDTH,
@@ -102,9 +104,29 @@ function LinksTab({ entry }: { entry: Entry }) {
 }
 
 /**
+ * An agent page's Info (M55.12): read-only. Its settings are the page's own
+ * property rows, which write one grant on Done; the generic property editor
+ * would offer free-text edits and remove-X on `scope:`, `tools:` and
+ * `schedule:`, the hazard M18 named.
+ */
+function AgentInfo({ entry }: { entry: Entry }) {
+  const { handle, actor } = agentRef(entry);
+  return (
+    <div data-testid="agent-info" className="flex flex-col gap-2 px-1.5 py-2 text-sm text-n-700">
+      <FileNote path={entry.path} />
+      <p className="m-0">
+        Answers to @{handle}; writes as {actor}
+      </p>
+      <p className="m-0 text-n-500">Its settings are this page&rsquo;s properties</p>
+    </div>
+  );
+}
+
+/**
  * Right-hand doc side panel (M2.x docs polish — Plane's pane pattern): one
  * panel, three tabs. Outline replaces the old floating TOC; Info hosts the
- * properties editor; Links shows resolved connections and backlinks.
+ * properties editor (on an agent page, a read-only note — M55.12); Links
+ * shows resolved connections and backlinks.
  */
 export function DocSidePanel({
   entry,
@@ -188,7 +210,12 @@ export function DocSidePanel({
           ) : (
             <div data-testid="outline-loading" />
           ))}
-        {tab === 'info' && <DocProperties entry={entry} schema={schema} />}
+        {tab === 'info' &&
+          (isAgentEntry(entry) ? (
+            <AgentInfo entry={entry} />
+          ) : (
+            <DocProperties entry={entry} schema={schema} />
+          ))}
         {tab === 'links' && <LinksTab entry={entry} />}
         {/* The record peek's Knowledge, component for component (M52.3).
             What this note gave Knowledge comes before what Knowledge can give

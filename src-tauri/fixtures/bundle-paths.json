@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "about": "Which vault paths are the knowledge/ bundle, and the one spelling each is filed under (M49.4, M53.28). Judged on the path the filesystem resolves, not the raw string: empty and `.` segments drop, `..` pops, and a path that climbs out of the vault, or starts with `/`, is not in the bundle. The first name is heard as a folding disk hears it: with the code points HFS+ ignores dropped, and Unicode case folded (to upper case, then to lower), it is `knowledge`. Only that name is respelled; the rest of the path stays as asked. A sibling that only shares the prefix is not the bundle. Replayed through canonical_path and is_knowledge_path by recognizes_the_bundle_but_not_a_lookalike_sibling in src-tauri/src/knowledge.rs, and through canonicalKnowledgePath and isKnowledgePath by src/engine/okf.test.ts. `canonical` is the bundle path in its one spelling, or null when the path is not in the bundle; `why` is for the reader.",
+  "cases": [
+    { "path": "knowledge", "canonical": "knowledge" },
+    { "path": "knowledge/metrics/revenue.md", "canonical": "knowledge/metrics/revenue.md" },
+    { "path": "./knowledge/x.md", "canonical": "knowledge/x.md" },
+    {
+      "path": "Knowledge/x.md",
+      "canonical": "knowledge/x.md",
+      "why": "APFS folds case, so on the disk the app ships for this IS knowledge/."
+    },
+    { "path": "KNOWLEDGE/log.md", "canonical": "knowledge/log.md" },
+    {
+      "path": "\u212anowledge/x.md",
+      "canonical": "knowledge/x.md",
+      "why": "APFS folds Unicode case, not only ASCII: it hears U+212A KELVIN SIGN as k."
+    },
+    {
+      "path": "know\u200cledge/x.md",
+      "canonical": "knowledge/x.md",
+      "why": "HFS+ ignores U+200C ZERO WIDTH NON-JOINER in a name (git's core.protectHFS class)."
+    },
+    {
+      "path": "\ufeffknowledge/x.md",
+      "canonical": "knowledge/x.md",
+      "why": "HFS+ ignores U+FEFF, the byte order mark, in a name too."
+    },
+    {
+      "path": "knowledge/Metrics/x.md",
+      "canonical": "knowledge/Metrics/x.md",
+      "why": "Only the bundle's own name is respelled."
+    },
+    { "path": "knowledge//a/./b.md", "canonical": "knowledge/a/b.md" },
+    { "path": "records/../knowledge/x.md", "canonical": "knowledge/x.md" },
+    { "path": "knowledge/../knowledge/x.md", "canonical": "knowledge/x.md" },
+    { "path": "knowledge/../records/x.md", "canonical": null },
+    { "path": "../knowledge/x.md", "canonical": null, "why": "It climbs out of the vault." },
+    { "path": "/knowledge/x.md", "canonical": null, "why": "Not a vault-relative path." },
+    {
+      "path": "knowledge-archive/x.md",
+      "canonical": null,
+      "why": "A sibling that shares the prefix is not the bundle."
+    },
+    {
+      "path": "\u212anowledge-archive/x.md",
+      "canonical": null,
+      "why": "Folded, it is still the sibling."
+    },
+    { "path": "my-knowledge/x.md", "canonical": null },
+    { "path": "records/risks/r.md", "canonical": null },
+    { "path": "", "canonical": null }
+  ]
+}

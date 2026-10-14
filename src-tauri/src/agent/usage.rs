@@ -99,6 +99,13 @@ pub struct RunFacts {
     /// Length of the `permission_denials` array. Missing is `None`; an empty
     /// array is `Some(0)` — different answers on purpose.
     pub permission_denials: Option<u64>,
+    /// The tools those denials name (M54.9): each denial's `tool_name`,
+    /// sorted and once each. Missing array is `None`, an empty one
+    /// `Some(vec![])`, as for the count. A tool outside a run's grant is
+    /// denied by the CLI and named here; one in its `--disallowedTools` is
+    /// withdrawn from the run instead, and never appears (recorded on
+    /// 2.1.250).
+    pub denied_tools: Option<Vec<String>>,
     /// Sum of the `usage.server_tool_use` object's numeric values; absent
     /// when the object is absent.
     pub server_tool_use: Option<u64>,
@@ -132,6 +139,19 @@ impl RunFacts {
                 .get("permission_denials")
                 .and_then(Value::as_array)
                 .map(|denials| denials.len() as u64),
+            denied_tools: event
+                .get("permission_denials")
+                .and_then(Value::as_array)
+                .map(|denials| {
+                    let mut names: Vec<String> = denials
+                        .iter()
+                        .filter_map(|denial| denial.get("tool_name").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .collect();
+                    names.sort();
+                    names.dedup();
+                    names
+                }),
             server_tool_use: usage
                 .and_then(|u| u.get("server_tool_use"))
                 .and_then(Value::as_object)
@@ -177,6 +197,7 @@ impl RunFacts {
         self.cache_write_5m = newer.cache_write_5m.or(self.cache_write_5m);
         self.cache_write_1h = newer.cache_write_1h.or(self.cache_write_1h);
         self.permission_denials = newer.permission_denials.or(self.permission_denials);
+        self.denied_tools = newer.denied_tools.or_else(|| self.denied_tools.take());
         self.server_tool_use = newer.server_tool_use.or(self.server_tool_use);
     }
 }
@@ -290,6 +311,10 @@ mod tests {
     const ASSISTANT_TURN: &str = include_str!("../../fixtures/cli-stream/assistant-turn.json");
     const RESULT_FUTURE: &str = include_str!("../../fixtures/cli-stream/result-future-fields.json");
     const RESULT_CACHE_TTL: &str = include_str!("../../fixtures/cli-stream/result-cache-ttl.json");
+    /// M54.9, recorded on 2.1.250 against a toy server whose `echo` alone
+    /// was granted: the run called `other` twice and Bash once.
+    const CONNECTOR_DENIALS: &str =
+        include_str!("../../fixtures/cli-stream/result-connector-denials.json");
 
     fn fixture(raw: &str) -> Value {
         serde_json::from_str(raw).expect("fixture is valid json")
@@ -406,6 +431,7 @@ mod tests {
             Some(0),
             "an empty array is zero, present — not absent"
         );
+        assert_eq!(facts.denied_tools, Some(vec![]));
         assert_eq!(
             facts.server_tool_use,
             Some(0),
@@ -437,6 +463,42 @@ mod tests {
             "cache_creation is consumed, not unknown: {:?}",
             unknown_fields(&event)
         );
+    }
+
+    #[test]
+    fn denied_tool_names_are_read_sorted_and_deduped() {
+        let stream: Vec<Value> = serde_json::from_str(CONNECTOR_DENIALS).expect("a stream");
+        let result = stream
+            .iter()
+            .find(|event| is_result(event))
+            .expect("the stream ends in a result");
+        let facts = RunFacts::parse(result).unwrap();
+        assert_eq!(facts.permission_denials, Some(3), "three calls were denied");
+        assert_eq!(
+            facts.denied_tools,
+            Some(vec!["Bash".to_string(), "mcp__toy__other".to_string()]),
+            "two tools, each named once"
+        );
+        // A later reading without the array keeps what the result said.
+        let mut merged = facts.clone();
+        merged.merge(RunFacts::default());
+        assert_eq!(merged.denied_tools, facts.denied_tools);
+    }
+
+    #[test]
+    fn a_missing_denial_array_is_none_and_an_empty_one_is_empty() {
+        let missing = RunFacts::parse(&json!({ "type": "result" })).unwrap();
+        assert_eq!(missing.denied_tools, None);
+        let empty =
+            RunFacts::parse(&json!({ "type": "result", "permission_denials": [] })).unwrap();
+        assert_eq!(empty.denied_tools, Some(vec![]));
+        // A denial without a tool name still counts, and names nothing.
+        let unnamed = RunFacts::parse(&json!({
+            "type": "result", "permission_denials": [{ "tool_use_id": "toolu_0000000001" }]
+        }))
+        .unwrap();
+        assert_eq!(unnamed.permission_denials, Some(1));
+        assert_eq!(unnamed.denied_tools, Some(vec![]));
     }
 
     #[test]

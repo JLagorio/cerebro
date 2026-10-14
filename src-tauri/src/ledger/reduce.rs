@@ -964,7 +964,6 @@ pub fn reduce(frames: &[Frame], store_id: &str) -> EpistemicState {
 
 /// Validate a marker against its buffered members and, if the batch is
 /// valid as a UNIT, fold the members in order.
-#[allow(clippy::too_many_arguments)]
 fn commit_batch(
     state: &mut EpistemicState,
     store_id: &str,
@@ -3849,6 +3848,32 @@ fn validate_basis_links(state: &EpistemicState, basis: &BeliefBasis) -> Result<(
     Ok(())
 }
 
+/// The claim `path` would sit inside, or one that sits inside it, with the
+/// Belief holding it (M53.29). A file and a folder cannot share a name, so of
+/// `a.md` and `a.md/b.md` the projection writer can create only the first it
+/// meets — and every reconciliation exit rewrites every projection.
+fn nesting_claim<'a>(
+    claims: &'a BTreeMap<String, String>,
+    path: &str,
+) -> Option<(&'a str, &'a str)> {
+    let enclosing = path
+        .match_indices('/')
+        .find_map(|(slash, _)| claims.get_key_value(&path[..slash]));
+    let inside = || {
+        let folder = format!("{path}/");
+        claims
+            .range::<str, _>((
+                std::ops::Bound::Included(folder.as_str()),
+                std::ops::Bound::Unbounded,
+            ))
+            .next()
+            .filter(|(other, _)| other.starts_with(&folder))
+    };
+    enclosing
+        .or_else(inside)
+        .map(|(other, holder)| (other.as_str(), holder.as_str()))
+}
+
 fn apply_belief_created(
     state: &mut EpistemicState,
     frame: &Frame,
@@ -3861,6 +3886,25 @@ fn apply_belief_created(
     let SubjectRef::Resolved { entity_id, aliases } = &body.subject else {
         return Err(refused("belief.created subject must be resolved"));
     };
+    // The projection-path claim: the first `.md` subject alias names the
+    // knowledge-relative file this Belief projects to, and the schema has
+    // already judged it claimable. One Belief per path, and no claim inside
+    // another's file: `a.md/b.md` beside `a.md` could never both be written.
+    // Judged before the entity registers, so a refused claim leaves no trace.
+    let path = schema::projection::projection_claim(aliases).map(str::to_string);
+    if let Some(path) = &path {
+        if let Some(holder) = state.projection_paths.get(path) {
+            return Err(refused(format!(
+                "projection path {path:?} is already claimed by belief {holder}"
+            )));
+        }
+        if let Some((other, holder)) = nesting_claim(&state.projection_paths, path) {
+            return Err(refused(format!(
+                "projection path {path:?} and {other:?} (belief {holder}) cannot both be files — \
+                 one sits inside the other"
+            )));
+        }
+    }
     if !state.entities.contains_key(entity_id) {
         state.entities.insert(
             entity_id.clone(),
@@ -3871,15 +3915,7 @@ fn apply_belief_created(
         );
         state.create_version("entity", entity_id, &frame.event_id);
     }
-    // The projection-path claim: the first `.md` subject alias names the
-    // knowledge-relative file this Belief projects to. One Belief per path.
-    let path = aliases.iter().find(|a| a.ends_with(".md")).cloned();
     if let Some(path) = &path {
-        if let Some(holder) = state.projection_paths.get(path) {
-            return Err(refused(format!(
-                "projection path {path:?} is already claimed by belief {holder}"
-            )));
-        }
         state
             .projection_paths
             .insert(path.clone(), body.belief_id.clone());
@@ -6143,6 +6179,195 @@ mod tests {
         assert!(details[0].contains("already recorded"));
         assert!(details[1].contains("DIFFERENT registered actors"));
         assert!(details[2].contains("share lineage"));
+    }
+
+    #[test]
+    fn the_writer_refuses_an_unwritable_claim_before_writing_a_byte() {
+        // M53.29: a governed apply's batch goes through this door. A claim
+        // the projection could not write is refused while the members are
+        // validated, so the set never becomes durable: no member, no marker.
+        let mut rig = Rig::new("reduce-claim-refused");
+        let claiming = |claim: &str| {
+            let mut body = belief_created(BELIEF, ENTITY, unsupported());
+            body.subject = SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec!["Acme Corp".into(), claim.into()],
+            };
+            vec![(
+                schema::KIND_BELIEF_CREATED.to_string(),
+                serde_json::to_value(&body).unwrap(),
+            )]
+        };
+        let ledger_bytes = |vault: &std::path::Path| {
+            let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(ledger_dir(vault))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            files.sort();
+            files
+                .iter()
+                .map(|path| (path.clone(), std::fs::read(path).unwrap_or_default()))
+                .collect::<Vec<_>>()
+        };
+        let before = ledger_bytes(&rig.vault);
+        let long_leaf = format!("concepts/{}.md", "a".repeat(241));
+        for claim in [
+            "../escape.md",
+            ".md",
+            "concepts/./acme.md",
+            "/concepts/acme.md",
+            "concepts/a\0b.md",
+            &long_leaf,
+        ] {
+            let error = rig
+                .writer
+                .append_batch(claiming(claim), Some("op:create"))
+                .unwrap_err();
+            assert!(error.contains("projection path"), "{claim:?}: {error}");
+        }
+        assert_eq!(
+            ledger_bytes(&rig.vault),
+            before,
+            "a refused claim writes nothing"
+        );
+
+        rig.writer
+            .append_batch(claiming("concepts/acme.md"), Some("op:create"))
+            .unwrap();
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        assert_eq!(
+            state
+                .projection_paths
+                .get("concepts/acme.md")
+                .map(String::as_str),
+            Some(BELIEF)
+        );
+    }
+
+    #[test]
+    fn a_claim_inside_another_claim_is_refused_and_leaves_no_trace() {
+        // M53.29: `concepts/acme.md/notes.md` beside `concepts/acme.md` is
+        // a folder and a file under one name. Each passes the schema alone,
+        // so only the reducer, which sees the other claim, can refuse it.
+        let mut rig = Rig::new("reduce-claim-nested");
+        let id = |n: u8| format!("{n:032x}");
+        let created = |belief_id: &str, entity_id: &str, claim: &str| {
+            let mut body = belief_created(belief_id, entity_id, unsupported());
+            body.subject = SubjectRef::Resolved {
+                entity_id: entity_id.into(),
+                aliases: vec![claim.into()],
+            };
+            body
+        };
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(BELIEF, ENTITY, "concepts/acme.md"),
+        );
+        // Inside a claim, from an entity nothing has registered.
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(BELIEF_B, ENTITY_B, "concepts/acme.md/notes.md"),
+        );
+        // A claim another claim already sits inside.
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(&id(1), ENTITY, "notes/deep.md/leaf.md"),
+        );
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(&id(2), ENTITY_B, "notes/deep.md"),
+        );
+        // A shared string prefix is not a shared folder.
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(&id(3), ENTITY, "concepts/acme.mdx/notes.md"),
+        );
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &created(&id(4), ENTITY, "concepts/acme.md2.md"),
+        );
+        // Two members of one set: the second meets the first's claim, and
+        // the whole set has no effect.
+        let pair = [("pair.md", 5), ("pair.md/inner.md", 6)]
+            .into_iter()
+            .map(|(claim, n)| {
+                (
+                    schema::KIND_BELIEF_CREATED.to_string(),
+                    serde_json::to_value(created(&id(n), ENTITY, claim)).unwrap(),
+                )
+            })
+            .collect();
+        rig.writer.append_batch(pair, Some("op:pair")).unwrap();
+
+        let state = rig.state();
+        let claims: Vec<&str> = state.projection_paths.keys().map(String::as_str).collect();
+        assert_eq!(
+            claims,
+            [
+                "concepts/acme.md",
+                "concepts/acme.md2.md",
+                "concepts/acme.mdx/notes.md",
+                "notes/deep.md/leaf.md"
+            ]
+        );
+        let nested: Vec<&str> = state
+            .anomalies
+            .iter()
+            .filter(|a| a.detail.contains("cannot both be files"))
+            .map(|a| a.detail.as_str())
+            .collect();
+        assert_eq!(nested.len(), 3, "{:?}", state.anomalies);
+        assert!(nested[0].contains("\"concepts/acme.md\""), "{}", nested[0]);
+        assert!(
+            nested[1].contains("\"notes/deep.md/leaf.md\""),
+            "{}",
+            nested[1]
+        );
+        assert!(nested[2].starts_with("batch member 1"), "{}", nested[2]);
+        // The refused claims registered nothing: the entity only the first
+        // of them named is still unknown.
+        assert!(!state.entities.contains_key(ENTITY_B));
+        assert!(!state.beliefs.contains_key(BELIEF_B));
+        assert!(!state.beliefs.contains_key(&id(5)));
+    }
+
+    #[test]
+    fn the_longest_claimable_leaf_is_one_the_projection_writer_can_write() {
+        // `MAX_CLAIM_LEAF_BYTES` is the projection writer's limit, not a
+        // round number: at it the writer's `<leaf>.cerebro-tmp` is exactly
+        // NAME_MAX, and one byte past it the temp file cannot be created.
+        let mut rig = Rig::new("reduce-claim-leaf");
+        let leaf = |bytes: usize| format!("concepts/{}.md", "a".repeat(bytes - 3));
+        let longest = leaf(schema::projection::MAX_CLAIM_LEAF_BYTES);
+        let mut body = belief_created(BELIEF, ENTITY, unsupported());
+        body.subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![longest.clone()],
+        };
+        rig.append(schema::KIND_BELIEF_CREATED, &body);
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        let projection = project_belief(&state, BELIEF).unwrap();
+        let write = |claim: &str| {
+            crate::ledger::manifest::write_projection(
+                &rig.vault,
+                &format!("knowledge/{claim}"),
+                &projection,
+            )
+        };
+        write(&longest).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(rig.vault.join("knowledge").join(&longest)).unwrap(),
+            projection.bytes
+        );
+        let past = leaf(schema::projection::MAX_CLAIM_LEAF_BYTES + 1);
+        assert!(
+            write(&past).is_err(),
+            "a {}-byte leaf wrote — raise MAX_CLAIM_LEAF_BYTES to the writer's limit",
+            schema::projection::MAX_CLAIM_LEAF_BYTES + 1
+        );
+        assert!(!rig.vault.join("knowledge").join(&past).exists());
     }
 
     #[test]

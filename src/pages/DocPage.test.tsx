@@ -754,3 +754,90 @@ describe('a concept is a page (M50.1)', () => {
     expect(screen.queryByTestId('concept-title')).toBeNull();
   });
 });
+
+describe('an agent is a page (M55.12)', () => {
+  const AGENT = 'records/agents/release-scout.md';
+
+  beforeEach(async () => {
+    resetMockFs();
+    await useVaultStore.getState().openVault('/demo-vault');
+    useNavStore.setState({
+      selection: { kind: 'doc', path: AGENT },
+      history: [{ kind: 'home' }, { kind: 'doc', path: AGENT }],
+      historyIndex: 1,
+    });
+    useUiStore.setState({ docPanelOpen: false, docPanelTab: 'outline' });
+  });
+  afterEach(cleanup);
+
+  it('roots at Agents, with no folder crumbs', () => {
+    render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    expect(screen.getByTestId('doc-title').textContent).toBe('Release scout');
+    expect(screen.queryByRole('button', { name: 'Records' })).toBeNull();
+    expect(screen.queryByText('Records')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Agents' }));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'agents' });
+  });
+
+  it('shows its grants as its own rows, never the generic property surface', () => {
+    render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    expect(screen.getByTestId('agent-properties').textContent).toContain('records/risks/');
+    expect(screen.queryByTestId('page-properties')).toBeNull();
+    expect(screen.getByTestId('agent-dossier')).toBeTruthy();
+  });
+
+  it('opens its Runs tab through the selection, and the editor leaves', async () => {
+    const { rerender } = render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    fireEvent.click(screen.getByTestId('record-tab-runs'));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: AGENT, tab: 'runs' });
+    rerender(<DocPage selection={{ kind: 'doc', path: AGENT, tab: 'runs' }} />);
+    expect(screen.queryByTestId('markdown-editor')).toBeNull();
+    expect(await screen.findByTestId('agent-runs')).toBeTruthy();
+    // The strip is the app's: nothing to add, rename or delete.
+    expect(screen.queryByTestId('new-record-tab')).toBeNull();
+  });
+
+  it('offers no Add page or Save as template, and keeps Rename and Trash', () => {
+    render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    const labels = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(labels).not.toContain('Add page');
+    expect(labels).not.toContain('Save as template');
+    expect(labels).toContain('Rename…');
+    expect(labels).toContain('Move to Trash');
+  });
+
+  it('Info is a read-only note, never the generic property editor', () => {
+    useUiStore.setState({ docPanelOpen: true, docPanelTab: 'info' });
+    render(<DocPage selection={{ kind: 'doc', path: AGENT }} />);
+    const info = screen.getByTestId('agent-info');
+    expect(info.textContent).toContain(
+      'Answers to @release-scout; writes as process:release-scout',
+    );
+    expect(info.textContent).toContain('Its settings are this page’s properties');
+    expect(screen.queryByTestId('doc-properties')).toBeNull();
+  });
+
+  it('an empty agent gets no template bar, which an empty doc does', async () => {
+    fs().set('notes/blank.md', '# Blank\n');
+    fs().set('records/agents/blank.md', '---\ntype: Agent\npaused: true\n---\n\n# Blank agent\n');
+    await useVaultStore.getState().rescan();
+
+    // The control: an empty doc offers its templates.
+    render(<DocPage selection={{ kind: 'doc', path: 'notes/blank.md' }} />);
+    await waitFor(() => expect(screen.getByTestId('blank-page-bar')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    cleanup();
+
+    render(<DocPage selection={{ kind: 'doc', path: 'records/agents/blank.md' }} />);
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    // A template's frontmatter could retype the agent it lands on.
+    expect(screen.queryByTestId('blank-page-bar')).toBeNull();
+  });
+});

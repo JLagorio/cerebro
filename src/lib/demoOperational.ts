@@ -42,6 +42,9 @@ export const AMBIENT_CONCURRENCY_MAX = 4;
  * because some component has a branch for it:
  *
  * - a run with `actor: null` → "unattributed" (a row written before M33.1)
+ * - a run with `cause: null` → "why not recorded" (a row from before M56.7),
+ *   and a scheduled run that started 45 minutes after it was due → "ran 45m
+ *   late"
  * - a run with `usage_state: 'unknown'` → "unknown", never its zero columns
  * - a run with no cost rows → "not recorded", never $0
  * - a run whose proposal counters were never booked (`null`, pre-M49.9) →
@@ -88,6 +91,14 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 0,
       rejected: 0,
       parent_run_id: null,
+      cause: {
+        kind: 'assembly',
+        why: 'assembling an answer',
+        subject: null,
+        detail: null,
+        due_at: null,
+      },
+      cli_session_id: null,
     },
     {
       // Left work on the table: two of its three proposals are still waiting,
@@ -107,6 +118,17 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 1,
       rejected: 0,
       parent_run_id: null,
+      // A schedule's fire at 08:30 that ran at 09:15 (M56.7): the fleet and
+      // the agent's Runs tab say why, and that it ran 45m late.
+      cause: {
+        kind: 'schedule',
+        why: 'its schedule came due',
+        subject: null,
+        detail: 'weekdays 08:30',
+        due_at: '2026-07-28T08:30:00.000Z',
+      },
+      // Synthetic, in the shape Claude Code's stream names a session.
+      cli_session_id: '00000000-0000-4000-8000-000000000001',
     },
     {
       // The Knowledge agent, asked in the panel (M52.3) — it is off duty in
@@ -129,6 +151,8 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 2,
       rejected: 0,
       parent_run_id: null,
+      cause: { kind: 'attended', why: 'you asked', subject: null, detail: null, due_at: null },
+      cli_session_id: null,
     },
     {
       // The CLI died without reporting usage. Its token columns are zero and
@@ -148,6 +172,14 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 0,
       rejected: 0,
       parent_run_id: null,
+      cause: {
+        kind: 'ingest',
+        why: 'background ingest of new material',
+        subject: null,
+        detail: null,
+        due_at: null,
+      },
+      cli_session_id: null,
     },
     {
       run_id: 'run-maint-1',
@@ -165,6 +197,14 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 0,
       rejected: 1,
       parent_run_id: null,
+      cause: {
+        kind: 'maintenance',
+        why: "Cerebro's upkeep",
+        subject: null,
+        detail: null,
+        due_at: null,
+      },
+      cli_session_id: null,
     },
     {
       run_id: 'run-chat-1',
@@ -182,6 +222,8 @@ export function demoFleetRuns(): FleetRun[] {
       applied: 0,
       rejected: 0,
       parent_run_id: null,
+      cause: { kind: 'attended', why: 'you asked', subject: null, detail: null, due_at: null },
+      cli_session_id: null,
     },
     {
       // A row from before M33.1 added the column: nothing attributed it, and
@@ -203,6 +245,9 @@ export function demoFleetRuns(): FleetRun[] {
       applied: null,
       rejected: null,
       parent_run_id: null,
+      // Nor did anything record why it started (pre-M56.7): "why not recorded".
+      cause: null,
+      cli_session_id: null,
     },
   ];
 }

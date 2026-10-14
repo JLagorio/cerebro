@@ -293,6 +293,41 @@ describe('the table answers the questions an interpreter asks', () => {
     }
   });
 
+  it('declares the grant refusals operational transport codes, in no op row', () => {
+    // M54.10. A call its grant or the corpus refuses fails at the server's
+    // door, before any tool body runs or any proposal exists: where
+    // run_actor_mismatch already fails. The twin of
+    // `grant_refusals_are_operational_transport_codes` in table.rs.
+    const grant = [
+      'read_outside_scope',
+      'target_outside_corpus',
+      'tool_outside_grant',
+      'write_outside_scope',
+    ];
+    for (const code of grant) {
+      expect(destiny(POLICY, code), code).toBe('operational');
+      expect(POLICY.transport_rejections, code).toContain(code);
+      for (const [name, rule] of Object.entries(POLICY.ops)) {
+        expect(rule.possible_rejections, `${name}`).not.toContain(code);
+      }
+      expect(retryVerdict(POLICY, code, 0), code).toBe('not_retryable');
+    }
+  });
+
+  it('declares stale_content an operational transport code, in no op row', () => {
+    // M55.3 (D2). A note write whose expect_hash names other bytes fails at
+    // the write door before a byte is written, so it claims nothing and is
+    // never the ledger's stale_target_version. The twin of
+    // `stale_content_is_an_operational_transport_code` in table.rs.
+    expect(destiny(POLICY, 'stale_content')).toBe('operational');
+    expect(POLICY.transport_rejections).toContain('stale_content');
+    for (const [name, rule] of Object.entries(POLICY.ops)) {
+      expect(rule.possible_rejections, `${name}`).not.toContain('stale_content');
+    }
+    expect(retryVerdict(POLICY, 'stale_content', 0)).toBe('not_retryable');
+    expect(destiny(POLICY, 'stale_target_version')).toBe('ledger');
+  });
+
   it('binds the preventive ancestry walk to the ops that change a belief basis', () => {
     // The walk is Rust-only — it reads reducer state the mock has no
     // counterpart for — but WHERE it runs is policy, and both loaders hold

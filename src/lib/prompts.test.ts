@@ -7,12 +7,18 @@ import {
   conceptAsk,
   currentStatePrompt,
   distillPrompt,
+  fetchRefsPrompt,
   RECHECK_LABEL,
   REVISE_LABEL,
   reviewConceptPrompt,
   reviseConceptPrompt,
+  standingInstructionsBlock,
 } from './prompts';
 import { ALL_TOOLS } from '@/engine/tools';
+import { grantedTools, mentionedTools, type PromptGrant } from '@/engine/toolGrant';
+
+/** A run that holds every tool: what every prompt here was written for. */
+const FULL: PromptGrant = { tools: grantedTools(null), shell: false, attended: false };
 
 /**
  * What an unattended run is actually told.
@@ -24,7 +30,7 @@ import { ALL_TOOLS } from '@/engine/tools';
  * to the standing ones instead of replacing them.
  */
 const base = () =>
-  agentRunPrompt('records/agents/scout.md', 'Release scout', 'process:release-scout', {
+  agentRunPrompt(FULL, 'records/agents/scout.md', 'Release scout', 'process:release-scout', {
     recent: '',
     preferences: '',
   });
@@ -36,6 +42,7 @@ describe('agentRunPrompt', () => {
 
   it('states the scope up front rather than leaving it to be discovered', () => {
     const prompt = agentRunPrompt(
+      FULL,
       'records/agents/scout.md',
       'Release scout',
       'process:release-scout',
@@ -48,39 +55,64 @@ describe('agentRunPrompt', () => {
   });
 
   it('says an empty scope means every record write will be refused', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, []);
+    const prompt = agentRunPrompt(FULL, 'p', 't', 'a', { recent: '', preferences: '' }, null, []);
     expect(prompt).toContain('scoped to no folder at all');
   });
 
   it('states the READ boundary too, and says searches count what they withhold (M36.4)', () => {
-    // The enforcement is M34.4's; this is the agent being told, so it plans
-    // around the boundary instead of discovering it as refused reads.
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, null, [
-      'records/risks',
-    ]);
+    // The loopback enforcement is M34.4's; this is the agent being told, so
+    // it plans around the boundary instead of discovering it as refused reads.
+    const prompt = agentRunPrompt(
+      FULL,
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      null,
+      null,
+      ['records/risks'],
+    );
     expect(prompt).toContain('read notes only inside: records/risks');
     expect(prompt).toContain('withheld');
-    // And absent stays silent: an unrestricted reader gets no boundary talk.
+    // M53.5: build_args denies the CLI's own readers and withdraws the
+    // shell on this run, so the prompt names both and where notes ARE read.
+    expect(prompt).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant, so reach notes through get_note and search_notes.",
+    );
+    // And absent stays silent: an unrestricted reader gets no boundary talk,
+    // and keeps the CLI readers the clause would say it lost.
     expect(base()).not.toContain('read notes only inside');
+    expect(base()).not.toContain('Read, Glob and Grep');
   });
 
   it('an empty read scope says work from what the message hands you (M36.4)', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', { recent: '', preferences: '' }, null, null, []);
+    const prompt = agentRunPrompt(
+      FULL,
+      'p',
+      't',
+      'a',
+      { recent: '', preferences: '' },
+      null,
+      null,
+      [],
+    );
     expect(prompt).toContain('read no note in this vault');
-    expect(prompt).toContain('Work from what this message hands you');
+    // M53.5: nothing reads around the empty scope either.
+    expect(prompt).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant. Work from what this message hands you.",
+    );
   });
 
   it('gives the model gate an explicit permission to do nothing', () => {
     // Without it, a model asked "is this important?" finds a way to say yes —
     // the whole point of the gate is that most wakings end here.
     const prompt = agentRunPrompt(
+      FULL,
       'p',
       't',
       'a',
       { recent: '', preferences: '' },
       {
-        subject: 'records/risks/r.md',
-        because: 'status becomes at-risk',
         ask: 'Does this threaten the release?',
       },
     );
@@ -89,7 +121,7 @@ describe('agentRunPrompt', () => {
   });
 
   it('ranks the human’s corrections above the agent’s own notes', () => {
-    const prompt = agentRunPrompt('p', 't', 'a', {
+    const prompt = agentRunPrompt(FULL, 'p', 't', 'a', {
       recent: 'MY OWN NOTES',
       preferences: 'HUMAN CORRECTION',
     });
@@ -192,13 +224,12 @@ describe('asking about a concept (M52.3)', () => {
 describe('per-trigger instructions (M18.5)', () => {
   const withDo = () =>
     agentRunPrompt(
+      FULL,
       'records/agents/scout.md',
       'Release scout',
       'process:release-scout',
       { recent: '', preferences: '' },
       {
-        subject: 'records/risks/r.md',
-        because: 'status becomes at-risk',
         do: 'Check the release date before writing anything.',
       },
     );
@@ -225,30 +256,32 @@ describe('per-trigger instructions (M18.5)', () => {
   });
 
   it('changes nothing for a trigger that declares none', () => {
-    const prompt = agentRunPrompt(
-      'p',
-      't',
-      'a',
-      { recent: '', preferences: '' },
-      {
-        subject: 'records/risks/r.md',
-        because: 'status becomes at-risk',
-      },
-    );
+    const prompt = agentRunPrompt(FULL, 'p', 't', 'a', { recent: '', preferences: '' }, {});
     expect(prompt).not.toContain('on top of your standing instructions');
+    expect(prompt).toBe(agentRunPrompt(FULL, 'p', 't', 'a', { recent: '', preferences: '' }, null));
+  });
+
+  it('never pastes what woke the run into its prose (M56.7)', () => {
+    // The subject is vault text. It rides the request's cause, and Rust
+    // quotes it into the message as data; the prompt names neither it nor
+    // the kind of waking.
+    const prompt = withDo();
+    expect(prompt).not.toContain('records/risks/r.md');
+    expect(prompt).not.toContain('You were woken because');
+    expect(prompt).toContain('on an unattended run.');
+    expect(prompt).not.toContain('event-triggered');
   });
 
   it('keeps the gate ahead of the instruction, so a "no" run never reads it', () => {
     // Order is the design: decide whether to act, then how. Reversed, the
     // model has already planned the work before being asked to skip it.
     const prompt = agentRunPrompt(
+      FULL,
       'p',
       't',
       'a',
       { recent: '', preferences: '' },
       {
-        subject: 's',
-        because: 'b',
         ask: 'SHOULD I?',
         do: 'HOW TO.',
       },
@@ -268,6 +301,7 @@ describe('per-trigger instructions (M18.5)', () => {
 describe('addressedAgentPrompt', () => {
   const addressed = (memory = { recent: '', preferences: '' }, scope: string[] | null = null) =>
     addressedAgentPrompt(
+      FULL,
       'records/agents/scout.md',
       'Release scout',
       'process:release-scout',
@@ -288,11 +322,30 @@ describe('addressedAgentPrompt', () => {
     expect(addressed()).toContain('is waiting');
   });
 
-  it('points at the standing instructions rather than pasting them in', () => {
-    // The body is a record the turn already knows the path of and holds the
-    // tools to read. Folded in above the question, an agent's charter reads
+  it('asks for no read of the record, and carries none of it (M53.5)', () => {
+    // The record's body closes the turn's system prompt instead
+    // (standingInstructionsBlock). Asked to read it, a read-scoped turn whose
+    // record sits outside its folders could not: get_note holds the agent's
+    // own record to the read limit like any other note, and build_args
+    // withdrew the CLI's Read. Pasted in above the question, a charter reads
     // as something the person had just typed.
-    expect(addressed()).toContain('standing instructions are the body of that record');
+    for (const readScope of [null, ['records/risks'], []]) {
+      const prompt = addressedAgentPrompt(
+        FULL,
+        'records/agents/scout.md',
+        'Release scout',
+        'process:release-scout',
+        { recent: '', preferences: '' },
+        null,
+        readScope,
+      );
+      expect(prompt).not.toContain('read it');
+      expect(prompt).not.toContain('get_note refuses');
+      expect(prompt).not.toContain('standing instructions');
+      expect(prompt).toContain(
+        'Answer as that agent: your writes are attributed to process:release-scout.',
+      );
+    }
   });
 
   it('ranks the human’s corrections above the agent’s own notes, like a run does', () => {
@@ -321,6 +374,7 @@ describe('addressedAgentPrompt', () => {
 
   it('states the read boundary the addressed turn actually runs under (M36.4)', () => {
     const prompt = addressedAgentPrompt(
+      FULL,
       'records/agents/scout.md',
       'Release scout',
       'process:release-scout',
@@ -329,8 +383,37 @@ describe('addressedAgentPrompt', () => {
       ['records/risks'],
     );
     expect(prompt).toContain('read notes only inside: records/risks');
+    // M53.5: the addressed turn's argv is built from the same read scope, so
+    // it is told the same withdrawal the scheduled run is.
+    expect(prompt).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant",
+    );
     // And absent stays silent, exactly like the write axis.
     expect(addressed()).not.toContain('read notes only inside');
+    expect(addressed()).not.toContain('Read, Glob and Grep');
+  });
+});
+
+/**
+ * M34.1.4 — standing instructions arrive with the system prompt, under the
+ * path they came from. Built here since M53.5, when the addressed turn
+ * started sending them too.
+ */
+describe('standingInstructionsBlock', () => {
+  it('closes a system prompt with the record body, under the path it came from', () => {
+    const block = standingInstructionsBlock(
+      'records/agents/scout.md',
+      '\n# Release scout\n\nKeep a running brief.\n',
+    );
+    expect(`sys${block}`).toBe(
+      'sys\n\nYour standing instructions, from records/agents/scout.md:\n\n# Release scout\n\nKeep a running brief.',
+    );
+  });
+
+  it('adds nothing for a record with no body', () => {
+    // A heading over no instructions tells the agent it has some.
+    expect(standingInstructionsBlock('records/agents/scout.md', '')).toBe('');
+    expect(standingInstructionsBlock('records/agents/scout.md', ' \n\t\n')).toBe('');
   });
 });
 
@@ -375,5 +458,144 @@ describe('currentStatePrompt (M33.8)', () => {
     });
     expect(block).not.toContain('Proposals waiting');
     expect(block).toContain('- Your last run: failed');
+  });
+});
+
+/**
+ * M54.7 — an agent prompt names only the tools its run holds. The lines that
+ * name a tool follow the grant; every other word stays.
+ */
+describe('agent prompts follow the run’s grant', () => {
+  const holding = (...tools: string[]): PromptGrant => ({
+    tools: new Set(tools),
+    shell: false,
+    attended: false,
+  });
+  const memory = { recent: 'NOTES', preferences: '' };
+  const run = (
+    grant: PromptGrant,
+    scope: string[] | null = null,
+    readScope: string[] | null = null,
+  ) =>
+    agentRunPrompt(
+      grant,
+      'records/agents/scout.md',
+      'Scout',
+      'process:scout',
+      memory,
+      null,
+      scope,
+      readScope,
+    );
+  const addressed = (grant: PromptGrant, scope: string[] | null, readScope: string[] | null) =>
+    addressedAgentPrompt(
+      grant,
+      'records/agents/scout.md',
+      'Scout',
+      'process:scout',
+      memory,
+      scope,
+      readScope,
+    );
+
+  it('asks for the working notes only of a run that holds update_frontmatter', () => {
+    expect(run(holding('update_frontmatter'))).toContain(
+      'rewrite your working notes with update_frontmatter on records/agents/scout.md',
+    );
+    expect(run(holding('write_concept'))).not.toContain('update_frontmatter');
+  });
+
+  it('sends what was learned to the bundle only from a run that holds write_concept', () => {
+    expect(run(holding('write_concept'))).toContain('through write_concept');
+    expect(run(holding('update_frontmatter'))).not.toContain('write_concept');
+  });
+
+  it('ends on the memory, with no blank line, when the run holds neither', () => {
+    const prompt = run(holding('search_notes'));
+    expect(prompt.endsWith('Your working notes from previous runs:\nNOTES')).toBe(true);
+    expect(mentionedTools(prompt)).toEqual([]);
+  });
+
+  it('names write_concept in the scope line only to a run that holds it', () => {
+    const exemption =
+      '(The knowledge bundle is reached through write_concept and is not affected.)';
+    expect(run(holding('write_concept'), ['records/risks'])).toContain(exemption);
+    const without = run(holding('create_note'), ['records/risks']);
+    expect(without).toContain('You may write records only inside: records/risks.');
+    expect(without).toContain('rather than discovering it as an error.\n');
+    expect(without).not.toContain('write_concept');
+  });
+
+  it('names only the readers a read-scoped run holds', () => {
+    expect(run(holding('search_notes'), null, ['records/risks'])).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant, so reach notes through search_notes.",
+    );
+    expect(run(holding('get_note'), null, ['records/risks'])).toContain(
+      ', so reach notes through get_note.',
+    );
+    const blind = run(holding('create_note'), null, ['records/risks']);
+    expect(blind).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant. Work from what this message hands you.",
+    );
+    expect(mentionedTools(blind)).toEqual([]);
+    const nowhere = run(holding('search_notes'), null, []);
+    expect(nowhere).toContain(
+      'You can read no note in this vault: every search returns only a withheld count.',
+    );
+    expect(nowhere).not.toContain('get_note');
+  });
+
+  it('names no reader to a read-scoped addressed turn that holds none', () => {
+    for (const readScope of [['records/risks'], []]) {
+      const prompt = addressed(holding('create_note'), ['records/risks'], readScope);
+      expect(mentionedTools(prompt)).toEqual([]);
+      expect(prompt).toContain('Work from what this message hands you.');
+      expect(prompt).toContain('What they asked:');
+    }
+  });
+
+  it('reads as before under a full grant', () => {
+    const prompt = run(FULL, ['records/risks'], ['records/risks']);
+    expect(prompt).toContain(
+      "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant, so reach notes through get_note and search_notes.",
+    );
+    expect(prompt).toContain(
+      'plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)',
+    );
+    expect(prompt).toContain(
+      'NOTES\n\nBefore you finish, rewrite your working notes with update_frontmatter on records/agents/scout.md',
+    );
+    expect(run(FULL, null, [])).toContain(
+      'You can read no note in this vault: every get_note is refused and every search returns only a withheld count.',
+    );
+  });
+});
+
+describe('fetchRefsPrompt (M69.2)', () => {
+  // The prompt as it read before labels existed, byte for byte.
+  const BEFORE = [
+    'The note at notes/plan.md refers to KES-421, https://linear.app/acme/issue/ENG-142/fix-login, and there is no local copy of them.',
+    '',
+    'For each one, use whichever connector you have for that system to fetch it, then call cache_source to write the result down.',
+    'Cached copies live in sources/ so the next question about the same ticket reads a file instead of calling the API again.',
+    'If you have no connector for a system, say so plainly rather than guessing at the contents.',
+  ].join('\n');
+  const IDS = ['KES-421', 'https://linear.app/acme/issue/ENG-142/fix-login'];
+
+  it('reads exactly as before when no link names its page', () => {
+    expect(fetchRefsPrompt('notes/plan.md', IDS)).toBe(BEFORE);
+    expect(fetchRefsPrompt('notes/plan.md', IDS, [null, null])).toBe(BEFORE);
+  });
+
+  it('names what each link calls its page, and lets that name stand in for a title', () => {
+    const prompt = fetchRefsPrompt('notes/plan.md', IDS, [null, 'ENG-142 Fix login']);
+    expect(prompt).toContain(
+      'refers to KES-421, https://linear.app/acme/issue/ENG-142/fix-login (ENG-142 Fix login, as the link names it), and',
+    );
+    expect(prompt).toContain(
+      '\nWhere the system gives no title, the name its link carries will do.\n',
+    );
+    // The added line names no tool (CV-19): the prompt names what it did before.
+    expect(mentionedTools(prompt)).toEqual(mentionedTools(BEFORE));
   });
 });

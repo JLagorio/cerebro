@@ -1,9 +1,34 @@
 # Full gate (M14.5): what CI enforces, caught before the push instead of ten
-# minutes after. Frontend-only pushes skip the Rust lane via change detection.
+# minutes after. A push that changes no Rust input skips the Rust lane.
 #
 # Policy: never bypass with --no-verify. If the hook is wrong, fix the hook.
 
 set -e
+
+# Toolchain drift warns and never blocks (M53.3). CI installs the pins in
+# rust-toolchain.toml and package.json, so a machine on other versions runs a
+# gate CI does not, and should hear so on every push. Homebrew's cargo ignores
+# rust-toolchain.toml, which leaves this as its only check.
+toolchain_drift() {
+  rust_pin=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml 2>/dev/null || true)
+  rust_have=$(rustc --version 2>/dev/null | awk '{ print $2 }' || true)
+  if [ "$rust_have" != "$rust_pin" ]; then
+    echo "pre-push: WARNING rustc is ${rust_have:-missing}; rust-toolchain.toml pins $rust_pin"
+  fi
+  node_pin=$(sed -n 's/^ *"node": *"\([0-9]*\)\.x".*/\1/p' package.json 2>/dev/null || true)
+  node_have=$(node --version 2>/dev/null || true)
+  node_major=${node_have#v}
+  node_major=${node_major%%.*}
+  if [ "$node_major" != "$node_pin" ]; then
+    echo "pre-push: WARNING node is ${node_have:-missing}; package.json engines pins $node_pin.x"
+  fi
+  pnpm_pin=$(sed -n 's/^ *"packageManager": *"pnpm@\([^"+]*\).*/\1/p' package.json 2>/dev/null || true)
+  pnpm_have=$(pnpm --version 2>/dev/null | tail -n 1 || true)
+  if [ "$pnpm_have" != "$pnpm_pin" ]; then
+    echo "pre-push: WARNING pnpm is ${pnpm_have:-missing}; package.json packageManager pins $pnpm_pin"
+  fi
+}
+toolchain_drift
 
 # Everything about to leave this machine. @{push} is unset for a new branch;
 # fall back to origin's default branch, and to everything as a last resort.
@@ -25,8 +50,12 @@ pnpm lint
 pnpm typecheck
 pnpm test:run
 
-if echo "$changed" | grep -q '^src-tauri/'; then
-  echo "pre-push: src-tauri changed — fmt, clippy, cargo test"
+# Rust inputs (M53.3): the crate, the trees its tests read (shared/ policy and
+# budgets, conformance/ vectors, demo-vault/), and the compiler pin. src/ stays
+# out although one trigger test walks it: it would put the Rust lane on nearly
+# every push, and CI's quality job runs that test on all of them anyway.
+if echo "$changed" | grep -qE '^(src-tauri|shared|conformance|demo-vault)/|^rust-toolchain\.toml$'; then
+  echo "pre-push: Rust inputs changed — fmt, clippy, cargo test"
   cargo fmt --check --manifest-path src-tauri/Cargo.toml
   cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
   # The crash-harness tests (vault/testutil.rs run_crash_scenario) abort a
@@ -41,5 +70,5 @@ if echo "$changed" | grep -q '^src-tauri/'; then
     cargo test --manifest-path src-tauri/Cargo.toml
   fi
 else
-  echo "pre-push: no src-tauri changes — Rust lane skipped"
+  echo "pre-push: no Rust inputs changed — Rust lane skipped"
 fi

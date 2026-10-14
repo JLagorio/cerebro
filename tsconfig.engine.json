@@ -1,0 +1,14 @@
+{
+  // The engine typechecks with no DOM (M53.20): ES2022 only, no ambient types,
+  // engine non-test files and whatever they import. `jsx: preserve` stops the
+  // implicit react/jsx-runtime import, whose global.d.ts declares DOM element
+  // interfaces that would let a DOM type through.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": [],
+    "jsx": "preserve"
+  },
+  "include": ["src/engine"],
+  "exclude": ["src/engine/**/*.test.ts"]
+}

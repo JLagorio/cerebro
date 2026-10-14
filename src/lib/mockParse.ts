@@ -1,17 +1,24 @@
-// Minimal TS re-implementation of the Rust note parser, used ONLY by the mock
-// IPC backend (browser dev, vitest, Playwright). The Rust scanner in
-// src-tauri/src/vault/parse.rs is the source of truth inside Tauri.
+// Minimal TS re-implementation of the Rust note parser. Only the mock IPC
+// backend (mockIpc.ts: browser dev, vitest, Playwright) reads it, and lint
+// keeps every other importer out (the mockParse rail in eslint.config.js). The
+// Rust scanner in src-tauri/src/vault/parse.rs is the source of truth inside
+// Tauri.
 //
-// PARITY: the wikilink scanning, humanize rule, fence handling, and snippet
-// rules below intentionally mirror parse.rs / entry.rs — including the
-// post-plan hardening from commit 8db3664 (fence-aware H1 titles, BOM strip,
-// CRLF tolerance, trailing whitespace on the closing fence, 64 KB frontmatter
-// cap, fence-aware snippets). The shared fixtures in mockParse.test.ts are
-// asserted by both implementations — keep them in sync.
+// PARITY: the wikilink scanning, title and snippet rules below intentionally
+// mirror parse.rs / entry.rs — including the post-plan hardening from commit
+// 8db3664 (fence-aware H1 titles, 64 KB frontmatter cap, fence-aware
+// snippets). The frontmatter split (BOM strip, CRLF tolerance, trailing
+// whitespace on the closing fence) and the humanize rule live in
+// engine/frontmatter.ts, where the app reads them too. The scan golden in
+// conformance/scan holds all of it to parse.rs: Rust writes the golden,
+// scanGolden.test.ts replays it through this parser, and a divergence moves
+// this side.
 import YAML from 'yaml';
+import { humanize, splitFrontmatter } from '@/engine/frontmatter';
 import { isKnowledgePath } from '@/engine/okf';
 import type { Entry, Scalar } from '@/engine/types';
 import { firstMeaningfulLine } from '@/mermaid/detect';
+import { sha256Hex } from './sha256';
 
 /** Frontmatter blocks larger than this are rejected without parsing (parity
  * with MAX_FRONTMATTER_LEN in parse.rs). */
@@ -55,52 +62,6 @@ export function extractWikilinks(value: unknown): string[] | null {
   collectStrings(value, texts);
   const targets = texts.flatMap(wikilinkTargets);
   return targets.length > 0 ? targets : null;
-}
-
-/** 'meeting-notes' -> 'Meeting notes' (parity with the Rust fallback title). */
-export function humanize(stem: string): string {
-  const spaced = stem.replace(/[-_]+/g, ' ').trim();
-  return spaced === '' ? stem : spaced[0].toUpperCase() + spaced.slice(1);
-}
-
-/**
- * Split raw content into the frontmatter YAML block and the body, mirroring
- * `split_frontmatter` in parse.rs: a leading BOM is stripped, the opening
- * fence is `---` + LF/CRLF, the closing fence tolerates trailing spaces or
- * tabs, and an unterminated fence treats the whole file as body. The yaml
- * block is returned without the final newline of its last line.
- */
-export function splitFrontmatter(raw: string): { yaml: string | null; body: string } {
-  const content = raw.startsWith('\ufeff') ? raw.slice(1) : raw;
-  let rest: string;
-  if (content.startsWith('---\n')) rest = content.slice(4);
-  else if (content.startsWith('---\r\n')) rest = content.slice(5);
-  else return { yaml: null, body: content };
-  // Fast path: closing fence immediately follows (empty frontmatter).
-  const fastBody = closingFenceBody(rest);
-  if (fastBody !== null) return { yaml: '', body: fastBody };
-  let search = 0;
-  for (;;) {
-    const pos = rest.indexOf('\n---', search);
-    if (pos === -1) break;
-    const body = closingFenceBody(rest.slice(pos + 1));
-    if (body !== null) {
-      return { yaml: rest.slice(0, pos).replace(/\r$/, ''), body };
-    }
-    search = pos + 1;
-  }
-  return { yaml: null, body: content }; // unterminated fence: treat whole file as body
-}
-
-/** If `s` starts with a closing fence line — `---`, optional trailing spaces
- * or tabs, then a newline or end of input — return the body after it. */
-function closingFenceBody(s: string): string | null {
-  if (!s.startsWith('---')) return null;
-  const trimmed = s.slice(3).replace(/^[ \t]+/, '');
-  if (trimmed === '') return trimmed;
-  if (trimmed.startsWith('\r\n')) return trimmed.slice(2);
-  if (trimmed.startsWith('\n')) return trimmed.slice(1);
-  return null;
 }
 
 /** Parse a frontmatter block into a mapping, mirroring `parse_frontmatter`
@@ -269,6 +230,7 @@ export function parseNote(path: string, raw: string, createdAt: string, modified
       createdAt,
       modifiedAt,
       parseError: null,
+      hash: sha256Hex(raw),
     };
   }
   const stem = filename.replace(/\.md$/, '');
@@ -319,5 +281,8 @@ export function parseNote(path: string, raw: string, createdAt: string, modified
     createdAt,
     modifiedAt,
     parseError,
+    // The bytes' SHA-256, the identity a trigger compares (M55.2; parity
+    // with entry.rs, held by the scan golden).
+    hash: sha256Hex(raw),
   };
 }

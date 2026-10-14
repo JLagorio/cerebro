@@ -97,6 +97,53 @@ describe('KnowledgePanel — people by name (M52.3)', () => {
   });
 });
 
+describe('KnowledgePanel — sources named by their links (M69.2)', () => {
+  const LINEAR = 'https://linear.app/acme/issue/ENG-142/fix-login';
+  const UNKNOWN = 'https://example.com/fix-login';
+
+  beforeEach(() => {
+    const linked = makeEntry({
+      path: CONCEPT,
+      filename: 'sync-error-rate.md',
+      folder: 'knowledge/metrics',
+      title: 'Sync error rate',
+      properties: {
+        sources: [
+          { id: 'issue', resource: LINEAR },
+          { id: 'titled', resource: LINEAR, title: 'The login bug' },
+          { id: 'unknown', resource: UNKNOWN },
+        ],
+      },
+    });
+    useVaultStore.setState({ vaultPath: '/vault', entries: [linked] });
+  });
+
+  const links = () => {
+    const concept = listConcepts(useVaultStore.getState().entries, TODAY).find(
+      (c) => c.entry.path === CONCEPT,
+    )!;
+    render(
+      <KnowledgePanel
+        concept={concept}
+        today={TODAY}
+        onOpenEntity={() => {}}
+        onOpenConcept={() => {}}
+      />,
+    );
+    return screen
+      .getAllByRole('link')
+      .map((a) => [a.textContent, a.getAttribute('title'), a.getAttribute('href')]);
+  };
+
+  it('shows the name a link carries, a title it was given, or the URL, each with the URL on hover', () => {
+    expect(links()).toEqual([
+      ['ENG-142 Fix login', LINEAR, LINEAR],
+      ['The login bug', LINEAR, LINEAR],
+      [UNKNOWN, UNKNOWN, UNKNOWN],
+    ]);
+  });
+});
+
 describe('relativeDay on the reader’s calendar (M52.4)', () => {
   const tz = process.env.TZ;
   afterEach(() => {

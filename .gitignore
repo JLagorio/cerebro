@@ -22,10 +22,20 @@ docs/archive
 # vitest coverage output (M14.4)
 coverage/
 
-# Agent worktrees and local scratch (M16.1)
-.claude/
+# Agent worktrees and local scratch in any .claude/ folder stay ignored. The
+# root .claude/skills/ is the one tracked corner (M53.23), so the pattern takes
+# `/*`: git cannot re-include a file under an excluded folder. The `**/` keeps
+# a .claude/ made in a subfolder ignored, as before.
+**/.claude/*
+!/.claude/skills/
 
 # Superpowers brainstorming scratch (mockups, server state)
 .superpowers/
 docs/cerebro
 docs/cerebro-ds
+
+# The app's architecture needs no secrets today — the assistant is the user's
+# own CLI and no API key ever enters the app. This is for the first day that
+# stops being true, so it is here BEFORE there is anything to leak (M32.7).
+.env
+.env.*

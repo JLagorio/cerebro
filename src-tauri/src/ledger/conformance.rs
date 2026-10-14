@@ -2289,6 +2289,126 @@ fn scenario_moves() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// M53.29: a created Belief may claim only a path the projection writer can
+/// write. Each refused claim is a whole `belief.created` with no effect, so
+/// the same Belief id is free for the claim that is accepted, and an entity
+/// only a refused claim named is never registered.
+///
+/// DEL and the C1 controls are pinned in the unit tests on both sides
+/// instead (`projection.rs`, `schema.test.ts`): serde_json writes them raw,
+/// and a vector file is no place for a raw control byte.
+fn scenario_projection_claims() -> (&'static str, &'static str, Vec<Frame>) {
+    const UNREGISTERED: &str = "0123456789abcdef0123456789abcdef";
+    const DEEP: &str = "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1";
+    const PREFIX: &str = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2";
+    const LONGEST: &str = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+    const WIDEST: &str = "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4";
+    const WIDE_CHARS: &str = "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5";
+    const PAIR: &str = "c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6";
+    const PAIR_INNER: &str = "c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7";
+    let mut b = Builder::new();
+    for claim in [
+        "../escape.md",
+        ".md",
+        "concepts/./acme.md",
+        "/concepts/acme.md",
+    ] {
+        b.push_body(
+            KIND_BELIEF_CREATED,
+            &projection_belief_body(BELIEF, ENTITY, claim),
+        );
+    }
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+    // Only the first `.md` alias claims: a later one is a resolution hint,
+    // judged as nothing more.
+    let mut hinted = projection_belief_body(BELIEF_B, ENTITY_B, "concepts/beta.md");
+    hinted.subject = SubjectRef::Resolved {
+        entity_id: ENTITY_B.into(),
+        aliases: vec![
+            "Beta Corp".into(),
+            "concepts/beta.md".into(),
+            "../not-a-claim.md".into(),
+        ],
+    };
+    b.push_body(KIND_BELIEF_CREATED, &hinted);
+
+    // The right shape, and still nothing the projection writer can create:
+    // a NUL, the last C0 control, a leaf whose `<leaf>.cerebro-tmp` passes
+    // NAME_MAX (in ASCII, and in CJK characters that are 85 UTF-16 units
+    // but 249 bytes), and a 256-byte folder name.
+    let unwritable = [
+        "concepts/a\0b.md".to_string(),
+        "concepts/a\u{1f}b.md".to_string(),
+        format!("concepts/{}.md", "a".repeat(241)),
+        format!("concepts/{}.md", "\u{6982}".repeat(82)),
+        format!("{}/acme.md", "d".repeat(256)),
+    ];
+    for claim in &unwritable {
+        b.push_body(
+            KIND_BELIEF_CREATED,
+            &projection_belief_body(BELIEF_C, UNREGISTERED, claim),
+        );
+    }
+    // A file and a folder cannot share a name: a claim inside concepts/acme.md
+    // is refused, and so is a claim that another claim already sits inside.
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF_C, UNREGISTERED, "concepts/acme.md/notes.md"),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(DEEP, ENTITY, "notes/deep.md/leaf.md"),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF_C, UNREGISTERED, "notes/deep.md"),
+    );
+    // Accepted at every edge: a shared string prefix is not a shared folder,
+    // and a 243-byte leaf (ASCII or CJK) and a 255-byte folder are writable.
+    for (belief, claim) in [
+        (PREFIX, "concepts/acme.mdx/notes.md".to_string()),
+        (LONGEST, format!("concepts/{}.md", "a".repeat(240))),
+        (WIDEST, format!("{}/acme.md", "d".repeat(255))),
+        (WIDE_CHARS, format!("concepts/{}.md", "\u{6982}".repeat(80))),
+    ] {
+        b.push_body(
+            KIND_BELIEF_CREATED,
+            &projection_belief_body(belief, ENTITY, &claim),
+        );
+    }
+    // Inside one set: the second member meets the first member's claim, and
+    // the whole set has no effect.
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0029",
+        [(PAIR, "pair.md"), (PAIR_INNER, "pair.md/inner.md")]
+            .into_iter()
+            .map(|(belief, claim)| {
+                (
+                    KIND_BELIEF_CREATED.to_string(),
+                    serde_json::to_value(projection_belief_body(belief, ENTITY, claim)).unwrap(),
+                )
+            })
+            .collect(),
+        true,
+        None,
+    );
+    (
+        "projection-claims",
+        "A created Belief's first .md alias claims its projection path, and the claim must be \
+         one the projection writer can create: an escaping claim, a bare .md leaf, a '.' \
+         segment and an absolute path are each refused with no effect; concepts/acme.md is then \
+         claimed, and a second .md alias after the claim is a hint that claims nothing. A NUL, a \
+         control character, a leaf over 243 bytes (ASCII or CJK) and a folder name over 255 \
+         bytes are refused, and so are a claim inside another claim's file, one another claim \
+         sits inside, and a set whose members nest; a shared string prefix, a 243-byte leaf and \
+         a 255-byte folder name are claimed.",
+        b.frames,
+    )
+}
+
 fn scenario_overrides() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let created = b.push_body(
@@ -5778,6 +5898,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_migration(),
         scenario_overrides(),
         scenario_moves(),
+        scenario_projection_claims(),
         scenario_projection_identity(),
         scenario_reconciliation(),
         scenario_capture(),

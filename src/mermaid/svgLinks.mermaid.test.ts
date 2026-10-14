@@ -135,9 +135,10 @@ describe('what a rendered diagram can navigate to (M29.38)', () => {
         expect([name, anchors[0].firstElementChild]).toEqual([name, wrapped]);
       }
 
-      // An absolute target is neutralized on exactly the same terms. Opening
-      // it in the system browser would be a feature; navigating the webview to
-      // it is just losing the app.
+      // An absolute target is neutralized on exactly the same terms. The
+      // packaged shell guard would hand it to the system browser (M53.12), but
+      // a read-only picture opens nothing: the structural editor's badge is
+      // the one place a diagram's link is followed.
       const ext = host(
         await renderSvg('flowchart TD\n  A[Start] --> B\n  click A "https://example.com"'),
       );

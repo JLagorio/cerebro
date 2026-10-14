@@ -46,6 +46,7 @@ use rusqlite::Connection;
 use crate::agent::usage::Usage;
 use crate::ledger::schema::{BlockedReason, SemanticOutcome};
 use crate::runtime::budget::{GateReason, Reservation};
+use crate::runtime::cause::{CauseKind, RunCause};
 use crate::runtime::dispatch::{self, Dispatched, ItemOutcome, RunOutcome};
 use crate::runtime::scheduler::SchedulerState;
 use crate::runtime::taint;
@@ -197,6 +198,8 @@ pub fn run_once<R: Runner, C: Commit>(
         // M33.1 — ingest owns the row it claims, under whichever of its lanes
         // the batch came from.
         Some(super::driver::ACTOR),
+        // M56.7 — and records why it started, with the row.
+        Some(&RunCause::of(CauseKind::Ingest)),
         now,
     )? {
         Dispatched::Started(lease) => lease,

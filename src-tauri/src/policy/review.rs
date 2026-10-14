@@ -589,7 +589,7 @@ mod tests {
             .with_timezone(&chrono::Utc);
         crate::runtime::sink::with_sink(|conn| {
             crate::runtime::dispatch::begin_attended(
-                conn, BOOKED_RUN, None, None, None, None, started,
+                conn, BOOKED_RUN, None, None, None, None, None, started,
             )
         })
         .unwrap()

@@ -824,7 +824,11 @@ impl CulpritDetail {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the commit pipeline threads one set's table, writer, members and verdicts \
+              through every stage"
+)]
 fn reject_set(
     table: &PolicyTable,
     writer: &mut LedgerWriter,
@@ -920,7 +924,6 @@ fn reject_set(
 
 /// A precondition failure refuses the whole set: the culprit carries the
 /// predicate's own code and detail, every peer carries `atomic_set_refused`.
-#[allow(clippy::too_many_arguments)]
 fn reject_precondition(
     table: &PolicyTable,
     writer: &mut LedgerWriter,
@@ -1061,7 +1064,11 @@ fn queue_set(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the commit pipeline threads one set's table, writer, members and verdicts \
+              through every stage"
+)]
 fn apply_set(
     table: &PolicyTable,
     writer: &mut LedgerWriter,
@@ -1092,7 +1099,11 @@ fn apply_set(
 /// `proposal.applied`, contiguous, under one `batch_id`. Nothing is visible
 /// to the reducer until the marker validates, so a crash anywhere in here
 /// leaves the set exactly as it was.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the commit pipeline threads one set's table, writer, members and verdicts \
+              through every stage"
+)]
 fn apply_with_decisions(
     table: &PolicyTable,
     writer: &mut LedgerWriter,

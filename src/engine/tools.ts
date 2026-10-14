@@ -1,16 +1,20 @@
 /**
  * What the assistant can actually do (M18.4).
  *
- * The tool names have only ever existed in `src-tauri/src/mcp.rs`, which is
- * correct — that is where they are served and where a narrowing is enforced.
+ * The tool names are served by `src-tauri/src/mcp.rs` from
+ * `shared/policy/tools.v1.json`, which is correct — that is where they are
+ * served and where a narrowing is enforced.
  * But it left the UI with nothing to offer: `allowed-tools:` was a free-text
  * box, so choosing a policy meant knowing every identifier by heart and
  * getting each one exactly right. A typo did not error; it silently narrowed
  * the run to nothing, which looks identical to a model that decided not to act.
  *
- * So this is a MIRROR, and it is tested as one (tools.test.ts parses mcp.rs and
- * fails if the two lists diverge) — the same parity discipline the mock backend
- * already carries for the Rust write guards.
+ * So the picker reads the same manifest the server serves from (M54.2),
+ * through `src/lib/policy/tools.ts`: its toolsets, each row's toolset and
+ * summary, and whether a tool writes. The transcript's icons and write cards,
+ * the end-of-turn checkpoint and the run log's paths read it too. No tool is
+ * listed here: a list typed out in this file would be a second inventory, and
+ * it would drift the moment a row was added.
  *
  * ## Toolsets
  *
@@ -22,12 +26,16 @@
  */
 
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
+import { TOOLS, toolFacts } from '@/lib/policy/tools';
+
+export { bareToolName } from '@/lib/policy/tools';
 
 export interface ToolSpec {
   name: string;
   /** One line, plain. Not the model-facing description, which is a paragraph. */
   summary: string;
-  /** True when the tool changes something on disk or in the UI. */
+  /** True when a successful call changes something on disk: its door's
+   * `writes` flag in the manifest. */
   writes: boolean;
 }
 
@@ -38,156 +46,100 @@ export interface Toolset {
   tools: ToolSpec[];
 }
 
-export const TOOLSETS: Toolset[] = [
-  {
-    id: 'read',
-    label: 'Read the vault',
-    hint: 'Look things up. Changes nothing.',
-    tools: [
-      {
-        name: 'get_vault_context',
-        summary: 'The vault’s types, views, projects and counts',
-        writes: false,
-      },
-      { name: 'search_notes', summary: 'Search titles, bodies and frontmatter', writes: false },
-      { name: 'get_note', summary: 'Read one note in full', writes: false },
-      {
-        name: 'knowledge_about',
-        summary: 'What Knowledge already holds about one entity',
-        writes: false,
-      },
-      { name: 'list_inbox', summary: 'Captures waiting to be filed', writes: false },
-    ],
-  },
-  {
-    id: 'write',
-    label: 'Write to the vault',
-    hint: 'Creates and edits notes — inside whatever scope is set below.',
-    tools: [
-      { name: 'create_note', summary: 'Create a note', writes: true },
-      { name: 'update_frontmatter', summary: 'Patch a note’s frontmatter', writes: true },
-      { name: 'append_to_note', summary: 'Add markdown to the end of a note', writes: true },
-    ],
-  },
-  {
-    id: 'knowledge',
-    label: 'Knowledge and sources',
-    hint: 'The agent-written bundle: every write is recorded in its history, replacing a concept needs read access to it, and a concept still needs your stamp to count as verified.',
-    tools: [
-      { name: 'write_concept', summary: 'Record a concept in knowledge/', writes: true },
-      {
-        name: 'recheck_concept',
-        summary: 'Mark a rechecked concept still true, and when to check it next',
-        writes: true,
-      },
-      {
-        name: 'cache_source',
-        summary: 'Save fetched external material under sources/',
-        writes: true,
-      },
-    ],
-  },
-  {
-    id: 'propose',
-    label: 'Propose, don’t apply',
-    hint: 'Shows the user an accept/reject card instead of writing.',
-    tools: [{ name: 'propose_organize', summary: 'Suggest how to file a capture', writes: false }],
-  },
-  {
-    id: 'agents',
-    label: 'Hand work to agents',
-    hint: 'Starts another agent, which writes under its OWN scope — calling never lends the caller anything. Two hops, then it stops.',
-    tools: [
-      {
-        name: 'hand_to',
-        summary: 'Start a run of another agent with a task',
-        writes: false,
-      },
-    ],
-  },
-  {
-    id: 'ui',
-    label: 'Move the app',
-    hint: 'Changes what is on screen. Rarely what you want for an unattended run — it moves the user while they are working.',
-    tools: [
-      { name: 'open_note', summary: 'Open a note in the UI', writes: false },
-      { name: 'navigate', summary: 'Go to a surface', writes: false },
-    ],
-  },
-];
-
 /**
- * The proposal toolset (M26.3c) — GENERATED from the shared policy artifact,
- * never typed out.
- *
- * The Rust server builds its half from the same `ops` table, so a hand-written
- * list here would be the second inventory the milestone's parity rules forbid:
- * it would drift the moment an op was added or an `agent_facing: false` was
- * set, and the drift would show up as a picker offering something the server
- * refuses.
- *
- * `writes: true` on every entry, and it is the honest answer even though a
- * proposal is not itself a mutation: LOW and MEDIUM ops AUTO-APPLY once
- * committed (12 of the 20), so "this selection can change something on disk"
- * is true. The picker's grouping axis is what a run can CHANGE, and a group
- * that read as harmless here would be a lie for exactly the ops most likely
- * to be picked.
+ * Does a successful call to `name` change something on disk? Read off the
+ * manifest: the row's door, the generated door for an op the policy table
+ * offers agents, or the CLI row. Either spelling, short or `mcp__cerebro__`;
+ * false for a name the manifest does not know. A panel turn that called one
+ * ends with a rescan and, in a git vault, its own checkpoint (M9.5).
  */
-const PROPOSAL_TOOLS: ToolSpec[] = [
-  ...agentFacingOps(POLICY).map((op) => ({
-    name: `propose_${op}`,
-    summary: `Propose ${op.replace(/_/g, ' ')} (${POLICY.ops[op].base_risk})`,
-    writes: true,
-  })),
-  {
-    name: 'commit_proposals',
-    summary: 'Decide this run’s proposals as one atomic batch',
-    writes: true,
-  },
-];
-
-const PROPOSAL_TOOLSET: Toolset = {
-  // NOT `propose` — that id already belongs to the M17-era set holding
-  // `propose_organize`, and two sets sharing one id would make
-  // `matchedToolset` answer with whichever came first.
-  id: 'proposals',
-  label: 'Propose changes to Knowledge',
-  hint: 'Suggests changes through the policy layer. Low- and medium-risk ones apply automatically once committed; high-risk ones wait for you on a card. Off unless the proposal surface is switched on.',
-  tools: PROPOSAL_TOOLS,
-};
-
-// PUSHED INTO `TOOLSETS`, not unioned only into `ALL_TOOLS`. The pickers
-// (AgentEditor, SkillEditor) build their checkboxes and group hints from
-// TOOLSETS alone — so a set that existed only in ALL_TOOLS would pass every
-// parity test while never appearing in the UI, and the person choosing a
-// policy would have no way to grant or withhold the proposal surface.
-TOOLSETS.push(PROPOSAL_TOOLSET);
+export function isWriteTool(name: string): boolean {
+  return toolFacts(name)?.writes === true;
+}
 
 /**
- * Tools the server serves that a person never picks (M26.4h).
+ * Does a transcript draw a call to `name` as a change card, its path visible
+ * while collapsed and a diff on offer? The manifest's renderer says so for
+ * the tools whose target names what they changed. A proposal writes through
+ * the ledger and has no path to show, so it stays a step.
+ */
+export function showsAsChange(name: string): boolean {
+  return toolFacts(name)?.renderer === 'change';
+}
+
+/** The lucide icon for a call to `name`, or the wrench for a tool the
+ * manifest does not know: another server's, or a CLI tool it does not list. */
+export function toolIconName(name: string): string {
+  return toolFacts(name)?.icon ?? 'wrench';
+}
+
+/** A picker entry, its writes flag read off the manifest. */
+function spec(name: string, summary: string): ToolSpec {
+  return { name, summary, writes: isWriteTool(name) };
+}
+
+/**
+ * The generated proposal tools (M26.3c), one per op the shared policy table
+ * offers agents, named with the manifest's prefix. The Rust server builds its
+ * half from the same `ops`, so an op added there is offered here the moment
+ * it lands, and an `agent_facing: false` withdraws it from both.
+ *
+ * Each one writes, and that is the honest answer even though a proposal is
+ * not itself a mutation: LOW and MEDIUM ops AUTO-APPLY once committed, so
+ * "this selection can change something on disk" is true. The manifest says so
+ * by sending the generated tools through the ledger door, which writes. The
+ * picker's grouping axis is what a run can CHANGE, and a group that read as
+ * harmless here would be a lie for exactly the ops most likely to be picked.
+ */
+const GENERATED_TOOLS: ToolSpec[] = agentFacingOps(POLICY).map((op) =>
+  spec(
+    `${TOOLS.generated.prefix}${op}`,
+    `Propose ${op.replace(/_/g, ' ')} (${POLICY.ops[op].base_risk})`,
+  ),
+);
+
+/**
+ * The picker's groups, in the manifest's order. A set's tools are the
+ * generated proposal tools first, when it is the generated block's toolset,
+ * then the rows that name it, in served order.
+ *
+ * The pickers (AgentProperties, SkillEditor) build their checkboxes and group
+ * hints from TOOLSETS alone, so a tool that reached only `ALL_TOOLS` would
+ * never appear in the UI, and the person choosing a policy could neither
+ * grant nor withhold it.
+ */
+export const TOOLSETS: Toolset[] = TOOLS.toolsets.map(({ id, label, hint }) => ({
+  id,
+  label,
+  hint,
+  tools: [
+    ...(id === TOOLS.generated.toolset ? GENERATED_TOOLS : []),
+    ...TOOLS.tools.filter((row) => row.toolset === id).map((row) => spec(row.name, row.summary)),
+  ],
+}));
+
+/**
+ * Tools the server serves that a person never picks (M26.4h): the rows with
+ * no toolset.
  *
  * `report_window_outcome` belongs to the ingest driver's own runs and
  * `submit_answer` to an attended synthesis run: each is refused unless the app
  * opened that run's window or question, so putting either in a picker would
- * offer a checkbox that does nothing for every agent a person can build. Both
- * stay in `ALL_TOOLS`, because the catalog parity test scrapes the Rust
- * server's `base_tools()` and a tool served on one side and absent on the
- * other is exactly the drift that test exists to catch.
+ * offer a checkbox that does nothing for every agent a person can build. They
+ * stay in `ALL_TOOLS`, so `unknownTools` still knows them: a served tool
+ * flagged as unknown would invite someone to delete it from a working policy.
  */
-const UNPICKABLE_TOOLS: ToolSpec[] = [
-  {
-    name: 'report_window_outcome',
-    summary: 'Background ingest: report what this change-window concluded',
-    writes: false,
-  },
-  {
-    name: 'submit_answer',
-    summary: 'Attended synthesis: submit the nine-part answer to this run’s question',
-    writes: false,
-  },
-];
+const UNPICKABLE_TOOLS: ToolSpec[] = TOOLS.tools
+  .filter((row) => row.toolset === null)
+  .map((row) => spec(row.name, row.summary));
 
 export const ALL_TOOLS: ToolSpec[] = [...TOOLSETS.flatMap((set) => set.tools), ...UNPICKABLE_TOOLS];
+
+/** The proposal set's names: the generated tools and the rows filed beside
+ * them (commit_proposals). */
+const PROPOSAL_TOOLS = new Set(
+  TOOLSETS.find((set) => set.id === TOOLS.generated.toolset)?.tools.map((t) => t.name) ?? [],
+);
 
 export function toolSpec(name: string): ToolSpec | undefined {
   return ALL_TOOLS.find((t) => t.name === name);
@@ -214,7 +166,7 @@ export function proposalConsequence(): { applies: number; queues: number } {
  * gets no table about weapons it does not carry. */
 export function holdsProposalTools(names: readonly string[] | null): boolean {
   if (names === null) return false;
-  return names.some((n) => PROPOSAL_TOOLS.some((t) => t.name === n));
+  return names.some((n) => PROPOSAL_TOOLS.has(n));
 }
 
 /**

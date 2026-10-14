@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { onUiAction } from '@/agent/agentIpc';
 import type { Selection } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { announceExternalWrites } from '@/editor/openPages';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -15,6 +16,11 @@ import { useVaultStore } from '@/stores/vaultStore';
  * proposal in front of them. Note what it CANNOT do here — a proposal is
  * stored for review, never applied, so the agent's opinion about how to file
  * a capture never becomes a silent write.
+ *
+ * It also carries what the agent's write tools announce (M53.6). The watcher
+ * drops the echo of every write the app makes, the agent's MCP writes
+ * included, so this is how the vault, and a page with the written file open,
+ * hear about them.
  */
 export function AgentActions() {
   const navigate = useNavStore((s) => s.navigate);
@@ -33,7 +39,9 @@ export function AgentActions() {
           navigate(toSelection(action.to, action.id));
           break;
         case 'vault_changed':
-          void rescan();
+          // The pages showing those files hold their saves until the rescan
+          // lands, then reload or ask (NoteBodyEditor, M53.6).
+          void announceExternalWrites(action.paths ?? [], rescan);
           break;
         case 'propose_organize':
           addProposal({

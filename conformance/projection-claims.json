@@ -1,0 +1,1178 @@
+{
+  "name": "projection-claims",
+  "description": "A created Belief's first .md alias claims its projection path, and the claim must be one the projection writer can create: an escaping claim, a bare .md leaf, a '.' segment and an absolute path are each refused with no effect; concepts/acme.md is then claimed, and a second .md alias after the claim is a hint that claims nothing. A NUL, a control character, a leaf over 243 bytes (ASCII or CJK) and a folder name over 255 bytes are refused, and so are a claim inside another claim's file, one another claim sits inside, and a set whose members nest; a shared string prefix, a 243-byte leaf and a 255-byte folder name are claimed.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "8e2955e7199737542c5dc53b7ab93f0e196427380cb9679abf91c22969ea8db5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "../escape.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "8e2955e7199737542c5dc53b7ab93f0e196427380cb9679abf91c22969ea8db5",
+      "hash": "66fef2d256dfa67095e2a51050dc23a64a32929b5b276e683e2a2fd19fe48aeb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            ".md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "66fef2d256dfa67095e2a51050dc23a64a32929b5b276e683e2a2fd19fe48aeb",
+      "hash": "4c6ee999b0fd87c9476662db31985c9c5c828563fd1a71bf50feb9a378c49970",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/./acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "4c6ee999b0fd87c9476662db31985c9c5c828563fd1a71bf50feb9a378c49970",
+      "hash": "fa3b3c9470e04adf5c732e1a3236d41f124d5436fff0c9e3ec08da1723ae6701",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "/concepts/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "fa3b3c9470e04adf5c732e1a3236d41f124d5436fff0c9e3ec08da1723ae6701",
+      "hash": "b399e2528cbe364603da7ae7634a68fad29dac4d779f5e61a3ea057538117158",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "b399e2528cbe364603da7ae7634a68fad29dac4d779f5e61a3ea057538117158",
+      "hash": "ea270c1feff9fe0d70b3b363e30025f2f94ee3faba3d5237936252fcef91dc5d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Beta Corp",
+            "concepts/beta.md",
+            "../not-a-claim.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "ea270c1feff9fe0d70b3b363e30025f2f94ee3faba3d5237936252fcef91dc5d",
+      "hash": "6ca688d0b45ea0442cce2c20818d6b06bd15045012d14ce8ec7340e26ef6fe03",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "concepts/a\u0000b.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "6ca688d0b45ea0442cce2c20818d6b06bd15045012d14ce8ec7340e26ef6fe03",
+      "hash": "60022a96da6e1007961b62314c98cc90959c2074f8c352567e6b1abf0756ce30",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "concepts/a\u001fb.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "60022a96da6e1007961b62314c98cc90959c2074f8c352567e6b1abf0756ce30",
+      "hash": "9463aa8ee5eaf7e853efd701799ce5d5ab20f7ee5c6cb8b57624741437bfc0ff",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "concepts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "9463aa8ee5eaf7e853efd701799ce5d5ab20f7ee5c6cb8b57624741437bfc0ff",
+      "hash": "1642a5fa5d506f02d72d69f10114041d4ddd1a3f535fdfd2f9c002f03448ab63",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "concepts/概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "1642a5fa5d506f02d72d69f10114041d4ddd1a3f535fdfd2f9c002f03448ab63",
+      "hash": "f8e490703c1521c3dde9f7c03a55656774b0e766348781a0daa37c239f76b4a5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "f8e490703c1521c3dde9f7c03a55656774b0e766348781a0daa37c239f76b4a5",
+      "hash": "fc7bf1f803ce9300d18989569f31a33c0ef5a9b50f72534ff2dfc9d5765f508e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "concepts/acme.md/notes.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "fc7bf1f803ce9300d18989569f31a33c0ef5a9b50f72534ff2dfc9d5765f508e",
+      "hash": "dfcf6ccf1ca58658bb6545e1baf33c8001e4e8abb09ccf77fdb40de66032a637",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "notes/deep.md/leaf.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "prev": "dfcf6ccf1ca58658bb6545e1baf33c8001e4e8abb09ccf77fdb40de66032a637",
+      "hash": "b17fbd6e002341e57f076476d034cdadc9feac2e0818faa390d27da885e75629",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "0123456789abcdef0123456789abcdef",
+          "aliases": [
+            "notes/deep.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "prev": "b17fbd6e002341e57f076476d034cdadc9feac2e0818faa390d27da885e75629",
+      "hash": "84d3abb987dd7d8625aca2316c1180903854ebe266249e8674d78d8039a3d12e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/acme.mdx/notes.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 16,
+      "event_id": "00000000000000000000000000000010",
+      "prev": "84d3abb987dd7d8625aca2316c1180903854ebe266249e8674d78d8039a3d12e",
+      "hash": "bf612880ce0af5ddc0d8dedfd7ac8c87eb3e04ec04094c804d56bf0602507f38",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "prev": "bf612880ce0af5ddc0d8dedfd7ac8c87eb3e04ec04094c804d56bf0602507f38",
+      "hash": "689b1e095279b35fc4d8082ceb4bfc64a28e196d94ba589b3e1d451c200d1a9e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 18,
+      "event_id": "00000000000000000000000000000012",
+      "prev": "689b1e095279b35fc4d8082ceb4bfc64a28e196d94ba589b3e1d451c200d1a9e",
+      "hash": "716caf0db3e23150586a6db93c0657049db8f02cdf3027dcc02e4999ed5cb66a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "prev": "716caf0db3e23150586a6db93c0657049db8f02cdf3027dcc02e4999ed5cb66a",
+      "hash": "0416d46ad5f9bf91845ce70d411e9c52a8e25a2df5865793ad77ec8bfdc027bb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0029",
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "pair.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "prev": "0416d46ad5f9bf91845ce70d411e9c52a8e25a2df5865793ad77ec8bfdc027bb",
+      "hash": "6973590f06803ec9ea1a39a49ffc7311533e06a010cb72ff26d28559d9f7f5da",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0029",
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "pair.md/inner.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 21,
+      "event_id": "00000000000000000000000000000015",
+      "prev": "6973590f06803ec9ea1a39a49ffc7311533e06a010cb72ff26d28559d9f7f5da",
+      "hash": "887d747c5ec70437052d0269a74a71ffe9ba488ea06b98d6a5e279666f2ca7a7",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0029",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "00000000000000000000000000000013",
+          "00000000000000000000000000000014"
+        ],
+        "member_count": 2,
+        "members_digest": "0cdd48dedd8a1b19a3462d8f288f3924e554ac4aa0ee2285a077f937828d4ac9",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000005",
+      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000006"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "0000000000000000000000000000000d"
+        ],
+        "projection": {
+          "path": "notes/deep.md/leaf.md",
+          "generating_event": "0000000000000000000000000000000d",
+          "state_digest": "e6be30765bf00ffa07f245cdcac2692260422aa4bc07744e836b8d0467850011",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "0000000000000000000000000000000f"
+        ],
+        "projection": {
+          "path": "concepts/acme.mdx/notes.md",
+          "generating_event": "0000000000000000000000000000000f",
+          "state_digest": "3a2d1c5f4b2384b067709902d264d07101d0e19b0a4684d6cf9df9e36d61ae9f",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000010"
+        ],
+        "projection": {
+          "path": "concepts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md",
+          "generating_event": "00000000000000000000000000000010",
+          "state_digest": "dfdffb890bbe901d747999951e703341139b8ec75398c00993296a7bbfb704ad",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000011"
+        ],
+        "projection": {
+          "path": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/acme.md",
+          "generating_event": "00000000000000000000000000000011",
+          "state_digest": "f784eddbdd386f4a67373c65edef66f95adca20c44185e518d788e689df4b45f",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000012"
+        ],
+        "projection": {
+          "path": "concepts/概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概.md",
+          "generating_event": "00000000000000000000000000000012",
+          "state_digest": "a50dfeb152c8a2c6a59ed733b14fae1a75a7bc084e12435bee54e42bbcb06e50",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000005"
+        ],
+        "projection": {
+          "path": "concepts/acme.md",
+          "generating_event": "00000000000000000000000000000005",
+          "state_digest": "b1d8bd0316d6930ea2ae9f3eaa171e869168594392b0200d84e7ac9457d9d53f",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "ffffffffffffffffffffffffffffffff": {
+        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000006"
+        ],
+        "projection": {
+          "path": "concepts/beta.md",
+          "generating_event": "00000000000000000000000000000006",
+          "state_digest": "0dbfbcf609fc964d0f95d8e64be471bf26099796fa562d69fa25e69bdf15d5fa",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1": 1,
+      "belief:c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2": 1,
+      "belief:c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3": 1,
+      "belief:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4": 1,
+      "belief:c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5": 1,
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
+      "belief:ffffffffffffffffffffffffffffffff": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "entity:dddddddddddddddddddddddddddddddd": 1
+    },
+    "batches": [
+      [
+        "beefbeefbeefbeefbeefbeefbeef0029",
+        "refused",
+        2
+      ]
+    ],
+    "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
+    "ingest_receipts": {},
+    "semantic_assessments": {},
+    "comparisons": {},
+    "classifications": {},
+    "contradiction_edges": {},
+    "contradiction_backfill": null,
+    "freshness": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"../escape.md\" must not escape, double-slash or carry a '.' segment"
+    },
+    {
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \".md\" names no file — '.md' alone is a dotfile with no extension"
+    },
+    {
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/./acme.md\" must not escape, double-slash or carry a '.' segment"
+    },
+    {
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"/concepts/acme.md\" must be knowledge-relative with forward slashes"
+    },
+    {
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/a\\0b.md\" carries the control character U+0000"
+    },
+    {
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/a\\u{1f}b.md\" carries the control character U+001F"
+    },
+    {
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.md\" names a 244-byte file — the projection writer's temp file needs it at 243 bytes or fewer"
+    },
+    {
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概概.md\" names a 249-byte file — the projection writer's temp file needs it at 243 bytes or fewer"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/acme.md\" has a 256-byte folder name — a file system holds 255"
+    },
+    {
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"concepts/acme.md/notes.md\" and \"concepts/acme.md\" (belief eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee) cannot both be files — one sits inside the other"
+    },
+    {
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "projection path \"notes/deep.md\" and \"notes/deep.md/leaf.md\" (belief c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1) cannot both be files — one sits inside the other"
+    },
+    {
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "batch_id": "beefbeefbeefbeefbeefbeefbeef0029",
+      "code": "refused",
+      "detail": "batch member 1: projection path \"pair.md/inner.md\" and \"pair.md\" (belief c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6) cannot both be files — one sits inside the other"
+    },
+    {
+      "seq": 21,
+      "event_id": "00000000000000000000000000000015",
+      "batch_id": "beefbeefbeefbeefbeefbeefbeef0029",
+      "code": "batch",
+      "detail": "member 1 refused — whole batch has no effect"
+    }
+  ]
+}

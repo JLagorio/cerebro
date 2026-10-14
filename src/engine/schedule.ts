@@ -552,6 +552,29 @@ export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' 
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? 'daterange' : 'date';
 }
 
+/**
+ * The value a record created ON a calendar day gets for `field` — what a
+ * day's "+" writes (M53.16).
+ *
+ * The declared kind decides, as it does for a drag (`dateKindOf`), because the
+ * schema is what the new record is validated against the moment it is read
+ * back. Every host used to write the bare day, so a calendar keyed to a
+ * `daterange` created records that failed their own validation ("must be a
+ * start/end range"). A `daterange` gets an open range, `{ start: day, end:
+ * null }` — the shape the date picker writes before anyone gives the range an
+ * end. A `date`, an undeclared field or any other kind gets the bare day:
+ * unlike a drag, a new record has no shape on disk to keep.
+ */
+export function createOnDayValue(
+  typeName: string,
+  field: string,
+  day: string,
+  schema: Schema,
+): unknown {
+  const declared = schema.types.get(typeName)?.fields.find((f) => f.name === field)?.kind;
+  return serializeDateProperty(makeDateValue(day), declared === 'daterange' ? 'daterange' : 'date');
+}
+
 /** Left offset and width in px for a record's bar on the axis. */
 export function barGeometry(span: Span, axis: Span, zoom: Zoom): { left: number; width: number } {
   const px = PX_PER_DAY[zoom];

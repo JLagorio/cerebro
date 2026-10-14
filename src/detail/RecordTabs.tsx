@@ -43,6 +43,12 @@ import { uniqueName } from '@/views/ViewTabs';
  * - the layout editor's canvas STAGES it into its draft and lands the whole
  *   draft on Apply.
  *
+ * And one host that passes no `onChange` (M55.12): an agent page, whose
+ * Instructions, Runs and Memory are the app's own tab set. An app-owned tab
+ * set is not the user's to edit, so without `onChange` the strip is FIXED —
+ * no grip, no menu, no caret, no rename, no delete and no "+ Tab". Arrows and
+ * `onSelect` still work.
+ *
  * One ambient exception (M45.4): the add/change drill-in reads the vault
  * catalog (entries/views/schema) straight from the store — rosters are
  * lookups, not contract state.
@@ -104,8 +110,8 @@ export interface RecordTabsProps {
   activeId: string;
   onSelect: (id: string) => void;
   /** The whole next tab set — the host persists it (`setTypeTabs`) or stages
-   * it (the layout editor's draft). */
-  onChange: (next: TabDef[]) => void;
+   * it (the layout editor's draft). Absent = a fixed strip (M55.12). */
+  onChange?: (next: TabDef[]) => void;
   /** The RECORD's own type (M45.4) — what a view tab's related-scope toggle
    * is gated on: it exists iff the picked source stores a relation aimed at
    * this type. Optional so pre-M45.4 call sites compile; absent = no toggle. */
@@ -129,6 +135,8 @@ export function RecordTabs({
   hostType,
   gutter = 'md',
 }: RecordTabsProps) {
+  const editable = onChange !== undefined;
+  const change = (next: TabDef[]) => onChange?.(next);
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -143,7 +151,7 @@ export function RecordTabs({
     ids: tabs.map((t) => t.id),
     axis: 'x',
     labelFor: (id) => tabs.find((t) => t.id === id)?.name ?? id,
-    onReorder: (id, to) => onChange(moveTab(tabs, id, to)),
+    onReorder: (id, to) => change(moveTab(tabs, id, to)),
   });
 
   // Roving tabindex, the same shape as ViewTabs (M16.34): the strip is ONE
@@ -194,7 +202,7 @@ export function RecordTabs({
     };
     const next = [...tabs];
     next.splice(index + 1, 0, copy);
-    onChange(next);
+    change(next);
   };
 
   const commitDelete = (tab: TabDef) => {
@@ -208,7 +216,7 @@ export function RecordTabs({
       const survivor = tabs[index - 1] ?? tabs[index + 1];
       onSelect(survivor.id);
     }
-    onChange(next);
+    change(next);
   };
 
   const menuItems = (tab: TabDef, index: number): ContextMenuItem[] => {
@@ -232,7 +240,7 @@ export function RecordTabs({
             {
               icon: 'arrow-left',
               label: 'Move left',
-              onSelect: () => onChange(moveTab(tabs, tab.id, index - 1)),
+              onSelect: () => change(moveTab(tabs, tab.id, index - 1)),
             },
           ]
         : []),
@@ -241,7 +249,7 @@ export function RecordTabs({
             {
               icon: 'arrow-right',
               label: 'Move right',
-              onSelect: () => onChange(moveTab(tabs, tab.id, index + 1)),
+              onSelect: () => change(moveTab(tabs, tab.id, index + 1)),
             },
           ]
         : []),
@@ -318,7 +326,7 @@ export function RecordTabs({
                   onCommit={(name) => {
                     setRenaming(null);
                     if (name !== '' && name !== tab.name)
-                      onChange(tabs.map((t) => (t.id === tab.id ? { ...t, name } : t)));
+                      change(tabs.map((t) => (t.id === tab.id ? { ...t, name } : t)));
                   }}
                 />
               );
@@ -333,15 +341,17 @@ export function RecordTabs({
                     space — an appended handle would shove every tab sideways
                     the moment the pointer arrived. `tab` is the row grip
                     transposed for that 10px slot (M46.2 Task 6). */}
-                <Tooltip label="Drag to reorder">
-                  <Grip
-                    kind="tab"
-                    {...sortable.gripProps(tab.id, index)}
-                    // Opacity, not `hidden`: a hidden grip is out of the tab
-                    // order, and Left/Right reordering needs it reachable.
-                    className="absolute inset-y-1 left-0 z-10 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                  />
-                </Tooltip>
+                {editable && (
+                  <Tooltip label="Drag to reorder">
+                    <Grip
+                      kind="tab"
+                      {...sortable.gripProps(tab.id, index)}
+                      // Opacity, not `hidden`: a hidden grip is out of the tab
+                      // order, and Left/Right reordering needs it reachable.
+                      className="absolute inset-y-1 left-0 z-10 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    />
+                  </Tooltip>
+                )}
                 <button
                   type="button"
                   role="tab"
@@ -353,6 +363,7 @@ export function RecordTabs({
                       onSelect(tab.id);
                       return;
                     }
+                    if (!editable) return;
                     // Anchor the menu to the tab that was pressed, taken from
                     // the event — the tab IS the event target.
                     const box = e.currentTarget.getBoundingClientRect();
@@ -360,7 +371,7 @@ export function RecordTabs({
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    setMenu({ x: e.clientX, y: e.clientY, id: tab.id });
+                    if (editable) setMenu({ x: e.clientX, y: e.clientY, id: tab.id });
                   }}
                   className={[
                     'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-sm',
@@ -374,7 +385,9 @@ export function RecordTabs({
                   <span className="min-w-0 truncate">{tab.name}</span>
                   {/* The caret appears on the tab you are standing on: the
                       only one whose menu opens without leaving where you are. */}
-                  {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+                  {active && editable && (
+                    <Icon name="chevron-down" size={11} color="var(--n-400)" />
+                  )}
                 </button>
                 {changingSource === tab.id && (
                   <ChangeSourceForm
@@ -383,7 +396,7 @@ export function RecordTabs({
                     onCancel={() => setChangingSource(null)}
                     onCommit={(value) => {
                       setChangingSource(null);
-                      onChange(tabs.map((t) => (t.id === tab.id ? rewireTab(t, value) : t)));
+                      change(tabs.map((t) => (t.id === tab.id ? rewireTab(t, value) : t)));
                     }}
                   />
                 )}
@@ -392,39 +405,41 @@ export function RecordTabs({
           })}
         </div>
 
-        <div className="relative flex-none">
-          <button
-            type="button"
-            data-testid="new-record-tab"
-            aria-label="New tab"
-            onClick={() => setCreating(true)}
-            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
-          >
-            <Icon name="plus" size={13} />
-            Tab
-          </button>
-          {creating && (
-            <NewTabForm
-              takenNames={tabs.map((t) => t.name)}
-              hostType={hostType ?? null}
-              onCancel={() => setCreating(false)}
-              onCreate={(spec) => {
-                setCreating(false);
-                onChange([
-                  ...tabs,
-                  {
-                    id: mintTabId(
-                      spec.name,
-                      tabs.map((t) => t.id),
-                    ),
-                    icon: null,
-                    ...spec,
-                  },
-                ]);
-              }}
-            />
-          )}
-        </div>
+        {editable && (
+          <div className="relative flex-none">
+            <button
+              type="button"
+              data-testid="new-record-tab"
+              aria-label="New tab"
+              onClick={() => setCreating(true)}
+              className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
+            >
+              <Icon name="plus" size={13} />
+              Tab
+            </button>
+            {creating && (
+              <NewTabForm
+                takenNames={tabs.map((t) => t.name)}
+                hostType={hostType ?? null}
+                onCancel={() => setCreating(false)}
+                onCreate={(spec) => {
+                  setCreating(false);
+                  change([
+                    ...tabs,
+                    {
+                      id: mintTabId(
+                        spec.name,
+                        tabs.map((t) => t.id),
+                      ),
+                      icon: null,
+                      ...spec,
+                    },
+                  ]);
+                }}
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {menu !== null && (

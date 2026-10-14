@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeEntry } from '@/test/factories';
 import {
+  AGENT_KEYS,
   agentActive,
   agentDraft,
   agentPatch,
@@ -97,7 +98,7 @@ describe('agentDraft / agentPatch', () => {
     });
     const drafted = agentDraft(before, 'body');
     expect(drafted.recent).toBe('Last run found two.');
-    const patch = agentPatch(drafted);
+    const patch = agentPatch(drafted, AGENT_KEYS);
     expect(patch.scope).toEqual(['records/risks']);
     expect(patch.tools).toBe('shell');
     expect(parseTriggers(patch.when)).toEqual([
@@ -109,7 +110,7 @@ describe('agentDraft / agentPatch', () => {
   it('never writes `recent:` — the agent owns its own notes', () => {
     // Overwriting it from a form would erase what the last run learned, and
     // the field is the one the agent rewrites at the end of every run.
-    const patch = agentPatch(agentDraft(agentEntry({ recent: 'x' }), ''));
+    const patch = agentPatch(agentDraft(agentEntry({ recent: 'x' }), ''), AGENT_KEYS);
     expect('recent' in patch).toBe(false);
     expect('memory' in patch).toBe(false);
   });
@@ -117,11 +118,81 @@ describe('agentDraft / agentPatch', () => {
   it('keeps an EMPTY scope, which scopes the agent to nothing', () => {
     const drafted = agentDraft(agentEntry({ scope: [] }), '');
     expect(drafted.scope).toEqual([]);
-    expect(agentPatch(drafted).scope).toEqual([]);
+    expect(agentPatch(drafted, AGENT_KEYS).scope).toEqual([]);
   });
 
   it('says `tools: safe` out loud rather than leaving the default implied', () => {
-    expect(agentPatch(agentDraft(agentEntry({}), '')).tools).toBe('safe');
+    expect(agentPatch(agentDraft(agentEntry({}), ''), AGENT_KEYS).tools).toBe('safe');
+  });
+
+  it('reads `disallowed-tools:` and never writes it (M54.9)', () => {
+    // The form shows what a record denies and does not edit it, so a save
+    // must leave the key exactly as whoever wrote it left it — absent, empty
+    // or a list.
+    const listed = agentDraft(agentEntry({ 'disallowed-tools': ['mcp__gmail__trash_thread'] }), '');
+    expect(listed.disallowedTools).toEqual(['mcp__gmail__trash_thread']);
+    expect(agentDraft(agentEntry({ 'disallowed-tools': [] }), '').disallowedTools).toEqual([]);
+    expect(agentDraft(agentEntry({}), '').disallowedTools).toBeNull();
+    expect('disallowed-tools' in agentPatch(listed, AGENT_KEYS)).toBe(false);
+    expect('disallowed-tools' in agentPatch({ ...listed, disallowedTools: null }, AGENT_KEYS)).toBe(
+      false,
+    );
+  });
+});
+
+describe('agentPatch by key (M55.12)', () => {
+  const d = agentDraft(
+    makeEntry({
+      path: 'records/agents/a.md',
+      type: 'Agent',
+      properties: {
+        slug: 'release-scout',
+        description: 'Watches risks',
+        scope: ['records/risks'],
+        'read-scope': ['records'],
+        'allowed-tools': ['get_note'],
+        connectors: ['gmail'],
+        schedule: 'weekdays 08:30',
+        when: [{ event: 'created' }],
+        preferences: 'Never file a risk without an owner.',
+        recent: 'Last run found two.',
+      } as never,
+    }),
+    '# Release scout\n\nWatch the risks.\n',
+  );
+
+  it('writes exactly the asked keys', () => {
+    expect(agentPatch(d, ['scope'])).toEqual({ scope: ['records/risks'] });
+    expect(agentPatch(d, ['readScope'])).toEqual({ 'read-scope': ['records'] });
+    expect(agentPatch(d, ['allowedTools'])).toEqual({ 'allowed-tools': ['get_note'] });
+    expect(agentPatch(d, ['connectors'])).toEqual({ connectors: ['gmail'] });
+    expect(agentPatch(d, ['shell'])).toEqual({ tools: 'safe' });
+    expect(agentPatch({ ...d, triggers: [] }, ['triggers'])).toEqual({ when: null });
+    expect(agentPatch({ ...d, schedule: '' }, ['schedule'])).toEqual({ schedule: null });
+    expect(agentPatch({ ...d, preferences: '  ' }, ['preferences'])).toEqual({ preferences: null });
+    expect(agentPatch(d, [])).toEqual({});
+  });
+
+  it('slugifies a typed handle, and an emptied one removes the key', () => {
+    expect(agentPatch({ ...d, slug: 'Release Scout' }, ['slug'])).toEqual({
+      slug: 'release-scout',
+    });
+    expect(agentPatch({ ...d, slug: '  ' }, ['slug'])).toEqual({ slug: null });
+  });
+
+  it('keeps [] apart from null on every list axis', () => {
+    expect(agentPatch({ ...d, scope: [] }, ['scope'])).toEqual({ scope: [] });
+    expect(agentPatch({ ...d, scope: null }, ['scope'])).toEqual({ scope: null });
+    expect(agentPatch({ ...d, connectors: [] }, ['connectors'])).toEqual({ connectors: [] });
+  });
+
+  it('no key set writes recent, memory or the body', () => {
+    const all = agentPatch(d, AGENT_KEYS);
+    for (const key of ['recent', 'memory', 'instructions', 'body', 'disallowed-tools']) {
+      expect(key in all).toBe(false);
+    }
+    expect(Object.values(all)).not.toContain('Last run found two.');
+    expect(Object.values(all)).not.toContain(d.instructions);
   });
 });
 

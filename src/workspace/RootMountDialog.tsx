@@ -1,17 +1,12 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { MountRefusal } from '@/engine/roots';
+import { pickDirectory } from '@/lib/rootsIpc';
 import { useRootsStore } from '@/stores/rootsStore';
-
-/** Injected so tests drive it without the Tauri dialog plugin. */
-async function pickDirectory(): Promise<string | null> {
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const picked = await open({ directory: true, multiple: false });
-  return typeof picked === 'string' ? picked : null;
-}
 
 interface Props {
   onClose(): void;
+  /** Injected so tests drive it without the Tauri dialog plugin. */
   pickPath?: () => Promise<string | null>;
 }
 

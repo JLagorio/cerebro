@@ -1,0 +1,747 @@
+{
+  "cli_version": "2.1.250",
+  "scenario": "resume-usage",
+  "source": "derived",
+  "derived_from": [
+    "cli --help (--session-id, --fork-session, --effort)",
+    "cli bundle (result and usage schemas)",
+    "06-agents study (session-file effort)"
+  ],
+  "steps": [
+    {
+      "argv": [
+        "-p",
+        "Reply with the one word: one.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-000000000002",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000003",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000001",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "one"
+              }
+            ],
+            "usage": {
+              "input_tokens": 6000,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 4,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-000000000004",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "one",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0.002,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 6000,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 4,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000005",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: one."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000006",
+            "parentUuid": "00000000-0000-4000-8000-000000000005",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "one"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Reply with the one word: two.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--resume",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-000000000007",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000008",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000002",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "two"
+              }
+            ],
+            "usage": {
+              "input_tokens": 6020,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 4,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-000000000009",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "two",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0.002,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 6020,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 4,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000005",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: one."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000006",
+            "parentUuid": "00000000-0000-4000-8000-000000000005",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "one"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000a",
+            "parentUuid": "00000000-0000-4000-8000-000000000006",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: two."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-00000000000b",
+            "parentUuid": "00000000-0000-4000-8000-00000000000a",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000002",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "two"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6020,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Reply with the one word: three.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "sonnet",
+        "--effort",
+        "low",
+        "--resume",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-00000000000c",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-sonnet-5",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-00000000000d",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000003",
+            "model": "claude-sonnet-5",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "three"
+              }
+            ],
+            "usage": {
+              "input_tokens": 6040,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 4,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-00000000000e",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "three",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0.002,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 6040,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 4,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000005",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: one."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000006",
+            "parentUuid": "00000000-0000-4000-8000-000000000005",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "one"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6000,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000a",
+            "parentUuid": "00000000-0000-4000-8000-000000000006",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: two."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-00000000000b",
+            "parentUuid": "00000000-0000-4000-8000-00000000000a",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000002",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "two"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6020,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000f",
+            "parentUuid": "00000000-0000-4000-8000-00000000000b",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Reply with the one word: three."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000010",
+            "parentUuid": "00000000-0000-4000-8000-00000000000f",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "effort": "low",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000003",
+              "model": "claude-sonnet-5",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "three"
+                }
+              ],
+              "usage": {
+                "input_tokens": 6040,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 4,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    }
+  ]
+}

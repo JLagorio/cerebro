@@ -21,6 +21,13 @@ export interface Entry {
   createdAt: string; // ISO 8601
   modifiedAt: string; // ISO 8601
   parseError: string | null; // YAML error message, or null
+  /**
+   * Lowercase-hex SHA-256 of the file's bytes as read (M55.2): the content's
+   * identity, which triggers compare instead of a timestamp. Null means not
+   * known: the file was unreadable, or an optimistic edit's write has not
+   * answered yet. Never the hash of nothing.
+   */
+  hash: string | null;
 }
 
 /**
@@ -326,8 +333,9 @@ export type Selection =
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so
-  // "the release scout's triggers" is a place the back button can return to
-  // rather than component state that a re-render forgets.
+  // "the risk sweep's arguments" is a place the back button can return to
+  // rather than component state that a re-render forgets. An agent's path
+  // forwards to its page (M55.12).
   | { kind: 'library'; tab?: LibraryTab; path?: string }
   // M30 — mounted roots. `root` and `path` ride on the selection rather than in
   // component state so "the README of cerebro" is a place Back returns to, the
@@ -340,7 +348,8 @@ export type Selection =
   // M41 — the agents' front door. `actor` is the ACTOR string
   // (`process:<slug>`, or an internal construct's name), not the record
   // path: constructs have pages too, and the actor is the one identity a
-  // run, a write, and an @-mention already share.
+  // run, a write, and an @-mention already share. An actor with a record
+  // forwards to that record's page (M55.12); constructs keep this one.
   | { kind: 'agents'; actor?: string }
   | { kind: 'settings' };
 

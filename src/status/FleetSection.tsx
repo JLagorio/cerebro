@@ -7,6 +7,7 @@ import type { FleetFilter, FleetRun, FleetRunDetail } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { RunDetailPanel } from './RunDetailPanel';
+import { RunWhy } from './RunWhy';
 
 /**
  * The run history — one level under the roster (M33.5, re-homed in M33b.3).
@@ -40,7 +41,8 @@ import { RunDetailPanel } from './RunDetailPanel';
  * recorded" rather than $0. The old activity log could express exactly one of
  * these, and could not tell "nothing has run" from "we could not read the
  * runs" at all. M49.9 adds a fourth: a run whose proposal counters nothing
- * ever booked reads "proposals not recorded" rather than "0 applied".
+ * ever booked reads "proposals not recorded" rather than "0 applied". M56.7
+ * adds a fifth: a run nobody recorded a cause for reads "why not recorded".
  *
  * The read is SELECT-only and recomputed on every filter change. Nothing is
  * cached, so this list cannot drift from what the database holds.
@@ -234,6 +236,10 @@ export function FleetSection({
               >
                 {relativeWhen(run.started_at, now)}
               </span>
+              {/* WHY it started (M56.7), in Rust's words, and how late a
+                schedule's fire ran. A row from before reads "why not
+                recorded". */}
+              <RunWhy cause={run.cause} startedAt={run.started_at} />
               <span className="text-2xs text-n-500">{run.lane}</span>
               {/* Sentence case: the DS reserves capitals for eyebrows, and an
                 outcome is a fact, not a headline (M42.4). */}

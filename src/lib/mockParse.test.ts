@@ -1,64 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { extractWikilinks, humanize, parseNote, splitFrontmatter } from './mockParse';
-
-// CROSS-LANGUAGE PARITY FIXTURES
-// These three fixture strings are also asserted by the Rust parser tests in
-// src-tauri/src/vault/entry.rs (Task 4). If a fixture or an expected value
-// changes here it must change there too: the mock parser and the Rust scanner
-// must produce the same Entry for the same file content.
-
-const FIXTURE_ITEM = `---
-type: Work item
-key: FLD-7
-status: progress
-priority: urgent
-project: "[[guided-onboarding-ga]]"
----
-
-# Checklist stalls on step 3 offline
-
-Steps to reproduce the stall, see [[offline-sync-hardening]].
-`;
-
-const FIXTURE_BAD_YAML = `---
-type: [unclosed
-status: todo
----
-
-# Broken note
-`;
-
-const FIXTURE_PLAIN = `Just a plain paragraph that links to [[field-platform]].
-`;
+import { humanize, splitFrontmatter } from '@/engine/frontmatter';
+import { extractWikilinks, parseNote } from './mockParse';
 
 const T = '2026-07-24T00:00:00.000Z';
 
-describe('parseNote parity fixtures', () => {
-  it('parses frontmatter, title, relationships and body links (fixture 1)', () => {
-    const e = parseNote('items/fld-7.md', FIXTURE_ITEM, T, T);
-    expect(e.path).toBe('items/fld-7.md');
-    expect(e.filename).toBe('fld-7.md');
-    expect(e.title).toBe('Checklist stalls on step 3 offline');
-    expect(e.type).toBe('Work item');
-    expect(e.properties.key).toBe('FLD-7');
-    expect(e.properties.status).toBe('progress');
-    expect(e.properties.priority).toBe('urgent');
-    expect(e.properties).not.toHaveProperty('project');
-    expect(e.relationships.project).toEqual(['guided-onboarding-ga']);
-    expect(e.outgoingLinks).toEqual(['offline-sync-hardening']);
-    expect(e.snippet).toBe('Steps to reproduce the stall, see offline-sync-hardening.');
-    expect(e.parseError).toBeNull();
-  });
-
-  it('keeps a malformed-YAML file as an entry with parseError set (fixture 2)', () => {
-    const e = parseNote('items/broken.md', FIXTURE_BAD_YAML, T, T);
-    expect(e.parseError).not.toBeNull();
-    expect(e.properties).toEqual({});
-    expect(e.relationships).toEqual({});
-    expect(e.type).toBeNull();
-    expect(e.title).toBe('Broken note');
-  });
-
+describe('parseNote', () => {
   // M50.1 — parity with entry.rs: OKF titles a concept by its frontmatter.
   it('titles a knowledge file by its frontmatter, and nothing else', () => {
     const concept =
@@ -69,16 +15,6 @@ describe('parseNote parity fixtures', () => {
     expect(parseNote('notes/cutover.md', concept, T, T).title).toBe('Trigger');
     const bare = '---\ntype: Playbook\ntitle: "  "\n---\n\n# Trigger\n';
     expect(parseNote('knowledge/playbooks/cutover.md', bare, T, T).title).toBe('Trigger');
-  });
-
-  it('handles no frontmatter and no H1 (fixture 3)', () => {
-    const e = parseNote('notes/meeting-notes.md', FIXTURE_PLAIN, T, T);
-    expect(e.title).toBe('Meeting notes');
-    expect(e.type).toBeNull();
-    expect(e.properties).toEqual({});
-    expect(e.outgoingLinks).toEqual(['field-platform']);
-    expect(e.snippet).toBe('Just a plain paragraph that links to field-platform.');
-    expect(e.parseError).toBeNull();
   });
 });
 

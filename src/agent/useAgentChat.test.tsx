@@ -11,7 +11,6 @@ vi.mock('./agentIpc', () => ({
     if ('deferred' in start) throw new Error(`run deferred: ${start.deferred.join(', ')}`);
     return start;
   },
-  startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
   stopAgent: vi.fn(async () => true),
   // Mirrors the real fan-out (M17.3): a subscriber that names a run sees only
   // that run's events. Wrapping here rather than filtering in each test is
@@ -31,18 +30,36 @@ vi.mock('./agentIpc', () => ({
     };
   }),
 }));
+// An addressed turn reads its agent's record through the app's own door
+// (M53.5). Mocked at the wire, as useJobRunner's tests do, so each test says
+// what the record holds without sharing mockIpc's fake disk.
+vi.mock('@/lib/ipc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ipc')>();
+  return { ...actual, readNote: vi.fn() };
+});
 
 import * as agentIpc from './agentIpc';
 import { useAgentChat, type TurnContext } from './useAgentChat';
+import { registerFlush } from '@/editor/openPages';
 import { makeEntry } from '@/engine/testHelpers';
+import { mentionedTools, type PromptGrant } from '@/engine/toolGrant';
+import * as ipc from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
 
-/** A turn's context (M17.6/M17.7). Most tests care only about the prompt. */
+/** What an addressed agent's record holds, unless a test says otherwise. */
+const RECORD_BODY = '# Release scout\n\nKeep a running brief on what threatens the next release.';
+beforeEach(() => {
+  vi.mocked(ipc.readNote).mockReset();
+  vi.mocked(ipc.readNote).mockResolvedValue(RECORD_BODY);
+});
+
+/** A turn's context (M17.6/M17.7). Most tests care only about the prompt,
+ * which is a composer the hook calls with the turn's grant (M54.7). */
 const turnOf = (systemPrompt: string): TurnContext => ({
-  systemPrompt,
+  systemPrompt: () => systemPrompt,
   place: null,
   conversationId: 'c-1',
 });
@@ -65,9 +82,9 @@ describe('useAgentChat send expansion', () => {
   it('freezes the context the question was asked in (M17.6)', async () => {
     // The prompt is a getter because the panel rebuilds it from context chips,
     // the vault, and the open record — all of which move while a send is
-    // parked on a skill expansion and the MCP handshake. Reading it after
-    // those awaits would send the context the user drifted INTO, which is the
-    // whole complaint: "it confuses the AI".
+    // parked on a skill expansion. Reading it after that await would send the
+    // context the user drifted INTO, which is the whole complaint: "it
+    // confuses the AI".
     let context = 'context: Roadmap';
     let release = (_: string) => {};
     const expansion = new Promise<string>((resolve) => {
@@ -189,6 +206,18 @@ describe('useAgentChat send expansion', () => {
     );
   });
 
+  it('a turn hands the backend no endpoint and no bearer (M53.10)', async () => {
+    // Rust sets both for every run, and binds the bearer to the vault the run
+    // works in; the wire cannot carry either. The panel used to fetch the
+    // endpoint's address and its base token once, and hand them back on
+    // every turn, in whichever vault was open by then.
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('hello'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(Object.keys(options).filter((key) => key.toLowerCase().includes('mcp'))).toEqual([]);
+  });
+
   it('stop() during a pending expansion cancels the send — no child for a cancelled turn', async () => {
     // Stop ends the turn, but the send that started it may still be parked
     // on a skill expansion (or the preempt handoff) — and without the epoch
@@ -218,6 +247,28 @@ describe('useAgentChat send expansion', () => {
       expect(result.current.messages[1].streaming).toBe(false);
       expect(result.current.streaming).toBe(false);
     });
+  });
+
+  /* M53.6 — a save that lands after the agent's write puts the old text back,
+     so the open pages' pending saves land before the child is spawned. */
+  it('lands every open page’s pending save before the child starts', async () => {
+    let land = () => {};
+    const unregister = registerFlush(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    try {
+      const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+      act(() => result.current.send('append to the page I am typing in'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+      await act(async () => land());
+      await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    } finally {
+      unregister();
+    }
   });
 
   it('a cancelled send does not wedge the next one', async () => {
@@ -500,6 +551,70 @@ describe('useAgentChat and a redelivered ToolStart', () => {
 });
 
 /**
+ * Which turns end in a rescan and a checkpoint (M9.5, M54.2). The trigger is
+ * the tool manifest's writes flag: a commit writes through the ledger and
+ * MultiEdit edits a file, so each of those turns rescans and hands its prompt
+ * to the checkpoint once, at Done; a turn that only read does neither.
+ */
+describe('useAgentChat checkpoints a turn that wrote', () => {
+  const opts = { shell: false, connectors: false };
+  const storeRescan = useVaultStore.getState().rescan;
+  const rescan = vi.fn(async () => undefined);
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    rescan.mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', rescan });
+    useUiStore.setState({ runs: [] });
+  });
+
+  afterEach(() => {
+    // Unmount first: a store write under a mounted hook re-renders it
+    // outside act.
+    cleanup();
+    useVaultStore.setState({ rescan: storeRescan });
+  });
+
+  /** One turn whose only tool is `tool`, run to its Done. */
+  async function turnCalling(tool: string) {
+    const onWrote = vi.fn();
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null, onWrote));
+    act(() => result.current.send('tidy the inbox'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    act(() =>
+      handlers.forEach((h) =>
+        h({ run: 8, kind: 'ToolStart', tool_id: 't-1', tool_name: tool, input: '{}' }),
+      ),
+    );
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'ToolDone', tool_id: 't-1' })));
+    // Nothing fires before the turn ends: the checkpoint covers the whole turn.
+    expect(onWrote).not.toHaveBeenCalled();
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
+    return onWrote;
+  }
+
+  it('checkpoints a turn whose only tool committed proposals', async () => {
+    const onWrote = await turnCalling('mcp__cerebro__commit_proposals');
+    expect(onWrote).toHaveBeenCalledOnce();
+    expect(onWrote).toHaveBeenCalledWith('tidy the inbox');
+    expect(rescan).toHaveBeenCalledOnce();
+  });
+
+  it('checkpoints a MultiEdit turn', async () => {
+    const onWrote = await turnCalling('MultiEdit');
+    expect(onWrote).toHaveBeenCalledOnce();
+    expect(rescan).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a turn that only read alone', async () => {
+    const onWrote = await turnCalling('mcp__cerebro__get_note');
+    expect(onWrote).not.toHaveBeenCalled();
+    expect(rescan).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * M33b.6 — `@agent-slug` routes the turn.
  *
  * The capability is entirely a routing one: everything it hands the run —
@@ -573,7 +688,11 @@ describe('useAgentChat addressed by name (M33b.6)', () => {
   it('leaves the thread exactly where it was — a recipient is not a place (D8)', async () => {
     const place = { kind: 'inbox' } as const;
     const { result } = renderHook(() =>
-      useAgentChat(() => ({ systemPrompt: 'sys', place, conversationId: 'c-7' }), wideOpen, null),
+      useAgentChat(
+        () => ({ systemPrompt: () => 'sys', place, conversationId: 'c-7' }),
+        wideOpen,
+        null,
+      ),
     );
     act(() => result.current.send('@release-scout look here'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
@@ -732,6 +851,41 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].connectorNames).toEqual(['atlassian']);
   });
 
+  it('hands the run the connector tools the record denies (M54.9)', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [
+        agentEntry({
+          connectors: ['gmail'],
+          'disallowed-tools': ['mcp__gmail__trash_thread', 'mcp__gmail__send_message'],
+        }),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: false, connectors: true }, null),
+    );
+    act(() => result.current.send('@release-scout tidy my inbox'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    // A subtraction Rust applies to the run's argv: what it names, the run
+    // never calls, whatever the person's own allow rules say.
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].disallowedTools).toEqual([
+      'mcp__gmail__trash_thread',
+      'mcp__gmail__send_message',
+    ]);
+  });
+
+  it('denies nothing on a turn nobody is addressed in', async () => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+    const { result } = renderHook(() =>
+      useAgentChat(turn('sys'), { shell: false, connectors: true }, null),
+    );
+    act(() => result.current.send('plain question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].disallowedTools).toBeNull();
+  });
+
   it('hands the run the read scope the record declared (M34.4)', async () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({
@@ -746,6 +900,250 @@ describe('useAgentChat cannot be widened by who it is addressed to', () => {
     // The read axis rides the same bearer the write scope does — an addressed
     // agent reads what its record says it reads, not what the panel can.
     expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].readScope).toEqual(['sources']);
+  });
+});
+
+/**
+ * M53.5 — an addressed turn carries its agent's standing instructions.
+ *
+ * build_args withdraws the CLI's Read, Glob and Grep from a read-scoped run,
+ * and get_note holds the agent's own record to its read limit like any other
+ * note, so a turn told to read its own instructions could lose them. The app
+ * reads the record instead, and its body closes the system prompt, where
+ * useJobRunner (M34.1.4) and hand_to put it.
+ */
+describe('useAgentChat hands an addressed turn its standing instructions (M53.5)', () => {
+  const agentEntry = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { slug: 'release-scout', ...properties } as never,
+    });
+  const opts = { shell: false, connectors: false };
+  const BLOCK = `\n\nYour standing instructions, from records/agents/scout.md:\n\n${RECORD_BODY}`;
+
+  /** Send one turn and hand back what the run was started with. */
+  const sendAndRun = async (text: string) => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send(text));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    return vi.mocked(agentIpc.runAgent).mock.calls[0][1];
+  };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useUiStore.setState({ runs: [] });
+    useVaultStore.setState({ vaultPath: '/vault', entries: [agentEntry({})] });
+  });
+
+  it('closes the system prompt with the record’s body, and keeps it out of the message', async () => {
+    const options = await sendAndRun('@release-scout what is slipping?');
+    expect(vi.mocked(ipc.readNote)).toHaveBeenCalledWith('/vault', 'records/agents/scout.md');
+    expect(options.systemPrompt).toBe(`sys${BLOCK}`);
+    // Standing, not said: folded into the message, the charter would read
+    // as something the person had just typed.
+    expect(options.message).not.toContain('Keep a running brief');
+  });
+
+  it('keeps a read-scoped agent’s instructions when its record sits outside that scope', async () => {
+    // The turn the read-it-yourself prompt lost: get_note refuses a record
+    // outside `sources/`, and the CLI's Read is withdrawn from this run.
+    useVaultStore.setState({ entries: [agentEntry({ 'read-scope': ['sources/'] })] });
+    const options = await sendAndRun('@release-scout what is stale?');
+    expect(options.readScope).toEqual(['sources']);
+    expect(options.systemPrompt).toBe(`sys${BLOCK}`);
+  });
+
+  it.each([
+    ['an unscoped agent', {}],
+    ['a read-scoped agent', { 'read-scope': ['sources/'] }],
+  ])('asks %s for no read of its own record', async (_label, properties) => {
+    useVaultStore.setState({ entries: [agentEntry(properties)] });
+    const { message } = await sendAndRun('@release-scout status?');
+    expect(message).not.toMatch(/read it/);
+    expect(message).not.toContain('get_note refuses');
+    expect(message).not.toContain('standing instructions');
+  });
+
+  it('adds no block for a record with no body', async () => {
+    // A heading over no instructions would tell the agent it has some.
+    vi.mocked(ipc.readNote).mockResolvedValue('\n  \n');
+    const options = await sendAndRun('@release-scout hello');
+    expect(options.systemPrompt).toBe('sys');
+  });
+
+  it('reads nothing for a turn addressed to nobody', async () => {
+    // The common case costs nothing, and an @name nothing answers to was
+    // only ever text.
+    for (const text of ['what is slipping?', '@nobody-here are you there?']) {
+      vi.mocked(agentIpc.runAgent).mockClear();
+      const options = await sendAndRun(text);
+      expect(options.systemPrompt).toBe('sys');
+    }
+    expect(vi.mocked(ipc.readNote)).not.toHaveBeenCalled();
+  });
+
+  it('spawns nothing when the record cannot be read, and says why on the turn', async () => {
+    // The Tauri wire rejects with a string, not an Error.
+    vi.mocked(ipc.readNote).mockRejectedValue(
+      'records/agents/scout.md: No such file or directory (os error 2)',
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    // Every step after the send is a microtask, so one timer turn settles it.
+    await act(async () => {
+      result.current.send('@release-scout what is slipping?');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(result.current.streaming).toBe(false);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    const { error } = result.current.messages[1];
+    expect(error).toContain(
+      "Could not read Release scout's instructions at records/agents/scout.md",
+    );
+    expect(error).toContain('No such file or directory');
+    // No child, and nothing left in the registry the status bar reads.
+    expect(useUiStore.getState().runs).toEqual([]);
+  });
+
+  it('stop() while the record is being read spawns nothing', async () => {
+    let release: (body: string) => void = () => undefined;
+    vi.mocked(ipc.readNote).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('@release-scout what is slipping?'));
+    await vi.waitFor(() => expect(vi.mocked(ipc.readNote)).toHaveBeenCalled());
+    act(() => result.current.stop());
+    await act(async () => {
+      release(RECORD_BODY);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(result.current.messages[1].streaming).toBe(false);
+  });
+
+  it('a read that fails after stop() leaves the next turn alone', async () => {
+    // The cancelled send must quit, not report: its failure reaching the
+    // shared catch would end whichever turn is in flight by then.
+    let fail: (reason: unknown) => void = () => undefined;
+    vi.mocked(ipc.readNote).mockImplementationOnce(
+      () =>
+        new Promise<string>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('@release-scout what is slipping?'));
+    await vi.waitFor(() => expect(vi.mocked(ipc.readNote)).toHaveBeenCalled());
+    act(() => result.current.stop());
+    act(() => result.current.send('next question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+
+    await act(async () => {
+      fail(new Error('gone'));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(result.current.messages[1].error).toBeUndefined();
+    expect(result.current.streaming).toBe(true);
+    expect(useUiStore.getState().runs).toHaveLength(1);
+  });
+});
+
+/**
+ * M54.7 — the turn's prompt is composed for what the turn holds. The skill's
+ * narrowing and the recipient's meet first, and the composer hears the result,
+ * so a narrowed turn is told only about tools it can call.
+ */
+describe('useAgentChat composes the prompt for the turn’s grant (M54.7)', () => {
+  const agentEntry = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Release scout',
+      type: 'Agent',
+      properties: { slug: 'release-scout', ...properties } as never,
+    });
+
+  /** Send one turn with Settings' shell `shell`, and hand back the grant the
+   * composer heard and what the run was started with. */
+  const sendAndCompose = async (
+    text: string,
+    options: { message?: string; allowedTools?: string[] | null; shell?: boolean } = {},
+  ) => {
+    const compose = vi.fn((_grant: PromptGrant) => 'sys');
+    const { result } = renderHook(() =>
+      useAgentChat(
+        () => ({ systemPrompt: compose, place: null, conversationId: 'c-1' }),
+        { shell: options.shell ?? true, connectors: false },
+        null,
+      ),
+    );
+    act(() => result.current.send(text, options.message, options.allowedTools));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    expect(compose).toHaveBeenCalledOnce();
+    return {
+      grant: compose.mock.calls[0][0],
+      options: vi.mocked(agentIpc.runAgent).mock.calls[0][1],
+    };
+  };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useUiStore.setState({ runs: [] });
+    useVaultStore.setState({ vaultPath: '/vault', entries: [] });
+  });
+
+  it('composes a skill turn narrowed to nothing with no tools, for a person watching', async () => {
+    const { grant, options } = await sendAndCompose('/tidy', {
+      message: 'TIDY BODY',
+      allowedTools: [],
+    });
+    expect([...grant.tools]).toEqual([]);
+    expect(grant.attended).toBe(true);
+    expect(options.allowedTools).toEqual([]);
+    expect(options.systemPrompt).toBe('sys');
+  });
+
+  it('composes an unnarrowed turn with every tool and the Settings shell', async () => {
+    const { grant } = await sendAndCompose('what is at risk?');
+    expect(grant.tools.has('get_note')).toBe(true);
+    expect(grant.tools.has('propose_organize')).toBe(true);
+    expect(grant.shell).toBe(true);
+  });
+
+  it('composes an addressed turn with the agent’s narrowed tools', async () => {
+    useVaultStore.setState({ entries: [agentEntry({ 'allowed-tools': ['search_notes'] })] });
+    const { grant, options } = await sendAndCompose('@release-scout what is slipping?');
+    expect([...grant.tools]).toEqual(['search_notes']);
+    expect(options.allowedTools).toEqual(['search_notes']);
+  });
+
+  it('composes a read-scoped agent’s turn without the shell its read limit withdraws', async () => {
+    useVaultStore.setState({
+      entries: [
+        agentEntry({
+          tools: 'shell',
+          'allowed-tools': ['search_notes', 'create_note'],
+          scope: ['records/risks'],
+          'read-scope': ['sources/'],
+        }),
+      ],
+    });
+    const { grant, options } = await sendAndCompose('@release-scout what is stale?');
+    expect(grant.shell).toBe(false);
+    // Rust withdraws it (M53.5); the shell asked for is still passed through.
+    expect(options.shell).toBe(true);
+    // And the message the turn leads with names no tool the grant lacks.
+    const named = mentionedTools(options.message);
+    expect(named).toEqual(['search_notes']);
+    for (const tool of named) expect(grant.tools.has(tool), tool).toBe(true);
+    expect(options.message).not.toContain('write_concept');
   });
 });
 

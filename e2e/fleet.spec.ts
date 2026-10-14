@@ -39,6 +39,22 @@ const RUN = {
   // M41: the wire carries hop lineage now; a fixture without the field
   // would seed rows the real backend can no longer produce.
   parent_run_id: null as string | null,
+  // M56.7: why it started, in Rust's words, and the session it ran as. Wide
+  // for the same reason as `actor`: `null` is "why not recorded".
+  cause: {
+    kind: 'ingest',
+    why: 'background ingest of new material',
+    subject: null,
+    detail: null,
+    due_at: null,
+  } as {
+    kind: string;
+    why: string;
+    subject: string | null;
+    detail: string | null;
+    due_at: string | null;
+  } | null,
+  cli_session_id: null as string | null,
 };
 
 /** A run whose usage was lost. Its token columns are zero and that is NOT a
@@ -56,6 +72,8 @@ const LOST = {
   proposals_submitted: 0,
   applied: 0,
   rejected: 0,
+  // A row from before causes were recorded.
+  cause: null,
 };
 
 type Run = typeof RUN;
@@ -348,4 +366,55 @@ test('fleet: a run row says when it happened', async ({ page }) => {
   const when = section.getByTestId('fleet-when');
   await expect(when).toContainText('hour');
   await expect(when).toHaveAttribute('title', RUN.started_at);
+});
+
+// --- Why a run started (M56.7) ----------------------------------------------
+
+test('fleet: a run says why it started and how late', async ({ page }) => {
+  const fired = {
+    ...RUN,
+    run_id: 'run-fired',
+    actor: 'process:release-scout',
+    lane: 'scheduled',
+    started_at: '2026-07-28T09:15:00Z',
+    cause: {
+      kind: 'schedule',
+      why: 'its schedule came due',
+      subject: null,
+      detail: 'weekdays 08:30',
+      due_at: '2026-07-28T08:30:00.000Z',
+    },
+  };
+  const section = await openFleet(page, [fired]);
+  const why = section.getByTestId('fleet-row').getByTestId('run-why');
+  await expect(why).toHaveText('its schedule came due (weekdays 08:30) · ran 45m late');
+  await expect(why).toHaveAttribute('data-kind', 'schedule');
+});
+
+test('fleet: a run from before causes says why not recorded', async ({ page }) => {
+  const section = await openFleet(page, [LOST]);
+  await expect(section.getByTestId('fleet-row').getByTestId('run-why')).toHaveText(
+    'why not recorded',
+  );
+});
+
+test("fleet: release-scout's scheduled run says why, on the fleet and on its Runs tab", async ({
+  page,
+}) => {
+  // The demo seed: release-scout's 08:30 fire ran at 09:15.
+  await boot(page);
+  await openAgents(page);
+  const said = 'its schedule came due (weekdays 08:30) · ran 45m late';
+  const row = page.locator('[data-testid="fleet-row"][data-run="run-scout-1"]');
+  await expect(row.getByTestId('run-why')).toHaveText(said);
+  // A row from before causes says so rather than guessing.
+  await expect(
+    page.locator('[data-testid="fleet-row"][data-run="run-legacy-1"]').getByTestId('run-why'),
+  ).toHaveText('why not recorded');
+
+  await page.getByTestId('agent-row').filter({ hasText: 'Release scout' }).click();
+  await expect(page.getByTestId('record-tab-runs')).toHaveAttribute('aria-selected', 'true');
+  const run = page.getByTestId('agent-runs').getByTestId('agent-run');
+  await expect(run).toHaveAttribute('data-run', 'run-scout-1');
+  await expect(run.getByTestId('run-why')).toHaveText(said);
 });

@@ -85,12 +85,11 @@ export function SettingsPage() {
         // The fire-key ledger is vault-scoped (PR #5 review) — the count
         // must read the same slice of it the runner does.
         skillRuns: vaultPath === null ? {} : (skillRuns[vaultPath] ?? {}),
-        connectors,
         // Render-time clock is honest enough here: this page re-renders on
         // every visit, and a due schedule missing until then costs a label.
         now: new Date(),
       }).length,
-    [attempts, connectors, entries, skillRuns, vaultPath, quarantine, ledgerReview],
+    [attempts, entries, skillRuns, vaultPath, quarantine, ledgerReview],
   );
 
   const changeVault = async () => {
@@ -198,7 +197,7 @@ export function SettingsPage() {
           />
           <SettingRow
             label="Connectors"
-            hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once, and a cached copy past its refresh date is re-fetched in the background."
+            hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once. A cached copy past its refresh date is marked stale; ask for a fresh one when you need it."
             checked={connectors}
             onChange={setConnectors}
           />

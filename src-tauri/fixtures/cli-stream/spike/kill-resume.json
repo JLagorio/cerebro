@@ -1,0 +1,761 @@
+{
+  "cli_version": "2.1.250",
+  "scenario": "kill-resume",
+  "source": "derived",
+  "derived_from": ["cli bundle (resume transcript repair)"],
+  "steps": [
+    {
+      "argv": [
+        "-p",
+        "Call slow_echo once with text 'stop' and seconds 30, then reply done.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": null,
+        "signal": "SIGTERM",
+        "stopped": true
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-000000000002",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000003",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000001",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "tool_use",
+            "content": [
+              {
+                "type": "tool_use",
+                "id": "toolu_000000000000000000000001",
+                "name": "mcp__probe__slow_echo",
+                "input": {
+                  "text": "stop",
+                  "seconds": 30
+                }
+              }
+            ],
+            "usage": {
+              "input_tokens": 6100,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 40,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000004",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Call slow_echo once with text 'stop' and seconds 30, then reply done."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000005",
+            "parentUuid": "00000000-0000-4000-8000-000000000004",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "tool_use",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_000000000000000000000001",
+                  "name": "mcp__probe__slow_echo",
+                  "input": {
+                    "text": "stop",
+                    "seconds": 30
+                  }
+                }
+              ],
+              "usage": {
+                "input_tokens": 6100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Continue.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--resume",
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-000000000006",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-000000000007",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000002",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "The earlier call was cut off; nothing came back from it."
+              }
+            ],
+            "usage": {
+              "input_tokens": 6200,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 14,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-000000000008",
+          "session_id": "00000000-0000-4000-8000-000000000001",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "The earlier call was cut off; nothing came back from it.",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 6200,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 14,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-000000000001.jsonl",
+        "files": ["00000000-0000-4000-8000-000000000001.jsonl"],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000004",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Call slow_echo once with text 'stop' and seconds 30, then reply done."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000005",
+            "parentUuid": "00000000-0000-4000-8000-000000000004",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000001",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "tool_use",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_000000000000000000000001",
+                  "name": "mcp__probe__slow_echo",
+                  "input": {
+                    "text": "stop",
+                    "seconds": 30
+                  }
+                }
+              ],
+              "usage": {
+                "input_tokens": 6100,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000009",
+            "parentUuid": "00000000-0000-4000-8000-000000000005",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Continue."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-00000000000a",
+            "parentUuid": "00000000-0000-4000-8000-000000000009",
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000002",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "The earlier call was cut off; nothing came back from it."
+                }
+              ],
+              "usage": {
+                "input_tokens": 6200,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 14,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Write a 300-word story about a fox who keeps a lighthouse.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--session-id",
+        "00000000-0000-4000-8000-00000000000b"
+      ],
+      "exit": {
+        "code": null,
+        "signal": "SIGTERM",
+        "stopped": true
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-00000000000c",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-00000000000b.jsonl",
+        "files": [
+          "00000000-0000-4000-8000-00000000000b.jsonl",
+          "00000000-0000-4000-8000-000000000001.jsonl"
+        ],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000d",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Write a 300-word story about a fox who keeps a lighthouse."
+            }
+          }
+        ]
+      },
+      "probe": []
+    },
+    {
+      "argv": [
+        "-p",
+        "Continue.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--mcp-config",
+        "/RECORD/probe/mcp-config.json",
+        "--permission-mode",
+        "acceptEdits",
+        "--allowedTools",
+        "mcp__probe__slow_echo",
+        "--setting-sources",
+        "user",
+        "--strict-mcp-config",
+        "--model",
+        "haiku",
+        "--resume",
+        "00000000-0000-4000-8000-00000000000b"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null,
+        "stopped": false
+      },
+      "stderr": "",
+      "stream": [
+        {
+          "type": "system",
+          "subtype": "init",
+          "uuid": "00000000-0000-4000-8000-00000000000e",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "model": "claude-haiku-4-5-20251001",
+          "permissionMode": "acceptEdits",
+          "claude_code_version": "2.1.250",
+          "apiKeySource": "none",
+          "tools": [
+            "Task",
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "DesignSync",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskCreate",
+            "TaskGet",
+            "TaskList",
+            "TaskOutput",
+            "TaskStop",
+            "TaskUpdate",
+            "ToolSearch",
+            "WebFetch",
+            "WebSearch",
+            "Workflow",
+            "Write",
+            "mcp__probe__approve",
+            "mcp__probe__slow_echo"
+          ],
+          "mcp_servers": [
+            {
+              "name": "probe",
+              "status": "connected"
+            }
+          ]
+        },
+        {
+          "type": "assistant",
+          "uuid": "00000000-0000-4000-8000-00000000000f",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "parent_tool_use_id": null,
+          "message": {
+            "role": "assistant",
+            "id": "msg_000000000000000000000003",
+            "model": "claude-haiku-4-5-20251001",
+            "stop_reason": "end_turn",
+            "content": [
+              {
+                "type": "text",
+                "text": "A fox kept the lighthouse on the point."
+              }
+            ],
+            "usage": {
+              "input_tokens": 6200,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "output_tokens": 300,
+              "cache_creation": {
+                "ephemeral_5m_input_tokens": 0,
+                "ephemeral_1h_input_tokens": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "result",
+          "subtype": "success",
+          "uuid": "00000000-0000-4000-8000-000000000010",
+          "session_id": "00000000-0000-4000-8000-00000000000b",
+          "is_error": false,
+          "num_turns": 1,
+          "result": "A fox kept the lighthouse on the point.",
+          "stop_reason": "end_turn",
+          "terminal_reason": "completed",
+          "total_cost_usd": 0,
+          "permission_denials": [],
+          "usage": {
+            "input_tokens": 6200,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 300,
+            "cache_creation": {
+              "ephemeral_5m_input_tokens": 0,
+              "ephemeral_1h_input_tokens": 0
+            }
+          }
+        }
+      ],
+      "session": {
+        "file": "00000000-0000-4000-8000-00000000000b.jsonl",
+        "files": [
+          "00000000-0000-4000-8000-00000000000b.jsonl",
+          "00000000-0000-4000-8000-000000000001.jsonl"
+        ],
+        "lines": [
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-00000000000d",
+            "parentUuid": null,
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Write a 300-word story about a fox who keeps a lighthouse."
+            }
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "enqueue"
+          },
+          {
+            "type": "queue-operation",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "operation": "dequeue"
+          },
+          {
+            "type": "user",
+            "uuid": "00000000-0000-4000-8000-000000000011",
+            "parentUuid": "00000000-0000-4000-8000-00000000000d",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "user",
+              "content": "Continue."
+            }
+          },
+          {
+            "type": "assistant",
+            "uuid": "00000000-0000-4000-8000-000000000012",
+            "parentUuid": "00000000-0000-4000-8000-000000000011",
+            "sessionId": "00000000-0000-4000-8000-00000000000b",
+            "isSidechain": false,
+            "entrypoint": "sdk-cli",
+            "version": "2.1.250",
+            "message": {
+              "role": "assistant",
+              "id": "msg_000000000000000000000003",
+              "model": "claude-haiku-4-5-20251001",
+              "stop_reason": "end_turn",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "A fox kept the lighthouse on the point."
+                }
+              ],
+              "usage": {
+                "input_tokens": 6200,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 300,
+                "cache_creation": {
+                  "ephemeral_5m_input_tokens": 0,
+                  "ephemeral_1h_input_tokens": 0
+                }
+              }
+            }
+          }
+        ]
+      },
+      "probe": []
+    }
+  ]
+}

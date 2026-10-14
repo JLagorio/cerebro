@@ -6,15 +6,23 @@ import {
   createCodeBlockSpec,
   defaultBlockSpecs,
   defaultInlineContentSpecs,
+  inlineContentToNodes,
+  trackPosition,
   type PartialBlock,
 } from '@blocknote/core';
-import { SideMenuExtension, SuggestionMenu } from '@blocknote/core/extensions';
+import {
+  insertOrUpdateBlockForSlashMenu,
+  SideMenuExtension,
+  SuggestionMenu,
+  type DefaultSuggestionItem,
+} from '@blocknote/core/extensions';
 import { BlockGrip } from './BlockDragLayer';
 import { canInsertColumnsAt, COLUMN_COUNTS, newColumnList } from './columnCommands';
 import { codeBlockOptions } from '@blocknote/code-block';
-import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
+import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
+import { createLinkedPage } from '@/app/listActions';
 import { AskAiPopover } from '@/editor/AskAiPopover';
-import { AiFormattingToolbar, type Preset } from '@/editor/SelectionToolbar';
+import { AiFormattingToolbar, CarriedBlockMenu, type Preset } from '@/editor/SelectionToolbar';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
@@ -33,6 +41,7 @@ import { Icon } from '@/components/ui/Icon';
 import { parseSources } from '@/engine/okf';
 import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
+import { resolveTarget } from '@/engine/wikilink';
 import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
@@ -51,22 +60,54 @@ import { citationPasteHandler, citationTextInput, insertCitation } from './citat
 import { citationChoices, citationIndexOf } from './citations';
 import { buildOutline } from './DocOutline';
 import {
+  charBeforeTrigger,
+  creatableTitle,
+  mentionAtWordStart,
+  readLinkQuery,
+  stemOfPath,
+} from './linkMenu';
+import {
   blocksToMarkdown,
   escapeMarkerLines,
-  isLossyImport,
+  lossyImportCause,
   markdownToBlocks,
+  type LossyCause,
   unwrapReplyFence,
 } from './markdown';
 import { NotePathContext } from './notePath';
 
-// Default schema with the fully-featured code block (shiki highlighting,
-// full language list) swapped in, plus the Cerebro custom blocks (AI block,
-// callout, columns, database, mermaid) and inline chips: wikilinks,
-// assignees, dates, and footnote citations (M2.x, M47.2, M48.1, M51.5).
+/**
+ * The fully-featured code block (shiki highlighting, the full language list),
+ * whose language is empty until someone picks one (M55.15). The package's
+ * default is `javascript`, so a bare fence reopened as a JavaScript fence:
+ * the save wrote a word the file never had, and the lossy-import check locked
+ * the page for it. Empty is what a bare fence means, and the serializer writes
+ * it back bare; the picker shows it as Plain Text.
+ */
+const codeBlockSpec = createCodeBlockSpec({ ...codeBlockOptions, defaultLanguage: '' });
+
+/**
+ * The table controls a markdown table cannot carry, switched off (M55.15):
+ * split and merged cells (a cell spans one column), cell colours, and the
+ * header toggles (a markdown table always has a header row and never a header
+ * column). BlockNote's defaults already say so; they are spelled out because
+ * turning one on would offer an action a save drops (`UNCARRIED_ACTIONS`).
+ */
+export const TABLE_SETTINGS = {
+  splitCells: false,
+  cellBackgroundColor: false,
+  cellTextColor: false,
+  headers: false,
+} as const;
+
+// Default schema with that code block swapped in, plus the Cerebro custom
+// blocks (AI block, callout, columns, database, mermaid) and inline chips:
+// wikilinks, assignees, dates, and footnote citations (M2.x, M47.2, M48.1,
+// M51.5).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
-    codeBlock: createCodeBlockSpec(codeBlockOptions),
+    codeBlock: codeBlockSpec,
     ai: AiBlock(),
     callout: CalloutBlock(),
     column: ColumnBlock(),
@@ -84,6 +125,56 @@ export const cerebroSchema = BlockNoteSchema.create({
 });
 
 export type CerebroEditor = typeof cerebroSchema.BlockNoteEditor;
+
+type SlashKey = DefaultSuggestionItem['key'];
+
+/**
+ * BlockNote's `/` entries the menu leaves out, by key (M53.31).
+ *
+ * Every block the editor offers has a disk carrier, or it is not offered: a
+ * key goes here when a save would not keep its block. Empty since M55.4 gave
+ * toggles, toggle headings, audio and file their carriers. `markdown.test.ts`
+ * holds this set to its KNOWN_LOSSY, which can only stay empty.
+ */
+export const DROPPED_SLASH_KEYS: ReadonlySet<SlashKey> = new Set<SlashKey>();
+
+/** A `/` menu row. BlockNote's own carry the key they were made from. */
+type SlashMenuItem = DefaultReactSuggestionItem & { key?: SlashKey };
+
+/**
+ * BlockNote's table, with the header row a markdown table must have (M55.4).
+ * Without one the first save wrote an empty header row above the cells.
+ */
+const insertTable = (editor: CerebroEditor): void => {
+  insertOrUpdateBlockForSlashMenu(editor, {
+    type: 'table',
+    content: {
+      type: 'tableContent',
+      headerRows: 1,
+      rows: [{ cells: ['', '', ''] }, { cells: ['', '', ''] }],
+    },
+  });
+};
+
+/** The `/` menu: BlockNote's entries less DROPPED_SLASH_KEYS, then `ours`. */
+export function slashMenuItems(
+  editor: CerebroEditor,
+  ours: DefaultReactSuggestionItem[] = [],
+): SlashMenuItem[] {
+  // The React list spreads each core entry, key and all; only its declared
+  // type leaves the key off.
+  const blockNote = getDefaultReactSlashMenuItems(editor) as (DefaultReactSuggestionItem & {
+    key: SlashKey;
+  })[];
+  return [
+    ...blockNote
+      .filter((item) => !DROPPED_SLASH_KEYS.has(item.key))
+      .map((item) =>
+        item.key === 'table' ? { ...item, onItemClick: () => insertTable(editor) } : item,
+      ),
+    ...ours,
+  ];
+}
 
 const stem = (e: Entry): string => e.filename.replace(/\.md$/, '');
 
@@ -234,18 +325,23 @@ export interface MarkdownEditorProps {
   /**
    * Called with the serialized markdown, debounced after user edits.
    * Suppressed when serialization matches the last saved form, so opening a
-   * document never rewrites it.
+   * document never rewrites it. A returned promise is the save: the editor's
+   * flush waits for it.
    */
-  onChange: (markdown: string) => void;
+  onChange: (markdown: string) => void | Promise<void>;
   /**
-   * Fires once the document is loaded. `lossyImport` is true when the parse
-   * round trip lost textual content (e.g. raw HTML blocks) — consumers
-   * should warn before edits overwrite the file.
+   * Fires once the document is loaded. `lossyCause` says how the parse
+   * round trip changed the file's text (raw HTML dropped, other text dropped,
+   * text added or reordered), or is null when it kept it; consumers open such
+   * a page read-only and name the cause before edits overwrite the file.
    *
    * `flushPendingSave` / `cancelPendingSave` let the owner take control of the
-   * debounce: flush before a deliberate save (⌘S), cancel before writing the
-   * file out of band (template apply) so the stale in-editor body can't be
-   * written back over it.
+   * debounce. Flush before a deliberate save (⌘S) or before an agent turn
+   * starts (M53.6): it emits a pending edit, and its promise settles once
+   * `onChange`'s has, including a save the debounce had already started. It
+   * never rejects. Cancel before the file is written out of band (template
+   * apply) or the buffer is discarded for the disk's version, so the stale
+   * in-editor body can't be written back over it.
    */
   onReady?: (info: EditorReadyInfo) => void;
   debounceMs?: number;
@@ -262,8 +358,8 @@ export interface MarkdownEditorProps {
 
 export interface EditorReadyInfo {
   editor: CerebroEditor;
-  lossyImport: boolean;
-  flushPendingSave: () => void;
+  lossyCause: LossyCause | null;
+  flushPendingSave: () => Promise<void>;
   cancelPendingSave: () => void;
 }
 
@@ -284,6 +380,7 @@ export function MarkdownEditor({
   const leaveAnswer = useRef<(event: KeyboardEvent) => boolean>(() => false);
   const editor = useCreateBlockNote({
     schema: cerebroSchema,
+    tables: TABLE_SETTINGS,
     _tiptapOptions: {
       editorProps: {
         // M52.1: a hand-typed `[^id]` becomes a chip as its `]` lands.
@@ -369,14 +466,32 @@ export function MarkdownEditor({
   // effect without rebuilding the debounce plumbing.
   const readOnlyRef = useRef(readOnly);
   readOnlyRef.current = readOnly;
+  // False once unmounted: a page made from the link menu lands after a write
+  // and a rescan, and by then its chip may have no editor to go into (M55.7).
+  // Set in the effect rather than at creation, so StrictMode's second mount
+  // turns it back on.
+  const alive = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
+  /**
+   * Every emit so far, serialized then saved, as one promise that never
+   * rejects (M53.6). A flush returns it, so it waits for a save the debounce
+   * already started as well as the one it starts itself.
+   */
+  const lastEmit = useRef<Promise<void>>(Promise.resolve());
   const emitRef = useRef(() => {});
   emitRef.current = () => {
-    void blocksToMarkdown(editor).then((md) => {
+    const emitted = blocksToMarkdown(editor).then((md) => {
       if (md === lastSaved.current) return;
       lastSaved.current = md;
-      onChangeRef.current(md);
+      return onChangeRef.current(md);
     });
+    lastEmit.current = Promise.allSettled([lastEmit.current, emitted]).then(() => undefined);
   };
 
   // Handed to the owner via onReady and kept for the editor's lifetime, so
@@ -390,6 +505,7 @@ export function MarkdownEditor({
     const wasPending = timer.current !== null;
     cancelPendingSave();
     if (wasPending && !readOnlyRef.current) emitRef.current();
+    return lastEmit.current;
   }).current;
 
   useEffect(() => {
@@ -406,7 +522,7 @@ export function MarkdownEditor({
       setLoaded(true);
       onReadyRef.current?.({
         editor,
-        lossyImport: isLossyImport(markdown, roundTripped),
+        lossyCause: lossyImportCause(markdown, roundTripped),
         flushPendingSave,
         cancelPendingSave,
       });
@@ -449,7 +565,10 @@ export function MarkdownEditor({
 
   // --- Mention menus (M2.x docs polish) -----------------------------------
   // `[[` links a page (Obsidian habit); `@` links pages/people and sets due
-  // dates on task lines. Insertion replaces the trigger text with a chip.
+  // dates on task lines. A pick replaces the trigger text with a chip. When
+  // no page answers to the name typed, both menus end on a Create row that
+  // makes the page and links it (M55.7); `@` offers it only where a word
+  // starts.
 
   const insertChip = (content: {
     type: 'wikilink' | 'assignee' | 'due';
@@ -459,8 +578,9 @@ export function MarkdownEditor({
     editor.focus();
   };
 
-  // The `[[` flow: the menu triggers on the SECOND bracket, so its cleanup
-  // leaves the first `[` behind as text. Remove it before inserting.
+  // The `[[` flow: the menu triggers on the SECOND bracket (linkMenu.test.tsx
+  // measures it), so its cleanup leaves the first `[` behind as text. Remove
+  // it before inserting.
   const stripDanglingBracket = () => {
     try {
       const e = editor as unknown as {
@@ -531,6 +651,69 @@ export function MarkdownEditor({
       icon: <Icon name="calendar" size={14} />,
       onItemClick: () => insertChip({ type: 'due', props: { date: isoAfterDays(days) } }),
     }));
+
+  /**
+   * Make the page a Create row names, then link it where the caret was
+   * (M55.7). `typed` is the trigger and query the menu cleared, put back if
+   * the page cannot be made.
+   *
+   * The caret is tracked, not read when the write lands: the create awaits a
+   * write and a rescan, and the author may move or keep typing meanwhile. The
+   * chip goes in only after the write, so it carries the stem the backend
+   * actually wrote. The editor is not focused afterwards: ProseMirror maps
+   * the caret, past the chip when it sat where the chip goes, and along with
+   * its text when the author has moved on.
+   */
+  const createAndLink = (title: string, typed: string) => {
+    const at = trackPosition(editor, editor.prosemirrorState.selection.from);
+    void createLinkedPage(title).then((path) => {
+      if (!alive.current || readOnlyRef.current) return;
+      try {
+        editor.transact((tr) => {
+          const pos = at();
+          if (path === null) {
+            tr.insertText(typed, pos);
+            return;
+          }
+          tr.insert(
+            pos,
+            inlineContentToNodes<
+              typeof cerebroSchema.inlineContentSchema,
+              typeof cerebroSchema.styleSchema
+            >(
+              [{ type: 'wikilink', props: { target: stemOfPath(path), alias: '' } }, ' '],
+              editor.pmSchema,
+            ),
+          );
+        });
+      } catch {
+        toast(`Couldn't link "${title}"`);
+      }
+    });
+  };
+
+  /**
+   * A menu's last row: make a page by the name typed and link it (M55.7).
+   * None when the text cannot be a page title, no vault is open, or a page
+   * already answers to the name, since its own row links that page.
+   */
+  const createRow = (text: string, trigger: '[' | '@'): DefaultReactSuggestionItem | null => {
+    const title = creatableTitle(text);
+    if (title === null || vaultPath === null || resolveTarget(title, entries) !== null) return null;
+    return {
+      title: `Create "${title}"`,
+      subtext: 'New page',
+      group: 'New page',
+      icon: <Icon name="file-plus" size={14} />,
+      onItemClick: () => createAndLink(title, trigger === '[' ? `[[${text}` : `@${text}`),
+    };
+  };
+
+  /** `rows`, then the Create row when there is one; one title per row still. */
+  const withCreate = (
+    rows: DefaultReactSuggestionItem[],
+    create: DefaultReactSuggestionItem | null,
+  ): DefaultReactSuggestionItem[] => (create === null ? rows : distinctTitles([...rows, create]));
 
   // Slash command for dates (M2.x feedback): inserts today as a rich date
   // chip — clicking the chip opens the full picker (range, format, time,
@@ -801,7 +984,6 @@ export function MarkdownEditor({
       void (async () => {
         try {
           const document = await blocksToMarkdown(editor);
-          const mcp = await startMcp(vaultPath);
           // Attended, no lane: never gated — startedOrThrow makes a contract
           // break visible instead of a silent no-run.
           const { run: runId } = startedOrThrow(
@@ -822,7 +1004,6 @@ export function MarkdownEditor({
               connectors: false,
               attended: true,
               allowedTools: [],
-              mcp,
             }),
           );
           let text = '';
@@ -962,18 +1143,28 @@ export function MarkdownEditor({
         >
           <SuggestionMenuController
             triggerCharacter="@"
-            getItems={async (query) =>
-              filterItems(
+            getItems={async (query) => {
+              const rows = filterItems(
                 [...personItems(), ...docItems({ excludePeople: true }), ...dueItems()],
                 query,
-              )
-            }
+              );
+              // Create only where a mention starts: `ana@example.com` is an
+              // address, and the `@` in `meet @ 5pm` names nothing.
+              const starts =
+                !/^\s/.test(query) &&
+                mentionAtWordStart(charBeforeTrigger(editor.prosemirrorState, query, '@'));
+              return withCreate(rows, starts ? createRow(query, '@') : null);
+            }}
           />
           <SuggestionMenuController
             triggerCharacter="["
             getItems={async (query) => {
-              if (query.startsWith('^')) {
-                const cites = filterItems(citeItems(), query.slice(1));
+              const asked = readLinkQuery(
+                query,
+                charBeforeTrigger(editor.prosemirrorState, query, '['),
+              );
+              if (asked.kind === 'cite') {
+                const cites = filterItems(citeItems(), asked.text);
                 // Nothing to cite — a page with no sources and no footnotes,
                 // or an id nobody has used yet. Closed rather than shown empty:
                 // an open menu swallows Enter, and the author is typing a
@@ -981,31 +1172,37 @@ export function MarkdownEditor({
                 if (cites.length === 0) closeLinkMenu.current();
                 return cites;
               }
-              // The user is mid-`[[`: the second bracket lands in the query.
-              return filterItems(
-                docItems().map((item) => ({
-                  ...item,
-                  onItemClick: () => {
-                    stripDanglingBracket();
-                    item.onItemClick?.();
-                  },
-                })),
-                query.replace(/^\[/, ''),
-              );
+              // A `]` ends the link being typed. Closed for the same reason: an
+              // open menu would swallow the Enter that starts the next line.
+              if (asked.kind === 'closed') {
+                closeLinkMenu.current();
+                return [];
+              }
+              // Create only after `[[`; a lone `[` is a bracket. Every row,
+              // Create included, strips the first bracket before it inserts, so
+              // Create tracks the caret with the bracket already gone.
+              const create = asked.double ? createRow(asked.text, '[') : null;
+              return withCreate(filterItems(docItems(), asked.text), create).map((item) => ({
+                ...item,
+                onItemClick: () => {
+                  stripDanglingBracket();
+                  item.onItemClick?.();
+                },
+              }));
             }}
           />
           <SuggestionMenuController
             triggerCharacter="/"
             getItems={async (query) =>
-              // Defaults plus per-template inserts under "Advanced blocks".
+              // BlockNote's entries less DROPPED_SLASH_KEYS, then ours: the
+              // date, columns, Cerebro's blocks and per-template inserts.
               filterItems(
-                [
-                  ...(getDefaultReactSlashMenuItems(editor) as DefaultReactSuggestionItem[]),
+                slashMenuItems(editor, [
                   dateSlashItem(),
                   ...columnSlashItems(),
                   ...blockSlashItems(),
                   ...templateSlashItems(),
-                ],
+                ]),
                 query,
               )
             }
@@ -1021,8 +1218,12 @@ export function MarkdownEditor({
                 <AddBlockButton />
                 {/* M48.4: ours, not BlockNote's `DragHandleButton`. Same
                     position, same click-opens-the-menu behaviour; a drag that
-                    a test can drive and a drop that can land in a column. */}
-                <BlockGripButton hostRef={host} sideMenu={<DragHandleButton {...props} />} />
+                    a test can drive and a drop that can land in a column. The
+                    menu it opens holds only what a save keeps (M55.15). */}
+                <BlockGripButton
+                  hostRef={host}
+                  sideMenu={<DragHandleButton {...props} dragHandleMenu={CarriedBlockMenu} />}
+                />
               </SideMenu>
             )}
           />

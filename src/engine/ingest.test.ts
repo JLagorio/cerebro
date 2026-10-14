@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import SOURCE_SLUGS from '../../src-tauri/fixtures/source-slugs.json';
 import {
+  canonicalSourceId,
   detectFormat,
   findExternalRefs,
   parseTranscript,
+  sourceCachePath,
   sourceFreshness,
+  type SourceKind,
   speakersOf,
   titleFromContent,
   titleFromFilename,
@@ -232,7 +236,7 @@ describe('external references', () => {
       {
         kind: 'url',
         id: 'https://wiki.test/x/Rollback',
-        cachePath: 'sources/web/wiki.test-x-rollback.md',
+        cachePath: 'sources/web/wiki.test-x-rollback-16990b2f5ec5.md',
       },
     ]);
   });
@@ -254,15 +258,23 @@ describe('external references', () => {
     expect(findExternalRefs('SUPERPHX-421 and PHX-421X', PHX)).toHaveLength(0);
   });
 
-  it('builds the same cache paths the Rust writer does', () => {
-    // Pinned against source_slugs_match_the_frontends_cache_paths in
-    // src-tauri/src/mcp.rs. If these drift, every fetched source looks
-    // uncached forever and the agent refetches on every turn.
-    const cacheOf = (id: string) => findExternalRefs(id, { issuePrefixes: ['PHX'] })[0].cachePath;
-    expect(cacheOf('PHX-421')).toBe('sources/issues/phx-421.md');
-    expect(cacheOf('https://wiki.test/x/Rollback')).toBe('sources/web/wiki.test-x-rollback.md');
-    expect(cacheOf('https://a.test/p?q=1&r=2')).toBe('sources/web/a.test-p-q-1-r-2.md');
-    expect(cacheOf('http://a.test/p/')).toBe('sources/web/a.test-p.md');
+  it('replays the cache paths it shares with the Rust writer', () => {
+    // src-tauri/fixtures/source-slugs.json, which
+    // source_slugs_replay_the_shared_cases in src-tauri/src/mcp.rs replays
+    // too. The Inbox counts a copy by the identity and path cache_source
+    // gave it, so twins that drift can make a fetched source look uncached,
+    // and it is fetched again.
+    const sources = new Map<string, string>();
+    for (const { kind, id, canonical, path } of SOURCE_SLUGS.cases) {
+      expect(['issue', 'web']).toContain(kind);
+      const source = kind as SourceKind;
+      expect(canonicalSourceId(source, id), JSON.stringify(id)).toBe(canonical);
+      expect(sourceCachePath(source, id), JSON.stringify(id)).toBe(path);
+      // Two sources sharing one file is how the second fetch overwrote the first.
+      const identity = `${source}\0${canonical}`;
+      expect(sources.get(path) ?? identity, path).toBe(identity);
+      sources.set(path, identity);
+    }
   });
 
   it('drops sentence punctuation that is not part of the url', () => {
@@ -275,15 +287,71 @@ describe('external references', () => {
     expect(findExternalRefs('PHX-421 blocks PHX-421', PHX)).toHaveLength(1);
   });
 
+  it('one reference per source however it is spelled', () => {
+    const refs = findExternalRefs(
+      'See https://wiki.test/x/Rollback, http://Wiki.Test/x/Rollback/ and https://wiki.test/x/rollback.',
+    );
+    // The first spelling is what a fetch asks for. Path case is identity, so
+    // the last is another page.
+    expect(refs.map((r) => r.id)).toEqual([
+      'https://wiki.test/x/Rollback',
+      'https://wiki.test/x/rollback',
+    ]);
+  });
+
+  it('offers nothing for a url with nothing left to fetch', () => {
+    // cache_source refuses an id that canonicalizes to nothing, so a fetch
+    // offered for one could never be written down.
+    expect(findExternalRefs('See https://... or https:///')).toEqual([]);
+  });
+
   it('only proposes a fetch for references with nothing cached', () => {
     const text = 'PHX-421 and PHX-9';
-    expect(uncachedRefs(text, ['sources/issues/phx-421.md'], PHX).map((r) => r.id)).toEqual([
+    const at = (...paths: string[]) => paths.map((path) => makeEntry({ path }));
+    expect(uncachedRefs(text, at('sources/issues/phx-421.md'), PHX).map((r) => r.id)).toEqual([
       'PHX-9',
     ]);
     // The cache is what keeps a repeat mention from becoming a repeat API call.
     expect(
-      uncachedRefs(text, ['sources/issues/phx-421.md', 'sources/issues/phx-9.md'], PHX),
+      uncachedRefs(text, at('sources/issues/phx-421.md', 'sources/issues/phx-9.md'), PHX),
     ).toEqual([]);
+  });
+
+  it('finds a copy by its source_id even at a legacy path', () => {
+    // Where the old rule filed it. cache_source refreshes a copy where it
+    // lives, so the Inbox has to count this one rather than offer a fetch.
+    const legacy = makeEntry({
+      path: 'sources/web/wiki.test-x-rollback.md',
+      properties: { source_id: 'https://wiki.test/x/Rollback', source_kind: 'web' },
+    });
+    expect(uncachedRefs('See https://wiki.test/x/Rollback.', [legacy])).toEqual([]);
+    expect(uncachedRefs('See http://WIKI.test/x/Rollback/ again.', [legacy])).toEqual([]);
+    // A kind nobody recorded is no disagreement.
+    for (const properties of [
+      { source_id: ' PHX-421' },
+      { source_id: 'phx-421', source_kind: null },
+    ]) {
+      const copy = makeEntry({ path: 'sources/jira/phx.md', properties });
+      expect(uncachedRefs('PHX-421', [copy], PHX)).toEqual([]);
+    }
+    // Path case is identity: another page has no copy yet.
+    expect(uncachedRefs('See https://wiki.test/x/rollback.', [legacy]).map((r) => r.id)).toEqual([
+      'https://wiki.test/x/rollback',
+    ]);
+  });
+
+  it('a copy outside sources/ or of another kind does not count', () => {
+    const url = 'https://wiki.test/x/Rollback';
+    const entries = [
+      // A note that names the page is not a copy of it.
+      makeEntry({ path: 'records/x.md', properties: { source_id: url, source_kind: 'web' } }),
+      // Nor is a copy that says it is of an issue.
+      makeEntry({
+        path: 'sources/issues/odd.md',
+        properties: { source_id: url, source_kind: 'issue' },
+      }),
+    ];
+    expect(uncachedRefs(`See ${url}.`, entries).map((r) => r.id)).toEqual([url]);
   });
 });
 
@@ -306,7 +374,7 @@ describe('sourceFreshness (M34.5.2)', () => {
         TODAY,
       ),
     ).toEqual({ state: 'stale', staleAfter: '2026-08-01', fetchedAt: '2026-07-20T10:00:00Z' });
-    // The boundary matches the refresh lane: due ON the date, not after it.
+    // Due ON the date, not after it.
     expect(sourceFreshness(cached({ stale_after: TODAY }), TODAY)?.state).toBe('stale');
   });
 

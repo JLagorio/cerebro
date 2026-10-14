@@ -597,14 +597,6 @@ fn write_concept_in_run_with(
     Ok(())
 }
 
-/// Submit the enriched ops as one atomic commit set and interpret its
-/// outcome.
-///
-/// A concept write is all-or-nothing by nature: the Belief, its relation
-/// edits, and its new aliases describe one edit a person made in one file.
-/// Applying the Belief while a relation waited would leave the file saying
-/// something the graph does not.
-#[allow(clippy::too_many_arguments)] // each is a distinct fact of one write
 /// Which server-stamped door a routed write came through, and what the card
 /// a person may be asked about it should say — `write_concept`'s full
 /// replace and `recheck_concept`'s one-field stamp must never read alike.
@@ -613,7 +605,17 @@ struct Door<'a> {
     reason: String,
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Submit the enriched ops as one atomic commit set and interpret its
+/// outcome.
+///
+/// A concept write is all-or-nothing by nature: the Belief, its relation
+/// edits, and its new aliases describe one edit a person made in one file.
+/// Applying the Belief while a relation waited would leave the file saying
+/// something the graph does not.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct fact of one write"
+)]
 fn route(
     writer: &mut LedgerWriter,
     vault: &Path,
@@ -2341,6 +2343,7 @@ mod tests {
             crate::runtime::dispatch::begin_attended(
                 conn,
                 "99999999999999999999999999999999",
+                None,
                 None,
                 None,
                 None,

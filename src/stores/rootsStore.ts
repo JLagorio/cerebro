@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import * as groups from '@/engine/editorGroups';
 import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
-import type { DirEntry, MountRefusal, Root } from '@/engine/roots';
+import type { GitRemoteStatus } from '@/engine/git';
+import type { DirEntry, MountRefusal, Root, RootGitRefusal, RootSyncOutcome } from '@/engine/roots';
+import { DIVERGED_MESSAGE, isRootGitRefusal, syncLanded } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
+import { useUiStore } from './uiStore';
 
 export type { EditorGroup, Layout, OpenTab };
 export { sameTab, tabKey } from '@/engine/editorGroups';
@@ -18,8 +21,41 @@ interface RootsState {
   children: Record<string, DirEntry[]>;
   /** Editor groups, left to right. See engine/editorGroups.ts. */
   layout: Layout;
+  /** rootId → its git status, once loaded. */
+  gitStatus: Record<string, GitRemoteStatus>;
+  /**
+   * rootId → the typed refusal its last git read returned.
+   *
+   * Refusals are VALUES here, not errors: `no_git_capability` is the ordinary
+   * answer for a mounted folder that is not a repository, and toasting it
+   * would be an error message on every non-repo root at startup. This is the
+   * proposal-channel exemption AGENTS.md carves out, same as `mount`.
+   */
+  gitRefusals: Record<string, RootGitRefusal>;
+  /** rootId → how many files are dirty, once loaded. */
+  gitDirty: Record<string, number>;
+  /**
+   * rootId → what its last sync ended in, refusals included, once one has run.
+   *
+   * Kept apart from `gitRefusals`, which holds what a READ said: a sync's
+   * answer is about the remote, and the row renders it on the sync control
+   * (`syncNotice`) instead of as a toast.
+   */
+  gitSync: Record<string, RootSyncOutcome>;
 
   loadRoots(): Promise<void>;
+  /** Read one root's git status. Never throws; refusals are stored, not thrown. */
+  loadGitStatus(rootId: string): Promise<void>;
+  /**
+   * Fetch, then fast-forward only when that is unambiguously safe.
+   *
+   * The outcome is a value to RENDER, never a toast: it lands in `gitSync`,
+   * where the row reads it (`auth_error` with the credential hint, a diverged
+   * root with the divergence message, `parent_repo` as the quiet nested
+   * state), and is returned as well. Only a transport failure toasts, and it
+   * resolves to null.
+   */
+  syncRoot(rootId: string): Promise<RootSyncOutcome | null>;
   /** Resolves to the refusal to be RENDERED, or null on success. Never throws. */
   mount(path: string): Promise<MountRefusal | null>;
   unmount(rootId: string): Promise<void>;
@@ -71,7 +107,16 @@ export const selectActiveTab = (s: RootsState): OpenTab | null => groups.activeT
  */
 export const initialRootsState = (): Pick<
   RootsState,
-  'roots' | 'expanded' | 'children' | 'layout' | 'revealSeq' | 'revealing'
+  | 'roots'
+  | 'expanded'
+  | 'children'
+  | 'layout'
+  | 'revealSeq'
+  | 'revealing'
+  | 'gitStatus'
+  | 'gitRefusals'
+  | 'gitDirty'
+  | 'gitSync'
 > => ({
   roots: [],
   expanded: {},
@@ -79,6 +124,10 @@ export const initialRootsState = (): Pick<
   layout: groups.emptyLayout(),
   revealSeq: 0,
   revealing: null,
+  gitStatus: {},
+  gitRefusals: {},
+  gitDirty: {},
+  gitSync: {},
 });
 
 export const useRootsStore = create<RootsState>((set, get) => ({
@@ -86,6 +135,39 @@ export const useRootsStore = create<RootsState>((set, get) => ({
 
   async loadRoots() {
     set({ roots: await ipc.listRoots() });
+  },
+
+  /**
+   * A refusal is stored and rendered; only a TRANSPORT failure (invoke itself
+   * rejecting with something that is not a refusal) follows the human-UI
+   * rule of catch/toast/null. Mixing those two up in either direction is a
+   * review-blocking defect per AGENTS.md.
+   */
+  async loadGitStatus(rootId) {
+    let result: GitRemoteStatus | RootGitRefusal;
+    try {
+      result = await ipc.rootGitRemoteStatus(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not read git status: ${String(err)}`);
+      return;
+    }
+    if (isRootGitRefusal(result)) {
+      const { [rootId]: _drop, ...status } = get().gitStatus;
+      set({ gitStatus: status, gitRefusals: { ...get().gitRefusals, [rootId]: result } });
+      return;
+    }
+    // Success clears any stale refusal: capability is re-probed live on the
+    // Rust side, so a folder that became a repo must stop rendering
+    // yesterday's answer.
+    const { [rootId]: _stale, ...refusals } = get().gitRefusals;
+    set({ gitStatus: { ...get().gitStatus, [rootId]: result }, gitRefusals: refusals });
+
+    // The dirty count is a second read; a refusal here is not worth
+    // overwriting a status we already have, so it only ever adds a count.
+    const dirty = await ipc.rootGitModifiedFiles(rootId).catch(() => null);
+    if (dirty !== null && !isRootGitRefusal(dirty)) {
+      set({ gitDirty: { ...get().gitDirty, [rootId]: dirty.length } });
+    }
   },
 
   /**
@@ -139,6 +221,59 @@ export const useRootsStore = create<RootsState>((set, get) => ({
       if (get().expanded[nodeKey(rootId, dir)] !== true) await get().toggle(rootId, dir);
     }
     set({ revealSeq: get().revealSeq + 1, revealing: { rootId, path } });
+  },
+
+  /**
+   * fetch → refresh status → pull only when behind and NOT ahead.
+   *
+   * The ahead check is the whole safety argument: a root that is both ahead
+   * and behind has diverged, and Cerebro must never try to reconcile a
+   * repository it does not own. `--ff-only` would refuse anyway; not asking
+   * is better than being refused, and the row still gets the answer it would
+   * have given.
+   */
+  async syncRoot(rootId) {
+    // Every exit replaces the last sync's answer: an "auth failed" must not
+    // outlive the sync that fixed it, and a transport failure (toasted
+    // instead) leaves no typed answer at all.
+    const settle = (outcome: RootSyncOutcome | null): RootSyncOutcome | null => {
+      const { [rootId]: _last, ...others } = get().gitSync;
+      set({ gitSync: outcome === null ? others : { ...others, [rootId]: outcome } });
+      return outcome;
+    };
+
+    let fetched: RootSyncOutcome;
+    try {
+      fetched = await ipc.rootGitFetch(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not sync: ${String(err)}`);
+      return settle(null);
+    }
+    // A refusal, no remote, or a fetch that failed: there is nothing fresh to
+    // fast-forward to, so the fetch's answer is the sync's.
+    if (!syncLanded(fetched)) return settle(fetched);
+
+    await get().loadGitStatus(rootId);
+    const status = get().gitStatus[rootId];
+    if (status === undefined || status.behind === 0) return settle(fetched);
+    if (status.ahead > 0) {
+      return settle({
+        status: 'rejected',
+        message: DIVERGED_MESSAGE,
+        updatedFiles: [],
+        conflictFiles: [],
+      });
+    }
+
+    let pulled: RootSyncOutcome;
+    try {
+      pulled = await ipc.rootGitPullFf(rootId);
+    } catch (err) {
+      useUiStore.getState().toast(`Could not sync: ${String(err)}`);
+      return settle(null);
+    }
+    if (!isRootGitRefusal(pulled)) await get().loadGitStatus(rootId);
+    return settle(pulled);
   },
 
   openFile(rootId, path, groupId) {

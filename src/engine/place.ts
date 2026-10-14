@@ -224,22 +224,36 @@ export function placeLabel(
  * written there — including by an older build with a Selection shape this one
  * no longer has. Anything that does not narrow to a place this build can key
  * and label is dropped to null, which reads as "not anchored" and renders as
- * nothing. Structural, not exhaustive: it checks the fields `placeKey` and
- * `placeLabel` actually read.
+ * nothing.
+ *
+ * Exhaustive over kinds, structural over fields (M53.14). Every Selection kind
+ * has a case, so a kind added to the union does not compile here until it is
+ * handled — `mywork` and `workspace` never got one, and a thread anchored on
+ * My work or Work lost its anchor on every reload. Within a kind it checks
+ * only the fields `placeKey` and `placeLabel` actually read.
  */
 export function isPlace(raw: unknown): raw is Place {
   if (typeof raw !== 'object' || raw === null) return false;
   const p = raw as Record<string, unknown>;
-  // 'docs' is deliberately not among the bare kinds (M38.3): the surface is
-  // gone, so a thread persisted against it fails the guard and loses its
-  // anchor rather than round-tripping into a selection nothing can render.
-  switch (p.kind) {
+  // The cast is for the type checker only, to make the switch exhaustive. At
+  // runtime `kind` is still whatever storage held.
+  const kind = p.kind as Selection['kind'];
+  // A retired kind has no case, and the compiler refuses one (TS2678): `docs`
+  // (M38.3) and `review` (M33.3, which this guard kept accepting until
+  // M53.14). A thread persisted against a surface that is gone fails the
+  // guard and loses its anchor rather than round-tripping into a selection
+  // nothing can render.
+  switch (kind) {
+    // Keyed and labelled by the kind alone. `placeOf` strips library's
+    // tab/path and workspace's root/path, and `placeKey`/`placeLabel` read
+    // no other field of these kinds.
     case 'home':
     case 'inbox':
+    case 'mywork':
     case 'changes':
     case 'pulse':
-    case 'review':
     case 'library':
+    case 'workspace':
     case 'settings':
       return true;
     case 'knowledge': {
@@ -265,7 +279,13 @@ export function isPlace(raw: unknown): raw is Place {
       );
     case 'type':
       return typeof p.name === 'string';
-    default:
+    default: {
+      // The M16.4 guard, but returning false. `never` only to the compiler:
+      // at runtime `unhandled` is whatever storage held (`'review'`, say), so
+      // returning it would accept every truthy kind this build cannot render.
+      const unhandled: never = kind;
+      void unhandled;
       return false;
+    }
   }
 }

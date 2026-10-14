@@ -220,7 +220,7 @@ pub enum Fact {
 }
 
 macro_rules! binary_result {
-    ($name:ident, $yes:ident => $yes_str:literal, $no:ident => $no_str:literal) => {
+    ($name:ident, $yes:ident, $no:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum $name {
@@ -231,22 +231,15 @@ macro_rules! binary_result {
             fn is_yes(self) -> bool {
                 matches!(self, $name::$yes)
             }
-            #[allow(dead_code)]
-            pub fn as_str(self) -> &'static str {
-                match self {
-                    $name::$yes => $yes_str,
-                    $name::$no => $no_str,
-                }
-            }
         }
     };
 }
 
-binary_result!(ConnectionResult, Connected => "connected", Disconnected => "disconnected");
-binary_result!(HealthResult, Healthy => "healthy", Unhealthy => "unhealthy");
-binary_result!(KnownResult, Known => "known", Unknown => "unknown");
-binary_result!(AccessResult, Accessible => "accessible", Denied => "denied");
-binary_result!(CurrentResult, Current => "current", Stale => "stale");
+binary_result!(ConnectionResult, Connected, Disconnected);
+binary_result!(HealthResult, Healthy, Unhealthy);
+binary_result!(KnownResult, Known, Unknown);
+binary_result!(AccessResult, Accessible, Denied);
+binary_result!(CurrentResult, Current, Stale);
 
 impl Fact {
     /// The one dimension this variant establishes. One-to-one, in the order

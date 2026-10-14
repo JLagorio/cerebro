@@ -201,4 +201,25 @@ describe('navStore', () => {
     forward(); // at the tip — no-op
     expect(useNavStore.getState().historyIndex).toBe(1);
   });
+
+  it('a replace writes over the current slot, so Back skips the forwarder (M55.12)', () => {
+    const a: Selection = { kind: 'agents' };
+    const b: Selection = { kind: 'agents', actor: 'process:release-scout' };
+    const c: Selection = { kind: 'doc', path: 'records/agents/release-scout.md' };
+    useNavStore.setState({ selection: a, history: [a], historyIndex: 0 });
+    useUiStore.setState({ detailPath: 'records/risks/x.md' });
+    const { navigate, back } = useNavStore.getState();
+    navigate(b);
+    navigate(c, { replace: true });
+    let s = useNavStore.getState();
+    expect(s.history).toEqual([a, c]);
+    expect(s.historyIndex).toBe(1);
+    expect(s.selection).toEqual(c);
+    // It is still a surface change: what belonged to the last surface goes.
+    expect(useUiStore.getState().detailPath).toBeNull();
+    back();
+    s = useNavStore.getState();
+    expect(s.selection).toEqual(a);
+    expect(s.historyIndex).toBe(0);
+  });
 });

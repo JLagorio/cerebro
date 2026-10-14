@@ -3,15 +3,19 @@ import { diffEntries } from './events';
 import { describeTrigger, fires, firstMatch, parseTriggers } from './triggers';
 import { makeEntry } from './testHelpers';
 
-const risk = (over: Parameters<typeof makeEntry>[0] = { path: 'records/risks/a.md' }) =>
-  makeEntry({
+// Each version has new bytes, so its hash moves with its stamp (M55.2).
+const risk = (over: Parameters<typeof makeEntry>[0] = { path: 'records/risks/a.md' }) => {
+  const modifiedAt = over.modifiedAt ?? '2026-08-01T09:00:00Z';
+  return makeEntry({
     path: 'records/risks/a.md',
     title: 'A risk',
     type: 'Risk',
     properties: { status: 'open' },
-    modifiedAt: '2026-08-01T09:00:00Z',
+    modifiedAt,
+    hash: `h:${modifiedAt}`,
     ...over,
   });
+};
 
 describe('diffEntries', () => {
   it('reports nothing at all on the first scan of a session', () => {

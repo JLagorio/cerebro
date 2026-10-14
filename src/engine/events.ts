@@ -41,6 +41,18 @@ export type VaultEvent =
       fields: string[];
     };
 
+/**
+ * ## A change is new bytes (M55.2)
+ *
+ * `changed` fires when the content changed, never because a timestamp moved:
+ * both versions' hashes are known and they differ. A touch, an identical
+ * re-save or a checkout of the same bytes fires nothing, and a rewrite within
+ * the same second still fires. A version whose hash is not known yet (an
+ * optimistic edit the write has not answered, or a file that could not be
+ * read) is not compared at all; `observeScan` holds the last known version
+ * until its bytes are, so the event fires once, against that version.
+ */
+
 /** Compare two property bags by their rendered value — enough to answer
  * "did status change", without depending on YAML round-trip fidelity. */
 function changedFields(before: Entry, after: Entry): string[] {
@@ -98,7 +110,7 @@ export function diffEntries(before: Entry[] | null, after: Entry[]): VaultEvent[
       );
       continue;
     }
-    if (previous.modifiedAt === entry.modifiedAt) continue;
+    if (previous.hash === null || entry.hash === null || previous.hash === entry.hash) continue;
     events.push({
       kind: 'changed',
       path: entry.path,
@@ -128,6 +140,12 @@ export interface ScanBaseline {
  * included — see the module comment. An empty corpus never becomes the
  * baseline: the store's pre-scan `[]` and an empty scan look the same, and
  * an empty `before` reads every note in the next scan as created.
+ *
+ * An entry whose hash is not known is not a version to compare against
+ * (M55.2): where the baseline already held that path, it keeps the entry it
+ * held, so the bytes that land later are diffed against the last version
+ * that was known. A path seen for the first time keeps its entry, or the
+ * next scan would announce it as created twice.
  */
 export function observeScan(
   baseline: ScanBaseline | null,
@@ -136,5 +154,11 @@ export function observeScan(
 ): { baseline: ScanBaseline; events: VaultEvent[] } {
   const before = baseline !== null && baseline.vault === vault ? baseline.entries : null;
   if (entries.length === 0) return { baseline: { vault, entries: before }, events: [] };
-  return { baseline: { vault, entries }, events: diffEntries(before, entries) };
+  const events = diffEntries(before, entries);
+  if (before === null || entries.every((e) => e.hash !== null)) {
+    return { baseline: { vault, entries }, events };
+  }
+  const held = new Map(before.map((e) => [e.path, e]));
+  const kept = entries.map((e) => (e.hash === null ? (held.get(e.path) ?? e) : e));
+  return { baseline: { vault, entries: kept }, events };
 }

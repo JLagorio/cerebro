@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 vi.mock('./agentIpc', () => ({ stopAgent: vi.fn(async () => true) }));
 
@@ -7,8 +7,10 @@ import * as agentIpc from './agentIpc';
 import { RunList } from './RunList';
 import type { RunRecord } from './runs';
 import { useNavStore } from '@/stores/navStore';
+import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
-import { appendRunLog, describeRun, writtenPath } from '@/engine/runLog';
+import { describeRun, writtenPath, type RunLogEntry } from '@/engine/runLog';
+import TOOL_CASES from '../../src-tauri/fixtures/tool-cases.json';
 
 afterEach(cleanup);
 
@@ -36,6 +38,7 @@ describe('RunList', () => {
     vi.mocked(agentIpc.stopAgent).mockClear();
     useUiStore.setState({ runs: [], aiPanelOpen: false });
     useNavStore.setState({ selection: { kind: 'home' } });
+    useRunLogStore.getState().clear();
   });
 
   it('draws nothing at all when nothing is running', () => {
@@ -75,7 +78,7 @@ describe('RunList', () => {
 
   it('cannot stop a task whose child does not exist yet', () => {
     // A task exists from the moment Send is pressed; the child does not exist
-    // until the MCP handshake is done. Offering Stop in that window would
+    // until `run_agent` has spawned it. Offering Stop in that window would
     // leave a run the list believes it stopped.
     useUiStore.setState({ runs: [run({ run: null })] });
     render(<RunList />);
@@ -113,14 +116,41 @@ describe('RunList', () => {
 
 describe('the run log (M17.15)', () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    // The store holds the log for the session, so storage alone is not a
+    // reset: clear() empties both.
+    useRunLogStore.getState().clear();
     useUiStore.setState({ runs: [] });
+  });
+
+  const entry = (over: Partial<RunLogEntry> = {}): RunLogEntry => ({
+    id: 'r-0',
+    at: '2026-08-03T10:00:00Z',
+    owner: 'job',
+    label: 'Release scout',
+    source: 'records/agents/scout.md',
+    trigger: 'schedule',
+    scope: null,
+    files: [],
+    status: 'ok',
+    ...over,
+  });
+
+  it('shows a run logged while it is open, without being reopened (M53.20)', () => {
+    // It used to read storage once, as it opened, so a run that finished
+    // under an open list stayed invisible until the next open.
+    useUiStore.setState({ runs: [run()] });
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+    expect(screen.queryByTestId('run-log-row')).toBeNull();
+
+    act(() => useRunLogStore.getState().append(entry({ files: ['records/risks/a.md'] })));
+    expect(screen.getByTestId('run-log-row').textContent).toContain('Wrote records/risks/a.md');
   });
 
   it('shows what it did after there is nothing left running', () => {
     // The gap this closes: an unattended agent could write into the vault for
     // a month and leave no record that it had run at all.
-    appendRunLog({
+    useRunLogStore.getState().append({
       id: 'r-1',
       at: '2026-08-03T10:00:00Z',
       owner: 'job',
@@ -142,7 +172,7 @@ describe('the run log (M17.15)', () => {
     // M33.7 — the two run logs finally name the same run. Before this the
     // device-local log was keyed by a process tag that restarts at zero every
     // launch, so it could not address a database row at all.
-    appendRunLog({
+    useRunLogStore.getState().append({
       id: 'r-2',
       at: '2026-08-03T10:00:00Z',
       owner: 'job',
@@ -170,7 +200,7 @@ describe('the run log (M17.15)', () => {
   it('an entry from before the ids met is labelled device-only, and is not a link', () => {
     // Not broken — a run from before M33.7, or one that happened where no
     // runtime database exists. A link here would land nowhere.
-    appendRunLog({
+    useRunLogStore.getState().append({
       id: 'r-3',
       at: '2026-08-03T10:00:00Z',
       owner: 'job',
@@ -260,4 +290,14 @@ describe('writtenPath', () => {
     expect(writtenPath('update_frontmatter', 'not json')).toBeNull();
     expect(writtenPath('update_frontmatter', null)).toBeNull();
   });
+
+  // The path is the manifest's target argument (M54.2), and these cases are
+  // the ones Rust replays for its scope targets, so the log and the server
+  // read one description of where a call is aimed.
+  it.each(TOOL_CASES.cases.map((c) => [c.tool, c.args, c.written_path] as const))(
+    'replays shared case %# for %s',
+    (tool, args, path) => {
+      expect(writtenPath(tool, JSON.stringify(args))).toBe(path);
+    },
+  );
 });

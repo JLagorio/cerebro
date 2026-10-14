@@ -325,3 +325,58 @@ describe('layout editor signal', () => {
     expect(useUiStore.getState().layoutEditor).toEqual({ type: 'Meeting' });
   });
 });
+
+/**
+ * M53.27: a run the budget gate deferred gives back the record its claim
+ * made, in memory and in the localStorage mirror the next launch starts from.
+ */
+describe('forgetJobRecord', () => {
+  const stored = (key: string): unknown =>
+    JSON.parse(window.localStorage.getItem(key) ?? 'null') as unknown;
+
+  beforeEach(() => {
+    window.localStorage.removeItem('cerebro.learnAttempts');
+    window.localStorage.removeItem('cerebro.skillRuns');
+    useUiStore.setState({ learnAttempts: {}, skillRuns: {} });
+  });
+
+  it('forgets an attempt that still holds the run key, and its mirror', () => {
+    const ui = useUiStore.getState();
+    ui.recordLearnAttempt('knowledge/a.md', 'stale:2026-07-01');
+    ui.recordLearnAttempt('knowledge/b.md', 'stale:2026-07-02');
+    ui.forgetJobRecord('/vault', 'attempts', 'knowledge/a.md', 'stale:2026-07-01');
+    const left = { 'knowledge/b.md': 'stale:2026-07-02' };
+    expect(useUiStore.getState().learnAttempts).toEqual(left);
+    expect(stored('cerebro.learnAttempts')).toEqual(left);
+  });
+
+  it('forgets a fire in the vault it names, and its mirror, never the same fire elsewhere', () => {
+    const ui = useUiStore.getState();
+    ui.recordSkillRun('/vault', 'records/skills/digest.md', '2026-07-31 09:00');
+    ui.recordSkillRun('/other', 'records/skills/digest.md', '2026-07-31 09:00');
+    ui.forgetJobRecord('/vault', 'skillRuns', 'records/skills/digest.md', '2026-07-31 09:00');
+    const left = { '/vault': {}, '/other': { 'records/skills/digest.md': '2026-07-31 09:00' } };
+    expect(useUiStore.getState().skillRuns).toEqual(left);
+    expect(stored('cerebro.skillRuns')).toEqual(left);
+  });
+
+  it('keeps a record that holds a different run key', () => {
+    // Re-recorded since the deferred claim, so no longer that run's to give
+    // back.
+    const ui = useUiStore.getState();
+    ui.recordLearnAttempt('knowledge/a.md', 'stale:2026-08-01');
+    ui.recordSkillRun('/vault', 'records/skills/digest.md', '2026-08-01 09:00');
+    const before = useUiStore.getState();
+    ui.forgetJobRecord('/vault', 'attempts', 'knowledge/a.md', 'stale:2026-07-01');
+    ui.forgetJobRecord('/vault', 'skillRuns', 'records/skills/digest.md', '2026-07-31 09:00');
+    // Nor a slot in a vault that never recorded it.
+    ui.forgetJobRecord('/other', 'skillRuns', 'records/skills/digest.md', '2026-08-01 09:00');
+    // The same objects: no new state, so nothing re-renders.
+    expect(useUiStore.getState().learnAttempts).toBe(before.learnAttempts);
+    expect(useUiStore.getState().skillRuns).toBe(before.skillRuns);
+    expect(stored('cerebro.learnAttempts')).toEqual({ 'knowledge/a.md': 'stale:2026-08-01' });
+    expect(stored('cerebro.skillRuns')).toEqual({
+      '/vault': { 'records/skills/digest.md': '2026-08-01 09:00' },
+    });
+  });
+});

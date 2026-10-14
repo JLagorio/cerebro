@@ -9,8 +9,11 @@ already installed on your machine, so no API key ever goes into the app.
 
 ### Download a build
 
-Every push builds a Mac app. Open the repository's **Actions** tab, pick the
-most recent **Mac app** run for your branch, and download the `Cerebro-macOS`
+Every push to `main` and every `v*` tag builds a Mac app (a tag also publishes
+it as a GitHub release). A push to any other branch runs only the checks; to
+build that branch, run `gh workflow run mac-app.yml --ref <branch>`. Open the
+repository's **Actions** tab, pick the most recent successful **CI & Mac app**
+run on `main` (or the run you dispatched), and download the `Cerebro-macOS`
 artifact. Unzip it, open `Cerebro.dmg`, and drag Cerebro to Applications. (The
 artifact also holds `Cerebro.zip` — the same app, if you would rather unzip it
 than mount a disk image.)
@@ -46,8 +49,11 @@ build without touching `/Applications`, or `--universal` to build something
 that runs on both Apple Silicon and Intel.
 
 You need Xcode command line tools (`xcode-select --install`),
-[Rust](https://rustup.rs), and Node 20+ with pnpm (`corepack enable`). The
-script names anything that is missing instead of failing partway through.
+[Rust](https://rustup.rs), [Node](https://nodejs.org) and pnpm, at the versions
+the repo pins. `rust-toolchain.toml` names the Rust (rustup reads it on its
+own); `engines` and `packageManager` in `package.json` name the Node major and
+the pnpm release (`npm install -g pnpm@<that release>`). The script names
+anything that is missing instead of failing partway through.
 
 ## First run
 

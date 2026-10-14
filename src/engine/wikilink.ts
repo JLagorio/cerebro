@@ -1,3 +1,4 @@
+import { slugify } from '@/lib/slug';
 import type { Entry } from './types';
 
 /**
@@ -6,7 +7,8 @@ import type { Entry } from './types';
  * `wikilinkTargets` in src/lib/mockParse.ts and `wikilink_targets` in
  * src-tauri/src/vault/parse.rs: the target is the text before the first
  * `|`, trimmed; empty targets and targets containing brackets are
- * rejected. (mockParse stays self-contained by design — do not merge.)
+ * rejected. The two TS scanners stay separate — do not merge them; the scan
+ * golden in conformance/scan holds both to parse.rs.
  */
 function extractTargets(text: string): string[] {
   const out: string[] = [];
@@ -46,6 +48,12 @@ export function formatWikilink(target: string): string {
   return `[[${target}]]`;
 }
 
+/** An entry's filename stem as a link matches it: the filename minus a
+ * trailing `.md` (any case), lowercased. */
+function stemOf(entry: Entry): string {
+  return entry.filename.replace(/\.md$/i, '').toLowerCase();
+}
+
 /**
  * Filename-stem match first, then project folder, then exact title; all
  * case-insensitive (Tolaria rule).
@@ -59,8 +67,7 @@ export function resolveTarget(target: string, entries: Entry[]): Entry | null {
   const needle = target.trim().toLowerCase();
   if (needle === '') return null;
   for (const entry of entries) {
-    const stem = entry.filename.replace(/\.md$/i, '').toLowerCase();
-    if (stem === needle) return entry;
+    if (stemOf(entry) === needle) return entry;
   }
   for (const entry of entries) {
     if (entry.filename.toLowerCase() !== 'project.md') continue;
@@ -71,4 +78,22 @@ export function resolveTarget(target: string, entries: Entry[]): Entry | null {
     if (entry.title.toLowerCase() === needle) return entry;
   }
   return null;
+}
+
+/**
+ * A stem for a new page called `title` that no link answers to yet (M55.7):
+ * `slugify(title)`, or `page` when nothing of the title survives, then `-2`,
+ * `-3`… until `resolveTarget` finds nothing by that name.
+ *
+ * Checked across the whole vault, not just the folder the page lands in.
+ * `resolveTarget`'s stem pass is vault-wide and first-wins, so a stem unique
+ * only in its own folder could point the new page's link at an older page.
+ * And because a stem match outranks a project folder and a title, a stem
+ * equal to either would take over every link that already reaches them.
+ */
+export function freshStem(title: string, entries: Entry[]): string {
+  const base = slugify(title) || 'page';
+  let stem = base;
+  for (let n = 2; resolveTarget(stem, entries) !== null; n += 1) stem = `${base}-${n}`;
+  return stem;
 }

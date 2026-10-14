@@ -40,11 +40,28 @@ export interface PulseFile {
   title: string;
 }
 
-export interface PulseCommit extends GitCommit {
+/** What one commit did inside the vault. */
+export interface PulseChanges {
   files: PulseFile[];
   added: number;
   modified: number;
   deleted: number;
+}
+
+export interface PulseCommit extends GitCommit {
+  /** `null` when the file list could not be read. Never an empty list: that
+   * would say the commit touched nothing, which nobody measured. */
+  changes: PulseChanges | null;
+}
+
+/**
+ * The vault's history (M53.15). `tracked: false` is a vault that is not a
+ * repository; `tracked: true` with no commits is one nobody has committed to
+ * yet. A log that failed is a rejected read, never either of these.
+ */
+export interface VaultPulse {
+  tracked: boolean;
+  commits: PulseCommit[];
 }
 
 export interface LastCommitInfo {

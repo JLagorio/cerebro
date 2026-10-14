@@ -20,9 +20,10 @@
     // this same repo, so leaving it visible makes Quick Open list every source
     // file twice — open the wrong one and you are silently editing a different
     // branch. It also hands the TS server a duplicate src/ plus its own
-    // tsconfigs. eslint.config.js, .prettierignore and .gitignore all already
-    // exclude .claude/; this is the editor saying the same thing.
-    ".claude": true,
+    // tsconfigs. Only the worktrees hide: .gitignore tracks .claude/skills
+    // (M53.23), which stays visible, while eslint.config.js, .prettierignore
+    // and vite.config.ts still skip all of .claude/.
+    ".claude/worktrees": true,
     "docs": false,
     "dist": true,
     "dist-mac": true,
@@ -38,7 +39,7 @@
   // the file watcher — demo-vault is the golden corpus, so grepping it
   // constantly buries real hits in fixture noise.
   "search.exclude": {
-    ".claude": true,
+    ".claude/worktrees": true,
     "docs": true,
     "dist": true,
     "dist-mac": true,
@@ -56,7 +57,7 @@
   // Watching the vendored tree and Rust's target/ dir costs file handles and
   // wakes the TS server for changes that can never affect the app.
   "files.watcherExclude": {
-    "**/.claude/**": true,
+    "**/.claude/worktrees/**": true,
     "**/docs/**": true,
     "**/dist/**": true,
     "**/dist-mac/**": true,

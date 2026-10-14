@@ -1247,3 +1247,60 @@ pub const SCHEMA_V18: &str = "
     ALTER TABLE runs ADD COLUMN counters_booked INTEGER NOT NULL DEFAULT 0
         CHECK (counters_booked IN (0, 1));
 ";
+
+/// M54.11 — the last status each connector was seen in, per vault.
+///
+/// One row per (vault, connector), keyed by the connector's name in the
+/// vault's list. `state` is what the newest observation concluded, `signal`
+/// what in its run's stream decided it, and `seen_at` and `run_id` when and
+/// which run. No row means not observed yet: no run has used the connector,
+/// or none said anything either way (an init that read `pending`, a server
+/// the stream never mentioned). A newer observation replaces an older one
+/// whatever order the runs finish in (`connector_status::record`).
+///
+/// Names, states, times and run ids only. No URL, header or token is ever
+/// stored here.
+///
+/// The signal CHECK also names `authenticate` and `server_error`, which CLI
+/// 2.1.250 does not emit in `-p` (recorded on toy servers: no
+/// `mcp__<server>__authenticate` tool, no server-error key in the result), so
+/// nothing writes them yet and a build that measures them needs no rebuild.
+pub const SCHEMA_V19: &str = "
+    CREATE TABLE connector_status (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        connector TEXT NOT NULL CHECK (length(connector) > 0),
+        state TEXT NOT NULL
+            CHECK (state IN ('working', 'needs_sign_in', 'failed', 'not_approved')),
+        signal TEXT NOT NULL
+            CHECK (signal IN ('init', 'tool_result', 'tool_errors', 'permission_denial',
+                              'authenticate', 'server_error')),
+        seen_at TEXT NOT NULL CHECK (seen_at LIKE '____-__-__T%Z'),
+        run_id TEXT NOT NULL CHECK (length(run_id) > 0),
+        PRIMARY KEY (vault_id, connector)
+    );
+";
+
+/// M56.7 — why a run started, and the Claude Code session it ran as.
+///
+/// `runs.cause` is a JSON object whose `kind` is one of the ten in
+/// `runtime::cause::WORDS`, in that order, at most 2048 characters. The kind
+/// test sits in `coalesce(…, 0)` because SQLite passes a CHECK that reads
+/// NULL, and an object with no `kind` would read exactly that. Written
+/// with the run row, by the runtime only: the claim, the attended open and
+/// the meter's fallback insert (`dispatch`). Nullable and never backfilled —
+/// a row from before this step holds NULL, read as "why not recorded".
+///
+/// `runs.cli_session_id` is the session id the CLI's stream reported, 8 to
+/// 64 characters of `[0-9A-Za-z-]` and never a leading `-`, so neither a path
+/// nor a flag fits. Written by the meter when a run finishes
+/// (`dispatch::record_cli_session`). Nullable and never backfilled too.
+pub const SCHEMA_V20: &str = "
+    ALTER TABLE runs ADD COLUMN cause TEXT CHECK (cause IS NULL OR (
+        json_valid(cause) AND json_type(cause) = 'object'
+        AND coalesce(json_extract(cause, '$.kind') IN ('schedule', 'event', 'assigned', 'handoff', 'manual', 'followup', 'attended', 'ingest', 'maintenance', 'assembly'), 0)
+        AND length(cause) <= 2048));
+    ALTER TABLE runs ADD COLUMN cli_session_id TEXT CHECK (cli_session_id IS NULL OR (
+        length(cli_session_id) BETWEEN 8 AND 64
+        AND NOT cli_session_id GLOB '*[^0-9A-Za-z-]*'
+        AND NOT cli_session_id GLOB '-*'));
+";

@@ -16,7 +16,7 @@ import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
-import { useNewRecord, useQuickAdd } from '@/views/QuickAdd';
+import { useCreateOnDay, useNewRecord, useQuickAdd } from '@/views/QuickAdd';
 import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
@@ -60,6 +60,9 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const scope = `type:${listing.name}`;
   // M9.6: the type screen could only list; now it can create.
   const quickAdd = useQuickAdd(listing.name, null);
+  // M53.16: a calendar day's "+", writing the date in the shape its field
+  // declares.
+  const createOnDay = useCreateOnDay(listing.name);
   // M12.8: the tab row's New button — creates untitled, opens the panel.
   const newRecord = useNewRecord(listing.name);
 
@@ -216,7 +219,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const onCreateOn =
     dateField === null
       ? undefined
-      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
+      : (title: string, day: string) => createOnDay(title, day, dateField);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="type-page">

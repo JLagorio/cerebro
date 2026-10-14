@@ -1,0 +1,54 @@
+name: Workflow scanners
+
+# Runs only when workflow files change. Scope is pinned to OUR .github —
+# docs/examples/ vendors entire third-party repos including their own
+# workflows, and a scanner that wanders in there fails on code we don't own
+# (the M15.19 coverage lesson, still paying rent).
+on:
+  pull_request:
+    paths: ['.github/**']
+  push:
+    branches: [main]
+    paths: ['.github/**']
+
+permissions:
+  contents: read
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # SARIF into code scanning
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # No `version:` input on purpose. The action resolves the zizmor binary
+      # to a sha256-pinned ghcr image via a version table baked into the
+      # action itself, so pinning the action by commit above already pins the
+      # binary — and an explicit version here would be a second pin that
+      # Dependabot cannot bump, i.e. the exact rot M32.3 exists to prevent.
+      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          inputs: .github/workflows/
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Downloaded rather than actioned, so the integrity story is the
+      # checksum: it is verified against rhysd's published checksums.txt for
+      # this exact version. Bumping the version means re-verifying the hash.
+      - name: actionlint (version- and checksum-pinned)
+        run: |
+          curl -sSLo actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+          tar xzf actionlint.tar.gz actionlint
+          ./actionlint -color .github/workflows/*.yml

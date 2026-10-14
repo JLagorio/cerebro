@@ -2,10 +2,11 @@ import type React from 'react';
 import { Icon } from '@/components/ui/Icon';
 
 /**
- * Form chrome for the library editors (M18).
+ * Form chrome for the library editors (M18) and an agent page's grant rows
+ * (M55.12).
  *
- * The three editors are the same document with different fields, so the labels,
- * help text and spacing live here once. Everything is a controlled input with an
+ * They are the same document with different fields, so the labels, help text
+ * and spacing live here once. Everything is a controlled input with an
  * explicit `<label>` — the old surface was a property table where the field name
  * and its meaning were the same three words, and these need a sentence.
  */

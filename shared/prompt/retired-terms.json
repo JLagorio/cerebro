@@ -1,0 +1,4 @@
+{
+  "why": "Words for the model cerebro retired: project folders holding project.md, the collection.yml and *.list.yml files a Collection and its Lists used to be (M47 made a Collection its folder's own note), the Types screen (a database opens as its own page), and work items as a built-in kind (a vault's types are its own). None may appear in what the model or a new user reads: the product brief, the server instructions, a prompt, the mock's overview reply, the tool manifest, get_vault_context or the welcome screen. Each term matches as a case-insensitive substring (src/lib/productBrief.test.ts, src/App.test.tsx, src-tauri/src/mcp.rs). A term that retires joins the list; copy that trips on one is reworded, and the list is never weakened to let it pass.",
+  "terms": ["project.md", "collection.yml", ".list.yml", "Types screen", "work item"]
+}

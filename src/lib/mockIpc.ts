@@ -5,11 +5,14 @@
 // "disk" state. 'vault-changed' has no equivalent here: startWatcher is a
 // no-op and writers trigger rescans directly (see vaultStore).
 import YAML, { type Document } from 'yaml';
-import { isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
+import type { ConnectorStatusRow } from '@/engine/connectors';
+import { diskFolded, hfsHeard, isKnowledgePath, KNOWLEDGE_DIR } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { normalizeAliasV1 } from './epistemic/normalize';
 import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
-import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
+import { humanize, splitFrontmatter } from '@/engine/frontmatter';
+import { planEdits, type QuoteEdit } from '@/engine/quote';
+import { firstH1LineIndex, parseNote } from './mockParse';
 import { sha256Hex } from './sha256';
 import {
   AMBIENT_CONCURRENCY_DEFAULT,
@@ -96,6 +99,8 @@ export function resetOperational(): void {
   fleetDetails = demoFleetDetails();
   runWrites = demoRunWrites();
   fleetAvailable = true;
+  connectorStatusRows = [];
+  connectorStatusFails = false;
   resetAgentPauses();
 }
 
@@ -175,19 +180,31 @@ export async function getLastVault(): Promise<string | null> {
 }
 
 /**
+ * Parity with scan.rs `is_hidden`: a dotfile or a dot-folder, Obsidian-style,
+ * heard as HFS+ hears the name — its first character HFS+ does not ignore is
+ * `.`, so `\u200c.claude` IS `.claude`. scanVault hides it, and the note
+ * writers refuse it (`noteRefusal`).
+ */
+const isHidden = (name: string): boolean => hfsHeard(name).startsWith('.');
+
+/**
  * Parity with scan.rs `is_skipped_dir`: a folder the scan never descends
- * into — a dot-folder, or exactly `views` or `attachments`, at any depth (v2
+ * into — a hidden one, or exactly `views` or `attachments`, at any depth (v2
  * project folders carry their own views/). The note writers ask it too.
  */
 const isSkippedDir = (name: string): boolean =>
-  name.startsWith('.') || name === 'views' || name === 'attachments';
+  isHidden(name) || name === 'views' || name === 'attachments';
 
 export async function scanVault(_vault: string): Promise<Entry[]> {
   const paths = [...files.keys()]
-    .filter(
-      (p) =>
-        (p.endsWith('.md') || p.endsWith('.mmd')) && !p.split('/').slice(0, -1).some(isSkippedDir),
-    )
+    .filter((p) => {
+      const names = p.split('/');
+      return (
+        (p.endsWith('.md') || p.endsWith('.mmd')) &&
+        !isHidden(names.at(-1) ?? '') &&
+        !names.slice(0, -1).some(isSkippedDir)
+      );
+    })
     .sort();
   const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
@@ -221,31 +238,20 @@ const MARKDOWN = ['md'];
 /** `save_note`'s set: diagrams save raw through the same door (M29.20). */
 const MARKDOWN_OR_DIAGRAM = ['md', 'mmd'];
 
-/** Code points HFS+ ignores in a name, which write.rs `disk_folded` drops. */
-const HFS_IGNORABLE = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
-
-/**
- * Mirror of write.rs `disk_folded`: `name` as a disk that folds names may
- * hear it — Unicode case folded (APFS hears U+212A KELVIN SIGN as `k`), with
- * the HFS+ ignorables dropped.
- */
-const diskFolded = (name: string): string =>
-  name.replace(HFS_IGNORABLE, '').toUpperCase().toLowerCase();
-
 /**
  * Mirror of `note_refusal` in write.rs (PLATFORM-API-1): why `path` is not a
- * note a note writer may touch, or null when it is. No component may start
- * with `.` — not `.git/`, `.cerebro/`, `.claude/`, any dot-folder or dotfile;
- * the extension must be one the door takes, spelled as the scanner spells
- * it; and a markdown note may not sit in a folder the scanner skips, asked
- * with scanVault's own `isSkippedDir` — exactly `views/` and `attachments/`,
- * so `Attachments/` and `Views/`, which it lists, save. A `.mmd` may, for the
+ * note a note writer may touch, or null when it is. No component may be
+ * hidden (scanVault's own `isHidden`) — not `.git/`, `.cerebro/`, `.claude/`,
+ * any dot-folder or dotfile, which scanVault hides; the extension must be one
+ * the door takes, spelled as the scanner spells it; and a markdown note may
+ * not sit in a folder the scanner skips, asked with scanVault's own
+ * `isSkippedDir` — past the dot rule, exactly `views/` and `attachments/`, so
+ * `Attachments/` and `Views/`, which it lists, save. A `.mmd` may, for the
  * legacy-List whiteboards write.rs names.
  */
 function noteRefusal(path: string, extensions: readonly string[]): string | null {
   const names = path.split('/').filter((name) => name !== '' && name !== '.');
-  // As HFS+ hears the name (write.rs `disk_folded`): `\u200c.claude` IS `.claude` there.
-  if (names.some((name) => name.replace(HFS_IGNORABLE, '').startsWith('.'))) {
+  if (names.some(isHidden)) {
     return 'dot-folders and dotfiles hold no notes';
   }
   const leaf = names.at(-1) ?? '';
@@ -263,12 +269,14 @@ function noteRefusal(path: string, extensions: readonly string[]): string | null
 /**
  * Mirror of `note_join` in write.rs: contained (as `safe_join` judges, and
  * first), AND a note, AND not the bundle under another name — a first
- * component a folding disk hears as `knowledge` (U+212A KELVIN SIGN +
- * `nowledge`) that the bundle's guards, which fold ASCII only, do not read.
- * Rust also judges where a path LANDS — through a symlink, under a name APFS
- * folds, inside the folder `knowledge/` resolves to — and that half has
- * nothing to mirror here: this disk is a Map, and a key only ever lands on
- * itself. Both backends replay src-tauri/fixtures/note-targets.json.
+ * component a folding disk hears as `knowledge` (`Knowledge`, U+212A KELVIN
+ * SIGN + `nowledge`) that is not exactly `knowledge` (M53.28). The bundle's
+ * guards hear those names as the bundle too; this refuses them without
+ * leaning on the guards, so a note door reaches the bundle by its own name or
+ * not at all. Rust also judges where a path LANDS — through a symlink, under
+ * a name APFS folds, inside the folder `knowledge/` resolves to — and that
+ * half has nothing to mirror here: this disk is a Map, and a key only ever
+ * lands on itself. Both backends replay src-tauri/fixtures/note-targets.json.
  */
 function guardNoteTarget(path: string, extensions: readonly string[]): void {
   if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
@@ -277,7 +285,7 @@ function guardNoteTarget(path: string, extensions: readonly string[]): void {
   const refusal = noteRefusal(path, extensions);
   if (refusal !== null) throw new Error(`not a note: ${path} — ${refusal}`);
   const head = path.split('/').find((name) => name !== '' && name !== '.');
-  if (head !== undefined && diskFolded(head) === KNOWLEDGE_DIR && !isKnowledgePath(path)) {
+  if (head !== undefined && diskFolded(head) === KNOWLEDGE_DIR && head !== KNOWLEDGE_DIR) {
     throw new Error(
       `${path} is inside knowledge/ by another name — the bundle is reached by its own name or not at all`,
     );
@@ -304,11 +312,161 @@ export async function saveNote(_vault: string, path: string, body: string): Prom
   touch(path);
 }
 
+/** Mirror of knowledge.rs `AGENT_USE_WRITE_CONCEPT`: the agent's refusal at
+ *  the bundle's edge, in the agent's words. */
+const AGENT_USE_WRITE_CONCEPT =
+  'knowledge/ is written only through write_concept and recheck_concept, which record ' +
+  "provenance. Use recheck_concept to move only a concept's `stale_after`, and write_concept " +
+  "otherwise; `verified` is the user's stamp and is never yours to set.";
+
+/** Mirror of mcp.rs `TYPE_DOC_REFUSAL`, word for word. */
+const TYPE_DOC_REFUSAL =
+  "type: Type docs are the vault's schema and are changed by people, not by agent runs. " +
+  'Tell the user what schema change you need instead.';
+
+/** Mirror of mcp.rs `AGENT_DOC_REFUSAL`, word for word. */
+const AGENT_DOC_REFUSAL =
+  'type: Agent records are grants — their scope:, read-scope: and allowed-tools: are what a ' +
+  'run of them is handed, and hand_to starts a run of any of them. They are written by ' +
+  'people, not by agent runs. Tell the user what agent you need instead.';
+
+/**
+ * Mirror of mcp.rs `governed_type_refusal`: the refusal a governed type earns,
+ * or null for ordinary content. Matched exactly, as the scanner types them.
+ */
+function governedTypeRefusal(declared: string | null): string | null {
+  if (declared === 'Type') return TYPE_DOC_REFUSAL;
+  if (declared === 'Agent') return AGENT_DOC_REFUSAL;
+  return null;
+}
+
+/** The `type` a file's leading frontmatter declares, read the way scanVault
+ *  reads it (parse.rs `declared_type`): no fence at byte zero, or a block
+ *  that does not parse, is untyped. */
+function declaredType(path: string, raw: string): string | null {
+  return parseNote(path, raw, SEED_TIME, SEED_TIME).type;
+}
+
+/** Mirror of mcp.rs `MALFORMED_EXPECT_HASH`, word for word. */
+const MALFORMED_EXPECT_HASH = "expect_hash must be the 64-character hash from get_note's Hash line";
+
+/** Mirror of mcp.rs `parse_expect_hash` (M55.3): absent is no expectation,
+ *  64 hex characters in either case are lowercased, anything else refuses. */
+function parseExpectHash(expectHash: unknown): string | null {
+  if (expectHash === undefined || expectHash === null) return null;
+  if (typeof expectHash === 'string' && /^[0-9a-fA-F]{64}$/.test(expectHash)) {
+    return expectHash.toLowerCase();
+  }
+  throw new Error(MALFORMED_EXPECT_HASH);
+}
+
+/** Mirror of mcp.rs `stale_content_message`, word for word. */
+function staleContentMessage(path: string): string {
+  return (
+    `stale_content: ${path} changed since you read it, so nothing was written. ` +
+    'Read it again with get_note and decide whether your change still applies.'
+  );
+}
+
+/**
+ * The agent's `append_to_note` (mcp.rs `tool_append_in`), for the browser-mode
+ * mock agent (M53.6): the content as its own paragraph at the end of the
+ * body, under the frontmatter the note already has, and the file touched the
+ * way an MCP write moves its stamp. Refuses what Rust refuses, in Rust's
+ * order and words, before writing a byte: a malformed `expectHash`
+ * (`parse_expect_hash`), the bundle (`guard_agent_write`), a `.mmd` and
+ * anything that is not a note (`append_note_checked`), then bytes other than
+ * the ones `expectHash` names (`stale_content`, M55.3), then a Type doc or an
+ * Agent record, judged on the bytes the note holds and on the bytes the
+ * append would land (`governed_bytes_refusal`, M55.1).
+ */
+export async function agentAppend(
+  _vault: string,
+  path: string,
+  content: string,
+  expectHash?: string,
+): Promise<void> {
+  const expected = parseExpectHash(expectHash);
+  if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+  if (path.endsWith('.mmd')) {
+    throw new Error(
+      `${path}: a .mmd is raw diagram source, and markdown appended to it is not a diagram`,
+    );
+  }
+  guardNoteTarget(path, MARKDOWN);
+  const current = mustGet(path);
+  if (expected !== null && sha256Hex(current) !== expected) {
+    throw new Error(staleContentMessage(path));
+  }
+  const governed = governedTypeRefusal(declaredType(path, current));
+  if (governed !== null) throw new Error(governed);
+  const { yaml, body } = splitFrontmatter(current);
+  const joined = `${body.trimEnd()}\n\n${content.trim()}\n`;
+  // Composed as save_note composes it (write.rs `compose`): the note's block,
+  // then the body. A blank block is dropped, so there, as with no block, the
+  // body is the whole file.
+  const saved = yaml !== null && yaml.trim() !== '' ? `---\n${yaml}\n---\n${joined}` : joined;
+  // What those bytes DECLARE, which asking what the note IS cannot see: a
+  // body that parks an unterminated `---\ntype: Agent` fence is untyped until
+  // the append closes it, and then it is frontmatter at byte zero.
+  const minted = governedTypeRefusal(declaredType(path, saved));
+  if (minted !== null) throw new Error(minted);
+  files.set(path, saved);
+  touch(path);
+}
+
+/**
+ * The agent's `edit_note` (mcp.rs `tool_edit_note_in`, M55.5), for the
+ * browser-mode mock agent: quoted passages of the body replaced in place,
+ * every edit or none, with every byte before the body and every byte no edit
+ * quoted left as it was. Refuses what Rust refuses, in Rust's order and
+ * words, before writing a byte: a malformed `expectHash`, the bundle
+ * (`guard_agent_write`), anything that is not a markdown note (`note_join`,
+ * a `.mmd` included), a missing note, bytes other than the ones `expectHash`
+ * names (`stale_content`), a Type doc or an Agent record as the note stands,
+ * the quotes themselves (`planEdits`, the twin of quote.rs), and bytes the
+ * edits would make a Type doc or an Agent record. The read scope that gates
+ * it in Rust is the grant's, which the mock agent has none of. Returns the
+ * report the tool answers with.
+ */
+export async function agentEdit(
+  _vault: string,
+  path: string,
+  edits: readonly QuoteEdit[],
+  expectHash?: string,
+): Promise<string> {
+  const expected = parseExpectHash(expectHash);
+  if (isKnowledgePath(path)) throw new Error(AGENT_USE_WRITE_CONCEPT);
+  guardNoteTarget(path, MARKDOWN);
+  const current = files.get(path);
+  if (current === undefined) throw new Error(`no note at ${path}`);
+  if (expected !== null && sha256Hex(current) !== expected) {
+    throw new Error(staleContentMessage(path));
+  }
+  const governed = governedTypeRefusal(declaredType(path, current));
+  if (governed !== null) throw new Error(governed);
+  const { body } = splitFrontmatter(current);
+  const prefix = current.slice(0, current.length - body.length);
+  const plan = planEdits(body, prefix, edits);
+  if (!plan.ok) throw new Error(plan.message);
+  const saved = prefix + plan.text;
+  const minted = governedTypeRefusal(declaredType(path, saved));
+  if (minted !== null) throw new Error(minted);
+  files.set(path, saved);
+  touch(path);
+  const count = `${edits.length} ${edits.length === 1 ? 'edit' : 'edits'}`;
+  return [
+    `Edited ${path}: ${count}; nothing outside the quoted text changed.`,
+    ...plan.lines.map((line, i) => `  ${i + 1}. now at line ${line}`),
+    `Hash: ${sha256Hex(saved)}`,
+  ].join('\n');
+}
+
 export async function updateFrontmatter(
   _vault: string,
   path: string,
   patch: Record<string, unknown>,
-): Promise<void> {
+): Promise<string | null> {
   // Parity with update_frontmatter in write.rs (M29.23): mermaid's config
   // header IS valid YAML, so patching a .mmd would merge into the diagram's
   // own header and reserialize it. There is no frontmatter here to update.
@@ -349,8 +507,14 @@ export async function updateFrontmatter(
         );
       }
     }
+    // A captured write answers no hash, as Rust's valve answers None: the
+    // projection is the ledger's, and the next scan reads it (M55.2).
+    await writeFrontmatter(path, patch);
+    return null;
   }
-  return writeFrontmatter(path, patch);
+  await writeFrontmatter(path, patch);
+  // The hash of the bytes written, as lib.rs `update_frontmatter` answers it.
+  return sha256Hex(mustGet(path));
 }
 
 /** The one sanctioned human write into the bundle: `verified` and nothing
@@ -489,16 +653,20 @@ export async function createNote(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<string> {
-  guardHumanWrite(folder);
   // '' means the vault root — no separator, or the path grows a leading '/'
-  // (parity with unique_rel_path in write.rs).
+  // (parity with note_candidates in write.rs).
   const prefix = folder === '' ? '' : `${folder}/`;
   let finalSlug = slug;
   for (let n = 2; files.has(`${prefix}${finalSlug}.md`); n++) finalSlug = `${slug}-${n}`;
   const path = `${prefix}${finalSlug}.md`;
   // Judged on the file it will write, as write.rs create_note judges it: a
-  // dot-folder (`.git/hooks`), a skipped folder, or a dotfile slug refuses.
+  // dot-folder (`.git/hooks`), a skipped folder, a dotfile slug, or the
+  // bundle under another name refuses. Then the folder, as lib.rs guards it:
+  // `knowledge/` itself refuses as read-only on both backends. A folded
+  // spelling of the bundle refuses here as a note target, where Rust's
+  // command refuses it as read-only first; both refuse (M53.28).
   guardNoteTarget(path, MARKDOWN);
+  guardHumanWrite(folder);
   // Parity with write.rs create_note: null-valued keys are skipped, an empty
   // mapping omits the fence block, and an empty body gets a humanized H1.
   const kept = Object.entries(frontmatter).filter(([, value]) => value !== null);
@@ -676,6 +844,9 @@ export async function listCollections(_vault: string): Promise<{ folder: string;
 }
 
 export async function saveCollection(_vault: string, folder: string, yaml: string): Promise<void> {
+  // The bundle first, as lib.rs save_collection guards it (M53.28): the mock
+  // had no guard here, so a collection.yml landed in knowledge/.
+  guardHumanWrite(folder);
   if (folder === '') throw new Error('the vault root is not a collection');
   const path = `${folder}/${COLLECTION_MARKER}`;
   files.set(path, yaml);
@@ -688,6 +859,8 @@ export async function saveList(
   id: string,
   yaml: string,
 ): Promise<void> {
+  // As lib.rs save_list guards it (M53.28), and as saveCollection does.
+  guardHumanWrite(folder);
   const path = folder === '' ? `${id}${LIST_SUFFIX}` : `${folder}/${id}${LIST_SUFFIX}`;
   files.set(path, yaml);
   touch(path);
@@ -1012,6 +1185,34 @@ export async function saveConnectors(_vault: string, json: string): Promise<void
   connectorsJson = json;
 }
 
+// --- Connector status (M54.11) ----------------------------------------------
+// Rust reads these rows from runtime.db, where the meter records what each
+// run saw of its connectors. The browser runs nothing, so it has none until a
+// spec or test seeds them, and it cannot compute `refused`: a row carries one
+// only when it was seeded with one. `resetOperational()` restores both.
+
+let connectorStatusRows: ConnectorStatusRow[] = [];
+/** True models a runtime database that cannot be read. */
+let connectorStatusFails = false;
+
+export async function connectorStatus(_vault: string): Promise<ConnectorStatusRow[]> {
+  if (connectorStatusFails) throw new Error('no runtime database for this workspace');
+  return connectorStatusRows.map((row) => ({ ...row }));
+}
+
+/** Test-only seam, mirroring `__cerebroSeedFleet`: the rows a status read
+ * returns, or `'fail'` for a read that rejects. */
+export function __seedConnectorStatus(rows: ConnectorStatusRow[] | 'fail'): void {
+  connectorStatusFails = rows === 'fail';
+  connectorStatusRows = rows === 'fail' ? [] : rows.map((row) => ({ ...row }));
+}
+
+if (typeof window !== 'undefined') {
+  (
+    window as unknown as { __cerebroSeedConnectorStatus: typeof __seedConnectorStatus }
+  ).__cerebroSeedConnectorStatus = __seedConnectorStatus;
+}
+
 // --- Vault format v2 file operations (M2 Task 3) ---
 
 export async function createFolder(_vault: string, path: string): Promise<void> {
@@ -1138,9 +1339,12 @@ export async function writeTextFile(
   return actual;
 }
 
-/** All directories in the vault (derived from file paths + explicit folders). */
+/**
+ * All directories in the vault (derived from file paths + explicit folders),
+ * skipping the folders scanVault skips and everything under them — parity
+ * with scan.rs `list_folders`.
+ */
 export async function listFolders(_vault: string): Promise<string[]> {
-  const skipped = /(^|\/)(views|attachments|\.[^/]*)(\/|$)/;
   const dirs = new Set<string>(folders);
   for (const p of files.keys()) {
     const parts = p.split('/');
@@ -1148,7 +1352,7 @@ export async function listFolders(_vault: string): Promise<string[]> {
       dirs.add(parts.slice(0, i).join('/'));
     }
   }
-  return [...dirs].filter((d) => !skipped.test(d)).sort();
+  return [...dirs].filter((d) => !d.split('/').some(isSkippedDir)).sort();
 }
 
 // --- Mermaid diagram export (M29.4) -----------------------------------------
@@ -1809,6 +2013,25 @@ export interface FleetRun {
   /** M34.3's hop lineage (M41): the run this one was spawned FROM; null is
    * a root. Mirrors fleet.rs — the parity the mock owes the wire. */
   parent_run_id: string | null;
+  /** Why the run started (M56.7), in Rust's words. `null` is "why not
+   * recorded": a row from before causes, or a run that named none. */
+  cause: FleetRunCause | null;
+  /** The Claude Code session the run ran as, from its stream (M56.7). `null`
+   * is not recorded. */
+  cli_session_id: string | null;
+}
+
+/**
+ * Why one run started, as fleet.rs serves it (`cause::CauseView`). `why` is
+ * the kind's words from Rust's one vocabulary, so this side renders it and
+ * keeps no list of kinds. `due_at` is set for a schedule's fire.
+ */
+export interface FleetRunCause {
+  kind: string;
+  why: string;
+  subject: string | null;
+  detail: string | null;
+  due_at: string | null;
 }
 
 /** One `run_cost_components` row (M31.6). */
@@ -2459,4 +2682,24 @@ export function refuseIfAgentPaused(vault: string, actor: string | null | undefi
     `${actor} is paused, so this run did not start. Resume it on the fleet — ` +
       'a paused agent that still ran would make the pause a lie.',
   );
+}
+
+// --- Diagnostics (M53.24) --------------------------------------------------
+
+/**
+ * One uncaught webview error on its way to the diagnostic log, the shape
+ * Rust's `log_frontend` reads. Raw text: Rust redacts and clamps it, so no
+ * redaction rule lives on this side.
+ */
+export interface FrontendLogEntry {
+  level: 'error' | 'warn';
+  message: string;
+  /** `file:line:col`, when the browser knows it. */
+  source?: string;
+  stack?: string;
+}
+
+export async function logFrontend(_entry: FrontendLogEntry): Promise<void> {
+  // No-op: the browser has no app data to log into, and its console already
+  // shows the error.
 }

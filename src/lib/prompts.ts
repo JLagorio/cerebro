@@ -1,4 +1,5 @@
 import { SOURCES_DIR } from '@/engine/ingest';
+import { holds, type PromptGrant } from '@/engine/toolGrant';
 
 /**
  * The prompts cerebro hands the agent when the user asks for something from a
@@ -9,6 +10,10 @@ import { SOURCES_DIR } from '@/engine/ingest';
  * A distilled concept without `about` is unreachable from the work it
  * describes, and a distillation that never cites the note it read cannot be
  * checked — so the prompt says both, every time, in the same words.
+ *
+ * The agent prompts go to runs a record narrows, so they take the run's grant
+ * first and name only the tools it holds (M54.7). A surface's ask goes to a
+ * run that holds every tool, and src/agent/promptGrant.test.ts holds both.
  */
 
 /**
@@ -63,14 +68,29 @@ export function fetchRefsLabel(count: number): string {
   return `Fetch ${count} reference${count === 1 ? '' : 's'}`;
 }
 
-/** Ask the agent to fetch external references a note mentions but nobody has cached. */
-export function fetchRefsPrompt(path: string, ids: readonly string[]): string {
+/**
+ * Ask the agent to fetch external references a note mentions but nobody has
+ * cached. `labels[i]`, when set, is the name `ids[i]`'s own link carries
+ * (`linkLabel`, M69.2), offered as the cache title where the system gives
+ * none; a call without labels reads exactly as it did before them.
+ */
+export function fetchRefsPrompt(
+  path: string,
+  ids: readonly string[],
+  labels: readonly (string | null | undefined)[] = [],
+): string {
+  const named = ids.map((id, i) => {
+    const label = labels[i];
+    return label ? `${id} (${label}, as the link names it)` : id;
+  });
+  const labelled = ids.some((_, i) => !!labels[i]);
   return [
-    `The note at ${path} refers to ${ids.join(', ')}, and there is no local copy of ${
+    `The note at ${path} refers to ${named.join(', ')}, and there is no local copy of ${
       ids.length === 1 ? 'it' : 'them'
     }.`,
     '',
     'For each one, use whichever connector you have for that system to fetch it, then call cache_source to write the result down.',
+    ...(labelled ? ['Where the system gives no title, the name its link carries will do.'] : []),
     `Cached copies live in ${SOURCES_DIR}/ so the next question about the same ticket reads a file instead of calling the API again.`,
     'If you have no connector for a system, say so plainly rather than guessing at the contents.',
   ].join('\n');
@@ -281,16 +301,6 @@ export function studioBuildPrompt(title: string, folder: string): string {
 export const TEMPLATE_FILL_LABEL = 'Fill from the template';
 
 /**
- * Run one agent record unattended (M13.4).
- *
- * Same additive-only spine as a scheduled skill, plus the two things that
- * make an agent an AGENT rather than a prompt: an identity its writes are
- * attributed to, and a memory it must leave for its next run. The memory
- * lives in the record's own `memory:` frontmatter — rewritten through
- * update_frontmatter, bounded, and visible as an ordinary property — so what
- * the agent carries forward is never hidden from the person it works for.
- */
-/**
  * State pushed at a resumed run, rather than remembered by it (M33.8).
  *
  * An unattended run may carry notes it wrote weeks ago (`memory.recent`), and
@@ -362,8 +372,11 @@ export function agentMemoryLines(memory: { recent: string; preferences: string }
  * an agent discovering it as a tool error halfway through. `whenEmpty` is the
  * one clause that differs by caller — a run nobody is watching should stop and
  * say so in its memory; a turn someone is waiting on should say so to them.
+ * The bundle's exemption names write_concept, so only a run holding it hears
+ * that.
  */
 export function agentScopeLines(
+  grant: PromptGrant,
   scope: readonly string[] | null | undefined,
   whenEmpty: string,
 ): string[] {
@@ -371,25 +384,71 @@ export function agentScopeLines(
   return [
     scope.length === 0
       ? `You are scoped to no folder at all: every write to a record will be refused. ${whenEmpty}`
-      : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
+      : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error.${
+          holds(grant, 'write_concept')
+            ? ' (The knowledge bundle is reached through write_concept and is not affected.)'
+            : ''
+        }`,
     '',
   ];
 }
 
 /**
- * The READ boundary, stated (M36.4) — the M34.4 deferral's other half. The
- * enforcement has existed since the grant grew the axis; until now the agent
- * discovered it as refused reads and searches that said "N withheld". A
- * boundary the agent knows about is one it can plan around.
+ * What build_args takes from every read-scoped run (M53.5): the CLI's own
+ * readers, which need no approval inside the vault, and the shell, which reads
+ * past any folder list. One clause for both read-scope sentences, so they
+ * cannot drift apart on what is withdrawn.
  */
-export function agentReadScopeLines(readScope: readonly string[] | null | undefined): string[] {
+const CLI_READERS_WITHDRAWN =
+  "The CLI's own Read, Glob and Grep are withdrawn on this run, and so is any shell grant";
+
+/** The tools a read-scoped run reads notes through, where mcp.rs holds them
+ * to its read limit, in the order the read-scope sentence names them. */
+const NOTE_READERS = ['get_note', 'search_notes'];
+
+/**
+ * The READ boundary, stated (M36.4) — the M34.4 deferral's other half. Until
+ * then the agent discovered it as refused reads and searches that said "N
+ * withheld". A boundary the agent knows about is one it can plan around. Every
+ * clause is enforced: cerebro's tools refuse past the boundary since M34.4, and
+ * the CLI's own readers are withdrawn only since M53.5 — before that, "This is
+ * enforced" was false for every file the CLI's Read could open. Where notes
+ * ARE read names the run's own readers (M54.7): the held ones of get_note and
+ * search_notes, and a run with neither works from what its message hands it.
+ */
+export function agentReadScopeLines(
+  grant: PromptGrant,
+  readScope: readonly string[] | null | undefined,
+): string[] {
   if (readScope == null) return [];
+  const readers = NOTE_READERS.filter((name) => holds(grant, name));
   return [
     readScope.length === 0
-      ? 'You can read no note in this vault: every get_note is refused and every search returns only a withheld count. Work from what this message hands you.'
-      : `You may read notes only inside: ${readScope.join(', ')}. This is enforced — a note elsewhere is refused before its body is served, and searches tell you how many hits were withheld rather than pretending they do not exist.`,
+      ? `You can read no note in this vault: ${holds(grant, 'get_note') ? 'every get_note is refused and ' : ''}every search returns only a withheld count. ${CLI_READERS_WITHDRAWN}. Work from what this message hands you.`
+      : `You may read notes only inside: ${readScope.join(', ')}. This is enforced — a note elsewhere is refused before its body is served, and searches tell you how many hits were withheld rather than pretending they do not exist. ${CLI_READERS_WITHDRAWN}${
+          readers.length > 0
+            ? `, so reach notes through ${readers.join(' and ')}.`
+            : '. Work from what this message hands you.'
+        }`,
     '',
   ];
+}
+
+/**
+ * An agent's standing instructions as they close its run's system prompt: the
+ * record's body, under the path it came from. The words useJobRunner's agent
+ * runs have closed with since M34.1.4, and the addressed turn's since M53.5.
+ *
+ * STANDING, so they ride the system prompt and never the message: folded into
+ * the turn, a charter reads as something the person had just said. An empty
+ * body adds nothing, because a heading over no instructions tells the agent
+ * it has some.
+ */
+export function standingInstructionsBlock(path: string, body: string): string {
+  const instructions = body.trim();
+  return instructions === ''
+    ? ''
+    : `\n\nYour standing instructions, from ${path}:\n\n${instructions}`;
 }
 
 /**
@@ -405,12 +464,19 @@ export function agentReadScopeLines(readScope: readonly string[] | null | undefi
  * one to ask. What the two genuinely share is the memory and the scope, and
  * they share the assembly rather than a copy of it.
  *
- * The standing instructions are NOT folded in. They are the body of a record
- * the turn is already told the path of and already holds the tools to read, and
- * the turn a person typed is the request — an agent's charter pasted in above
- * it would read as something the user had just said.
+ * The standing instructions are not in this prompt: the turn a person typed is
+ * the request, and an agent's charter pasted in above it would read as
+ * something the user had just said. useAgentChat reads the record itself and
+ * closes the turn's system prompt with its body (`standingInstructionsBlock`),
+ * where useJobRunner (M34.1.4) and hand_to put it, so no turn is asked to read
+ * its own record. Not every turn could: a read-scoped turn's one reader is
+ * get_note (M53.5 withdrew the CLI's), and get_note holds the agent's own
+ * record to the read limit like any other note.
+ *
+ * `grant` is the turn's (M54.7): the scope lines name only the tools it holds.
  */
 export function addressedAgentPrompt(
+  grant: PromptGrant,
   path: string,
   title: string,
   actor: string,
@@ -422,41 +488,72 @@ export function addressedAgentPrompt(
   readScope?: readonly string[] | null,
 ): string {
   return [
-    `This turn is addressed to "${title}", the agent defined at ${path} in this vault. Answer as that agent: your writes are attributed to ${actor}, and your standing instructions are the body of that record — read it before you answer. A person typed this and is waiting, so reply to them as well as writing anything down.`,
+    `This turn is addressed to "${title}", the agent defined at ${path} in this vault. Answer as that agent: your writes are attributed to ${actor}. A person typed this and is waiting, so reply to them as well as writing anything down.`,
     '',
     ...agentScopeLines(
+      grant,
       scope,
       'Say that to the person rather than trying and reporting the refusal.',
     ),
-    ...agentReadScopeLines(readScope),
+    ...agentReadScopeLines(grant, readScope),
     ...agentMemoryLines(memory),
     '',
     'What they asked:',
   ].join('\n');
 }
 
+/**
+ * Run one agent record unattended (M13.4).
+ *
+ * Same additive-only spine as a scheduled skill, plus the two things that
+ * make an agent an AGENT rather than a prompt: an identity its writes are
+ * attributed to, and working notes it leaves for its next run, kept in the
+ * record's own `recent:` frontmatter (M17.14) — bounded, and visible as an
+ * ordinary property, so what the agent carries forward is never hidden from
+ * the person it works for.
+ *
+ * `grant` is the run's (M54.7), and every line names only tools it holds:
+ * only a run holding update_frontmatter is asked to rewrite its notes, and
+ * only one holding write_concept is sent to the bundle with what it learned.
+ * Rust refuses that notes patch today; D7 lets it land in M56.
+ */
 export function agentRunPrompt(
+  grant: PromptGrant,
   path: string,
   title: string,
   actor: string,
   memory: { recent: string; preferences: string },
-  /** What woke this run, when an event did (M17.12) — layer TWO of the
-   * trigger. Layer one already passed deterministically; this is the model
-   * gate, and it comes with an explicit permission to do nothing. */
-  trigger?: { subject: string; because: string; ask?: string; do?: string } | null,
+  /** The trigger's own words for an event run (M17.12): `ask:` is layer TWO,
+   * the model gate, and comes with an explicit permission to do nothing;
+   * `do:` narrows this waking. What woke the run is not here: it rides the
+   * request's cause, and Rust opens the message with it as quoted data
+   * (M56.7), so no vault text is pasted into this prose. */
+  trigger?: { ask?: string; do?: string } | null,
   /** Folders this run may write inside (M17.13). Stated so the agent plans
    * inside its boundary rather than discovering it as a tool error. */
   scope?: readonly string[] | null,
   /** Folders this run may READ inside (M36.4) — same reason, other axis. */
   readScope?: readonly string[] | null,
 ): string {
+  // What the run leaves behind, each line to a run that holds its tool.
+  const closing = [
+    ...(holds(grant, 'update_frontmatter')
+      ? [
+          `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+        ]
+      : []),
+    ...(holds(grant, 'write_concept')
+      ? [
+          'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
+        ]
+      : []),
+  ];
   return [
-    `You are "${title}", the agent defined at ${path} in this vault, on an unattended ${trigger == null ? 'scheduled' : 'event-triggered'} run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
+    `You are "${title}", the agent defined at ${path} in this vault, on an unattended run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
     '',
-    ...(trigger == null
+    ...(trigger == null || (trigger.ask === undefined && trigger.do === undefined)
       ? []
       : [
-          `You were woken because ${trigger.because}: ${trigger.subject}. Read it first.`,
           ...(trigger.ask === undefined
             ? []
             : [
@@ -476,8 +573,8 @@ export function agentRunPrompt(
               ]),
           '',
         ]),
-    ...agentScopeLines(scope, 'Say so in your memory and stop.'),
-    ...agentReadScopeLines(readScope),
+    ...agentScopeLines(grant, scope, 'Say so in your memory and stop.'),
+    ...agentReadScopeLines(grant, readScope),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
@@ -485,9 +582,7 @@ export function agentRunPrompt(
     '',
     // M17.14 — two tiers, in priority order. See agentMemoryLines.
     ...agentMemoryLines(memory),
-    '',
-    `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
-    'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
+    ...(closing.length === 0 ? [] : ['', ...closing]),
   ].join('\n');
 }
 
@@ -497,6 +592,10 @@ export function agentRunPrompt(
  * "Do nothing without a connector" is load-bearing: a model told to refresh
  * a copy it cannot re-fetch will write a plausible newer-looking one, and a
  * fabricated cache poisons every concept that cites it.
+ *
+ * No run hears it since M54.9: a refresh run could hold no connector, so
+ * engine/jobs.ts derives no refresh job. It waits, rule and all, for the
+ * owner's call on which connector a refresh run may hold.
  */
 export function refreshSourcePrompt(path: string, title: string): string {
   return [

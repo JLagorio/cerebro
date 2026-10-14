@@ -39,10 +39,15 @@ die() { echo "error: $*" >&2; exit 1; }
 [ "$(uname -s)" = "Darwin" ] || die "this script builds the Mac app; run it on macOS."
 
 echo "==> Checking the toolchain"
+# The versions to ask for are the repo's pins, read rather than retyped:
+# engines.node and packageManager in package.json. rustup reads
+# rust-toolchain.toml by itself, so the Rust message names no version.
+NODE_PIN="$(sed -n 's/^ *"node": *"\(.*\)".*/\1/p' package.json)"
+PNPM_PIN="$(sed -n 's/^ *"packageManager": *"pnpm@\([^"+]*\).*/\1/p' package.json)"
 xcode-select -p >/dev/null 2>&1 || die "Xcode command line tools missing. Run: xcode-select --install"
 command -v cargo >/dev/null || die "Rust missing. Install it from https://rustup.rs"
-command -v node  >/dev/null || die "Node missing. Install Node 20 or newer from https://nodejs.org"
-command -v pnpm  >/dev/null || die "pnpm missing. Run: corepack enable && corepack prepare pnpm@10 --activate"
+command -v node  >/dev/null || die "Node missing. Install Node $NODE_PIN (package.json engines) from https://nodejs.org"
+command -v pnpm  >/dev/null || die "pnpm missing. Run: npm install -g pnpm@$PNPM_PIN (package.json packageManager)"
 
 # rustup is needed to ADD a target, and only a target this Rust does not
 # already have needs adding. Every Rust can build for the machine it is

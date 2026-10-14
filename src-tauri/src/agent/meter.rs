@@ -22,6 +22,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+use crate::runtime::cause::RunCause;
+use crate::runtime::connector_status::{self, Observation};
 use crate::runtime::dispatch::{self, ItemOutcome, RunOutcome};
 use crate::runtime::{self, operational::LogEntry};
 
@@ -66,9 +68,9 @@ pub enum Mode {
     /// finalize it itself — M26.4's ingest driver, which lands items by
     /// ROUTE rather than by success or failure.
     ///
-    /// `finish` records everything else and stops short of
-    /// `dispatch::finalize`, because the run's outcome is not the item's
-    /// destiny: a window that ran cleanly and concluded "nothing material"
+    /// `finish` records the unknown-fields row and the run's Claude Code
+    /// session (M56.7), and stops short of `dispatch::finalize`, because the
+    /// run's outcome is not the item's destiny: a window that ran cleanly and concluded "nothing material"
     /// consumes its items, and one that was BLOCKED holds them visibly.
     /// Finalizing here as well would be refused outright — the second call
     /// finds no running row — after the first had already decided wrongly.
@@ -91,13 +93,18 @@ pub struct Meter {
     pub elapsed_limit_seconds: Option<u64>,
     /// Who this run is for (M33.1). `None` is bare attended chat — a run
     /// nobody launched on a record's behalf — and it stays NULL rather than
-    /// being guessed at. Only [`Mode::Attended`] writes it here; the other
-    /// two modes work on a row `dispatch::claim` already attributed.
+    /// being guessed at. Only [`Mode::Attended`] writes it here, with
+    /// `parent_run_id` and `cause`; the other two modes work on a row
+    /// `dispatch::claim` already attributed and gave its cause.
     pub actor: Option<String>,
     /// The run whose tool call started this one (M34.3). `None` is a root —
     /// every run a person or a schedule started. Attended-mode only, like
     /// `actor`, and for the same reason.
     pub parent_run_id: Option<String>,
+    /// Why the run started (M56.7). Attended-mode writes it with the row it
+    /// opens, or with the fallback insert at finish; the other two modes
+    /// carry the cause their claim already wrote. `None` stores NULL.
+    pub cause: Option<RunCause>,
 }
 
 /// How a run ended, sent to whoever is waiting on it.
@@ -130,11 +137,33 @@ pub struct Tally {
     quota: bool,
     unknown_fields: Vec<String>,
     saw_terminal: bool,
+    /// The run was stopped at its `system/init` because cerebro's tools did
+    /// not load (M54.5, `agent::InitGate`).
+    init_refused: bool,
+    /// The Claude Code session the stream ran as (M56.7): the first
+    /// `system/init` line's `session_id`, or, when no init named one, the
+    /// terminal `result`'s.
+    init_session: Option<String>,
+    result_session: Option<String>,
 }
 
 impl Tally {
     /// Feed one parsed CLI line.
     pub fn observe(&mut self, event: &Value) {
+        let session = || {
+            event
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let is_init = event.get("type").and_then(Value::as_str) == Some("system")
+            && event.get("subtype").and_then(Value::as_str) == Some("init");
+        if is_init && self.init_session.is_none() {
+            self.init_session = session();
+        }
+        if usage::is_result(event) && self.result_session.is_none() {
+            self.result_session = session();
+        }
         for field in usage::unknown_fields(event) {
             if !self.unknown_fields.contains(&field) {
                 self.unknown_fields.push(field);
@@ -155,14 +184,62 @@ impl Tally {
         self.quota = usage::is_quota_failure(event);
     }
 
+    /// The Claude Code session this run ran as, as its stream named it:
+    /// init's, else the result's. `None` when neither line arrived or named
+    /// one.
+    pub fn cli_session_id(&self) -> Option<&str> {
+        self.init_session
+            .as_deref()
+            .or(self.result_session.as_deref())
+    }
+
+    /// Did the stream reach its terminal event? A run that did has already
+    /// said how it ended, failures included.
+    pub(crate) fn saw_terminal(&self) -> bool {
+        self.saw_terminal
+    }
+
+    /// Record that the run was stopped at init because cerebro's tools did
+    /// not load (M54.5). The run failed: nobody asked for that stop, and the
+    /// error event already told the person why.
+    pub(crate) fn refuse_init(&mut self) {
+        self.init_refused = true;
+    }
+
+    /// Was the run stopped at init? Its error event was its report, so the
+    /// reader adds no stderr to it.
+    pub(crate) fn refused_at_init(&self) -> bool {
+        self.init_refused
+    }
+
+    /// The tools the run's result says the CLI denied, sorted and once each
+    /// (M54.9). None when the run never reached its result.
+    pub(crate) fn denied_tools(&self) -> &[String] {
+        self.facts.denied_tools.as_deref().unwrap_or(&[])
+    }
+
     /// How this run ended, and what it cost.
     ///
     /// A stream that ended without a terminal event yields `None` usage —
     /// the honest-unknown path — rather than a zero that would let the same
     /// tokens be spent again.
-    pub fn outcome(&self, aborted: bool) -> (RunOutcome, Option<Usage>) {
+    ///
+    /// `aborted` is the watchdog's doing and outranks everything the stream
+    /// said. A run stopped at init because cerebro's tools did not load
+    /// (M54.5) failed, whatever else came after: a stop that raced it, or a
+    /// result the CLI wrote before the stop landed. Its usage stays what the
+    /// stream said, which with no result is unknown, never zero. `cancelled`
+    /// (M53.10) is a stop somebody asked for — a person's Stop, a vault
+    /// switch, quit — and it names the ending only of a run that never
+    /// reached its terminal event: one that already said how it ended keeps
+    /// that ending, because the stop lost the race to it.
+    pub fn ended(&self, aborted: bool, cancelled: bool) -> (RunOutcome, Option<Usage>) {
         let outcome = if aborted {
             RunOutcome::ElapsedAborted
+        } else if self.init_refused {
+            RunOutcome::Failed
+        } else if cancelled && !self.saw_terminal {
+            RunOutcome::Cancelled
         } else if !self.saw_terminal {
             RunOutcome::AbandonedUsageUnknown
         } else if self.quota {
@@ -194,9 +271,10 @@ pub fn begin(meter: &Meter) {
         meter.store_uuid.as_deref(),
         meter.actor.as_deref(),
         meter.parent_run_id.as_deref(),
+        meter.cause.as_ref(),
         meter.started_at,
     ) {
-        eprintln!(
+        log::warn!(
             "runtime meter: run {} could not be opened: {detail}",
             meter.run_id
         );
@@ -223,23 +301,24 @@ pub fn recover_orphaned(data_dir: &std::path::Path, started_before: DateTime<Utc
     };
     match dispatch::recover_orphaned_attended(&conn, started_before, Utc::now()) {
         Ok(0) => {}
-        Ok(closed) => eprintln!(
+        Ok(closed) => log::warn!(
             "runtime meter: closed {closed} attended run(s) a previous process left running — \
              their usage is recorded as unknown, which is not zero"
         ),
-        Err(detail) => eprintln!("runtime meter: orphaned attended runs not swept: {detail}"),
+        Err(detail) => log::warn!("runtime meter: orphaned attended runs not swept: {detail}"),
     }
 }
 
 /// Close a run's books. Never fails a run: metering records what happened and
-/// must not become a second way for the run to go wrong.
-pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
+/// must not become a second way for the run to go wrong. `aborted` and
+/// `cancelled` mean what they mean to [`Tally::ended`].
+pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, cancelled: bool, now: DateTime<Utc>) {
     let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
         // No runtime DB (a build without one, or a database that is being
         // recovered). The run happened; nothing else changes.
         return;
     };
-    let (outcome, counted) = tally.outcome(aborted);
+    let (outcome, counted) = tally.ended(aborted, cancelled);
 
     // A field this build has never seen is worth exactly one operational row
     // per run: enough to notice a CLI upgrade, not enough to drown the log.
@@ -272,7 +351,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
 
     let result = match meter.mode {
         // The supervisor holds the lease and knows the route. See `Mode`.
-        Mode::Supervised => return,
+        Mode::Supervised => Ok(()),
         Mode::Attended => dispatch::meter_attended(
             &conn,
             &meter.run_id,
@@ -283,6 +362,7 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
             Some(&tally.facts),
             meter.actor.as_deref(),
             meter.parent_run_id.as_deref(),
+            meter.cause.as_ref(),
             meter.started_at,
             now,
         ),
@@ -304,8 +384,43 @@ pub fn finish(meter: &Meter, tally: &Tally, aborted: bool, now: DateTime<Utc>) {
         ),
     };
     if let Err(detail) = result {
-        eprintln!(
+        log::warn!(
             "runtime meter: run {} could not be recorded: {detail}",
+            meter.run_id
+        );
+    }
+    // After the mode's write, so an attended run's fallback insert has made
+    // the row this lands on. Every mode: the session is the stream's fact,
+    // and a supervised run's row is as much this run's as any other.
+    if let Some(session) = tally.cli_session_id() {
+        if let Err(detail) = dispatch::record_cli_session(&conn, &meter.run_id, session) {
+            log::warn!(
+                "runtime meter: run {}'s session could not be recorded: {detail}",
+                meter.run_id
+            );
+        }
+    }
+}
+
+/// Record what a finished run saw of its connectors (M54.11): one row per
+/// connector its stream said something about, under this run's id, each kept
+/// only while no newer run has seen that connector since. Never fails a run,
+/// like [`finish`]: with no runtime DB nothing is recorded, and a write that
+/// fails is logged. A meter with no vault records nothing, since a status
+/// belongs to the vault whose connector list named the server.
+pub fn record_connectors(meter: &Meter, observations: &[Observation]) {
+    if observations.is_empty() {
+        return;
+    }
+    let Some(vault_id) = meter.vault_id.as_deref() else {
+        return;
+    };
+    let Ok(conn) = runtime::open_existing(&meter.data_dir) else {
+        return;
+    };
+    if let Err(detail) = connector_status::record(&conn, vault_id, &meter.run_id, observations) {
+        log::warn!(
+            "runtime meter: run {}'s connector status could not be recorded: {detail}",
             meter.run_id
         );
     }
@@ -343,7 +458,8 @@ pub fn arm_watchdog(
             return;
         }
         // `stop` returning false is the ordinary race: the child exited
-        // between the deadline and this line, and that run is not aborted.
+        // between the deadline and this line, or somebody stopped it first,
+        // and that run is not aborted.
         if state.stop(run).unwrap_or(false) {
             flag.store(true, Ordering::Relaxed);
         }
@@ -369,13 +485,13 @@ mod tests {
             "type": "assistant",
             "message": { "usage": { "input_tokens": 3, "cache_read_input_tokens": 14678 } }
         }));
-        assert_eq!(tally.outcome(false).1, None, "no terminal event yet");
+        assert_eq!(tally.ended(false, false).1, None, "no terminal event yet");
         tally.observe(&result(
             json!({ "input_tokens": 4, "output_tokens": 271, "cache_read_input_tokens": 14678 }),
             false,
             "done",
         ));
-        let (outcome, usage) = tally.outcome(false);
+        let (outcome, usage) = tally.ended(false, false);
         assert_eq!(outcome, RunOutcome::Succeeded);
         assert_eq!(usage.unwrap().total(), 4 + 271 + 14_678);
     }
@@ -383,7 +499,7 @@ mod tests {
     #[test]
     fn a_stream_that_never_terminated_is_unknown_not_free() {
         let tally = Tally::default();
-        let (outcome, usage) = tally.outcome(false);
+        let (outcome, usage) = tally.ended(false, false);
         assert_eq!(outcome, RunOutcome::AbandonedUsageUnknown);
         assert_eq!(usage, None, "unknown, and never zero");
     }
@@ -396,7 +512,7 @@ mod tests {
             true,
             "API Error: Claude AI usage limit reached.",
         ));
-        let (outcome, usage) = tally.outcome(false);
+        let (outcome, usage) = tally.ended(false, false);
         assert_eq!(outcome, RunOutcome::QuotaFailed);
         assert_eq!(usage.unwrap().total(), 19, "a failed run is not a free run");
     }
@@ -405,7 +521,7 @@ mod tests {
     fn an_ordinary_failure_is_not_a_quota_failure() {
         let mut tally = Tally::default();
         tally.observe(&result(json!({ "output_tokens": 5 }), true, "tool crashed"));
-        assert_eq!(tally.outcome(false).0, RunOutcome::Failed);
+        assert_eq!(tally.ended(false, false).0, RunOutcome::Failed);
     }
 
     #[test]
@@ -414,13 +530,154 @@ mod tests {
         // from a run that was already being ended.
         let mut tally = Tally::default();
         tally.observe(&result(json!({ "output_tokens": 5 }), false, "fine"));
-        let (outcome, usage) = tally.outcome(true);
+        let (outcome, usage) = tally.ended(true, false);
         assert_eq!(outcome, RunOutcome::ElapsedAborted);
         assert_eq!(
             usage.unwrap().output_tokens,
             5,
             "an aborted run still spent what it spent"
         );
+    }
+
+    #[test]
+    fn a_cancelled_run_is_its_own_outcome_and_an_abort_outranks_it() {
+        // M53.10. A stopped run used to be booked abandoned, as if the app
+        // had lost track of it, and `cancelled` had no producer at all.
+        let tally = Tally::default();
+        let (outcome, usage) = tally.ended(false, true);
+        assert_eq!(outcome, RunOutcome::Cancelled);
+        assert_eq!(usage, None, "a stopped run's spend is unknown, never zero");
+        assert_eq!(
+            tally.ended(true, true).0,
+            RunOutcome::ElapsedAborted,
+            "the watchdog's stop is the watchdog's"
+        );
+    }
+
+    #[test]
+    fn a_cancel_that_lost_the_race_to_a_result_keeps_the_result() {
+        let mut tally = Tally::default();
+        tally.observe(&result(json!({ "output_tokens": 7 }), false, "done"));
+        let (outcome, usage) = tally.ended(false, true);
+        assert_eq!(outcome, RunOutcome::Succeeded, "it had already finished");
+        assert_eq!(usage.unwrap().output_tokens, 7);
+    }
+
+    #[test]
+    fn a_run_refused_at_init_books_failed_and_its_usage_stays_unknown() {
+        // M54.5. Nobody asked for this stop, so it is not cancelled, and a run
+        // that never said what it spent spent an unknown amount.
+        let mut tally = Tally::default();
+        tally.refuse_init();
+        assert!(tally.refused_at_init());
+        assert_eq!(tally.ended(false, false), (RunOutcome::Failed, None));
+        assert_eq!(
+            tally.ended(false, true),
+            (RunOutcome::Failed, None),
+            "a Stop that raced the refusal does not make it cancelled"
+        );
+        // A result the CLI wrote before the stop landed keeps its usage and
+        // loses its ending: it was an answer given without the tools.
+        tally.observe(&result(json!({ "output_tokens": 9 }), false, "fine"));
+        let (outcome, usage) = tally.ended(false, false);
+        assert_eq!(outcome, RunOutcome::Failed);
+        assert_eq!(usage.unwrap().output_tokens, 9);
+    }
+
+    #[test]
+    fn an_abort_outranks_an_init_refusal() {
+        let mut tally = Tally::default();
+        tally.refuse_init();
+        assert_eq!(tally.ended(true, false), (RunOutcome::ElapsedAborted, None));
+        assert_eq!(tally.ended(true, true).0, RunOutcome::ElapsedAborted);
+    }
+
+    #[test]
+    fn an_attended_run_refused_at_init_books_failed_with_usage_unknown() {
+        let dir = crate::vault::testutil::temp_vault("meter-init-refused");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        let mut tally = Tally::default();
+        tally.refuse_init();
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: "refused-1".into(),
+                mode: Mode::Attended,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: None,
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
+                cause: None,
+            },
+            &tally,
+            false,
+            false,
+            Utc::now(),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (outcome, usage): (String, String) = conn
+            .query_row(
+                "SELECT outcome, usage_state FROM runs WHERE run_id = 'refused-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "failed", "not cancelled: nobody asked for it");
+        assert_eq!(usage, "unknown");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_attended_run_stopped_by_a_person_books_cancelled() {
+        let dir = crate::vault::testutil::temp_vault("meter-cancelled");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        finish(
+            &Meter {
+                data_dir: dir.clone(),
+                run_id: "stopped-1".into(),
+                mode: Mode::Attended,
+                vault_id: Some(vault.clone()),
+                store_uuid: Some("store".into()),
+                started_at: Utc::now(),
+                elapsed_limit_seconds: None,
+                actor: None,
+                // Root by construction (M34.3): no tool call started this run.
+                parent_run_id: None,
+                cause: None,
+            },
+            &Tally::default(),
+            false,
+            true,
+            Utc::now(),
+        );
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let (outcome, usage): (String, String) = conn
+            .query_row(
+                "SELECT outcome, usage_state FROM runs WHERE run_id = 'stopped-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(outcome, "cancelled", "not abandoned: somebody stopped it");
+        assert_eq!(usage, "unknown");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -471,8 +728,10 @@ mod tests {
                 actor: None,
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                cause: None,
             },
             &tally,
+            false,
             false,
             Utc::now(),
         );
@@ -543,6 +802,7 @@ mod tests {
             actor: None,
             // Root by construction (M34.3): no tool call started this run.
             parent_run_id: None,
+            cause: None,
         };
         // No committed fixture carries a non-empty array, and none is needed:
         // the array's SHAPE is what the parser reads, so an inline event with
@@ -558,14 +818,14 @@ mod tests {
                   "tool_input": { "file_path": "/etc/hosts" } }
             ]
         }));
-        finish(&meter("denied"), &denied, false, Utc::now());
+        finish(&meter("denied"), &denied, false, false, Utc::now());
 
         let mut clean = Tally::default();
         clean.observe(&json!({
             "type": "result", "is_error": false, "result": "ok",
             "usage": { "output_tokens": 5 }, "permission_denials": []
         }));
-        finish(&meter("clean"), &clean, false, Utc::now());
+        finish(&meter("clean"), &clean, false, false, Utc::now());
 
         let conn = crate::runtime::open_existing(&dir).unwrap();
         let (rows, detail): (i64, String) = conn
@@ -577,9 +837,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rows, 1, "one row per run with a non-empty denial array");
-        assert!(
-            detail.contains("reported 2 permission denial"),
-            "the detail names the count: {detail}"
+        assert_eq!(
+            detail, "the CLI denied 2 call(s) this run: Bash, Write",
+            "the detail names the count and the tools (M54.9)"
         );
         let clean_rows: i64 = conn
             .query_row(
@@ -594,6 +854,194 @@ mod tests {
             "an empty array is Some(0) in RunFacts and log noise here"
         );
         drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_narrowed_out_connector_tool_is_recorded_by_name() {
+        // M54.9. Recorded on 2.1.250: a run granted a toy server's `echo`
+        // alone called `other` twice and Bash once, and the CLI denied all
+        // three. The run's one row names both tools, under its run_id.
+        const STREAM: &str =
+            include_str!("../../fixtures/cli-stream/result-connector-denials.json");
+        let dir = crate::vault::testutil::temp_vault("meter-connector-denials");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        let mut tally = Tally::default();
+        let stream: Vec<Value> = serde_json::from_str(STREAM).unwrap();
+        for event in &stream {
+            tally.observe(event);
+        }
+        let meter = Meter {
+            data_dir: dir.clone(),
+            run_id: "narrowed".into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: Some("process:mailer".into()),
+            parent_run_id: None,
+            cause: None,
+        };
+        finish(&meter, &tally, false, false, Utc::now());
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let rows: Vec<(String, Option<String>)> = conn
+            .prepare(
+                "SELECT detail, run_id FROM operational_log WHERE surface = 'agent.permission'",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [(
+                "the CLI denied 3 call(s) this run: Bash, mcp__toy__other".to_string(),
+                Some("narrowed".to_string())
+            )]
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_tally_keeps_the_session_init_named() {
+        // The committed init fixture, then a result naming another id: the
+        // init's is the run's (M56.7).
+        let init: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/init-connected.json"
+        ))
+        .unwrap();
+        let mut tally = Tally::default();
+        assert_eq!(tally.cli_session_id(), None, "nothing named yet");
+        tally.observe(&init);
+        tally.observe(&json!({
+            "type": "system", "subtype": "init", "session_id": "ffffffff-later-init"
+        }));
+        tally.observe(&json!({
+            "type": "result", "is_error": false, "result": "ok",
+            "session_id": "eeeeeeee-the-result"
+        }));
+        assert_eq!(
+            tally.cli_session_id(),
+            Some("00000000-0000-4000-8000-000000000005"),
+            "the first init's id"
+        );
+    }
+
+    #[test]
+    fn a_result_session_is_the_fallback() {
+        let terminal: Value = serde_json::from_str(include_str!(
+            "../../fixtures/cli-stream/result-success.json"
+        ))
+        .unwrap();
+        let mut tally = Tally::default();
+        tally.observe(&json!({ "type": "system", "subtype": "init" }));
+        tally.observe(&terminal);
+        assert_eq!(
+            tally.cli_session_id(),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
+    }
+
+    #[test]
+    fn finish_records_the_cli_session_in_every_mode() {
+        let dir = crate::vault::testutil::temp_vault("meter-cli-session");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let lease = || {
+            let conn = crate::runtime::open_existing(&dir).unwrap();
+            let dispatch::Dispatched::Started(lease) = dispatch::claim(
+                &conn,
+                &vault,
+                "store",
+                "scheduled",
+                crate::runtime::budget::Reservation {
+                    total_tokens: 20_000,
+                    output_tokens: 4_000,
+                },
+                &[],
+                None,
+                None,
+                Utc::now(),
+            )
+            .unwrap() else {
+                panic!("expected a lease");
+            };
+            lease
+        };
+        let session = |n: u8| format!("00000000-0000-4000-8000-00000000000{n}");
+        let tally_for = |n: u8| {
+            let mut tally = Tally::default();
+            tally.observe(&json!({
+                "type": "system", "subtype": "init", "session_id": session(n)
+            }));
+            tally.observe(&result(json!({ "output_tokens": 3 }), false, "ok"));
+            tally
+        };
+        let meter = |run_id: &str, mode: Mode| Meter {
+            data_dir: dir.clone(),
+            run_id: run_id.into(),
+            mode,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        let read = |run_id: &str| -> Option<String> {
+            let conn = crate::runtime::open_existing(&dir).unwrap();
+            conn.query_row(
+                "SELECT cli_session_id FROM runs WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+
+        let attended = meter("attended-run", Mode::Attended);
+        finish(&attended, &tally_for(1), false, false, Utc::now());
+        assert_eq!(read("attended-run"), Some(session(1)), "attended");
+
+        // Supervised: the row stays the supervisor's to close, and still
+        // takes the session.
+        let supervised = lease();
+        let meter_supervised = meter(&supervised.run_id, Mode::Supervised);
+        finish(&meter_supervised, &tally_for(2), false, false, Utc::now());
+        assert_eq!(read(&supervised.run_id), Some(session(2)), "supervised");
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        dispatch::finalize(
+            &conn,
+            &supervised.run_id,
+            RunOutcome::Succeeded,
+            // Known usage, so the day's accounting stays exact for the next.
+            Some(Usage {
+                output_tokens: 3,
+                ..Usage::default()
+            }),
+            None,
+            ItemOutcome::Consume,
+            Utc::now(),
+        )
+        .unwrap();
+        drop(conn);
+
+        let ambient = lease();
+        let meter_ambient = meter(&ambient.run_id, Mode::Ambient);
+        finish(&meter_ambient, &tally_for(3), false, false, Utc::now());
+        assert_eq!(read(&ambient.run_id), Some(session(3)), "ambient");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -632,8 +1080,10 @@ mod tests {
                 actor: None,
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                cause: None,
             },
             &tally,
+            false,
             false,
             Utc::now(),
         );
@@ -677,6 +1127,7 @@ mod tests {
             },
             &[],
             Some("process:scout"),
+            None,
             Utc::now(),
         )
         .unwrap() else {
@@ -697,8 +1148,10 @@ mod tests {
                 elapsed_limit_seconds: Some(lease.elapsed_limit_seconds),
                 actor: None,
                 parent_run_id: None,
+                cause: None,
             },
             &tally,
+            false,
             false,
             Utc::now(),
         );
@@ -764,6 +1217,7 @@ mod tests {
             },
             &["records/a.md".to_string()],
             None,
+            None,
             Utc::now(),
         )
         .unwrap() else {
@@ -784,8 +1238,10 @@ mod tests {
                 actor: None,
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                cause: None,
             },
             &tally,
+            false,
             false,
             Utc::now(),
         );
@@ -804,7 +1260,7 @@ mod tests {
             &conn,
             &lease.run_id,
             RunOutcome::Succeeded,
-            tally.outcome(false).1,
+            tally.ended(false, false).1,
             None,
             ItemOutcome::Land(crate::runtime::scheduler::SchedulerState::Consumed),
             Utc::now(),
@@ -831,8 +1287,10 @@ mod tests {
                 actor: None,
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                cause: None,
             },
             &Tally::default(),
+            false,
             false,
             Utc::now(),
         );
@@ -851,9 +1309,140 @@ mod tests {
             actor: None,
             // Root by construction (M34.3): no tool call started this run.
             parent_run_id: None,
+            cause: None,
         };
         let live = Arc::new(AtomicBool::new(true));
         let aborted = arm_watchdog(&meter, &super::super::AgentState::default(), 0, live);
         assert!(!aborted.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_finished_run_records_what_it_saw() {
+        // M54.11. The recorded toy-server run, read the way the reader reads
+        // it: every line through the tally and the observer, then the
+        // observations the meter writes under the run's id.
+        const STREAM: &str = include_str!("../../fixtures/cli-stream/connector-run.json");
+        let dir = crate::vault::testutil::temp_vault("meter-connector-status");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+
+        let connectors = crate::agent::run_connectors(
+            &["ok", "auth", "down", "errs", "asked", "narrow"].map(String::from),
+            Some(
+                &[
+                    "mcp__ok__echo",
+                    "mcp__ok__broken",
+                    "mcp__auth",
+                    "mcp__down",
+                    "mcp__errs",
+                    "mcp__asked",
+                    "mcp__narrow__echo",
+                ]
+                .map(String::from),
+            ),
+            None,
+        );
+        let mut tally = Tally::default();
+        let mut observer = crate::agent::connector_signals::Observer::new(&connectors);
+        let stream: Vec<Value> = serde_json::from_str(STREAM).unwrap();
+        for event in &stream {
+            tally.observe(event);
+            observer.observe(event, Utc::now());
+        }
+        let meter = Meter {
+            data_dir: dir.clone(),
+            run_id: "saw-connectors".into(),
+            mode: Mode::Attended,
+            vault_id: Some(vault.clone()),
+            store_uuid: Some("store".into()),
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        finish(&meter, &tally, false, false, Utc::now());
+        record_connectors(&meter, &observer.finish(tally.denied_tools()));
+
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let rows: Vec<(String, String, String, String)> =
+            crate::runtime::connector_status::read(&conn, &vault)
+                .unwrap()
+                .into_iter()
+                .map(|row| (row.connector, row.state, row.signal, row.run_id))
+                .collect();
+        let row = |connector: &str, state: &str, signal: &str| {
+            (
+                connector.to_string(),
+                state.to_string(),
+                signal.to_string(),
+                "saw-connectors".to_string(),
+            )
+        };
+        assert_eq!(
+            rows,
+            [
+                row("asked", "not_approved", "permission_denial"),
+                row("auth", "needs_sign_in", "init"),
+                row("down", "failed", "init"),
+                row("errs", "working", "init"),
+                row("narrow", "working", "init"),
+                row("ok", "working", "tool_result"),
+            ]
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_meter_without_a_vault_records_nothing() {
+        let dir = crate::vault::testutil::temp_vault("meter-connector-status-no-vault");
+        let _lock = crate::runtime::status::test_lock();
+        crate::runtime::status::clear();
+        let conn = crate::runtime::open(&dir).unwrap();
+        let vault = crate::runtime::scope::register(&conn, &dir).unwrap();
+        drop(conn);
+        let meter = Meter {
+            data_dir: dir.clone(),
+            run_id: "no-vault".into(),
+            mode: Mode::Attended,
+            vault_id: None,
+            store_uuid: None,
+            started_at: Utc::now(),
+            elapsed_limit_seconds: None,
+            actor: None,
+            parent_run_id: None,
+            cause: None,
+        };
+        let seen = Observation {
+            connector: "gmail".into(),
+            state: crate::runtime::connector_status::State::Working,
+            signal: crate::runtime::connector_status::Signal::Init,
+            seen_at: crate::runtime::now_utc(),
+        };
+        record_connectors(&meter, std::slice::from_ref(&seen));
+        let conn = crate::runtime::open_existing(&dir).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM connector_status", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            rows, 0,
+            "a status belongs to a vault, and this run had none"
+        );
+        assert!(crate::runtime::connector_status::read(&conn, &vault)
+            .unwrap()
+            .is_empty());
+        drop(conn);
+        // Nor does a missing runtime DB make it fail: it records nothing.
+        let elsewhere = Meter {
+            data_dir: dir.join("no-db-here"),
+            vault_id: Some(vault),
+            ..meter
+        };
+        record_connectors(&elsewhere, &[seen]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

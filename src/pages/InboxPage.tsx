@@ -16,6 +16,7 @@ import {
   type OrganizeCheck,
 } from '@/engine/inbox';
 import { resolveLayout } from '@/engine/layout';
+import { linkLabel } from '@/engine/linkLabels';
 import { conceptsFrom, isAgentWritten, listConcepts } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ProposalCard } from '@/agent/ProposalCard';
@@ -181,13 +182,9 @@ function OrganizePanel({
   const unresolved = useMemo(() => {
     if (!connectors) return [];
     const text = `${entry.title}\n${entry.snippet}`;
-    return uncachedRefs(
-      text,
-      allEntries.map((e) => e.path),
-      {
-        issuePrefixes: parseIssuePrefixes(issuePrefixes),
-      },
-    );
+    return uncachedRefs(text, allEntries, {
+      issuePrefixes: parseIssuePrefixes(issuePrefixes),
+    });
   }, [allEntries, connectors, entry.snippet, entry.title, issuePrefixes]);
 
   const typeOptions = [
@@ -333,6 +330,11 @@ function OrganizePanel({
                   fetchRefsPrompt(
                     entry.path,
                     unresolved.map((r) => r.id),
+                    // A link's own name as the cache title (M69.2): the title
+                    // only, since "Linear" alone titles nothing.
+                    unresolved.map((r) =>
+                      r.kind === 'url' ? (linkLabel(r.id)?.title ?? null) : null,
+                    ),
                   ),
                   entry.path,
                   askedAbout(fetchRefsLabel(unresolved.length), entry.title),

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { EditorReadyInfo } from './MarkdownEditor';
 import { NoteBodyEditor, type SaveState } from './NoteBodyEditor';
+import { __resetOpenPages, announceExternalWrites, flushOpenPages } from './openPages';
 
 const PAGE = 'inbox/test-page.md';
 const LOSSY_BODY = '# Page\n\n<div align="center">raw html island</div>\n';
@@ -94,6 +95,28 @@ describe('NoteBodyEditor', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('raw HTML'));
   });
 
+  /* The banner blamed raw HTML whatever the check found (M55.15). A link
+     reference definition is markdown the editor drops, and holds no HTML. */
+  it('names the cause when the file loses text that is not raw HTML', async () => {
+    fs().set(PAGE, '# Page\n\nSee [the spec][spec].\n\n[spec]: https://example.com "The spec"\n');
+    await renderReady(PAGE);
+    const banner = await screen.findByTestId('lossy-import-banner');
+    expect(banner.textContent).toContain("Parts of this file can't be shown in the rich editor.");
+    expect(banner.textContent).not.toContain('HTML');
+    expect(screen.getByRole('button', { name: /Edit anyway/ }).textContent).not.toContain('HTML');
+  });
+
+  /* A bare fence reopened as `javascript`, a word the file never had, and
+     the page opened locked for it (M55.15). */
+  it('opens a page with a bare code fence editable', async () => {
+    fs().set(PAGE, '# Page\n\n```\nnpm install\n```\n');
+    const { editor } = await renderReady(PAGE);
+    await settle();
+    expect(screen.queryByTestId('lossy-import-banner')).toBeNull();
+    expect(editor.isEditable).toBe(true);
+    expect(editor.document[1]).toMatchObject({ type: 'codeBlock', props: { language: '' } });
+  });
+
   // The banner used to be the ENTIRE mitigation: the editor stayed live and
   // the first keystroke autosaved the raw HTML out of the file 500 ms later.
   it('mounts a lossy import read-only so an edit cannot reach disk', async () => {
@@ -148,13 +171,15 @@ describe('NoteBodyEditor', () => {
 });
 
 /**
- * Reconciling with the disk (M17.4).
+ * Reconciling with the disk (M17.4, M53.6).
  *
  * The agent writes straight to disk through its MCP tools while you have the
- * file open. Nothing reloaded the editor, the watcher suppresses own-writes
- * for four seconds, and the next keystroke's debounce saved the stale buffer
- * back over the agent's work — the guaranteed outcome of asking the assistant
- * to revise a note you are looking at, not a narrow race.
+ * file open. Nothing reloaded the editor, the watcher drops the echo of every
+ * write the app makes (the agent's included), and the next keystroke's
+ * debounce saved the stale buffer back over the agent's work — the guaranteed
+ * outcome of asking the assistant to revise a note you are looking at, not a
+ * narrow race. A write announced for the page's path is handled by that
+ * announcement; anything else still has the modifiedAt stamp.
  */
 describe('NoteBodyEditor when the file changes underneath it', () => {
   const at = (iso: string) =>
@@ -179,7 +204,10 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     useUiStore.setState({ toasts: [] });
     at('2026-08-03T10:00:00Z');
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    __resetOpenPages();
+  });
 
   /** Every editor instance this component mounts, newest last — a reload is a
    *  remount, so the new body arrives as a new onReady. */
@@ -253,5 +281,115 @@ describe('NoteBodyEditor when the file changes underneath it', () => {
     at('2026-08-03T10:05:00Z');
     await settle();
     expect(screen.queryByTestId('external-change-banner')).toBeNull();
+  });
+
+  // --- An agent write announced for this path (M53.6) ---------------------
+  //
+  // Rust stamps modifiedAt to the second, so the stamp cannot carry a write
+  // in the same second as the last one. None of these move it: the
+  // announcement alone has to do the work.
+
+  const AGENT = '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n';
+
+  /** Announce a write to PAGE whose catch-up waits until `caughtUp()`. */
+  function announcePending(): { announced: Promise<void>; caughtUp: () => void } {
+    let caughtUp = () => {};
+    const done = new Promise<void>((resolve) => {
+      caughtUp = resolve;
+    });
+    let announced: Promise<void> = Promise.resolve();
+    act(() => {
+      announced = announceExternalWrites([PAGE], () => done);
+    });
+    return { announced, caughtUp };
+  }
+
+  /** The agent writes PAGE; the announcement holds until the test lets it land. */
+  async function agentWritesWhileTyped(seen: ReadyInfo[]): Promise<void> {
+    appendParagraph(seen[0].editor, 'my unsaved sentence');
+    fs().set(PAGE, AGENT);
+    const { announced, caughtUp } = announcePending();
+    // The debounce fires while the write is catching up: held, not written.
+    await settle();
+    expect(fs().get(PAGE)).toBe(AGENT);
+    await act(async () => {
+      caughtUp();
+      await announced;
+    });
+    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
+  }
+
+  it('reloads a clean buffer when a write to its file is announced, with modifiedAt unchanged', async () => {
+    const seen = await renderTracking(20);
+    fs().set(PAGE, AGENT);
+    await act(() => announceExternalWrites([PAGE], async () => undefined));
+    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
+    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+  });
+
+  it('holds what was typed while an announced write lands, then asks', async () => {
+    const seen = await renderTracking(20);
+    await agentWritesWhileTyped(seen);
+    // Nothing was taken away, and nothing was written over the agent's text.
+    expect(seen.length).toBe(1);
+    expect(bodyOf(seen[0])).toContain('my unsaved sentence');
+    appendParagraph(seen[0].editor, 'and one more');
+    await settle();
+    expect(fs().get(PAGE)).toBe(AGENT);
+  });
+
+  it('Keep writes what was held', async () => {
+    const seen = await renderTracking(20);
+    await agentWritesWhileTyped(seen);
+    appendParagraph(seen[0].editor, 'and one more');
+    await settle();
+    fireEvent.click(screen.getByTestId('external-change-keep'));
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+    await waitFor(() => expect(fs().get(PAGE)).toContain('and one more'), DISK_ROUND_TRIP);
+    expect(fs().get(PAGE)).toContain('my unsaved sentence');
+    expect(fs().get(PAGE)).not.toContain('Rewritten by the agent');
+  });
+
+  it('Load drops what was held and writes nothing back, then or on leaving', async () => {
+    const seen = await renderTracking(20);
+    await agentWritesWhileTyped(seen);
+    fireEvent.click(screen.getByTestId('external-change-reload'));
+    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
+    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
+    await settle();
+    expect(fs().get(PAGE)).toBe(AGENT);
+    cleanup();
+    await settle();
+    expect(fs().get(PAGE)).toBe(AGENT);
+  });
+
+  // The remount Load causes used to run the unmount flush, which wrote the
+  // discarded buffer straight back over the version being loaded.
+  it('Load cancels a save still waiting on its debounce', async () => {
+    const seen = await renderTracking(10_000);
+    appendParagraph(seen[0].editor, 'my unsaved sentence');
+    fs().set(PAGE, AGENT);
+    await act(() => announceExternalWrites([PAGE], async () => undefined));
+    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('external-change-reload'));
+    await waitFor(() => expect(seen.length).toBe(2), DISK_ROUND_TRIP);
+    await settle();
+    expect(fs().get(PAGE)).toBe(AGENT);
+  });
+
+  it('leaving the page writes what was held: theirs wins', async () => {
+    const seen = await renderTracking(20);
+    await agentWritesWhileTyped(seen);
+    cleanup();
+    await waitFor(() => expect(fs().get(PAGE)).toContain('my unsaved sentence'), DISK_ROUND_TRIP);
+  });
+
+  it('lands a pending edit when a turn flushes the open pages', async () => {
+    const seen = await renderTracking(10_000);
+    appendParagraph(seen[0].editor, 'typed just before asking');
+    await act(() => flushOpenPages());
+    // Landed by the time the flush resolves, not ten seconds out.
+    expect(fs().get(PAGE)).toContain('typed just before asking');
   });
 });

@@ -7,33 +7,63 @@
 //! makes `open_note` a direct call into app state instead of a hop through
 //! a second process, and it removes Node from the runtime requirements.
 //!
-//! Security: bound to loopback, and every request must carry a bearer token
-//! minted at startup. The token is handed to the CLI through a private
-//! `--mcp-config` file and nothing else, and `--strict-mcp-config` keeps the
-//! agent from loading any other server.
+//! Security: bound to loopback, and every request must carry a bearer minted
+//! for one run as it spawns. The bearer reaches that run's CLI through a
+//! private `--mcp-config` file and nothing else, resolves to the run's grant
+//! (its actor, scopes, tools and vault), is compared in constant time, and
+//! stops resolving `REVOKE_GRACE` after the run's process exits (M53.11).
+//! The endpoint holds no bearer of its own, and the app's window never holds
+//! one. `--strict-mcp-config` keeps the agent from loading any other server.
+//!
+//! A request must also be addressed to the endpoint itself (M54.6): Host
+//! `127.0.0.1:<port>` or `localhost:<port>`, and an Origin, when one is sent,
+//! `http://` and one of those. Anything else is refused before the endpoint
+//! reads the body or looks at the bearer, so a web page that rebinds a name
+//! to 127.0.0.1, or posts here from its own origin, reaches nothing. A fixed
+//! pool of `LOOPBACK_WORKERS` threads answers, so one slow call no longer
+//! holds up every other run, and a call that panics answers -32603 while its
+//! worker keeps serving. Writes to one file take turns under its path lock
+//! (`vault::write::lock_paths`, M55.1), and writes to different files may
+//! overlap.
 //!
 //! The bundle is the agent's to write and the human's to verify — but the
 //! agent writes it through its two server-stamped tools and nothing else
 //! (M17.1, M49.7): `write_concept`, which refuses a `verified` field and
 //! stamps `generated` from the run's actor, so it is where provenance comes
-//! from, and `recheck_concept`, which moves only `stale_after`; `create_note`, `update_frontmatter` and
-//! `append_to_note` therefore call `knowledge::guard_agent_write` and refuse
-//! the bundle outright. This module used to say the agent's tools were "NOT
+//! from, and `recheck_concept`, which moves only `stale_after`; `create_note`,
+//! `update_frontmatter`, `append_to_note` and `edit_note` therefore call
+//! `knowledge::guard_agent_write` and refuse the bundle outright. This module used to say the agent's tools were "NOT
 //! subject to the knowledge/ guard" and treat that as the design — it was the
 //! hole that let a model stamp the user's own review onto its own output.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use rand::Rng;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter};
 
+use crate::policy::tools::{Axis, Kind, Surface, TargetKind, ToolRow};
 use crate::vault;
 
 pub const UI_ACTION_EVENT: &str = "cerebro://ui-action";
 const PROTOCOL_VERSION: &str = "2025-06-18";
+/// What every run hears whatever it was granted (M54.7), served as the
+/// `initialize` answer's `instructions`. The same bytes TS reads, and the
+/// rules for them are `shared/prompt/README.md`'s: they name no tool and stay
+/// within the CLI's 2048-unit cap.
+const SERVER_INSTRUCTIONS: &str = include_str!("../../shared/prompt/server-instructions.md");
+/// What cerebro is (M54.8): the one description of the product the model
+/// reads. `get_vault_context` ends with it, and the TS system prompt opens
+/// with the same bytes (`src/lib/productBrief.ts`). It names no tool and
+/// never mentions the knowledge bundle, so it holds for every run;
+/// `shared/prompt/README.md` holds its rules.
+const PRODUCT_BRIEF: &str = include_str!("../../shared/prompt/product-brief.md");
 
 #[derive(Default)]
 pub struct McpState {
@@ -50,13 +80,14 @@ fn normalize_actor(actor: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_ACTOR)
 }
 
-/// What a run's bearer token buys it (M13.4 actor, M17.13 scope).
+/// What a run's bearer token buys it (M13.4 actor, M17.13 scope, M53.10
+/// vault).
 ///
-/// Both ride the token rather than shared "current run" state, for the reason
-/// PR #5 gave about attribution and which applies twice over to scope: a child
-/// killed while a write is in flight can only present the token it was spawned
-/// with, so its trailing writes are stamped as ITS actor and confined to ITS
-/// scope, never to the incoming run's.
+/// All of it rides the token rather than shared "current run" state, for the
+/// reason PR #5 gave about attribution and which applies twice over to scope:
+/// a child killed while a write is in flight can only present the token it
+/// was spawned with, so its trailing writes are stamped as ITS actor and
+/// confined to ITS scope, never to the incoming run's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunGrant {
     pub actor: String,
@@ -93,10 +124,10 @@ pub struct RunGrant {
     /// folding the two together would make the safest write scope also the
     /// blindest reader. Folders only, same reasoning as `scope`.
     pub read_scope: Option<Vec<String>>,
-    /// Tool names this token may dispatch. `None` is unrestricted — the
-    /// panel's own turns. Same upper-bound semantics as `scope`, and checked
-    /// in the same place, for the same reason: argv is advice, the grant is
-    /// the boundary.
+    /// Tool names this token may dispatch, and the only ones its `tools/list`
+    /// names (M54.4). `None` is unrestricted — the panel's own turns. Same
+    /// upper-bound semantics as `scope`, and checked in the same place, for
+    /// the same reason: argv is advice, the grant is the boundary.
     pub tools: Option<Vec<String>>,
     /// The actor chain from the root run to this one, self included (M34.3).
     /// A root's chain is one element: its own actor. The chain is how the
@@ -105,24 +136,32 @@ pub struct RunGrant {
     /// for the reason everything else here does: a callee cannot argue its
     /// own ancestry away.
     pub chain: Vec<String>,
+    /// The vault this run works in, fixed at mint (M53.10). Every tool call
+    /// resolves its vault from here and nowhere else. It used to read one
+    /// pointer the endpoint shared, which every `ensure` retargeted: a run
+    /// still going in one vault wrote into whichever vault had been opened
+    /// since. `None` is a bearer bound to no vault, and it can call no tool.
+    pub vault: Option<PathBuf>,
 }
 
-/// A run id derived from a bearer token by hash.
+/// A run id derived from a string by hash, for test fixtures only (M53.11).
 ///
-/// Since M31.2a a MINTED run token carries the durable id its spawner books
-/// (see `run_token`), so this derivation serves only bearers that never book
-/// a run: the endpoint's own base token, whose grant `resolve_grant` builds
-/// here. (`RunGrant::unrestricted` also calls it, but on the one production
-/// path that reaches it — the base branch of `resolve_grant` — that output
-/// is immediately overwritten; only test fixtures ever keep it.)
-/// Domain-separated so a token can never be read back out of an id
-/// that travels in the ledger, and 128-bit hex because
-/// `ProposalV1::validate` requires that shape.
-pub fn run_id_of(token: &str) -> String {
+/// Every minted bearer carries the durable id its spawner books (M31.2a, see
+/// `run_token`). The last bearer whose id came from here was the endpoint's
+/// own base token, and it is gone. Domain-separated and 128-bit hex, the
+/// shape `ProposalV1::validate` requires, so a fixture's id passes wherever a
+/// real one would.
+#[cfg(test)]
+fn run_id_of(token: &str) -> String {
     crate::ledger::schema::sha256_first128(format!("cerebro-mcp-run-v1\0{token}").as_bytes())
 }
 
 impl RunGrant {
+    /// A grant narrowed on no axis and bound to no vault, for test fixtures
+    /// only (M53.11). Production mints every grant through `run_token` or
+    /// `handoff_token`, each bound to a vault; the one production grant this
+    /// used to build, the endpoint's base token, is gone.
+    #[cfg(test)]
     fn unrestricted(actor: &str) -> Self {
         Self {
             actor: actor.to_string(),
@@ -131,6 +170,7 @@ impl RunGrant {
             read_scope: None,
             tools: None,
             chain: vec![actor.to_string()],
+            vault: None,
         }
     }
 
@@ -164,18 +204,52 @@ fn scope_admits(scope: &Option<Vec<String>>, path: &str) -> bool {
     })
 }
 
+/// token → grant for recent runs, oldest first. See RunGrant.
+type RunTable = Arc<Mutex<Vec<(String, RunGrant)>>>;
+
+/// run id → the instant its bearer stops resolving (M53.11). Keyed by run
+/// rather than by token, so no second copy of any bearer is kept, and pruned
+/// to the runs still in the table at every mint.
+type Revocations = Arc<Mutex<BTreeMap<String, Instant>>>;
+
 #[derive(Clone)]
 struct Running {
     port: u16,
-    token: String,
-    vault: Arc<Mutex<PathBuf>>,
-    /// token → grant for recent runs. See RunGrant.
-    run_actors: Arc<Mutex<Vec<(String, RunGrant)>>>,
+    /// The vault a tool call works in is its grant's, so the endpoint itself
+    /// holds none. Nor does it hold a bearer of its own (M53.11): every entry
+    /// here was minted for one run.
+    run_actors: RunTable,
+    /// Runs whose process has exited, or never started. Always locked after
+    /// `run_actors`, never before, on every path.
+    revoked: Revocations,
 }
 
-/// How many run tokens stay valid at once. A killed child's writes can still
-/// be in flight when the next run is minted, so its token must outlive the
-/// mint — briefly, and never unboundedly.
+impl Running {
+    /// What `presented` resolves to at `now`. `bearer_grant`'s lookup, and
+    /// the one place that takes both locks to read: the table, then the
+    /// revocations.
+    fn resolve(&self, presented: &str, now: Instant) -> Option<RunGrant> {
+        let runs = self.run_actors.lock().ok()?;
+        let revoked = self.revoked.lock().ok()?;
+        resolve_grant(presented, &runs, &revoked, now)
+    }
+}
+
+/// How long a run's bearer keeps resolving after its process exits (M53.11).
+///
+/// A grace, not revocation at the reap. A grant resolves when a worker
+/// DEQUEUES its request, not when it was sent, and a request waits in the
+/// queue while every worker is busy (M54.6), so a write the child sent just
+/// before it exited can still be waiting behind slow calls. That write must
+/// land, attributed to the run that sent it. Once the grace is spent, a shell
+/// the run left behind that read its config holds a bearer that opens
+/// nothing.
+pub const REVOKE_GRACE: Duration = Duration::from_secs(10);
+
+/// How many grants the table holds at once: the leak cap. A bearer retires
+/// when its run's process exits (`McpState::revoke`, M53.11); the window
+/// bounds what is left of runs that are long gone, and catches a bearer
+/// whose spawn site never reached a revocation.
 ///
 /// M17.3 raised this from 4. It was sized for one live child plus a little
 /// slack; with up to `MAX_CONCURRENT_RUNS` alive at once, four would evict a
@@ -194,9 +268,10 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
     runs.push((token, grant));
     let mut excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
     // A run whose token is gone can never propose again, so its attempt
-    // counters go with it — and its tool-call counts (M31.2b), for the same
-    // reason. Bounding the counters by the same window that bounds the
-    // tokens is what stops these maps growing for the life of the process.
+    // counters go with it — and its tool-call counts (M31.2b) and recorded
+    // refusals (M54.10), for the same reason. Bounding the counters by the
+    // same window that bounds the tokens is what stops these maps growing
+    // for the life of the process.
     //
     // M31.2b — but an attended run has no elapsed limit, and enough ambient
     // mints during one long run would evict its token mid-question: with it
@@ -217,6 +292,7 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
         let (_, dropped) = runs.remove(i);
         forget_attempts(&dropped.run_id);
         forget_tool_calls(&dropped.run_id);
+        forget_refusals(&dropped.run_id);
         excess -= 1;
     }
 }
@@ -227,12 +303,35 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
 /// poisoned questions mutex the answer is unknowable, and the fail-safe
 /// direction is `true` — retain rather than evict, leak over kill, for the
 /// same reason the cap may grow past its bound: it is about leaks, not
-/// about live runs.
+/// about live runs. `lists_question` asks the same thing and answers a
+/// poisoned mutex the other way, on purpose.
 fn holds_open_question(run_id: &str) -> bool {
     questions()
         .lock()
         .map(|map| map.contains_key(run_id))
         .unwrap_or(true)
+}
+
+/// Does this run hold an open ingest window, so its list may name
+/// `report_window_outcome` (M54.4)? A poisoned windows mutex reads as no:
+/// the list leaves out what it cannot vouch for, and the tool refuses on
+/// that same mutex anyway.
+fn holds_window(run_id: &str) -> bool {
+    windows()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(false)
+}
+
+/// Does this run hold an open question, so its list may name `submit_answer`
+/// (M54.4)? `holds_open_question`, read the other way on a poisoned mutex:
+/// eviction keeps a run it cannot vouch for, while the list leaves out a
+/// tool it cannot vouch for, and the tool refuses on that same mutex anyway.
+fn lists_question(run_id: &str) -> bool {
+    questions()
+        .lock()
+        .map(|map| map.contains_key(run_id))
+        .unwrap_or(false)
 }
 
 /// What one run has already tried for one piece of work (M26.4g).
@@ -266,10 +365,10 @@ fn forget_attempts(run_id: &str) {
 /// `run_id` → tool name → dispatch count (M31.2b). Per NAME because gap 3's
 /// own question — "did the run READ outside its manifest" — is unanswerable
 /// from a scalar. Process-global for the same reason the attempt map is:
-/// a run is a bearer token, not a connection. The panel base bearer's entry
-/// is immortal — its id is never in the eviction window — but bounded
-/// (catalog-sized keys, u64 counts) and app-side only: every spawned CLI
-/// gets a per-run token.
+/// a run is a bearer token, not a connection. Every entry belongs to a minted
+/// run, so eviction bounds the map with the token window; the one entry that
+/// outlived it, the endpoint's own base bearer's, went with that bearer
+/// (M53.11).
 fn tool_calls() -> &'static Mutex<BTreeMap<String, BTreeMap<String, u64>>> {
     static TOOL_CALLS: OnceLock<Mutex<BTreeMap<String, BTreeMap<String, u64>>>> = OnceLock::new();
     TOOL_CALLS.get_or_init(|| Mutex::new(BTreeMap::new()))
@@ -306,6 +405,39 @@ fn forget_tool_calls(run_id: &str) {
     if let Ok(mut map) = tool_calls().lock() {
         map.remove(run_id);
     }
+}
+
+/// `run_id` → the refusals already recorded against it, as (code, tool,
+/// target) (M54.10). A model that repeats a refused call is refused every
+/// time and recorded once: one row says the run met that boundary, and a row
+/// per retry would bury it. Bounded by the token window like the tool-call
+/// counters above; in memory, so a relaunch forgets it.
+type RecordedRefusals = BTreeMap<String, BTreeSet<(&'static str, String, String)>>;
+
+fn recorded_refusals() -> &'static Mutex<RecordedRefusals> {
+    static RECORDED: OnceLock<Mutex<RecordedRefusals>> = OnceLock::new();
+    RECORDED.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Is this the first time `run_id` is refused with `code` by `tool` for
+/// `target`? Marks it either way, so two calls racing on one refusal record
+/// one row. A lock a panic poisoned is taken back as it is: the worst a
+/// half-done insert can leave is one refusal recorded twice.
+fn first_refusal(run_id: &str, code: &'static str, tool: &str, target: &str) -> bool {
+    recorded_refusals()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(run_id.to_string())
+        .or_default()
+        .insert((code, tool.to_string(), target.to_string()))
+}
+
+/// The eviction-side cleanup, beside `forget_tool_calls`.
+fn forget_refusals(run_id: &str) {
+    recorded_refusals()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(run_id);
 }
 
 /// One run's ingest window, while it is open (M26.4h).
@@ -438,6 +570,8 @@ pub(crate) fn test_submit_answer(
             tools: Some(crate::assembly::live::declared_tools()),
             // A root: the synthesis construct is never handed to.
             chain: vec![crate::assembly::ask::ACTOR.to_string()],
+            // submit_answer reads no vault.
+            vault: None,
         },
     )
     .map(|_| ())
@@ -465,27 +599,59 @@ fn work_key(op_kind: &str, targets: &[crate::ledger::schema::ProposalTarget]) ->
     )
 }
 
-/// What a presented bearer resolves to: the endpoint's own token (from
-/// `ensure`) is the default actor with no scope, a minted run token is its
-/// run's grant, and anything else is unauthorized.
-fn resolve_grant(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<RunGrant> {
-    if presented == base {
-        let mut grant = RunGrant::unrestricted(DEFAULT_ACTOR);
-        // The panel's own turns are a run too, and its id comes from the
-        // endpoint token like every other.
-        grant.run_id = run_id_of(presented);
-        return Some(grant);
+/// Do these bytes spell the known token? Read in full, whatever they hold
+/// (M53.11): every byte of the known token is XOR-folded in, and so is the
+/// length difference, so a near miss, a prefix and an extension each cost
+/// what a match costs. `==` stops at the first byte that differs, and how
+/// long it took tells a caller how many leading bytes it had right.
+fn tokens_match(presented: &[u8], known: &[u8]) -> bool {
+    let mut diff = presented.len() ^ known.len();
+    for (i, byte) in known.iter().enumerate() {
+        diff |= usize::from(presented.get(i).copied().unwrap_or(0) ^ byte);
+        // Best effort against an optimizer that would turn the fold back
+        // into the early exit it replaces.
+        diff = std::hint::black_box(diff);
     }
-    runs.iter()
-        .rev()
-        .find(|(t, _)| t == presented)
-        .map(|(_, g)| g.clone())
+    diff == 0
 }
 
-#[derive(serde::Serialize, Clone)]
+/// What a presented bearer resolves to at `now`: the grant of the run it was
+/// minted for, or nothing (M53.11).
+///
+/// Every slot is compared with `tokens_match`, and the loop never stops early,
+/// so a refusal takes as long as an admission and says nothing about how
+/// close a guess came. The last match wins, as the newest mint always has. A
+/// match whose run was revoked at or before `now` resolves to nothing: its
+/// process has exited and its grace is spent. The endpoint holds no token of
+/// its own, so there is no other way in.
+fn resolve_grant(
+    presented: &str,
+    runs: &[(String, RunGrant)],
+    revoked: &BTreeMap<String, Instant>,
+    now: Instant,
+) -> Option<RunGrant> {
+    let mut found = None;
+    for (token, grant) in runs {
+        if tokens_match(presented.as_bytes(), token.as_bytes()) {
+            found = Some(grant);
+        }
+    }
+    let grant = found?;
+    if revoked
+        .get(&grant.run_id)
+        .is_some_and(|until| *until <= now)
+    {
+        return None;
+    }
+    Some(grant.clone())
+}
+
+/// Where the endpoint listens. Its address is all it hands out: it holds no
+/// bearer of its own (M53.11), so a caller that wants a tool call answered
+/// mints one for its run.
+#[derive(Clone, Debug)]
 pub struct McpInfo {
     pub url: String,
-    pub token: String,
 }
 
 fn random_token() -> String {
@@ -496,16 +662,17 @@ fn random_token() -> String {
 }
 
 impl McpState {
-    /// Start the endpoint if it is not already up, and point it at `vault`.
-    /// Idempotent: reopening a vault retargets the running server rather than
-    /// leaking a second listener on a new port.
-    pub fn ensure(&self, app: &AppHandle, vault: &Path) -> Result<McpInfo, String> {
+    /// Start the endpoint if it is not already up, and return its address.
+    /// Idempotent: a second call answers with the running server rather than
+    /// leaking a second listener on a new port. It points the endpoint at no
+    /// vault, because the endpoint has none: each run's bearer carries its
+    /// own (M53.10). Nor does it mint a bearer (M53.11): only a run gets one.
+    /// It answers from a pool of `LOOPBACK_WORKERS` threads (M54.6).
+    pub fn ensure(&self, app: &AppHandle) -> Result<McpInfo, String> {
         let mut guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         if let Some(running) = guard.as_ref() {
-            *running.vault.lock().map_err(|_| "vault lock poisoned")? = vault.to_path_buf();
             return Ok(McpInfo {
                 url: format!("http://127.0.0.1:{}/mcp", running.port),
-                token: running.token.clone(),
             });
         }
 
@@ -518,56 +685,30 @@ impl McpState {
             .port();
         let running = Running {
             port,
-            token: random_token(),
-            vault: Arc::new(Mutex::new(vault.to_path_buf())),
             run_actors: Arc::new(Mutex::new(Vec::new())),
+            revoked: Arc::new(Mutex::new(BTreeMap::new())),
         };
 
         let handler = running.clone();
         let app = app.clone();
-        std::thread::spawn(move || {
-            for mut request in server.incoming_requests() {
-                let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
-                // Authorization and attribution are one act: the bearer the
-                // request presents names the run it came from, and that
-                // run's actor stamps its writes (PR #5 security review).
-                let grant = request.headers().iter().find_map(|h| {
-                    if !h.field.equiv("Authorization") {
-                        return None;
-                    }
-                    let presented = h.value.as_str().strip_prefix("Bearer ")?;
-                    let runs = handler.run_actors.lock().ok()?;
-                    resolve_grant(presented, &handler.token, &runs)
-                });
-                // JSON-RPC notifications carry no id and take no response
-                // body. Verified against the real CLI: it sends
-                // `notifications/initialized` right after `initialize` and is
-                // happy with a bodyless 202.
-                if grant.is_some() && is_notification(&body) {
-                    let _ = request.respond(tiny_http::Response::empty(202));
-                    continue;
-                }
-                let response = if let Some(grant) = grant.as_ref() {
-                    handle_rpc(&app, &handler, grant, &body)
-                } else {
-                    json!({
-                        "jsonrpc": "2.0", "id": Value::Null,
-                        "error": { "code": -32001, "message": "unauthorized" }
-                    })
-                };
-                let payload = response.to_string();
-                let header = "Content-Type: application/json"
-                    .parse::<tiny_http::Header>()
-                    .expect("static header parses");
-                let _ =
-                    request.respond(tiny_http::Response::from_string(payload).with_header(header));
-            }
+        let dispatch = Arc::new(move |bearer: Option<&str>, body: &str| {
+            routed(bearer_grant(bearer, &handler), body, |grant, body| {
+                handle_rpc(&app, grant, body)
+            })
         });
+        let workers = serve_loopback(
+            Arc::new(server),
+            port,
+            LOOPBACK_WORKERS,
+            MAX_BODY_BYTES,
+            dispatch,
+        );
+        if workers.is_empty() {
+            return Err("could not start the MCP endpoint: no worker thread started".to_string());
+        }
 
         let info = McpInfo {
             url: format!("http://127.0.0.1:{port}/mcp"),
-            token: running.token.clone(),
         };
         *guard = Some(running);
         Ok(info)
@@ -575,12 +716,16 @@ impl McpState {
 
     /// Mint a bearer token for ONE run, bound to that run's actor (M13.4).
     /// None reads as the default actor. Written into that run's private MCP
-    /// config and nowhere else; only the last few run tokens stay valid.
+    /// config and nowhere else. It resolves until `revoke` retires it, once
+    /// the run's process has exited or failed to start (M53.11), and never
+    /// past the window.
     ///
     /// `run_id` is the durable id the caller books the run under — the
     /// meter's `runs`-table id (M31.2a). It goes into the grant, and the
     /// grant is the ONLY place it is ever resolved from, so a run can still
-    /// never name another run's id.
+    /// never name another run's id. `vault` is the vault the run works in,
+    /// and the grant is likewise the only place a tool call finds it
+    /// (M53.10).
     pub fn run_token(
         &self,
         actor: Option<&str>,
@@ -588,16 +733,29 @@ impl McpState {
         read_scope: Option<Vec<String>>,
         tools: Option<Vec<String>>,
         run_id: String,
+        vault: &Path,
     ) -> Result<String, String> {
         // A root by definition: every caller of this mint is a person, a
         // schedule, or an internal construct. A handed-to run is minted by
         // `handoff_token`, which extends the caller's chain instead.
-        self.chained_run_token(actor, scope, read_scope, tools, run_id, None)
+        let actor = normalize_actor(actor).to_string();
+        self.mint(RunGrant {
+            chain: vec![actor.clone()],
+            actor,
+            run_id,
+            scope,
+            read_scope,
+            tools,
+            vault: Some(vault.to_path_buf()),
+        })
     }
 
     /// The handoff mint (M34.3): the same token, with the CALLER's chain
-    /// extended by the callee. Separate from `run_token` so the seven root
-    /// call sites cannot accidentally pass a chain they do not have.
+    /// extended by the callee. Separate from `run_token` so the root call
+    /// sites cannot accidentally pass a chain they do not have. The vault is
+    /// the caller's too (M53.10): a callee works in the vault its caller
+    /// works in, taken from the caller's grant like the chain, so the two
+    /// cannot disagree.
     pub fn handoff_token(
         &self,
         actor: &str,
@@ -605,22 +763,36 @@ impl McpState {
         read_scope: Option<Vec<String>>,
         tools: Option<Vec<String>>,
         run_id: String,
-        caller_chain: &[String],
+        caller: &RunGrant,
     ) -> Result<String, String> {
-        let mut chain = caller_chain.to_vec();
-        chain.push(normalize_actor(Some(actor)).to_string());
-        self.chained_run_token(Some(actor), scope, read_scope, tools, run_id, Some(chain))
+        let vault = bound_vault(caller)?;
+        let actor = normalize_actor(Some(actor)).to_string();
+        let mut chain = caller.chain.clone();
+        chain.push(actor.clone());
+        self.mint(RunGrant {
+            chain,
+            actor,
+            run_id,
+            scope,
+            read_scope,
+            tools,
+            vault: Some(vault),
+        })
     }
 
-    fn chained_run_token(
-        &self,
-        actor: Option<&str>,
-        scope: Option<Vec<String>>,
-        read_scope: Option<Vec<String>>,
-        tools: Option<Vec<String>>,
-        run_id: String,
-        chain: Option<Vec<String>>,
-    ) -> Result<String, String> {
+    /// Record `grant` under a fresh bearer and return the bearer.
+    ///
+    /// The grant's axes are kept exactly as declared. An empty declaration is
+    /// not "everywhere": a record that declares `scope:` and lists nothing has
+    /// scoped itself to nothing, and the only safe reading of that is no
+    /// writes. The same reading holds for `read_scope` (M34.4: a declared-
+    /// empty read scope reads nothing) and for `tools` (M31.1b: an empty list
+    /// grants no dispatch). Only `None` is unrestricted.
+    ///
+    /// A mint is also where the revocations shrink (M53.11): one whose run the
+    /// window just evicted has nothing left to refuse, so the list never holds
+    /// more runs than the table does.
+    fn mint(&self, grant: RunGrant) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
         let token = random_token();
@@ -628,37 +800,358 @@ impl McpState {
             .run_actors
             .lock()
             .map_err(|_| "run token lock poisoned")?;
-        let actor = normalize_actor(actor).to_string();
-        push_run_token(
-            &mut runs,
-            token.clone(),
-            RunGrant {
-                chain: chain.unwrap_or_else(|| vec![actor.clone()]),
-                actor,
-                run_id,
-                // An empty declaration is not "everywhere" — a record that
-                // declares `scope:` and lists nothing has scoped itself to
-                // nothing, and the only safe reading of that is no writes.
-                scope,
-                // Same reading again (M34.4): a declared-empty read scope
-                // reads nothing, and only `None` is unrestricted.
-                read_scope,
-                // Same reading (M31.1b): an empty tools list grants no
-                // dispatch, and only `None` — the panel — is unrestricted.
-                tools,
-            },
-        );
+        push_run_token(&mut runs, token.clone(), grant);
+        if let Ok(mut revoked) = running.revoked.lock() {
+            revoked.retain(|run_id, _| runs.iter().any(|(_, grant)| grant.run_id == *run_id));
+        }
         Ok(token)
     }
 
-    pub fn info(&self) -> Option<McpInfo> {
-        let guard = self.inner.lock().ok()?;
-        let running = guard.as_ref()?;
-        Some(McpInfo {
-            url: format!("http://127.0.0.1:{}/mcp", running.port),
-            token: running.token.clone(),
-        })
+    /// Retire a run's bearer `grace` from now (M53.11). `agent::stream` calls
+    /// it one of two ways: with `REVOKE_GRACE` once the run's process is
+    /// reaped, or with no grace at all when the run never got a process, since
+    /// then nothing can still be sending with it. Best effort: a bearer the
+    /// window already evicted is dead without it.
+    pub fn revoke(&self, token: &str, grace: Duration) {
+        self.revoke_at(token, Instant::now() + grace);
     }
+
+    /// `revoke` on an explicit clock. The slot is found the way a request
+    /// finds it, in constant time, and its RUN is recorded, never the token.
+    /// A revocation can only bring the deadline closer: a second one never
+    /// lends a run time the first took away.
+    fn revoke_at(&self, token: &str, until: Instant) {
+        let Ok(guard) = self.inner.lock() else {
+            return;
+        };
+        let Some(running) = guard.as_ref() else {
+            return;
+        };
+        let Ok(runs) = running.run_actors.lock() else {
+            return;
+        };
+        let mut found = None;
+        for (known, grant) in runs.iter() {
+            if tokens_match(token.as_bytes(), known.as_bytes()) {
+                found = Some(grant.run_id.clone());
+            }
+        }
+        let Some(run_id) = found else {
+            return;
+        };
+        let Ok(mut revoked) = running.revoked.lock() else {
+            return;
+        };
+        revoked
+            .entry(run_id)
+            .and_modify(|at| *at = (*at).min(until))
+            .or_insert(until);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transport (M54.6)
+// ---------------------------------------------------------------------------
+
+/// How many requests the endpoint answers at once: two per run at the run
+/// cap, so every run at the cap can have a call in flight and a read beside
+/// it before a request waits for a worker. The CLI runs the calls the catalog
+/// marks read-only in parallel. One thread used to answer every run, so one
+/// slow call held up all of them, and one panic ended the server.
+const LOOPBACK_WORKERS: usize = 2 * crate::agent::MAX_CONCURRENT_RUNS;
+
+/// The largest request body the endpoint reads. A tool call carries a note at
+/// most. A larger body gets 413: by its declared length, before any of it is
+/// read, or by reading one byte past the cap when it declares none.
+const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+// What a request refused before dispatch is told, as JSON-RPC -32600. Each
+// kind is logged once per launch (`log_first_refusal`).
+const MISSING_HOST: &str = "refused: a request must name its Host";
+const FOREIGN_HOST: &str = "refused: Host is not this endpoint's own address";
+const FOREIGN_ORIGIN: &str = "refused: Origin is not this endpoint's own address";
+const OVERSIZED_BODY: &str = "refused: the request body is larger than the endpoint reads";
+
+/// What a body that could not be read, or is not UTF-8, is told: JSON-RPC
+/// -32700 at 400.
+const UNREADABLE_BODY: &str = "parse error: the request body could not be read as UTF-8 text";
+
+/// How much of a refused Host or Origin the log keeps.
+const PRESENTED_MAX: usize = 128;
+
+/// Why a request may not reach the endpoint, as the HTTP status to answer and
+/// the reason, or `None` when it is addressed to the endpoint itself.
+///
+/// The bearer keeps out whoever does not hold one. This keeps out a web page,
+/// before the bearer is looked at: a page that rebinds its own name to
+/// 127.0.0.1 still sends that name as Host, and a page that posts here
+/// directly sends its own Origin. So Host must be `127.0.0.1:<port>` or
+/// `localhost:<port>`, in any case. A missing Host gets 400, and any other
+/// 403: another name, another port, `[::1]` (the listener is IPv4 only), a
+/// trailing dot, no port. An Origin may be absent, since only a browser must
+/// send one, but one that is present must be `http://` and one of those two
+/// addresses, so `null`, `tauri://localhost` and https all get 403. rmcp's
+/// `validate_dns_rebinding_headers` is the guide; the code is our own.
+fn loopback_refusal(
+    host: Option<&str>,
+    origin: Option<&str>,
+    port: u16,
+) -> Option<(u16, &'static str)> {
+    let Some(host) = host else {
+        return Some((400, MISSING_HOST));
+    };
+    if !own_authority(host, port) {
+        return Some((403, FOREIGN_HOST));
+    }
+    if origin.is_some_and(|origin| !own_origin(origin, port)) {
+        return Some((403, FOREIGN_ORIGIN));
+    }
+    None
+}
+
+/// Is `authority` the endpoint's own: `127.0.0.1:<port>` or
+/// `localhost:<port>`, in any case?
+fn own_authority(authority: &str, port: u16) -> bool {
+    ["127.0.0.1", "localhost"]
+        .iter()
+        .any(|name| authority.eq_ignore_ascii_case(&format!("{name}:{port}")))
+}
+
+/// Is `origin` the endpoint's own: `http://` and one of its two addresses?
+fn own_origin(origin: &str, port: u16) -> bool {
+    const SCHEME: &str = "http://";
+    origin
+        .get(..SCHEME.len())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case(SCHEME))
+        && origin
+            .get(SCHEME.len()..)
+            .is_some_and(|authority| own_authority(authority, port))
+}
+
+/// Log the first refusal of each kind this launch, with what was presented.
+/// Later ones of that kind are answered and not logged, so a page that keeps
+/// knocking cannot fill the diagnostic log. Nothing reaches runtime.db: a
+/// refusal here belongs to no run, as an unauthorized request never did.
+fn log_first_refusal(reason: &'static str, presented: &str) {
+    static SEEN: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    if SEEN
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(reason)
+    {
+        let presented: String = presented.chars().take(PRESENTED_MAX).collect();
+        log::warn!(
+            "mcp endpoint: {reason} (it presented {presented:?}); later refusals of this kind \
+             are answered and not logged"
+        );
+    }
+}
+
+/// What a request that reached dispatch is answered with.
+enum Reply {
+    /// 202 and no body: a notification, taken.
+    Accepted,
+    /// 200 and this JSON-RPC body. An error is a 200 too: the CLI reads a 401
+    /// as an OAuth server asking it to sign in.
+    Json(Value),
+}
+
+/// The grant `bearer` resolves to now, or `None` (M53.11). A worker resolves
+/// it when it takes the request off the queue, never when the request was
+/// sent, and `REVOKE_GRACE` is sized against that.
+fn bearer_grant(bearer: Option<&str>, running: &Running) -> Option<RunGrant> {
+    running.resolve(bearer?, Instant::now())
+}
+
+/// How a request is answered, given the grant its bearer resolved to: `rpc`
+/// answers a request that holds one.
+///
+/// Authorization and attribution are one act: the bearer names the run the
+/// request came from, and that run's actor stamps its writes (PR #5 security
+/// review). No grant is the -32001 body at HTTP 200, never a 401 (`Reply`).
+/// JSON-RPC notifications carry no id and take no response body. Verified
+/// against the real CLI: it sends `notifications/initialized` right after
+/// `initialize` and is happy with a bodyless 202.
+fn routed(
+    grant: Option<RunGrant>,
+    body: &str,
+    rpc: impl FnOnce(&RunGrant, &str) -> Value,
+) -> Reply {
+    let Some(grant) = grant else {
+        return Reply::Json(rpc_error(Value::Null, -32001, "unauthorized"));
+    };
+    if is_notification(body) {
+        return Reply::Accepted;
+    }
+    Reply::Json(rpc(&grant, body))
+}
+
+/// Serve `server` from `workers` threads named `cerebro-mcp-<n>`, and return
+/// the ones that started.
+///
+/// Each worker takes the next request off tiny_http's queue, its documented
+/// way to answer from several threads, and answers it in order: the address
+/// check (`loopback_refusal`), the size cap (`max_body`), then `dispatch` with
+/// the request's bearer and body. An address refusal is answered before the
+/// body is read or the bearer looked at, and a size refusal before the
+/// bearer. `dispatch` runs inside `catch_unwind`, so a call that panics
+/// answers -32603 and its worker takes the next request, and a panic anywhere
+/// else in answering, tiny_http's own included, costs that one request: the
+/// pool keeps its size. A worker stops when `unblock` hands it nothing, which
+/// only the tests do, or when the listener fails: tiny_http 0.12 stops
+/// accepting after one accept error, for good, and M54.5's init check is
+/// what makes that visible to a run.
+fn serve_loopback<F>(
+    server: Arc<tiny_http::Server>,
+    port: u16,
+    workers: usize,
+    max_body: usize,
+    dispatch: Arc<F>,
+) -> Vec<JoinHandle<()>>
+where
+    F: Fn(Option<&str>, &str) -> Reply + Send + Sync + 'static,
+{
+    (0..workers)
+        .filter_map(|n| {
+            let server = Arc::clone(&server);
+            let dispatch = Arc::clone(&dispatch);
+            std::thread::Builder::new()
+                .name(format!("cerebro-mcp-{n}"))
+                .spawn(move || {
+                    for request in server.incoming_requests() {
+                        let _ = catch_unwind(AssertUnwindSafe(|| {
+                            answer_request(request, port, max_body, &*dispatch);
+                        }));
+                    }
+                })
+                .inspect_err(|e| log::warn!("mcp endpoint: worker {n} did not start: {e}"))
+                .ok()
+        })
+        .collect()
+}
+
+/// A request body, read no further than the cap.
+enum Body {
+    Text(String),
+    /// Over the cap: by its declared length, unread, or by one byte past it.
+    TooLarge,
+    /// The read failed, or the bytes are not UTF-8.
+    Unreadable,
+}
+
+/// Answer one request, in the order `serve_loopback` gives.
+fn answer_request<F>(mut request: tiny_http::Request, port: u16, max_body: usize, dispatch: &F)
+where
+    F: Fn(Option<&str>, &str) -> Reply,
+{
+    let host = header_value(&request, "Host");
+    let origin = header_value(&request, "Origin");
+    if let Some((status, reason)) = loopback_refusal(host.as_deref(), origin.as_deref(), port) {
+        let presented = if reason == FOREIGN_ORIGIN {
+            origin
+        } else {
+            host
+        };
+        log_first_refusal(reason, presented.as_deref().unwrap_or_default());
+        respond_json(request, status, &rpc_error(Value::Null, -32600, reason));
+        return;
+    }
+    let body = match read_body(&mut request, max_body) {
+        Body::Text(body) => body,
+        Body::TooLarge => {
+            let declared = request
+                .body_length()
+                .map_or("no declared length".to_string(), |len| {
+                    format!("{len} bytes")
+                });
+            log_first_refusal(OVERSIZED_BODY, &declared);
+            respond_json(
+                request,
+                413,
+                &rpc_error(Value::Null, -32600, OVERSIZED_BODY),
+            );
+            return;
+        }
+        Body::Unreadable => {
+            let error = rpc_error(Value::Null, -32700, UNREADABLE_BODY);
+            respond_json(request, 400, &error);
+            return;
+        }
+    };
+    let reply = catch_unwind(AssertUnwindSafe(|| dispatch(bearer_of(&request), &body)));
+    match reply {
+        Ok(Reply::Accepted) => {
+            let _ = request.respond(tiny_http::Response::empty(202));
+        }
+        Ok(Reply::Json(answer)) => respond_json(request, 200, &answer),
+        // The panic's own line is already in the diagnostic log (the hook
+        // M53.24 installs). The caller hears that its call failed, under its
+        // own id so it is not left waiting, and this worker serves on.
+        Err(_) => {
+            let id = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|request| request.get("id").cloned())
+                .unwrap_or(Value::Null);
+            let error = rpc_error(id, -32603, "internal error: the call failed inside Cerebro");
+            respond_json(request, 200, &error);
+        }
+    }
+}
+
+/// Every value the request sent for header `name`, joined into one: `None`
+/// when it sent none, itself when it sent one. A repeated Host or Origin
+/// joins into a value no check admits, so a second one cannot ride past the
+/// first.
+fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<String> {
+    let values: Vec<&str> = request
+        .headers()
+        .iter()
+        .filter(|header| header.field.equiv(name))
+        .map(|header| header.value.as_str())
+        .collect();
+    (!values.is_empty()).then(|| values.join(", "))
+}
+
+/// The token the request presents: its first `Authorization: Bearer` one.
+fn bearer_of(request: &tiny_http::Request) -> Option<&str> {
+    request.headers().iter().find_map(|header| {
+        if !header.field.equiv("Authorization") {
+            return None;
+        }
+        header.value.as_str().strip_prefix("Bearer ")
+    })
+}
+
+/// The request's body, refused unread when it declares more than `max` bytes.
+fn read_body(request: &mut tiny_http::Request, max: usize) -> Body {
+    if request.body_length().is_some_and(|len| len > max) {
+        return Body::TooLarge;
+    }
+    match read_capped(request.as_reader(), max) {
+        Ok(Some(bytes)) => String::from_utf8(bytes).map_or(Body::Unreadable, Body::Text),
+        Ok(None) => Body::TooLarge,
+        Err(_) => Body::Unreadable,
+    }
+}
+
+/// What `reader` holds, or `None` when that is more than `max` bytes. It
+/// reads one byte past the cap and stops, so a body that declares no length
+/// is never held whole.
+fn read_capped(reader: &mut dyn Read, max: usize) -> std::io::Result<Option<Vec<u8>>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((max as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    Ok((bytes.len() <= max).then_some(bytes))
+}
+
+fn respond_json(request: tiny_http::Request, status: u16, body: &Value) {
+    let response = tiny_http::Response::from_string(body.to_string()).with_status_code(status);
+    let response = match "Content-Type: application/json".parse::<tiny_http::Header>() {
+        Ok(header) => response.with_header(header),
+        Err(()) => response,
+    };
+    let _ = request.respond(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -672,29 +1165,70 @@ fn is_notification(body: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn handle_rpc(app: &AppHandle, running: &Running, grant: &RunGrant, body: &str) -> Value {
+fn rpc_result(id: Value, result: Value) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "result": result })
+}
+
+fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+fn method_not_found(id: Value, method: &str) -> Value {
+    rpc_error(id, -32601, &format!("method not found: {method}"))
+}
+
+/// The protocol's own answers, which need no app (M54.6): `initialize`,
+/// `ping`, and the errors for a body that is not a request (-32600) and a
+/// method the endpoint does not serve (-32601). `None` for `tools/list` and
+/// `tools/call`, which `handle_rpc` answers for the bearer's run.
+fn answer_protocol(request: &Value) -> Option<Value> {
+    let id = request.get("id").cloned().unwrap_or(Value::Null);
+    let Some(method) = request.get("method").and_then(Value::as_str) else {
+        return Some(rpc_error(
+            id,
+            -32600,
+            "invalid request: a request is an object with a string method",
+        ));
+    };
+    match method {
+        "initialize" => Some(rpc_result(id, initialize_result())),
+        "ping" => Some(rpc_result(id, json!({}))),
+        "tools/list" | "tools/call" => None,
+        other => Some(method_not_found(id, other)),
+    }
+}
+
+/// The `initialize` answer, the same for every bearer (M54.7). It takes no
+/// grant, so nothing in it can follow one: the `instructions` are the rules
+/// that hold on every run, and anything that depends on what a run may call
+/// rides that run's own system prompt instead.
+fn initialize_result() -> Value {
+    json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "capabilities": { "tools": {} },
+        "serverInfo": {
+            "name": "cerebro",
+            "title": "Cerebro",
+            "version": env!("CARGO_PKG_VERSION")
+        },
+        "instructions": SERVER_INSTRUCTIONS.trim()
+    })
+}
+
+fn handle_rpc(app: &AppHandle, grant: &RunGrant, body: &str) -> Value {
     let request: Value = match serde_json::from_str(body) {
         Ok(v) => v,
-        Err(e) => {
-            return json!({
-                "jsonrpc": "2.0", "id": Value::Null,
-                "error": { "code": -32700, "message": format!("parse error: {e}") }
-            })
-        }
+        Err(e) => return rpc_error(Value::Null, -32700, &format!("parse error: {e}")),
     };
+    if let Some(answer) = answer_protocol(&request) {
+        return answer;
+    }
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request.get("method").and_then(Value::as_str).unwrap_or("");
 
     let result = match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": { "tools": {} },
-            "serverInfo": { "name": "cerebro", "version": env!("CARGO_PKG_VERSION") }
-        })),
-        // Notifications carry no id and expect no response body; returning an
-        // empty result is harmless and keeps the handler total.
-        "notifications/initialized" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": tool_catalog(proposals_enabled(app)) })),
+        // What this bearer may call, never the whole catalog (M54.4).
+        "tools/list" => Ok(json!({ "tools": listed_tools(grant, proposals_enabled(app)) })),
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -703,17 +1237,16 @@ fn handle_rpc(app: &AppHandle, running: &Running, grant: &RunGrant, body: &str) 
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            call_tool(app, running, grant, name, &args)
+            call_tool(app, grant, name, &args)
         }
-        other => Err(format!("unknown method: {other}")),
+        // `answer_protocol` answered every other method.
+        other => return method_not_found(id, other),
     };
 
     match result {
-        Ok(value) => json!({ "jsonrpc": "2.0", "id": id, "result": value }),
-        Err(message) => json!({
-            "jsonrpc": "2.0", "id": id,
-            "error": { "code": -32000, "message": message }
-        }),
+        Ok(value) => rpc_result(id, value),
+        // call_tool's own refusal, the one -32000 left.
+        Err(message) => rpc_error(id, -32000, &message),
     }
 }
 
@@ -731,196 +1264,90 @@ fn schema(properties: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": properties, "required": required })
 }
 
-/// The hand-written tools: read, note-write, and UI. Spelled out, one by one.
-///
-/// Kept as literal `json!` entries in one scrapeable function because the TS
-/// picker mirrors them by name (`src/engine/tools.ts`) and there is nothing
-/// to derive them from — unlike the proposal surface below, which has an
-/// artifact.
+/// The hand-written tools, served from the manifest's base rows in its order
+/// (`shared/policy/tools.v1.json`, M54.1).
 fn base_tools() -> Vec<Value> {
-    // Built from the artifact, never written out here: a second hand-kept
-    // list of type names is exactly the twin-inventory defect
-    // shared/policy/README.md exists to prevent.
-    let concept_types = format!(
-        "OKF concept type. Pick the closest of: {}. Use the vault's own type name instead when one fits better.",
-        crate::knowledge::concept_type_menu()
-    );
-    vec![
-        json!({
-            "name": "get_vault_context",
-            "description": "Orient yourself: the vault's types, saved views, projects, note counts, and how many captures are waiting in the Inbox. Call this first.",
-            "inputSchema": schema(json!({}), &[])
-        }),
-        json!({
-            "name": "search_notes",
-            "description": "Full-text search over note titles, bodies, and frontmatter. Returns paths with matching excerpts.",
-            "inputSchema": schema(json!({
-                "query": { "type": "string", "description": "Text to search for" },
-                "type": { "type": "string", "description": "Optional: only notes with this frontmatter type" },
-                "limit": { "type": "number", "description": "Max results (default 20)" }
-            }), &["query"])
-        }),
-        json!({
-            "name": "get_note",
-            "description": "Read one note in full: frontmatter and body. For knowledge/ concepts the derived trust tier is included.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string", "description": "Vault-relative path, e.g. records/risks/r-1.md" }
-            }), &["path"])
-        }),
-        json!({
-            "name": "knowledge_about",
-            "description": "What the knowledge/ bundle already knows about one entity — the same read the app shows beside a record. Call it before answering a question about something the vault holds, so you build on what the base has already worked out instead of rediscovering it. Reports each concept's description, type, lifecycle, whether a human has verified it, whether it is due a recheck, what replaced it, and what it disagrees with. Reading only: nothing here writes. An entity nobody has written about comes back empty and says so — that is an answer, not a failure.",
-            "inputSchema": schema(json!({
-                "target": { "type": "string", "description": "A vault path (records/risks/r-1.md) or a bare wikilink target (rq-84b-kestrel, atlas). Resolved the way the app resolves a wikilink: filename stem, then project folder, then exact title, case-insensitively." },
-                "limit": { "type": "number", "description": "Max concepts (default 20). Any it cannot fit are counted, never dropped silently." }
-            }), &["target"])
-        }),
-        json!({
-            "name": "report_window_outcome",
-            "description": "Background ingest only: report what you concluded about this run's change-window, once, at the end. `material` requires that you actually proposed something; `undetermined` names one blocked_reason. Say which of the four dimensions you evaluated.",
-            "inputSchema": schema(json!({
-                "outcome": { "type": "string", "enum": ["material", "non_material", "undetermined"], "description": "What you concluded about the window" },
-                "explanation": { "type": "string", "description": "In your own words, why" },
-                "evaluated_dimensions": { "type": "array", "items": { "type": "string", "enum": ["world_state", "belief_state", "evidence_state", "attention"] }, "description": "Which of the four you actually considered" },
-                "material_dimensions": { "type": "array", "items": { "type": "string", "enum": ["world_state", "belief_state", "evidence_state", "attention"] }, "description": "Which of those moved. A subset of evaluated_dimensions." },
-                "blocked_reason": { "type": "string", "enum": ["batch_input_incomplete", "policy_dependency_unavailable", "runtime_unavailable", "semantic_validation_failed", "source_access_lost"], "description": "Required when outcome is undetermined" }
-            }), &["outcome", "explanation"])
-        }),
-        json!({
-            // A literal, like every other entry: `base_tools` is scraped by
-            // the TS parity test (`src/engine/tools.test.ts`), and a name
-            // behind a constant is a name that test cannot see. The constant
-            // is still the one truth — `the_submit_tool_the_prompt_names_is_the_one_served`
-            // asserts the two agree.
-            "name": "submit_answer",
-            "description": "Attended synthesis only: submit the nine-part answer to the question this run was given, once. It is checked against the working-memory manifest the app assembled — every ref must name an item that manifest held, and the intended use must come back unchanged. A refusal names what to fix.",
-            "inputSchema": schema(json!({
-                "answer": { "type": "object", "description": "The SynthesisAnswer object, in the shape the prompt printed" }
-            }), &["answer"])
-        }),
-        json!({
-            "name": "list_inbox",
-            "description": "Captures waiting to be organized: untyped notes the user has not yet filed.",
-            "inputSchema": schema(json!({}), &[])
-        }),
-        json!({
-            "name": "hand_to",
-            "description": "Start a run of another agent with a task. Fire-and-forget: the callee runs under its OWN scope and tools (calling never lends yours), writes to the vault, and cannot reply here — read its output from the vault, or say where the user can. Two hops then it stops; a cycle refuses; a paused agent cannot be called.",
-            "inputSchema": schema(json!({
-                "agent": { "type": "string", "description": "The agent's handle — its declared slug, or its slugified title" },
-                "message": { "type": "string", "description": "What you are handing it: the task, and any context it cannot read for itself" }
-            }), &["agent", "message"])
-        }),
-        json!({
-            "name": "create_note",
-            "description": "Create a note. Use for ordinary vault content, not knowledge concepts (use write_concept for those).",
-            "inputSchema": schema(json!({
-                "folder": { "type": "string", "description": "Vault-relative folder, '' for the root" },
-                "slug": { "type": "string", "description": "Filename stem, kebab-case" },
-                "frontmatter": { "type": "object", "description": "YAML frontmatter as a mapping" },
-                "body": { "type": "string", "description": "Markdown body, starting with an H1" }
-            }), &["folder", "slug", "body"])
-        }),
-        json!({
-            "name": "update_frontmatter",
-            "description": "Patch a note's frontmatter. Keys set to null are removed; untouched keys and key order are preserved.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string" },
-                "patch": { "type": "object", "description": "Keys to set; null deletes" }
-            }), &["path", "patch"])
-        }),
-        json!({
-            "name": "append_to_note",
-            "description": "Append markdown to the end of an existing note's body.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string" },
-                "content": { "type": "string" }
-            }), &["path", "content"])
-        }),
-        json!({
-            "name": "write_concept",
-            "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model. If the body says one thing replaced, narrowed or disagrees with another, say it in `supersedes`/`refines`/`contradicts` as well: prose is for the reader, the fields are what lets anything answer 'is this still true'. Only assert a relation whose target you read in this run.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string", "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md" },
-                "type": { "type": "string", "description": concept_types },
-                "title": { "type": "string" },
-                "description": { "type": "string", "description": "One sentence saying what this concept is. It is what appears beside the title wherever concepts are listed, so 'what it is' beats 'why it matters'." },
-                "about": {
-                    "type": "array",
-                    "description": "The vault entities this concept is knowledge OF, as wikilinks — e.g. [\"[[phoenix-warehouse-rollout]]\", \"[[risk-rollback-unrehearsed]]\"]. Distinct from `sources`: that is where the claim came from, this is what it is about. Anchor every concept you can; an unanchored concept cannot surface anywhere but the bundle.",
-                    "items": { "type": "string" }
-                },
-                "body": { "type": "string", "description": "Markdown body. Favour structure: headings, tables, lists." },
-                "tags": { "type": "array", "items": { "type": "string" } },
-                "sources": {
-                    "type": "array",
-                    "description": "Where this came from. Each: {id, resource, title?}. `resource` may be a vault path or a URL.",
-                    "items": { "type": "object" }
-                },
-                "supersedes": {
-                    "type": "array",
-                    "description": "Concepts this one REPLACES, as wikilinks. Use it instead of writing a second concept that contradicts an old one: the old concept stops being offered as current, and the record of what was believed before survives. Do not edit the concept being replaced.",
-                    "items": { "type": "string" }
-                },
-                "refines": {
-                    "type": "array",
-                    "description": "Concepts this one narrows or makes more exact, as wikilinks. Both stay true — this is a hierarchy, not a correction.",
-                    "items": { "type": "string" }
-                },
-                "contradicts": {
-                    "type": "array",
-                    "description": "Concepts this one disagrees with, where you cannot tell which is right. Say so rather than picking a winner; that judgement belongs to the person who owns the work.",
-                    "items": { "type": "string" }
-                },
-                "lifecycle": { "type": "string", "description": "draft | stable | deprecated. Use deprecated when a concept is no longer true and nothing replaces it — a wrong concept left stable is worse than one that is gone." },
-                "stale_after": { "type": "string", "description": "YYYY-MM-DD after which this should be rechecked" }
-            }), &["path", "type", "title", "description", "body"])
-        }),
-        json!({
-            "name": "recheck_concept",
-            "description": "Record that a concept you rechecked STILL HOLDS, and when to check it next. Moves `stale_after` and nothing else — no rewrite, no new timestamp, no log entry. Use this, not write_concept, for the 'still true' verdict; use write_concept only when the content itself changes. Refused for a concept a person has verified: say what you found in your reply instead. On a concept a machine confirmed, or a heavily referenced one, the stamp waits for a person's approval.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string", "description": "The concept's path under knowledge/" },
-                "stale_after": { "type": "string", "description": "YYYY-MM-DD, later than today: when this should be rechecked next" }
-            }), &["path", "stale_after"])
-        }),
-        json!({
-            "name": "cache_source",
-            "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. ALWAYS call this after fetching through a connector. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
-            "inputSchema": schema(json!({
-                "id": { "type": "string", "description": "Issue key (PHX-421) or the URL you fetched" },
-                "kind": { "type": "string", "description": "issue | web" },
-                "title": { "type": "string" },
-                "body": { "type": "string", "description": "The content, as markdown" },
-                "source_url": { "type": "string", "description": "Canonical link back to the original" },
-                "stale_after": { "type": "string", "description": "YYYY-MM-DD after which the copy should be refetched. Default: 30 days out." }
-            }), &["id", "kind", "title", "body"])
-        }),
-        json!({
-            "name": "propose_organize",
-            "description": "Propose how to file an Inbox capture. This does NOT write — it shows the user an accept/reject card. Use it instead of editing a capture directly.",
-            "inputSchema": schema(json!({
-                "path": { "type": "string", "description": "The capture's path" },
-                "type": { "type": "string", "description": "Suggested cerebro type" },
-                "title": { "type": "string", "description": "Suggested H1, if the current one is unclear" },
-                "properties": { "type": "object", "description": "Suggested frontmatter, e.g. status, priority, assignee" },
-                "reasoning": { "type": "string", "description": "One or two sentences: why this filing" }
-            }), &["path", "reasoning"])
-        }),
-        json!({
-            "name": "open_note",
-            "description": "Open a note in the cerebro UI so the user sees what you are talking about.",
-            "inputSchema": schema(json!({ "path": { "type": "string" } }), &["path"])
-        }),
-        json!({
-            "name": "navigate",
-            "description": "Move the cerebro UI to a surface: home, inbox, knowledge, or a saved view.",
-            "inputSchema": schema(json!({
-                "to": { "type": "string", "description": "home | inbox | knowledge | view" },
-                "id": { "type": "string", "description": "View id, when to = view" }
-            }), &["to"])
-        }),
-    ]
+    crate::policy::tools::rows(Surface::Base)
+        .map(served_row)
+        .collect()
+}
+
+/// One manifest row as `tools/list` serves it: its name, its description and
+/// schema with every `{{token}}` rendered, its title and four hints as
+/// annotations, and its CLI hints under `_meta`.
+fn served_row(row: &ToolRow) -> Value {
+    json!({
+        "name": row.name,
+        "description": substitute_tokens(&row.description),
+        "inputSchema": substituted(&row.input_schema),
+        "annotations": annotations(&row.title, row.kind, row.idempotent, row.open_world),
+        "_meta": search_meta(&row.search_hint, row.always_load),
+    })
+}
+
+/// MCP's tool annotations. `readOnlyHint` lets the CLI run calls in
+/// parallel, so the manifest allows `read_only` only on the door that writes
+/// nothing at all. The loopback lets every call overlap: writes to one file
+/// take turns in `vault::write` (M55.1), and writes to different files may
+/// overlap.
+fn annotations(title: &str, kind: Kind, idempotent: bool, open_world: bool) -> Value {
+    json!({
+        "title": title,
+        "readOnlyHint": kind == Kind::ReadOnly,
+        "destructiveHint": kind == Kind::Destructive,
+        "idempotentHint": idempotent,
+        "openWorldHint": open_world,
+    })
+}
+
+/// The CLI's own keys (read from 2.1.250): a search hint always, and
+/// `alwaysLoad` only on a tool that sets it. A key the CLI does not know is
+/// ignored, never fatal.
+fn search_meta(search_hint: &str, always_load: bool) -> Value {
+    let mut meta = Map::new();
+    meta.insert("anthropic/searchHint".into(), json!(search_hint));
+    if always_load {
+        meta.insert("anthropic/alwaysLoad".into(), json!(true));
+    }
+    Value::Object(meta)
+}
+
+/// What a manifest `{{token}}` renders to. One arm per token the manifest
+/// declares, and `the_manifest_spells_the_names_the_code_does` holds the two
+/// to each other.
+fn token_text(token: &str) -> Option<String> {
+    match token {
+        // Built from its artifact, never written out here: a second hand-kept
+        // list of type names is exactly the twin-inventory defect
+        // shared/policy/README.md exists to prevent.
+        "concept_types" => Some(crate::knowledge::concept_type_menu()),
+        _ => None,
+    }
+}
+
+fn substitute_tokens(text: &str) -> String {
+    let mut text = text.to_string();
+    for token in crate::policy::tools::manifest().tokens.keys() {
+        let marker = format!("{{{{{token}}}}}");
+        if let Some(value) = token_text(token).filter(|_| text.contains(&marker)) {
+            text = text.replace(&marker, &value);
+        }
+    }
+    text
+}
+
+/// `value` with every string's tokens rendered, keys and order kept.
+fn substituted(value: &Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(substitute_tokens(text)),
+        Value::Array(items) => Value::Array(items.iter().map(substituted).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, item)| (key.clone(), substituted(item)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -939,14 +1366,14 @@ pub const PROPOSAL_PREFIX: &str = "propose_";
 /// it closes the run's set.
 pub const COMMIT_TOOL: &str = "commit_proposals";
 
-/// Served by base_tools as a literal (the TS parity test scrapes those
-/// bytes — leave them); this const exists so SPAWN SITES never spell the
-/// name: a drifted spelling would be silently dropped by narrow().
+/// A manifest row; this const exists so SPAWN SITES never spell the name: a
+/// drifted spelling would be silently dropped by narrow(), and
+/// `the_manifest_spells_the_names_the_code_does` holds the two together.
 pub const REPORT_TOOL: &str = "report_window_outcome";
 
 /// Same contract. propose_organize is hand-written, not generated from the
-/// policy table (`proposal_op_of` says why), so proposal_tool_names() cannot
-/// yield it.
+/// policy table (`proposal_op_of` says why; it is the manifest's one prefix
+/// exception), so proposal_tool_names() cannot yield it.
 pub const ORGANIZE_TOOL: &str = "propose_organize";
 
 pub fn proposal_tool_name(op: &str) -> String {
@@ -981,8 +1408,7 @@ pub fn proposal_tool_names() -> Vec<String> {
 /// currently escapes only because its match arm happens to come first. Order
 /// is not a security property, so the mapping asks the artifact.
 fn proposal_op_of<'a>(tool: &'a str, table: &crate::policy::table::PolicyTable) -> Option<&'a str> {
-    let op = tool.strip_prefix(PROPOSAL_PREFIX)?;
-    table.agent_facing_ops().contains(&op).then_some(op)
+    crate::policy::tools::generated_op(tool, table)
 }
 
 /// **The registration gate.** Refuses to build any proposal tool unless this
@@ -1158,32 +1584,24 @@ fn describe(op: &str, rule: &crate::policy::table::OpRule) -> String {
 /// directions.
 pub fn proposal_tools(table: &crate::policy::table::PolicyTable) -> Result<Vec<Value>, String> {
     registration_gate(table)?;
+    let generated = crate::policy::tools::generated();
     let mut tools: Vec<Value> = table
         .agent_facing_ops()
         .into_iter()
         .map(|op| {
             let rule = table.op(op).expect("agent_facing_ops names table rows");
+            let title = format!("{} {}", generated.title_prefix, op.replace('_', " "));
             json!({
                 "name": proposal_tool_name(op),
                 "description": describe(op, rule),
                 "inputSchema": proposal_schema(),
+                "annotations": annotations(&title, generated.kind, generated.idempotent, generated.open_world),
+                "_meta": search_meta(&generated.search_hint, generated.always_load),
             })
         })
         .collect();
-    tools.push(json!({
-        "name": COMMIT_TOOL,
-        "description": "Close this run's proposal set and decide it as one atomic batch. Nothing you proposed has been applied before this call. Returns each proposal's outcome: applied, queued for a person, or rejected with the rule that refused it.",
-        "inputSchema": schema(
-            json!({
-                "proposal_ids": {
-                    "type": "array",
-                    "description": "The proposals to commit, in order. All must belong to this run.",
-                    "items": { "type": "string" }
-                }
-            }),
-            &["proposal_ids"],
-        )
-    }));
+    // The terminal commit is a manifest row on the proposals surface.
+    tools.extend(crate::policy::tools::rows(Surface::Proposals).map(served_row));
     Ok(tools)
 }
 
@@ -1200,12 +1618,14 @@ fn proposals_enabled(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// What `tools/list` serves.
+/// Every tool this build can serve, and the upper bound `agent::tool_policy`
+/// grants from. What one bearer is shown is `listed_tools`.
 ///
-/// The proposal half is absent unless the switch is on AND the gate passes.
-/// A gate failure is recorded operationally rather than swallowed: a server
-/// that quietly served twelve tools when it was asked for thirty-two would be
-/// indistinguishable from one that was switched off.
+/// The manifest's base rows, then — only when the switch is on AND the gate
+/// passes — the proposal half. A gate failure is recorded operationally
+/// rather than swallowed: a server that quietly served only its base rows
+/// when it was asked for the proposal surface too would be indistinguishable
+/// from one that was switched off.
 pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
     let mut tools = base_tools();
     if !proposals_enabled {
@@ -1231,6 +1651,37 @@ pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
         }
     }
     tools
+}
+
+/// What one bearer's `tools/list` holds (M54.4): the catalog, in its order,
+/// less every tool its grant would refuse at dispatch, so a narrowed run is
+/// shown only what it can call.
+///
+/// The two held tools go only to the run that can use them:
+/// `report_window_outcome` while it holds an open ingest window, and
+/// `submit_answer` while it holds an open question. Both open before their
+/// run spawns, so the list the CLI fetches at start already names them.
+///
+/// Of the grant's axes, only its tools are filtered: a write its scope
+/// refuses, or a read its read scope refuses, stays listed, and dispatch
+/// refuses it with a reason the model can read. The list depends on the
+/// bearer, so the run's mcp-config turns the CLI's tool-list cache off
+/// (`agent::mcp_config_json`).
+pub(crate) fn listed_tools(grant: &RunGrant, proposals_enabled: bool) -> Vec<Value> {
+    tool_catalog(proposals_enabled)
+        .into_iter()
+        .filter(|tool| {
+            let name = tool["name"].as_str().unwrap_or_default();
+            if ungranted_tool_refusal(grant, name).is_some() {
+                return false;
+            }
+            match name {
+                REPORT_TOOL => holds_window(&grant.run_id),
+                crate::assembly::prompt::SUBMIT_TOOL => lists_question(&grant.run_id),
+                _ => true,
+            }
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,32 +1754,64 @@ fn tool_recheck_concept(
     }))
 }
 
-/// M49.4 (K23) — REPLACING a concept is reading it first. write_concept is
-/// exempt from the write scope (recording what a run found is its job), but
-/// a run that may not read a concept must not overwrite it: a
-/// `read-scope: []` agent could otherwise replace any unattested concept
+/// A call refused before its tool body runs (M54.10), by its grant's write
+/// scope, tools or read scope, or because its target is no note the corpus
+/// holds. `code` is the operational transport code policy.v3 declares for
+/// the axis, `target` is what the run's dedupe keys on beside the code and
+/// the tool, and `message` is the text the model reads, unchanged.
+#[derive(Debug, PartialEq)]
+struct GrantRefusal {
+    code: &'static str,
+    target: String,
+    message: String,
+}
+
+// The four codes, one per axis, each declared operational and a transport
+// code in `shared/policy/policy.v3.json`.
+const WRITE_OUTSIDE_SCOPE: &str = "write_outside_scope";
+const TOOL_OUTSIDE_GRANT: &str = "tool_outside_grant";
+const READ_OUTSIDE_SCOPE: &str = "read_outside_scope";
+const TARGET_OUTSIDE_CORPUS: &str = "target_outside_corpus";
+
+/// A note write whose `expect_hash` names other bytes than the note holds
+/// (M55.3): operational and a transport code in policy.v3, like the four
+/// above, and never the ledger's `stale_target_version`.
+const STALE_CONTENT: &str = "stale_content";
+
+/// M49.4 (K23) — REPLACING a concept is reading it first. The concept door's
+/// tools are exempt from the write scope (recording what a run found is
+/// their job), but a run that may not read a concept must not overwrite it:
+/// a `read-scope: []` agent could otherwise replace any unattested concept
 /// unseen. A NEW concept reads nothing, so it stays open — but retiring one
 /// is replacing it too: a `supersedes` link that ADDS a concept the run may
 /// not read is refused the same way (`unreadable_supersession`), or the
-/// rule is one field away from moot.
+/// rule is one field away from moot. Either is a refusal on the read axis,
+/// keyed on the concept the run may not read (M54.10).
+///
+/// Which tools and which argument come off the manifest: every row on the
+/// concept door, aimed by its target argument, and the retirement check for
+/// the one whose schema can retire (`supersedes`, write_concept's).
 fn unreadable_replacement(
     vault: &Path,
     grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
-) -> Option<String> {
-    if name != "write_concept" && name != "recheck_concept" {
-        return None;
-    }
-    if name == "write_concept" {
+) -> Option<GrantRefusal> {
+    let row = crate::policy::tools::row(name).filter(|row| row.door == "concept")?;
+    let arg = row.target.as_ref()?.arg.as_deref()?;
+    if row.input_schema["properties"].get("supersedes").is_some() {
         if let Some(target) = unreadable_supersession(vault, grant, args) {
-            return Some(format!(
-                "This run cannot read {target}, so it cannot retire it — `supersedes` may name \
-                 only a concept the run has read."
-            ));
+            return Some(GrantRefusal {
+                code: READ_OUTSIDE_SCOPE,
+                message: format!(
+                    "This run cannot read {target}, so it cannot retire it — `supersedes` may \
+                     name only a concept the run has read."
+                ),
+                target,
+            });
         }
     }
-    let path = crate::knowledge::canonical_path(&arg_str(args, "path")?)?;
+    let path = crate::knowledge::canonical_path(&arg_str(args, arg)?)?;
     // A recorded concept whose file is gone still exists: writing it is
     // replacing it (and the writer refuses that over a deletion anyway).
     let recorded = || {
@@ -1340,10 +1823,14 @@ fn unreadable_replacement(
     if grant.may_read(&path) || !(crate::vault::write::concept_exists(vault, &path) || recorded()) {
         return None;
     }
-    Some(format!(
-        "This run cannot read {path}, so it cannot replace it — write a new concept instead, or \
-         ask for read access to it."
-    ))
+    Some(GrantRefusal {
+        code: READ_OUTSIDE_SCOPE,
+        message: format!(
+            "This run cannot read {path}, so it cannot replace it — write a new concept instead, \
+             or ask for read access to it."
+        ),
+        target: path,
+    })
 }
 
 /// The first concept a `supersedes` value ADDS that `grant` may not read.
@@ -1420,20 +1907,97 @@ fn unreadable_supersession(
 
 /// The vault path a write tool is aimed at, for the scope check (M17.13).
 ///
-/// Centralised here rather than inside each tool so that adding a write tool
-/// cannot accidentally add an unscoped one. A name this does not recognise
-/// falls through to `None`, which means UNSCOPED — so the claim that a future
-/// write "will be caught" is only as true as the tripwire, and until M26.3d
-/// the tripwire named three tools and never looked at the catalog. It now
-/// partitions the whole served catalog into scoped and
-/// explicitly-exempt-with-a-reason, so a new tool in neither half fails.
+/// Read off the tool's manifest row rather than out of each tool, so adding
+/// a write tool cannot add an unscoped one: a row on the write or read_write
+/// axis names its target argument, and the manifest's load refuses a
+/// note-door row without one. A folder target is where the file lands
+/// (create_note names a folder and a title), so the folder is what has to be
+/// in scope, the vault root when the argument is missing. A tool on any
+/// other axis has no write target; its row says why.
 fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
-    match name {
-        // create_note names a folder and a title; the file lands inside the
-        // folder, so the folder is what has to be in scope.
-        "create_note" => Some(arg_str(args, "folder").unwrap_or_default()),
-        "update_frontmatter" | "append_to_note" => arg_str(args, "path"),
+    let row = crate::policy::tools::row(name)
+        .filter(|row| matches!(row.axis, Axis::Write | Axis::ReadWrite))?;
+    let target = row.target.as_ref()?;
+    let arg = target.arg.as_deref()?;
+    match target.kind {
+        TargetKind::Folder => Some(arg_str(args, arg).unwrap_or_default()),
+        TargetKind::Note => arg_str(args, arg),
         _ => None,
+    }
+}
+
+/// The vault path a read tool is aimed at, for the read scope (M34.4), off
+/// the tool's manifest row on the read or read_write axis. A note target is
+/// its argument; the bundle target is the bundle itself; a reader with no
+/// target enumerates, and filters inside its own body. A read_write writer
+/// (edit_note, M55.5) quotes its note back in its answers, so it reads its
+/// target whether or not it carries `expect_hash`.
+fn read_target(name: &str, args: &Map<String, Value>) -> Option<String> {
+    let row = crate::policy::tools::row(name)
+        .filter(|row| matches!(row.axis, Axis::Read | Axis::ReadWrite))?;
+    let target = row.target.as_ref()?;
+    match target.kind {
+        TargetKind::Note => arg_str(args, target.arg.as_deref()?),
+        TargetKind::Bundle => Some(crate::knowledge::KNOWLEDGE_DIR.to_string()),
+        _ => None,
+    }
+}
+
+/// The note a write that carries `expect_hash` has read (M55.3): its write
+/// target, held to the read scope as well. A write without one reads nothing
+/// it may not.
+fn hashed_read_target(name: &str, args: &Map<String, Value>) -> Option<String> {
+    args.get("expect_hash")
+        .filter(|v| !v.is_null())
+        .and_then(|_| write_target(name, args))
+}
+
+/// The hash an agent's note write expects its target to hold (M55.3):
+/// get_note's `Hash:` line. Absent (or null) is no expectation; 64 hex
+/// characters in either case are lowercased, as the scan spells a hash; any
+/// other value is refused before anything is read or written.
+fn parse_expect_hash(args: &Map<String, Value>) -> Result<Option<String>, String> {
+    match args.get("expect_hash") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(hash))
+            if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()) =>
+        {
+            Ok(Some(hash.to_ascii_lowercase()))
+        }
+        Some(_) => Err(MALFORMED_EXPECT_HASH.to_string()),
+    }
+}
+
+const MALFORMED_EXPECT_HASH: &str =
+    "expect_hash must be the 64-character hash from get_note's Hash line";
+
+/// What the model reads when its `expect_hash` is stale (M55.3). It carries
+/// no current hash, so the only way on is to read the note again.
+fn stale_content_message(path: &str) -> String {
+    format!(
+        "{STALE_CONTENT}: {path} changed since you read it, so nothing was written. Read it \
+         again with get_note and decide whether your change still applies."
+    )
+}
+
+/// A note write's refusal as the model reads it (M55.3). A stale
+/// expectation is recorded against the run, once per run, tool and note,
+/// and answered in `stale_content_message`'s words; any other refusal keeps
+/// its own.
+fn note_write_refusal(
+    run: Option<&str>,
+    tool: &str,
+    error: vault::write::NoteWriteError,
+) -> String {
+    match error {
+        vault::write::NoteWriteError::Refused(message) => message,
+        vault::write::NoteWriteError::Stale(stale) => {
+            let message = stale_content_message(&stale.path);
+            if let Some(run) = run {
+                record_refusal(run, tool, STALE_CONTENT, &stale.path, &message);
+            }
+            message
+        }
     }
 }
 
@@ -1441,24 +2005,21 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
 /// grant permits dispatch.
 ///
 /// A function beside the check that uses it, like `may_write`, so the tests
-/// can hold the refusal itself. BOTH sides are normalized to the short
-/// spelling: loopback names arrive short, but a caller presenting the full
-/// `mcp__cerebro__` form names the same tool, and a grant DECLARED in the
-/// full form must admit the short-spelled call the loopback actually
-/// receives — a one-sided strip would refuse it, fail-closed but a silent
-/// drift channel. `MCP_PREFIX` lives in `agent/mod.rs` so the two spellings
-/// cannot drift.
+/// can hold the refusal itself, and `listed_tools` lists only what it
+/// admits. The name test is `agent::names_tool`, the one argv narrowing asks
+/// too (M54.4), so a grant declared as `Get_Note`, or in the full
+/// `mcp__cerebro__` form, admits the call it put in argv. Every name the
+/// loopback hears is one of cerebro's, so it is tested in the spelling the
+/// CLI grants it by: a short name gains the prefix, and a caller that
+/// presented the full form keeps it.
 fn ungranted_tool_refusal(grant: &RunGrant, name: &str) -> Option<String> {
     let tools = grant.tools.as_ref()?;
-    let strip = |t: &str| -> String {
-        t.strip_prefix(crate::agent::MCP_PREFIX)
-            .unwrap_or(t)
-            .to_string()
+    let prefix = crate::agent::MCP_PREFIX;
+    let heard = match name.get(..prefix.len()) {
+        Some(head) if head.eq_ignore_ascii_case(prefix) => name.to_string(),
+        _ => format!("{prefix}{name}"),
     };
-    let short = strip(name);
-    // Equal names strip to equal names, so this one comparison also covers
-    // the verbatim `t == name` case.
-    if tools.iter().any(|t| strip(t) == short) {
+    if tools.iter().any(|t| crate::agent::names_tool(t, &heard)) {
         return None;
     }
     Some(format!(
@@ -1491,96 +2052,259 @@ fn writes_preferences(actor: &str, name: &str, args: &Map<String, Value>) -> boo
         .is_some_and(|patch| patch.contains_key("preferences"))
 }
 
-fn call_tool(
-    app: &AppHandle,
-    running: &Running,
+/// A scope as a refusal names it: its folders, or "nothing" when it was
+/// declared empty.
+fn scope_words(scope: &Option<Vec<String>>) -> String {
+    scope
+        .as_ref()
+        .map(|s| {
+            if s.is_empty() {
+                "nothing".to_string()
+            } else {
+                s.join(", ")
+            }
+        })
+        .unwrap_or_default()
+}
+
+/// The grant's refusal of this call, if it has one (M54.10): its write
+/// scope, its tools, then its read scope, in the order they have always been
+/// asked, each in the words it has always used and typed by its own code.
+fn grant_refusal(
+    vault: &Path,
     grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
-) -> Result<Value, String> {
-    let vault = running
-        .vault
-        .lock()
-        .map_err(|_| "vault lock poisoned")?
-        .clone();
-
-    // M31.2b — counted at the top so a REFUSED call is still a call the run
-    // chose to make: scope- and grant-refusals are dispatches too. Counted
-    // here rather than per-arm so a new tool cannot be added uncounted.
-    note_tool_call(&grant.run_id, name);
-
-    // M17.13 — scope is enforced HERE, before the tool runs, and it is a
-    // refusal rather than a request. An agent bound to `projects/atlas` cannot
-    // write outside it even if its instructions, or a note it just read, tell
-    // it to. `write_concept` and `cache_source` are deliberately exempt: an
-    // agent's whole job may be to record what it found, which is not the same
-    // permission as editing the user's records. What bounds write_concept is
-    // the ledger (every write is a governed transition, M24), the tool
-    // allowlist (`tools:` may omit it), and — to REPLACE a concept — read
-    // access to it (M49.4, below).
+) -> Option<GrantRefusal> {
+    // M17.13 — scope is a refusal rather than a request. An agent bound to
+    // `projects/atlas` cannot write outside it even if its instructions, or a
+    // note it just read, tell it to. `write_concept` and `cache_source` are
+    // deliberately exempt: an agent's whole job may be to record what it
+    // found, which is not the same permission as editing the user's records.
+    // What bounds write_concept is the ledger (every write is a governed
+    // transition, M24), the tool allowlist (`tools:` may omit it), and — to
+    // REPLACE a concept — read access to it (M49.4, below).
     if let Some(target) = write_target(name, args) {
         if !grant.may_write(&target) {
-            return Ok(error_result(format!(
-                "This run is scoped to {} and cannot write to {target}.",
-                grant
-                    .scope
-                    .as_ref()
-                    .map(|s| if s.is_empty() {
-                        "nothing".to_string()
-                    } else {
-                        s.join(", ")
-                    })
-                    .unwrap_or_default()
-            )));
+            return Some(GrantRefusal {
+                code: WRITE_OUTSIDE_SCOPE,
+                message: format!(
+                    "This run is scoped to {} and cannot write to {target}.",
+                    scope_words(&grant.scope)
+                ),
+                target,
+            });
         }
     }
 
-    // M31.1b — reads were the one surface the grant did not bound. Checked
-    // exactly like scope: a name outside the grant is refused before any
-    // tool body runs. And exactly like scope's refusal above, this is a
-    // plain error_result the model can read — no OperationalRefusal, no
-    // operational_log row. Deliberate, and symmetric: if either refusal
-    // ever starts recording operationally, both change together.
-    if let Some(refusal) = ungranted_tool_refusal(grant, name) {
-        return Ok(error_result(refusal));
+    // M31.1b — reads were the one surface the grant did not bound. A name
+    // outside the grant is refused exactly like scope, before any tool body
+    // runs.
+    if let Some(message) = ungranted_tool_refusal(grant, name) {
+        return Some(GrantRefusal {
+            code: TOOL_OUTSIDE_GRANT,
+            target: name.to_string(),
+            message,
+        });
     }
 
     // M34.4 — and read PATHS, the axis the tool allowlist cannot express.
-    // The targeted reader (get_note) refuses here, before the body; every
-    // reader that ENUMERATES — search_notes, list_inbox, get_vault_context,
+    // The targeted reader (get_note) refuses here, before the body, and so
+    // does a note write that carries `expect_hash` (M55.3): the hash says the
+    // run read its target, so a run that may not read it cannot use the hash
+    // to probe it. edit_note always does (M55.5): its refusals list the
+    // passages they matched, so it is refused before any match. Every reader that ENUMERATES — search_notes, list_inbox, get_vault_context,
     // and knowledge_about's subject index — filters inside its own body
     // instead, over the scanned corpus, and says how much was withheld where
     // a count is what it reports: a silently thinned result reads as "that is
     // all there is". knowledge_about is checked here as well, because reading
     // the bundle at all is a separate question from which notes it may name.
-    let read_target = match name {
-        "get_note" => arg_str(args, "path"),
-        "knowledge_about" => Some(crate::knowledge::KNOWLEDGE_DIR.to_string()),
-        _ => None,
-    };
-    if let Some(target) = read_target {
+    if let Some(target) = read_target(name, args).or_else(|| hashed_read_target(name, args)) {
         if !grant.may_read(&target) {
-            return Ok(error_result(format!(
-                "This run may read only {} and cannot read {target}.",
-                grant
-                    .read_scope
-                    .as_ref()
-                    .map(|s| if s.is_empty() {
-                        "nothing".to_string()
-                    } else {
-                        s.join(", ")
-                    })
-                    .unwrap_or_default()
-            )));
+            return Some(GrantRefusal {
+                code: READ_OUTSIDE_SCOPE,
+                message: format!(
+                    "This run may read only {} and cannot read {target}.",
+                    scope_words(&grant.read_scope)
+                ),
+                target,
+            });
+        }
+    }
+    unreadable_replacement(vault, grant, name, args)
+}
+
+/// The note a note door judges for one call (M54.10).
+enum CorpusTarget {
+    /// A note the call names.
+    Note(String),
+    /// The note `create_note` would write: its folder and slug, which it
+    /// judges in that order, and the file they name before a `-2` makes the
+    /// name new.
+    New {
+        folder: String,
+        slug: String,
+        planned: String,
+    },
+}
+
+impl CorpusTarget {
+    /// The note judged: what the refusal is keyed on, and what tells a path
+    /// into `knowledge/` apart.
+    fn path(&self) -> &str {
+        match self {
+            CorpusTarget::Note(path) => path,
+            CorpusTarget::New { planned, .. } => planned,
         }
     }
 
-    if let Some(refusal) = unreadable_replacement(Path::new(&vault), grant, name, args) {
-        return Ok(error_result(refusal));
+    /// The door's refusal of it as no note it may touch, in the door's words.
+    fn refusal(&self, vault: &Path) -> Option<String> {
+        match self {
+            CorpusTarget::Note(path) => vault::write::note_target_refusal(vault, path),
+            CorpusTarget::New { folder, slug, .. } => {
+                vault::write::new_note_refusal(vault, folder, slug)
+            }
+        }
     }
+}
 
+/// What a note-door tool judges for this call, off its manifest row
+/// (M54.10): the note it names, or for a folder target the file
+/// `create_note` plans there. `None` for every other door, and for a call
+/// that names no note to judge, which its door answers in its own words.
+fn corpus_target(name: &str, args: &Map<String, Value>) -> Option<CorpusTarget> {
+    let row = crate::policy::tools::row(name).filter(|row| row.door == "note")?;
+    let target = row.target.as_ref()?;
+    let arg = target.arg.as_deref()?;
+    match target.kind {
+        TargetKind::Note => arg_str(args, arg).map(CorpusTarget::Note),
+        TargetKind::Folder => {
+            let folder = arg_str(args, arg).unwrap_or_default();
+            let slug = arg_str(args, "slug")?;
+            let planned = vault::write::planned_note_path(&folder, &slug)?;
+            Some(CorpusTarget::New {
+                folder,
+                slug,
+                planned,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// M54.10 — the corpus. A note door refuses a target that is no note a note
+/// writer may touch (M53.4); this asks the door's own judgement before the
+/// call reaches it, so the refusal carries a code and its run. A path into
+/// `knowledge/` is left to the bundle guard, which speaks first there, as it
+/// always has.
+fn corpus_refusal(vault: &Path, name: &str, args: &Map<String, Value>) -> Option<GrantRefusal> {
+    let target = corpus_target(name, args)?;
+    if crate::knowledge::is_knowledge_path(target.path()) {
+        return None;
+    }
+    let message = target.refusal(vault)?;
+    Some(GrantRefusal {
+        code: TARGET_OUTSIDE_CORPUS,
+        target: target.path().to_string(),
+        message,
+    })
+}
+
+/// Record a refusal against its run (M54.10): one `operational_log` row per
+/// run, code, tool and target, carrying the run's id. A sink that is not
+/// armed records nothing, and recording never changes the answer.
+fn record_grant_refusal(grant: &RunGrant, tool: &str, refusal: &GrantRefusal) {
+    record_refusal(
+        &grant.run_id,
+        tool,
+        refusal.code,
+        &refusal.target,
+        &refusal.message,
+    );
+}
+
+/// The recorder under `record_grant_refusal`, for a refusal met inside a
+/// tool body too (M55.3's `stale_content`): one row per run, code, tool and
+/// target, typed by policy.v3 and carrying the run's id.
+fn record_refusal(run_id: &str, tool: &str, code: &'static str, target: &str, message: &str) {
+    if !first_refusal(run_id, code, tool, target) {
+        return;
+    }
+    let typed = crate::policy::table::PolicyTable::load().and_then(|table| {
+        crate::policy::rejection::OperationalRefusal::new(&table, code, tool, message)
+    });
+    match typed {
+        Ok(typed) => crate::runtime::sink::record(
+            &typed,
+            &crate::runtime::operational::LogEntry {
+                run_id: Some(run_id.to_string()),
+                ..crate::runtime::operational::LogEntry::bare()
+            },
+        ),
+        Err(e) => log::warn!("operational_log: could not type {code}: {e}"),
+    }
+}
+
+/// What a call is refused before any tool body runs, in order (M54.10): the
+/// grant's write scope, tools and read scope, then the preferences tier,
+/// then the corpus.
+///
+/// M31.1b left the grant's refusals as plain errors that recorded nothing,
+/// and kept them symmetric: if one ever recorded, all would. They do now.
+/// Each of the four axes records under its own code against the run, and
+/// the model reads the same words. The preferences refusal stays plain: it
+/// is a memory rule, not an axis of the grant.
+fn refuse_before_dispatch(
+    vault: &Path,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Option<Value> {
+    if let Some(refusal) = grant_refusal(vault, grant, name, args) {
+        record_grant_refusal(grant, name, &refusal);
+        return Some(error_result(refusal.message));
+    }
     if writes_preferences(&grant.actor, name, args) {
-        return Ok(error_result(PREFERENCES_REFUSAL.to_string()));
+        return Some(error_result(PREFERENCES_REFUSAL.to_string()));
+    }
+    if let Some(refusal) = corpus_refusal(vault, name, args) {
+        record_grant_refusal(grant, name, &refusal);
+        return Some(error_result(refusal.message));
+    }
+    None
+}
+
+/// The vault a call works in: its bearer's, fixed when the bearer was minted
+/// (M53.10). A bearer bound to no vault reaches no tool, rather than falling
+/// back to a vault somebody else chose.
+fn bound_vault(grant: &RunGrant) -> Result<PathBuf, String> {
+    grant
+        .vault
+        .clone()
+        .ok_or_else(|| "This bearer is bound to no vault, so it can call no tool.".to_string())
+}
+
+fn call_tool(
+    app: &AppHandle,
+    grant: &RunGrant,
+    name: &str,
+    args: &Map<String, Value>,
+) -> Result<Value, String> {
+    // M31.2b — counted at the top so a REFUSED call is still a call the run
+    // chose to make: scope- and grant-refusals are dispatches too. Counted
+    // here rather than per-arm so a new tool cannot be added uncounted.
+    note_tool_call(&grant.run_id, name);
+
+    let vault = bound_vault(grant)?;
+
+    // Every axis is enforced HERE, before any tool body runs, as a refusal
+    // rather than a request: write scope (M17.13), tools (M31.1b), read scope
+    // (M34.4) and the corpus (M53.4), each recorded against the run under its
+    // own code (M54.10). A refused call is still counted above, and it
+    // returns before the open pages are told anything (M53.6).
+    if let Some(refused) = refuse_before_dispatch(&vault, grant, name, args) {
+        return Ok(refused);
     }
 
     let actor = grant.actor.as_str();
@@ -1592,8 +2316,10 @@ fn call_tool(
         "list_inbox" => tool_list_inbox(&vault, grant),
         "hand_to" => tool_hand_to(app, &vault, args, grant),
         "create_note" => tool_create_note(&vault, args),
-        "update_frontmatter" => tool_update_frontmatter(&vault, args),
-        "append_to_note" => tool_append(&vault, args),
+        // The run's id, so a stale `expect_hash` is recorded against it (M55.3).
+        "update_frontmatter" => tool_update_frontmatter_in(&vault, args, Some(&grant.run_id)),
+        "append_to_note" => tool_append_in(&vault, args, Some(&grant.run_id)),
+        "edit_note" => tool_edit_note_in(&vault, args, Some(&grant.run_id)),
         "write_concept" => tool_write_concept_in(&vault, args, actor, Some(&grant.run_id)),
         // The run's id, as for write_concept (M49.9, K25): the stamp is a
         // proposal now, and the run's counters must include it.
@@ -1619,6 +2345,15 @@ fn call_tool(
             None => Err(format!("unknown tool: {other}")),
         },
     };
+
+    // M53.6 — tell the open pages what changed. `write_file` registers every
+    // write the app makes as its own, so the watcher drops the echo of the
+    // agent's write exactly as it drops a save's; untold, a page with the file
+    // open keeps the version from before the write, and its next save puts
+    // that version back.
+    if let Some(change) = announced_change(&vault, name, args, &outcome) {
+        let _ = app.emit(UI_ACTION_EVENT, change);
+    }
 
     // A failing tool must reach the model as readable content, not as a
     // transport error it cannot see or recover from.
@@ -1938,10 +2673,63 @@ fn tool_commit_proposals(
     .and_then(typed_result_value)
 }
 
-/// Writes go straight to disk, so the UI must be told to rescan — the
-/// watcher suppresses events for writes the app itself made.
-fn notify_vault_changed(app: &AppHandle) {
-    let _ = app.emit(UI_ACTION_EVENT, json!({ "action": "vault_changed" }));
+/// What a tool call changed on disk, as the open pages hear it (M53.6) — or
+/// `None` when it changed nothing: a refusal, an `isError` answer, a read, or
+/// a tool that only moves the UI.
+///
+/// A write that knows the file it changed names it, under the path the scan
+/// lists it by (`landing_path`), so a page with that file open reloads it
+/// however the agent spelled the path; a page holding unsaved typing asks
+/// instead. The rest change files this cannot name from its arguments — a
+/// created note's dedup suffix, a proposal's targets, a commit's set — or, for
+/// `update_frontmatter`, only the frontmatter, which a page's save keeps from
+/// disk anyway. They announce no `paths`, which means "somewhere: rescan",
+/// never "nothing".
+///
+/// Which tools announce is the manifest's: a tool whose door writes
+/// (`policy::tools::writes_disk`) does, and every other tool is quiet.
+fn announced_change(
+    vault: &Path,
+    name: &str,
+    args: &Map<String, Value>,
+    outcome: &Result<Value, String>,
+) -> Option<Value> {
+    let value = outcome.as_ref().ok()?;
+    if value.get("isError").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let rescan = || json!({ "action": "vault_changed" });
+    let at = |paths: Vec<String>| json!({ "action": "vault_changed", "paths": paths });
+    match name {
+        "append_to_note" | "edit_note" => Some(match arg_str(args, "path") {
+            Some(path) => at(vec![listed_path(vault, &path)]),
+            None => rescan(),
+        }),
+        // The concept as `write_concept` itself spells it, and the update log
+        // it appends on every write.
+        "write_concept" => Some(
+            match arg_str(args, "path").and_then(|p| crate::knowledge::canonical_path(&p)) {
+                Some(concept) => at(vec![
+                    listed_path(vault, &concept),
+                    listed_path(vault, crate::knowledge::LOG_PATH),
+                ]),
+                None => rescan(),
+            },
+        ),
+        _ if crate::policy::tools::writes_disk(name) => Some(rescan()),
+        _ => None,
+    }
+}
+
+/// `rel` under the path the scan lists it by — where it lands — or, when that
+/// cannot be resolved, as asked with its `.` segments dropped.
+fn listed_path(vault: &Path, rel: &str) -> String {
+    vault::write::landing_path(vault, rel).unwrap_or_else(|| {
+        rel.split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect::<Vec<_>>()
+            .join("/")
+    })
 }
 
 fn tool_vault_context(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
@@ -1971,10 +2759,20 @@ fn tool_vault_context(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
     types.sort();
     types.dedup();
 
-    let projects: Vec<String> = entries
+    // M54.8: a Collection is its folder's own note saying `type: Collection`
+    // (`delivery/delivery.md`), the folder-note rule of
+    // `vault::write::declared_by_page` and TS `isCollectionPage`. A note at
+    // the root has no folder to speak for, so it never qualifies.
+    let collections: Vec<String> = entries
         .iter()
-        .filter(|e| e.filename == "project.md")
-        .map(|e| format!("{} ({})", e.title, e.path))
+        .filter(|e| {
+            e.entry_type.as_deref() == Some("Collection")
+                && e.folder
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|own| !own.is_empty() && e.filename == format!("{own}.md"))
+        })
+        .map(|e| format!("  - {} ({})", e.title, e.path))
         .collect();
     let concepts = entries
         .iter()
@@ -1983,14 +2781,19 @@ fn tool_vault_context(vault: &Path, grant: &RunGrant) -> Result<Value, String> {
     let inbox = entries.iter().filter(|e| is_capture(e)).count();
 
     Ok(text_result(format!(
-        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nContainers:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}{}\n\nConventions: notes are markdown with YAML frontmatter. A TYPED note is a record of its type; an untyped note is a doc — records peek in a side panel by default and can also open as full pages. Types are declared by `type: Type` docs in types/ (their fields:, statuses:, folder:, and views: keys are the schema); records default to records/<plural>/. A Collection is a folder holding collection.yml (legacy project.md folders read as Collections); Lists are *.list.yml files inside one. The knowledge/ bundle is yours to maintain (Open Knowledge Format) and the user's to verify.",
+        "Vault: {}\n\nNotes: {}\nTypes in use: {}\nCollections:\n{}\n\nKnowledge concepts: {}\nInbox captures waiting: {}{}\n\nAbout this app:\n{}",
         vault.display(),
         entries.len(),
         types.join(", "),
-        if projects.is_empty() { "  (none)".to_string() } else { projects.iter().map(|p| format!("  - {p}")).collect::<Vec<_>>().join("\n") },
+        if collections.is_empty() {
+            "  (none)".to_string()
+        } else {
+            collections.join("\n")
+        },
         concepts,
         inbox,
         scope_note,
+        PRODUCT_BRIEF.trim(),
     )))
 }
 
@@ -2154,10 +2957,12 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
         .iter()
         .find(|e| e.path == path)
         .ok_or_else(|| format!("no note at {path}"))?;
-    let body = vault::write::read_note(vault, &path)?;
+    // One read gives the body and its hash (M55.2), so the Hash line names
+    // exactly the bytes whose body this result prints.
+    let (body, hash) = vault::write::read_note_hashed(vault, &path)?;
 
     let mut header = format!(
-        "Path: {}\nTitle: {}\nType: {}\n",
+        "Path: {}\nTitle: {}\nType: {}\nHash: {hash}\n",
         entry.path,
         entry.title,
         entry
@@ -2477,10 +3282,9 @@ fn tool_hand_to(
         .map(|text| strip_frontmatter(&text))
         .unwrap_or_default();
     let request = crate::agent::AgentRequest {
-        message: format!(
-            "You were handed this by {}, mid-run:\n\n{message}",
-            grant.actor
-        ),
+        // The handed text alone: `start_handoff_run` opens it with the WHY
+        // block, which names the caller as data (M56.7).
+        message,
         system_prompt: Some(format!(
             "You are \"{}\", the agent defined at {} in this vault. Your writes are attributed \
              to {}. Nobody is watching this run and no chat reply will be read — everything \
@@ -2491,9 +3295,9 @@ fn tool_hand_to(
         session_id: None,
         model: None,
         // Fail closed, both: shell needs the Settings ceiling and connectors
-        // need the per-machine stdio approvals, and both live in the
-        // renderer. A missing field must never widen access — a handed-to
-        // run that needs either is a chain the person starts themselves.
+        // need the per-machine approvals, and both live in the renderer. A
+        // missing field must never widen access — a handed-to run that needs
+        // either is a chain the person starts themselves.
         shell: Some(false),
         connectors: Some(false),
         connector_names: Some(vec![]),
@@ -2505,10 +3309,15 @@ fn tool_hand_to(
         scope: frontmatter_list(record, "scope"),
         read_scope: frontmatter_list(record, "read-scope"),
         allowed_tools: frontmatter_list(record, "allowed-tools"),
+        // Connectors are off for a handed-to run, so there is nothing for
+        // its record's `disallowed-tools:` to deny (M54.9).
+        disallowed_tools: None,
         // Handoffs keep the caller-side booking: the chain bills to its
         // root, and the root's ceiling gates the spawn itself
         // (dispatch::refuse_if_chain_spent, M36.6) — no lane claim here.
         lane: None,
+        // The runtime records `handoff` with its caller, never the request.
+        cause: None,
         internal: false,
     };
     let run_id = crate::start_handoff_run(app, vault, request, grant)?;
@@ -2565,14 +3374,42 @@ fn governed_type_refusal(declared: Option<&str>) -> Option<&'static str> {
     }
 }
 
-/// What the note ALREADY on disk is — the "editing one" direction.
-fn governed_note_refusal(vault: &Path, rel: &str) -> Option<&'static str> {
-    governed_type_refusal(vault::write::note_type(vault, rel).as_deref())
-}
-
 /// What the write DECLARES — the "authoring or retyping into one" direction.
 fn governed_write_refusal(frontmatter: &Map<String, Value>) -> Option<&'static str> {
     governed_type_refusal(frontmatter.get("type").and_then(Value::as_str))
+}
+
+/// What a note's bytes declare, as the scanner will read them.
+///
+/// The one byte check (M55.1). An agent's patch, append and edit run it
+/// twice under the write's path lock (`vault::write::patch_note_checked`,
+/// `append_note_checked`, `edit_note`): on the bytes the lock holds — editing a Type doc
+/// or an Agent record — and on the bytes the write would land, because
+/// neither mint below ever says `type: Agent` in its own argument:
+/// - The patch side: nulling out the last surviving key empties the mapping,
+///   the empty mapping serialises as no block, and a `---` fence already
+///   sitting in the body then arrives at byte zero as the new frontmatter — a
+///   two-step mint whose second step looks like a deletion.
+/// - The append side: an append keeps the existing frontmatter block and
+///   composes the body under it, so a note with NO block has its body as the
+///   whole file. Park an UNTERMINATED `---\ntype: Agent` fence there
+///   (untyped, so creation allows it) and the append that supplies the
+///   closing fence promotes the whole thing to byte-zero frontmatter. An
+///   edit can close the same fence from inside the body (M55.5).
+///
+/// Both found in the PR #17 security review. Judged under the lock, the
+/// bytes checked are the bytes replaced, never an earlier read.
+fn governed_bytes_refusal(content: &str) -> Option<&'static str> {
+    governed_type_refusal(vault::parse::declared_type(content).as_deref())
+}
+
+/// `governed_bytes_refusal` on both sides of an agent's note write: what the
+/// note is, then what the write would make it.
+fn governed_bytes_check(before: &str, after: &str) -> Result<(), String> {
+    match governed_bytes_refusal(before).or_else(|| governed_bytes_refusal(after)) {
+        Some(refusal) => Err(refusal.into()),
+        None => Ok(()),
+    }
 }
 
 /// What the FILE a `create_note` would write declares.
@@ -2586,44 +3423,13 @@ fn governed_write_refusal(frontmatter: &Map<String, Value>) -> Option<&'static s
 /// that was typed (PR #17 security review). Composed through the same
 /// function that writes, so the guard reads the bytes, not a restatement of
 /// how they are built.
-/// What the FILE an `update_frontmatter` would write declares.
-///
-/// The mirror of `governed_compose_refusal` on the patch side, and needed for
-/// the same reason: `type: Agent` never appears in the patch at all. Nulling
-/// out the last surviving key empties the mapping, the empty mapping
-/// serialises as no block, and a `---` fence already sitting in the body then
-/// arrives at byte zero as the new frontmatter — a two-step mint whose second
-/// step looks like a deletion (PR #17 security review).
-fn governed_patch_refusal(
-    vault: &Path,
-    rel: &str,
-    patch: &Map<String, Value>,
-) -> Option<&'static str> {
-    let content = vault::write::patched_frontmatter(vault, rel, patch).ok()?;
-    governed_type_refusal(vault::parse::declared_type(&content).as_deref())
-}
-
 fn governed_compose_refusal(
     frontmatter: &Map<String, Value>,
     slug: &str,
     body: &str,
 ) -> Option<&'static str> {
     let content = vault::write::compose_new_note(frontmatter, slug, body).ok()?;
-    governed_type_refusal(vault::parse::declared_type(&content).as_deref())
-}
-
-/// What the FILE an `append_to_note` would write declares.
-///
-/// The third door, and the one `governed_note_refusal` cannot see: it asks
-/// what the note IS, and the answer is honestly "untyped" right up until the
-/// append lands. `save_note` keeps the existing frontmatter block and composes
-/// the body under it, so a note with NO block has its body as the whole file —
-/// park an UNTERMINATED `---\ntype: Agent` fence there (untyped, so creation
-/// allows it) and the append that supplies the closing fence promotes the
-/// whole thing to byte-zero frontmatter (PR #17 security review).
-fn governed_append_refusal(vault: &Path, rel: &str, joined: &str) -> Option<&'static str> {
-    let content = vault::write::saved_note(vault, rel, joined).ok()?;
-    governed_type_refusal(vault::parse::declared_type(&content).as_deref())
+    governed_bytes_refusal(&content)
 }
 
 fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
@@ -2646,51 +3452,177 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
     Ok(text_result(format!("Created {path}")))
 }
 
+/// The run-less form tests call; the server always books a run.
+#[cfg(test)]
 fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    tool_update_frontmatter_in(vault, args, None)
+}
+
+/// `update_frontmatter`, with a stale `expect_hash` recorded against the
+/// calling run when there is one (M55.3).
+fn tool_update_frontmatter_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    run: Option<&str>,
+) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("update_frontmatter needs a path")?;
     let patch = args
         .get("patch")
         .and_then(Value::as_object)
         .cloned()
         .ok_or("update_frontmatter needs a patch object")?;
-    // Both directions are governed: editing a Type doc or an Agent record,
-    // and retyping an ordinary note INTO one. The second is what makes a
-    // guard on creation alone insufficient — an agent minted in two steps is
-    // an agent.
-    if let Some(refusal) = governed_note_refusal(vault, &path)
-        .or_else(|| governed_write_refusal(&patch))
-        .or_else(|| governed_patch_refusal(vault, &path, &patch))
-    {
-        return Err(refusal.into());
-    }
+    let expect = parse_expect_hash(args)?;
     // The self-certification hole (M17.1): this tool could patch `verified`
     // onto any concept, which is exactly what write_concept refuses to do.
     crate::knowledge::guard_agent_write(&path)?;
-    vault::write::update_frontmatter(vault, &path, &patch)?;
+    // Both directions are governed: editing a Type doc or an Agent record,
+    // and retyping an ordinary note INTO one. The second is what makes a
+    // guard on creation alone insufficient — an agent minted in two steps is
+    // an agent. The patch is judged as typed here, and the bytes on both
+    // sides of the write under its lock.
+    if let Some(refusal) = governed_write_refusal(&patch) {
+        return Err(refusal.into());
+    }
+    // A stale expectation is judged under the same lock, before the check.
+    vault::write::patch_note_checked(
+        vault,
+        &path,
+        &patch,
+        expect.as_deref(),
+        governed_bytes_check,
+    )
+    .map_err(|e| note_write_refusal(run, "update_frontmatter", e))?;
     Ok(text_result(format!("Updated frontmatter on {path}")))
 }
 
+/// The run-less form tests call; the server always books a run.
+#[cfg(test)]
 fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    tool_append_in(vault, args, None)
+}
+
+/// `append_to_note`, with a stale `expect_hash` recorded against the calling
+/// run when there is one (M55.3).
+fn tool_append_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    run: Option<&str>,
+) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("append_to_note needs a path")?;
     let content = arg_str(args, "content").ok_or("append_to_note needs content")?;
-    if let Some(refusal) = governed_note_refusal(vault, &path) {
-        return Err(refusal.into());
-    }
+    let expect = parse_expect_hash(args)?;
     // Least severe of the three, still a bypass (M17.1): a concept body grown
     // here carries no `sources`, no updated `generated`, and no dedup check.
     crate::knowledge::guard_agent_write(&path)?;
-    // Composed by the mechanism, which refuses anything that is not a
-    // markdown note — `.git/config`, a ledger segment, a `.canvas`, a `.mmd`
-    // — before reading a byte of it (PLATFORM-API-1). The grant cannot: an
-    // unscoped run's grant admits every path.
-    let joined = vault::write::appended_body(vault, &path, &content)?;
-    // Both directions here too: what the note IS was asked above; this is what
-    // the appended bytes will DECLARE.
-    if let Some(refusal) = governed_append_refusal(vault, &path, &joined) {
-        return Err(refusal.into());
-    }
-    vault::write::save_note(vault, &path, &joined)?;
+    // The mechanism refuses anything that is not a markdown note —
+    // `.git/config`, a ledger segment, a `.canvas`, a `.mmd` — before reading
+    // a byte of it (PLATFORM-API-1); the grant cannot, since an unscoped
+    // run's grant admits every path. Both directions are judged on the bytes
+    // the lock holds and the bytes the append would land.
+    vault::write::append_note_checked(
+        vault,
+        &path,
+        &content,
+        expect.as_deref(),
+        governed_bytes_check,
+    )
+    .map_err(|e| note_write_refusal(run, "append_to_note", e))?;
     Ok(text_result(format!("Appended to {path}")))
+}
+
+/// The run-less form tests call; the server always books a run.
+#[cfg(test)]
+fn tool_edit_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    tool_edit_note_in(vault, args, None)
+}
+
+/// `edit_note` (M55.5): replace quoted passages of a note's body in place,
+/// all or none, with a stale `expect_hash` recorded against the calling run
+/// when there is one (M55.3).
+///
+/// The grant has already held the note to both scopes (`read_write`), so a
+/// refusal that quotes the note back speaks only to a run that may read it.
+/// Then the bundle guard, then the door: under the note's lock, the hash, the
+/// plan, and the governed check on the bytes held and the bytes the edits
+/// would land, so an edit that completes a byte-zero `---` fence declaring
+/// Agent or Type is refused like the append that would.
+fn tool_edit_note_in(
+    vault: &Path,
+    args: &Map<String, Value>,
+    run: Option<&str>,
+) -> Result<Value, String> {
+    let path = arg_str(args, "path").ok_or("edit_note needs a path")?;
+    let edits = quote_edits(args)?;
+    let expect = parse_expect_hash(args)?;
+    crate::knowledge::guard_agent_write(&path)?;
+    let edited = vault::write::edit_note(
+        vault,
+        &path,
+        &edits,
+        expect.as_deref(),
+        governed_bytes_check,
+    )
+    .map_err(|e| note_write_refusal(run, "edit_note", e))?;
+    Ok(text_result(edit_report(
+        &listed_path(vault, &path),
+        edits.len(),
+        &edited,
+    )))
+}
+
+/// `edits` as the resolver takes them. The resolver judges every limit and
+/// says which edit broke it; this only refuses a shape it cannot read. An
+/// `occurrence` that is absent or null is none, a positive integer is that
+/// one, and anything else is 0, which the resolver refuses as counting from 1.
+fn quote_edits(args: &Map<String, Value>) -> Result<Vec<vault::quote::QuoteEdit>, String> {
+    let items = args
+        .get("edits")
+        .and_then(Value::as_array)
+        .ok_or("edit_note needs `edits`, a list of {old, new} replacements")?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let (Some(old), Some(new)) = (
+                item.get("old").and_then(Value::as_str),
+                item.get("new").and_then(Value::as_str),
+            ) else {
+                return Err(format!(
+                    "Edit {}: `old` and `new` must both be strings",
+                    index + 1
+                ));
+            };
+            let occurrence = match item.get("occurrence") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(
+                    value
+                        .as_u64()
+                        .and_then(|k| usize::try_from(k).ok())
+                        .unwrap_or(0),
+                ),
+            };
+            Ok(vault::quote::QuoteEdit {
+                old: old.to_string(),
+                new: new.to_string(),
+                occurrence,
+            })
+        })
+        .collect()
+}
+
+/// What a landed edit tells the model: the note, where each edit's new text
+/// now starts, and the note's new hash under get_note's own label, ready for
+/// the next call's `expect_hash`.
+fn edit_report(path: &str, count: usize, edited: &vault::write::EditedNote) -> String {
+    let mut report = format!(
+        "Edited {path}: {count} {}; nothing outside the quoted text changed.\n",
+        if count == 1 { "edit" } else { "edits" }
+    );
+    for (i, line) in edited.lines.iter().enumerate() {
+        report.push_str(&format!("  {}. now at line {line}\n", i + 1));
+    }
+    report.push_str(&format!("Hash: {}", edited.content_hash));
+    report
 }
 
 /// The run-less form tests call; the server always books a run.
@@ -2846,34 +3778,140 @@ fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// Slug for a cached source. Mirrors `slugForUrl` in src/engine/ingest.ts —
-/// the frontend decides whether a reference is already cached by building the
-/// same path, so the two MUST agree or every fetch looks uncached forever.
-fn source_slug(kind: &str, id: &str) -> String {
+/// How much of its URL a web copy's file name keeps, for a person to read.
+const SOURCE_READABLE_MAX: usize = 64;
+
+/// Hex characters of the identity hash a web copy's file name ends in: what
+/// keeps two sources that read alike in two files. Should two ever meet
+/// anyway, `source_target` refuses rather than overwrite.
+const SOURCE_SUFFIX_HEX: usize = 12;
+
+/// What a fetched source IS, however it was spelled (INTEGRATIONS-2a). The id
+/// is trimmed of ASCII whitespace. An issue key is lowercased. A URL loses one
+/// leading `https://` or `http://` in any case, its host (everything before
+/// the first `/`, `?` or `#`) is ASCII-lowercased, and trailing `/` go. Path
+/// case, query and fragment stay: each can name a different page.
+///
+/// Twin of `canonicalSourceId` in src/engine/ingest.ts, the Inbox's half: it
+/// counts a reference as cached when a copy sits at this identity's path or
+/// names this identity in its `source_id`. Both replay
+/// src-tauri/fixtures/source-slugs.json.
+fn canonical_source_id(kind: &str, id: &str) -> String {
+    let trimmed = id.trim_matches(|c: char| c.is_ascii_whitespace());
     if kind == "issue" {
-        return format!("issues/{}", id.to_lowercase());
+        return trimmed.to_lowercase();
     }
-    let trimmed = id
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    // ASCII-only on purpose: the TypeScript side uses `\w`, which is ASCII,
-    // and `char::is_alphanumeric` is Unicode-aware. A é in a URL would
-    // otherwise produce two different paths and the cache would never hit.
-    let mut slug: String = trimmed
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
+    // `get`, not slicing: a multibyte character across the cut is no scheme,
+    // never a panic.
+    let rest = ["https://", "http://"]
+        .into_iter()
+        .find_map(|scheme| {
+            trimmed
+                .get(..scheme.len())
+                .filter(|head| head.eq_ignore_ascii_case(scheme))
+                .map(|_| &trimmed[scheme.len()..])
         })
-        .collect();
-    while slug.contains("--") {
-        slug = slug.replace("--", "-");
+        .unwrap_or(trimmed);
+    let cut = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let mut canonical = rest[..cut].to_ascii_lowercase();
+    canonical.push_str(&rest[cut..]);
+    canonical.trim_end_matches('/').to_string()
+}
+
+/// Where a NEW copy of a source lands, under `sources/`. An issue at
+/// `issues/<canonical>`, as since M8.2. A web page at `web/<readable>-<suffix>`:
+/// the readable half is the canonical id with every character outside
+/// `[A-Za-z0-9._-]` turned into `-` (ASCII on purpose: no Unicode class means
+/// the same thing in both twins), runs of `-` collapsed, no leading `-` or `.`
+/// (no dotfile) and no trailing `-`, lowercased, cut at SOURCE_READABLE_MAX;
+/// the suffix is the first SOURCE_SUFFIX_HEX hex characters of a sha256 over
+/// the canonical id. With nothing readable left, the suffix alone names it.
+///
+/// Twin of `sourceCachePath` in src/engine/ingest.ts. Both replay
+/// src-tauri/fixtures/source-slugs.json.
+fn source_slug(kind: &str, id: &str) -> String {
+    let canonical = canonical_source_id(kind, id);
+    if kind == "issue" {
+        return format!("issues/{canonical}");
     }
-    let slug = slug.trim_matches('-').to_lowercase();
-    format!("web/{}", slug.chars().take(80).collect::<String>())
+    let mut readable = String::with_capacity(canonical.len());
+    for c in canonical.chars() {
+        let c = if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+            c
+        } else {
+            '-'
+        };
+        if !(c == '-' && readable.ends_with('-')) {
+            readable.push(c);
+        }
+    }
+    let readable: String = readable
+        .trim_start_matches(['-', '.'])
+        .trim_end_matches('-')
+        .to_ascii_lowercase()
+        .chars()
+        .take(SOURCE_READABLE_MAX)
+        .collect();
+    let readable = readable.trim_end_matches('-');
+    let digest =
+        crate::ledger::sha256_hex(format!("cerebro-source-cache-v1\0web\0{canonical}").as_bytes());
+    let suffix = &digest[..SOURCE_SUFFIX_HEX];
+    if readable.is_empty() {
+        format!("web/{suffix}")
+    } else {
+        format!("web/{readable}-{suffix}")
+    }
+}
+
+/// Where `cache_source` writes `id`: the copy that already holds this source,
+/// wherever under `sources/` it lives (the first in path order), or else
+/// `source_slug`'s path. Reusing the copy is what lets a refetch replace one
+/// filed under an older path rule in place, so every citation of it keeps
+/// working. A copy is one whose `source_id` canonicalizes to the same id and
+/// whose `source_kind` agrees or was never recorded — the rule `uncachedRefs`
+/// in src/engine/ingest.ts counts by.
+///
+/// The new path is refused when another note already sits there: a file is
+/// only ever replaced by a copy of the source it holds.
+fn source_target(vault: &Path, kind: &str, id: &str) -> Result<String, String> {
+    let canonical = canonical_source_id(kind, id);
+    if canonical.is_empty() {
+        return Err("cache_source needs an id".into());
+    }
+    let folder = format!("{}/", vault::write::SOURCES_DIR);
+    let held = vault::scan::scan_vault(vault)?
+        .into_iter()
+        .filter(|e| e.path.starts_with(&folder) && e.path.ends_with(".md"))
+        .filter(|e| holds_source(e, kind, &canonical))
+        .map(|e| e.path)
+        .min();
+    if let Some(path) = held {
+        return Ok(path);
+    }
+    let path = format!("{}/{}.md", vault::write::SOURCES_DIR, source_slug(kind, id));
+    // Asked only of a contained path. The writer refuses any other before it
+    // looks, and whether a file exists outside the vault is not this tool's
+    // to say.
+    if vault::write::landing_path(vault, &path).is_some() && vault.join(&path).exists() {
+        return Err(format!(
+            "{path} already holds a different note; {id} was not written"
+        ));
+    }
+    Ok(path)
+}
+
+/// Is `entry` a copy of the source `canonical` names, as `kind`?
+fn holds_source(entry: &vault::entry::Entry, kind: &str, canonical: &str) -> bool {
+    let kind_agrees = match entry.properties.get("source_kind") {
+        None | Some(Value::Null) => true,
+        Some(declared) => declared.as_str() == Some(kind),
+    };
+    kind_agrees
+        && entry
+            .properties
+            .get("source_id")
+            .and_then(Value::as_str)
+            .is_some_and(|held| canonical_source_id(kind, held) == canonical)
 }
 
 /// Cache fetched external material as a working doc (M8.2).
@@ -2897,11 +3935,7 @@ fn tool_cache_source(
     }
     let title = arg_str(args, "title").ok_or("cache_source needs a title")?;
     let body = arg_str(args, "body").ok_or("cache_source needs a body")?;
-    let path = format!(
-        "{}/{}.md",
-        crate::vault::write::SOURCES_DIR,
-        source_slug(&kind, &id)
-    );
+    let path = source_target(vault, &kind, &id)?;
 
     let mut frontmatter = Map::new();
     // Typed so it is a first-class note, and `display: doc` keeps the cache
@@ -3097,32 +4131,187 @@ fn tool_ui(app: &AppHandle, action: &str, args: &Map<String, Value>) -> Result<V
     Ok(text_result(format!("Done ({action}).")))
 }
 
-pub fn vault_changed(app: &AppHandle) {
-    notify_vault_changed(app);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::testutil::{temp_vault, write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Barrier, Condvar, MutexGuard};
 
-    /// These exact strings are asserted again in src/engine/ingest.test.ts.
-    /// The frontend decides a reference is already cached by building the
-    /// same path this function builds — if the two ever disagree, every
-    /// fetched source looks uncached forever and the agent refetches on
-    /// every turn.
+    /// The cases src/engine/ingest.test.ts replays through the frontend's twin.
+    const SOURCE_SLUGS: &str = include_str!("../fixtures/source-slugs.json");
+
+    /// Where `source_slug` files a new copy, vault-relative.
+    fn new_copy(kind: &str, id: &str) -> String {
+        format!("{}/{}.md", vault::write::SOURCES_DIR, source_slug(kind, id))
+    }
+
+    /// `cache_source`, called the way the agent calls it.
+    fn cache(vault: &Path, kind: &str, id: &str, body: &str) -> Result<Value, String> {
+        let args: Map<String, Value> = serde_json::from_value(
+            json!({ "kind": kind, "id": id, "title": "Copy", "body": body }),
+        )
+        .unwrap();
+        tool_cache_source(vault, &args, DEFAULT_ACTOR)
+    }
+
+    fn answer_text(answer: &Value) -> &str {
+        answer["content"][0]["text"].as_str().unwrap_or_default()
+    }
+
+    // The parity half: the Inbox counts a reference as cached by finding a
+    // copy where this writer put it, or by its `source_id`, so the twins
+    // answer every shared case alike. And no two sources share a file: that
+    // sharing is how a second fetch overwrote the first.
     #[test]
-    fn source_slugs_match_the_frontends_cache_paths() {
-        assert_eq!(source_slug("issue", "PHX-421"), "issues/phx-421");
+    fn source_slugs_replay_the_shared_cases() {
+        let file: Value = serde_json::from_str(SOURCE_SLUGS).expect("source-slugs.json parses");
+        let mut files: BTreeMap<String, String> = BTreeMap::new();
+        for case in file["cases"].as_array().expect("cases") {
+            let kind = case["kind"].as_str().expect("a kind");
+            let id = case["id"].as_str().expect("an id");
+            let canonical = canonical_source_id(kind, id);
+            assert_eq!(
+                Some(canonical.as_str()),
+                case["canonical"].as_str(),
+                "{case}"
+            );
+            let path = new_copy(kind, id);
+            assert_eq!(Some(path.as_str()), case["path"].as_str(), "{case}");
+            let identity = format!("{kind}\0{canonical}");
+            let holder = files
+                .entry(path.clone())
+                .or_insert_with(|| identity.clone());
+            assert_eq!(*holder, identity, "{path} is two sources' file");
+        }
+    }
+
+    #[test]
+    fn a_long_shared_prefix_gets_two_copies() {
+        let vault = temp_vault("source-prefix");
+        let page = "https://www.notion.so/acme/Quarterly-planning-review-for-the-platform-team-and-every-partner-";
+        let first = format!("{page}0123456789abcdef0123456789abcdef");
+        let second = format!("{page}fedcba9876543210fedcba9876543210");
+        cache(&vault, "web", &first, "The first page.").unwrap();
+        let first_copy = vault.join(new_copy("web", &first));
+        let before = std::fs::read(&first_copy).unwrap();
+        cache(&vault, "web", &second, "The second page.").unwrap();
         assert_eq!(
-            source_slug("web", "https://wiki.test/x/Rollback"),
-            "web/wiki.test-x-rollback"
+            std::fs::read(&first_copy).unwrap(),
+            before,
+            "the second fetch overwrote the first copy"
+        );
+        let second_copy = std::fs::read_to_string(vault.join(new_copy("web", &second))).unwrap();
+        assert!(second_copy.contains("The second page."), "{second_copy}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_refetch_rewrites_the_copy_where_it_already_lives() {
+        let vault = temp_vault("source-refetch");
+        // Where the old rule filed it, and where every citation points.
+        let legacy = "sources/web/wiki.test-x-page.md";
+        write(
+            &vault,
+            legacy,
+            "---\ntype: Source\nsource_id: https://wiki.test/x/page\nsource_kind: web\n---\n\n\
+             # Page\n\nWhat it said then.\n",
+        );
+        let answer = cache(
+            &vault,
+            "web",
+            "http://WIKI.test/x/page/",
+            "What it says now.",
+        )
+        .unwrap();
+        let rewritten = std::fs::read_to_string(vault.join(legacy)).unwrap();
+        assert!(rewritten.contains("What it says now."), "{rewritten}");
+        assert!(!rewritten.contains("What it said then."), "{rewritten}");
+        assert!(
+            !vault
+                .join(new_copy("web", "https://wiki.test/x/page"))
+                .exists(),
+            "a refetch wrote a second copy"
+        );
+        assert!(answer_text(&answer).contains(legacy), "{answer}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_copy_outside_sources_or_of_another_kind_is_not_reused() {
+        let vault = temp_vault("source-elsewhere");
+        let id = "https://wiki.test/x/page";
+        // A note that names the page is not a copy of it, and neither is a
+        // copy that says it is of an issue.
+        let note = format!("---\ntype: Note\nsource_id: {id}\nsource_kind: web\n---\n\n# Mine\n");
+        let issue =
+            format!("---\ntype: Source\nsource_id: {id}\nsource_kind: issue\n---\n\n# Odd\n");
+        write(&vault, "records/x.md", &note);
+        write(&vault, "sources/issues/odd.md", &issue);
+        let answer = cache(&vault, "web", id, "The page.").unwrap();
+        let path = new_copy("web", id);
+        let written = std::fs::read_to_string(vault.join(&path)).unwrap();
+        assert!(written.contains("The page."), "{written}");
+        assert!(answer_text(&answer).contains(&path), "{answer}");
+        assert_eq!(
+            std::fs::read_to_string(vault.join("records/x.md")).unwrap(),
+            note
         );
         assert_eq!(
-            source_slug("web", "https://a.test/p?q=1&r=2"),
-            "web/a.test-p-q-1-r-2"
+            std::fs::read_to_string(vault.join("sources/issues/odd.md")).unwrap(),
+            issue
         );
-        // Trailing separators are filing noise, not part of the name.
-        assert_eq!(source_slug("web", "http://a.test/p/"), "web/a.test-p");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_path_held_by_another_note_is_never_overwritten() {
+        let vault = temp_vault("source-held");
+        let id = "https://wiki.test/x/page";
+        let path = new_copy("web", id);
+        write(
+            &vault,
+            &path,
+            "---\ntype: Source\nsource_id: https://other.test/y\nsource_kind: web\n---\n\n# Other\n",
+        );
+        let before = std::fs::read(vault.join(&path)).unwrap();
+        let refusal = cache(&vault, "web", id, "The page.").expect_err("another source's file");
+        assert!(refusal.contains(&path), "{refusal}");
+        assert_eq!(std::fs::read(vault.join(&path)).unwrap(), before);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_id_with_nothing_left_is_refused() {
+        let vault = temp_vault("source-empty");
+        for (kind, id) in [("web", "https://"), ("web", " HTTP:/// "), ("issue", " \t")] {
+            let refusal = cache(&vault, kind, id, "Nothing.").expect_err("nothing names a source");
+            assert_eq!(refusal, "cache_source needs an id", "{id:?}");
+        }
+        assert!(
+            !vault.join("sources").exists(),
+            "a refused id wrote something"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_path_outside_the_vault_is_never_looked_at() {
+        let root = temp_vault("source-outside");
+        let vault = root.join("vault");
+        // A vault that has cached an issue, so `sources/issues/` exists and
+        // `sources/issues/../../../secret.md` reaches the file beside it.
+        write(&vault, "sources/issues/phx-1.md", "# PHX-1\n");
+        write(&root, "secret.md", "# Secret\n");
+        let refusal =
+            cache(&vault, "issue", "../../../secret", "B").expect_err("outside the vault");
+        // The writer's refusal, not an answer about whether the file is there.
+        assert!(refusal.contains("escapes the vault"), "{refusal}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("secret.md")).unwrap(),
+            "# Secret\n"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -3157,7 +4346,7 @@ mod tests {
     #[test]
     fn every_catalog_tool_has_a_name_description_and_schema() {
         // WITH the proposal surface on, so the generated entries are held to
-        // the same bar as the hand-written twelve.
+        // the same bar as the manifest's rows.
         for tool in tool_catalog(true) {
             assert!(tool.get("name").and_then(Value::as_str).is_some());
             let description = tool
@@ -3169,6 +4358,257 @@ mod tests {
                 "a thin description is how an agent picks the wrong tool"
             );
             assert!(tool.get("inputSchema").is_some());
+        }
+    }
+
+    // --- The tool manifest (M54.1) -----------------------------------------
+
+    /// The cases the frontend replays through its own reader of the manifest.
+    const TOOL_CASES: &str = include_str!("../fixtures/tool-cases.json");
+
+    /// The JSON Schema keywords a served schema may use, and the types.
+    const SCHEMA_KEYWORDS: [&str; 6] = [
+        "type",
+        "description",
+        "properties",
+        "required",
+        "items",
+        "enum",
+    ];
+    const SCHEMA_TYPES: [&str; 7] = [
+        "string", "number", "integer", "boolean", "object", "array", "null",
+    ];
+
+    /// One schema node, and every node under it, as the API takes them.
+    fn assert_schema_node(tool: &str, at: &str, node: &Value) {
+        let node = node
+            .as_object()
+            .unwrap_or_else(|| panic!("{tool} {at}: a schema node is an object"));
+        for key in node.keys() {
+            assert!(
+                SCHEMA_KEYWORDS.contains(&key.as_str()),
+                "{tool} {at}: `{key}` is not a keyword the API takes"
+            );
+        }
+        let kind = node["type"].as_str().unwrap_or_default();
+        assert!(SCHEMA_TYPES.contains(&kind), "{tool} {at}: type {kind:?}");
+        if let Some(description) = node.get("description") {
+            assert!(description.is_string(), "{tool} {at}: description");
+        }
+        if kind == "array" {
+            let items = node
+                .get("items")
+                .unwrap_or_else(|| panic!("{tool} {at}: an array carries items"));
+            assert_schema_node(tool, &format!("{at}[]"), items);
+        }
+        if let Some(properties) = node.get("properties") {
+            let properties = properties
+                .as_object()
+                .unwrap_or_else(|| panic!("{tool} {at}: properties is an object"));
+            for (key, child) in properties {
+                assert!(
+                    (1..=64).contains(&key.len())
+                        && key
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c)),
+                    "{tool} {at}: property key {key:?}"
+                );
+                assert_schema_node(tool, &format!("{at}.{key}"), child);
+            }
+        }
+        if let Some(required) = node.get("required") {
+            for name in required.as_array().expect("required is a list") {
+                let name = name.as_str().expect("required names are strings");
+                assert!(
+                    node["properties"].get(name).is_some(),
+                    "{tool} {at}: requires {name}, which it does not declare"
+                );
+            }
+        }
+        if let Some(values) = node.get("enum") {
+            let values: Vec<&str> = values
+                .as_array()
+                .expect("enum is a list")
+                .iter()
+                .map(|v| v.as_str().expect("enum values are strings"))
+                .collect();
+            let unique: std::collections::BTreeSet<&str> = values.iter().copied().collect();
+            assert!(
+                !values.is_empty() && unique.len() == values.len(),
+                "{tool} {at}: enum {values:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_served_tool_is_valid_api_input() {
+        // What the API refuses is what a run would fail on, so every served
+        // tool is held to it here, generated ones included.
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().expect("a name");
+            assert!(
+                (1..=64).contains(&name.len())
+                    && name
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'),
+                "{name:?} is not a name the API takes"
+            );
+            let full = format!("{}{name}", crate::agent::MCP_PREFIX);
+            assert!(full.len() <= 64, "{full} is over 64 characters");
+            let description = tool["description"].as_str().expect("a description");
+            assert!(
+                (21..=2048).contains(&description.chars().count()),
+                "{name}: a description of {} characters",
+                description.chars().count()
+            );
+            let schema = &tool["inputSchema"];
+            assert_eq!(schema["type"], "object", "{name}: the root is an object");
+            assert!(schema["properties"].is_object(), "{name}: root properties");
+            assert_schema_node(name, "inputSchema", schema);
+        }
+    }
+
+    #[test]
+    fn every_served_tool_carries_its_annotations() {
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().unwrap();
+            let annotations = tool["annotations"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{name} carries no annotations"));
+            assert!(
+                annotations["title"]
+                    .as_str()
+                    .is_some_and(|title| !title.trim().is_empty()),
+                "{name}: a title"
+            );
+            for hint in [
+                "readOnlyHint",
+                "destructiveHint",
+                "idempotentHint",
+                "openWorldHint",
+            ] {
+                assert!(annotations[hint].is_boolean(), "{name}: {hint}");
+            }
+            let read_only = annotations["readOnlyHint"] == true;
+            assert!(
+                !(read_only && annotations["destructiveHint"] == true),
+                "{name} is read-only and destructive at once"
+            );
+            // readOnlyHint lets the CLI run calls in parallel, so it is the
+            // door that writes nothing at all, and only that door.
+            let door = crate::policy::tools::row(name)
+                .map_or(crate::policy::tools::generated().door.as_str(), |row| {
+                    row.door.as_str()
+                });
+            assert_eq!(read_only, door == "none", "{name} on door {door}");
+            let meta = tool["_meta"]
+                .as_object()
+                .unwrap_or_else(|| panic!("{name} carries no _meta"));
+            assert!(
+                meta["anthropic/searchHint"].is_string(),
+                "{name}: searchHint"
+            );
+            for (key, value) in meta {
+                match key.as_str() {
+                    "anthropic/searchHint" => {}
+                    "anthropic/alwaysLoad" => assert_eq!(value, &json!(true), "{name}"),
+                    other => panic!("{name}: `{other}` is no _meta key the CLI reads"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_served_catalog_is_the_manifest_in_order() {
+        // Served order is meaning, so it is the manifest's, never sorted.
+        let names = |tools: Vec<Value>| -> Vec<String> {
+            tools
+                .iter()
+                .map(|tool| tool["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let base: Vec<String> = crate::policy::tools::rows(Surface::Base)
+            .map(|row| row.name.clone())
+            .collect();
+        assert_eq!(names(tool_catalog(false)), base);
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let expected: Vec<String> = base
+            .iter()
+            .cloned()
+            .chain(table.agent_facing_ops().into_iter().map(proposal_tool_name))
+            .chain(crate::policy::tools::rows(Surface::Proposals).map(|row| row.name.clone()))
+            .collect();
+        assert_eq!(names(tool_catalog(true)), expected);
+    }
+
+    #[test]
+    fn the_manifest_spells_the_names_the_code_does() {
+        // The manifest restates a few names the code also spells (the
+        // lanes.v1 posture); each pair is pinned here.
+        let manifest = crate::policy::tools::manifest();
+        assert_eq!(manifest.generated.prefix, PROPOSAL_PREFIX);
+        assert_eq!(manifest.server_prefix(), crate::agent::MCP_PREFIX);
+        let config: Value = serde_json::from_str(&crate::agent::mcp_config_json(
+            "http://127.0.0.1:1/mcp",
+            "token",
+            &Map::new(),
+        ))
+        .unwrap();
+        let servers: Vec<&String> = config["mcpServers"].as_object().unwrap().keys().collect();
+        assert_eq!(servers, [&manifest.server]);
+        let surface_of = |name: &str| crate::policy::tools::row(name).map(|row| row.surface);
+        assert_eq!(surface_of(COMMIT_TOOL), Some(Surface::Proposals));
+        for name in [
+            REPORT_TOOL,
+            ORGANIZE_TOOL,
+            crate::assembly::prompt::SUBMIT_TOOL,
+        ] {
+            assert_eq!(surface_of(name), Some(Surface::Base), "{name}");
+        }
+        // Every token the manifest declares has text to render to.
+        for token in manifest.tokens.keys() {
+            assert!(
+                token_text(token).is_some(),
+                "{{{{{token}}}}} renders to nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn hand_written_and_generated_names_never_collide() {
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        for op in table.agent_facing_ops() {
+            let name = proposal_tool_name(op);
+            assert!(
+                crate::policy::tools::row(&name).is_none(),
+                "{name} is both a manifest row and a generated tool"
+            );
+        }
+    }
+
+    #[test]
+    fn replays_the_shared_tool_cases() {
+        let file: Value = serde_json::from_str(TOOL_CASES).expect("tool-cases.json parses");
+        let cases = file["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let tool = case["tool"].as_str().expect("a tool");
+            let args: Map<String, Value> = case["args"].as_object().cloned().unwrap_or_default();
+            assert_eq!(
+                crate::policy::tools::writes_disk(tool),
+                case["writes_disk"].as_bool().expect("writes_disk"),
+                "{case}"
+            );
+            assert_eq!(
+                write_target(tool, &args).as_deref(),
+                case["write_target"].as_str(),
+                "{case}"
+            );
+            assert_eq!(
+                read_target(tool, &args).as_deref(),
+                case["read_target"].as_str(),
+                "{case}"
+            );
         }
     }
 
@@ -3195,7 +4635,8 @@ mod tests {
         cache.insert("title".into(), json!("Page"));
         cache.insert("body".into(), json!("fetched content"));
         tool_cache_source(&dir, &cache, "process:release-scout").unwrap();
-        let cached = std::fs::read_to_string(dir.join("sources/web/wiki.test-x-page.md")).unwrap();
+        let cached =
+            std::fs::read_to_string(dir.join(new_copy("web", "https://wiki.test/x/page"))).unwrap();
         assert!(cached.contains("process:release-scout"));
         assert!(!cached.contains("claude-code"));
     }
@@ -3509,8 +4950,13 @@ mod tests {
         .is_err());
     }
 
-    fn actor_of(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<String> {
-        resolve_grant(presented, base, runs).map(|g| g.actor)
+    /// `resolve_grant` over a bare table with nothing revoked, now.
+    fn resolve_now(presented: &str, runs: &[(String, RunGrant)]) -> Option<RunGrant> {
+        resolve_grant(presented, runs, &BTreeMap::new(), Instant::now())
+    }
+
+    fn actor_of(presented: &str, runs: &[(String, RunGrant)]) -> Option<String> {
+        resolve_now(presented, runs).map(|g| g.actor)
     }
 
     #[test]
@@ -3523,21 +4969,18 @@ mod tests {
         push_run_token(&mut runs, "tok-agent".into(), grant("process:scout"));
         push_run_token(&mut runs, "tok-chat".into(), grant(DEFAULT_ACTOR));
         assert_eq!(
-            actor_of("tok-agent", "base", &runs).as_deref(),
+            actor_of("tok-agent", &runs).as_deref(),
             Some("process:scout"),
             "the outgoing run's trailing write still stamps as the outgoing run"
         );
+        assert_eq!(actor_of("tok-chat", &runs).as_deref(), Some(DEFAULT_ACTOR));
         assert_eq!(
-            actor_of("tok-chat", "base", &runs).as_deref(),
-            Some(DEFAULT_ACTOR)
+            actor_of("base", &runs),
+            None,
+            "the endpoint has no token of its own (M53.11): a bearer is a run's or nothing"
         );
         assert_eq!(
-            actor_of("base", "base", &runs).as_deref(),
-            Some(DEFAULT_ACTOR),
-            "the endpoint's own token is the default actor"
-        );
-        assert_eq!(
-            actor_of("unknown", "base", &runs),
+            actor_of("unknown", &runs),
             None,
             "unminted tokens are refused"
         );
@@ -3554,13 +4997,9 @@ mod tests {
             RUN_TOKEN_WINDOW,
             "the ledger never grows unboundedly"
         );
-        assert_eq!(
-            actor_of("tok-0", "base", &runs),
-            None,
-            "old credentials retire"
-        );
+        assert_eq!(actor_of("tok-0", &runs), None, "old credentials retire");
         let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
-        assert!(actor_of(&newest, "base", &runs).is_some());
+        assert!(actor_of(&newest, &runs).is_some());
     }
 
     #[test]
@@ -3582,11 +5021,11 @@ mod tests {
         }
 
         assert!(
-            resolve_grant("tok-live", "base", &runs).is_some(),
+            resolve_now("tok-live", &runs).is_some(),
             "the live run's token survives ambient mints while its question is open"
         );
         assert!(
-            actor_of("tok-1", "base", &runs).is_none(),
+            actor_of("tok-1", &runs).is_none(),
             "the next-oldest entry WITHOUT an open question was evicted instead"
         );
         assert_eq!(runs.len(), RUN_TOKEN_WINDOW, "the cap still holds");
@@ -3599,6 +5038,152 @@ mod tests {
         );
         // Close the question so the registry does not leak across tests.
         assert!(take_answer(live).is_none(), "no answer was ever submitted");
+    }
+
+    // --- Bearer hygiene (M53.11) ---------------------------------------
+    //
+    // A bearer used to compare with `==`, and lived until a window's worth of
+    // newer mints pushed it out, however long its process had been gone.
+
+    #[test]
+    fn tokens_match_reads_every_byte_and_the_length() {
+        assert!(tokens_match(b"abcdef", b"abcdef"));
+        // A miss anywhere is a miss: first byte, middle, last.
+        assert!(!tokens_match(b"xbcdef", b"abcdef"));
+        assert!(!tokens_match(b"abcxef", b"abcdef"));
+        assert!(!tokens_match(b"abcdex", b"abcdef"));
+        // The length folds in, so a prefix and an extension both miss.
+        assert!(!tokens_match(b"abcde", b"abcdef"));
+        assert!(!tokens_match(b"abcdefg", b"abcdef"));
+        assert!(!tokens_match(b"", b"abcdef"));
+        // A trailing NUL is a byte, not padding the fold could forgive.
+        assert!(!tokens_match(b"abcdef\0", b"abcdef"));
+    }
+
+    #[test]
+    fn a_token_resolves_only_to_its_own_slot_when_another_shares_its_prefix() {
+        let mut first = grant("process:one");
+        first.run_id = "run-tok-1".into();
+        let mut second = grant("process:ten");
+        second.run_id = "run-tok-10".into();
+        for runs in [
+            vec![
+                ("tok-1".to_string(), first.clone()),
+                ("tok-10".to_string(), second.clone()),
+            ],
+            vec![
+                ("tok-10".to_string(), second.clone()),
+                ("tok-1".to_string(), first.clone()),
+            ],
+        ] {
+            assert_eq!(actor_of("tok-1", &runs).as_deref(), Some("process:one"));
+            assert_eq!(actor_of("tok-10", &runs).as_deref(), Some("process:ten"));
+            assert_eq!(actor_of("tok-", &runs), None, "a prefix of both is neither");
+            assert_eq!(
+                actor_of("tok-100", &runs),
+                None,
+                "an extension of both is neither"
+            );
+        }
+    }
+
+    #[test]
+    fn a_revoked_bearer_answers_inside_the_grace_and_never_after() {
+        // A grant resolves at DEQUEUE. A write the child sent just before it
+        // exited may sit behind a slow call, and it must still land, as the
+        // run that sent it; once the grace is spent, nothing does.
+        assert_eq!(
+            REVOKE_GRACE,
+            Duration::from_secs(10),
+            "SECURITY.md promises ten seconds"
+        );
+        let state = test_state();
+        let token = mint_in(&state, "/vaults/a");
+        let reaped = Instant::now();
+        state.revoke_at(&token, reaped + REVOKE_GRACE);
+        assert!(
+            resolve_in(&state, &token, reaped + Duration::from_secs(5)).is_some(),
+            "queued behind a slow call, and admitted"
+        );
+        assert!(
+            resolve_in(&state, &token, reaped + REVOKE_GRACE).is_none(),
+            "the grace ends at its deadline, not after it"
+        );
+        assert!(
+            resolve_in(&state, &token, reaped + Duration::from_secs(11)).is_none(),
+            "and nothing after it"
+        );
+        // A second revocation never lends back the time the first took away.
+        state.revoke_at(&token, reaped + Duration::from_secs(60));
+        assert!(resolve_in(&state, &token, reaped + Duration::from_secs(11)).is_none());
+    }
+
+    #[test]
+    fn a_bearer_whose_child_never_spawned_is_dead_at_once() {
+        // The spawn failed, so nothing can still be sending with this bearer:
+        // there is no grace to give.
+        let state = test_state();
+        let token = mint_in(&state, "/vaults/a");
+        assert!(resolve_in(&state, &token, Instant::now()).is_some());
+        state.revoke(&token, Duration::ZERO);
+        assert!(resolve_in(&state, &token, Instant::now()).is_none());
+    }
+
+    #[test]
+    fn revoking_one_run_leaves_the_others_admitted() {
+        let state = test_state();
+        let before = mint_in(&state, "/vaults/a");
+        let ended = mint_in(&state, "/vaults/a");
+        let after = mint_in(&state, "/vaults/b");
+        state.revoke(&ended, Duration::ZERO);
+        let now = Instant::now();
+        assert!(resolve_in(&state, &ended, now).is_none());
+        assert!(resolve_in(&state, &before, now).is_some());
+        assert!(resolve_in(&state, &after, now).is_some());
+    }
+
+    #[test]
+    fn the_revocation_list_never_outgrows_the_window() {
+        // Every run revoked as it ends, for three windows' worth of runs: the
+        // list holds only runs still in the table, never more.
+        let state = test_state();
+        let first = mint_in(&state, "/vaults/a");
+        state.revoke(&first, Duration::ZERO);
+        for _ in 0..(3 * RUN_TOKEN_WINDOW) {
+            let token = mint_in(&state, "/vaults/a");
+            state.revoke(&token, REVOKE_GRACE);
+            let guard = state.inner.lock().unwrap();
+            let running = guard.as_ref().unwrap();
+            let runs = running.run_actors.lock().unwrap();
+            let revoked = running.revoked.lock().unwrap();
+            assert!(
+                revoked.len() <= RUN_TOKEN_WINDOW,
+                "{} revocations",
+                revoked.len()
+            );
+            assert!(
+                revoked
+                    .keys()
+                    .all(|run_id| runs.iter().any(|(_, grant)| grant.run_id == *run_id)),
+                "a revocation never outlives its grant"
+            );
+        }
+        // And revoking a bearer the window already evicted records nothing.
+        let len = |state: &McpState| {
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .revoked
+                .lock()
+                .unwrap()
+                .len()
+        };
+        let held = len(&state);
+        state.revoke(&first, Duration::ZERO);
+        assert_eq!(len(&state), held);
     }
 
     #[test]
@@ -3630,6 +5215,7 @@ mod tests {
             read_scope: None,
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
             tools: None,
+            vault: None,
         }
     }
 
@@ -3642,6 +5228,7 @@ mod tests {
             scope: None,
             read_scope: Some(folders.iter().map(|f| f.to_string()).collect()),
             tools: None,
+            vault: None,
         }
     }
 
@@ -3715,9 +5302,15 @@ mod tests {
             "---\ntype: Note\n---\n\n# Alpha\n",
         )
         .unwrap();
+        // `hidden/` is a Collection: its own note says so (M54.8).
         std::fs::write(
-            dir.join("hidden/project.md"),
-            "---\ntype: Secret\ntitle: Skunkworks\n---\n\n# Skunkworks\n",
+            dir.join("hidden/hidden.md"),
+            "---\ntype: Collection\ntitle: Skunkworks\n---\n\n# Skunkworks\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("hidden/secret.md"),
+            "---\ntype: Secret\n---\n\n# Plans\n",
         )
         .unwrap();
         std::fs::write(
@@ -3726,11 +5319,24 @@ mod tests {
         )
         .unwrap();
 
+        // Unbounded, the Collection is listed by its title: the scoped run
+        // below is told less, not told something different.
+        let whole = tool_vault_context(&dir, &RunGrant::unrestricted("a")).unwrap();
+        let text = whole["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("Collections:\n  - Skunkworks (hidden/hidden.md)\n"),
+            "{text}"
+        );
+
         let g = read_scoped(&["visible", "knowledge"]);
         let context = tool_vault_context(&dir, &g).unwrap();
         let text = context["content"][0]["text"].as_str().unwrap();
         assert!(!text.contains("Skunkworks"), "the title is a read: {text}");
         assert!(!text.contains("hidden/"), "the path is a read: {text}");
+        assert!(
+            text.contains("Collections:\n  (none)\n"),
+            "the collection itself is a read: {text}"
+        );
         assert!(
             !text.contains("Secret"),
             "the type in use is a read: {text}"
@@ -3741,7 +5347,7 @@ mod tests {
         );
         // Absent is never zero, and thinned is never whole: the count SAYS so.
         assert!(
-            text.contains("Outside this run's read scope (not counted above): 1"),
+            text.contains("Outside this run's read scope (not counted above): 2"),
             "{text}"
         );
 
@@ -3752,14 +5358,133 @@ mod tests {
         args.insert("target".into(), Value::String("Skunkworks".into()));
         let scoped_answer = tool_knowledge_about(&dir, &args, &g).unwrap();
         let text = scoped_answer["content"][0]["text"].as_str().unwrap();
-        assert!(!text.contains("hidden/project.md"), "{text}");
+        assert!(!text.contains("hidden/hidden.md"), "{text}");
         assert!(text.contains("open thread"), "{text}");
 
         let open = tool_knowledge_about(&dir, &args, &RunGrant::unrestricted("a")).unwrap();
         let text = open["content"][0]["text"].as_str().unwrap();
         assert!(
-            text.contains("hidden/project.md"),
+            text.contains("hidden/hidden.md"),
             "an unbounded run still resolves the subject: {text}"
+        );
+    }
+
+    /// The terms `shared/prompt/retired-terms.json` lists (M54.8).
+    fn retired_terms() -> Vec<String> {
+        let list: Value =
+            serde_json::from_str(include_str!("../../shared/prompt/retired-terms.json"))
+                .expect("retired-terms.json parses");
+        let terms: Vec<String> = list["terms"]
+            .as_array()
+            .expect("`terms` is a list")
+            .iter()
+            .map(|term| term.as_str().expect("a term is a string").to_string())
+            .collect();
+        assert!(!terms.is_empty() && terms.iter().all(|t| !t.trim().is_empty()));
+        terms
+    }
+
+    /// The retired terms `text` still says, each matched as a case-insensitive
+    /// substring, as src/lib/productBrief.test.ts matches them.
+    fn retired_terms_in(text: &str) -> Vec<String> {
+        let text = text.to_lowercase();
+        retired_terms()
+            .into_iter()
+            .filter(|term| text.contains(&term.to_lowercase()))
+            .collect()
+    }
+
+    #[test]
+    fn get_vault_context_speaks_the_current_model() {
+        // M54.8. A Type doc named project.md is a schema, not a container,
+        // and the overview ends with the one product brief instead of the
+        // conventions paragraph that described the retired model and told
+        // every run the knowledge bundle was its to maintain.
+        assert_eq!(
+            retired_terms_in("A Work Item in PROJECT.MD"),
+            ["project.md", "work item"],
+            "the match ignores case"
+        );
+        let dir = temp_vault("vault-context-current-model");
+        write(
+            &dir,
+            "types/project.md",
+            "---\ntype: Type\nfields:\n  state: { kind: text }\n---\n\n# Project\n",
+        );
+        write(
+            &dir,
+            "delivery/delivery.md",
+            "---\ntype: Collection\n---\n\n# Delivery\n",
+        );
+        // A Collection page that is not its folder's own note, and one at the
+        // root, describe nothing but themselves.
+        write(
+            &dir,
+            "delivery/stray.md",
+            "---\ntype: Collection\n---\n\n# Stray\n",
+        );
+        write(
+            &dir,
+            "rooted.md",
+            "---\ntype: Collection\n---\n\n# Rooted\n",
+        );
+        write(
+            &dir,
+            "records/bets/office-hours.md",
+            "---\ntype: Bet\nstatus: open\n---\n\n# Office hours\n",
+        );
+        write(&dir, "inbox/thought.md", "# A thought\n\nNot filed yet.\n");
+
+        let context = tool_vault_context(&dir, &RunGrant::unrestricted("a")).unwrap();
+        let text = context["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("\nCollections:\n  - Delivery (delivery/delivery.md)\n\n"),
+            "{text}"
+        );
+        for absent in [
+            "types/project.md",
+            "delivery/stray.md",
+            "rooted.md",
+            "Containers:",
+            "Conventions:",
+            "yours to maintain",
+            "knowledge/",
+        ] {
+            assert!(!text.contains(absent), "{absent}: {text}");
+        }
+        assert!(text.contains("Notes: 6\n"), "{text}");
+        assert!(text.contains("Inbox captures waiting: 1"), "{text}");
+        assert!(
+            text.ends_with(&format!("\n\nAbout this app:\n{}", PRODUCT_BRIEF.trim())),
+            "{text}"
+        );
+        assert_eq!(retired_terms_in(text), Vec::<String>::new(), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn get_vault_context_lists_the_demo_collections() {
+        // M54.8: demo-vault pins the folder-note rule. Its two Collection
+        // pages are listed, and its Project Type doc, types/project.md, is not.
+        let demo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
+        let context = tool_vault_context(&demo, &RunGrant::unrestricted("a")).unwrap();
+        let text = context["content"][0]["text"].as_str().unwrap();
+        let (_, listing) = text
+            .split_once("\nCollections:\n")
+            .expect("a Collections list");
+        let listed: Vec<&str> = listing
+            .lines()
+            .take_while(|line| line.starts_with("  - "))
+            .filter_map(|line| {
+                line.strip_suffix(')')?
+                    .rsplit_once(" (")
+                    .map(|(_, path)| path)
+            })
+            .collect();
+        assert_eq!(
+            listed,
+            ["delivery/delivery.md", "strategy/strategy.md"],
+            "{text}"
         );
     }
 
@@ -3918,85 +5643,203 @@ mod tests {
         assert!(!g.may_write("/projects/beta/a.md"));
     }
 
+    /// Every name the server can serve: the catalog with the surface on,
+    /// and the generated names by the table as well, so a table that failed
+    /// the registration gate in this build cannot shrink what is checked.
+    fn every_served_name() -> Vec<String> {
+        let mut served: Vec<String> = tool_catalog(true)
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .chain(proposal_tool_names())
+            .collect();
+        served.sort();
+        served.dedup();
+        served
+    }
+
     #[test]
     fn no_write_tool_escapes_the_scope_check() {
-        // The list in `write_target` is the enforcement surface, so a new write
-        // tool that is not listed there is silently unscoped. This test is the
-        // tripwire: every tool the policy grants that can change a note must
-        // resolve to a target.
+        // The tripwire, over the manifest: every tool on the note door must
+        // resolve a scope target, and every other served tool is a read the
+        // read scope binds, or names its exemption in the manifest — the
+        // generated proposal surface included.
         let args: Map<String, Value> = serde_json::from_value(json!({
             "path": "projects/atlas/a.md",
             "folder": "projects/atlas"
         }))
         .unwrap();
-        for tool in ["create_note", "update_frontmatter", "append_to_note"] {
-            assert!(
-                write_target(tool, &args).is_some(),
-                "{tool} must be scope-checked"
-            );
-        }
-        // EVERY EXEMPTION IS DECLARED, and the partition is TOTAL over the
-        // served catalog — including the generated proposal surface, which
-        // did not exist when this test named three tools and called itself a
-        // tripwire.
-        let exempt: std::collections::BTreeMap<&str, &str> = [
-            (
-                "write_concept",
-                "records findings into knowledge/ through the ledger; replacing a concept needs \
-                 read access to it (M49.4)",
-            ),
-            (
-                "recheck_concept",
-                "stamps one concept's stale_after through the ledger; needs read access to it (M49.7)",
-            ),
-            (
-                "cache_source",
-                "sources/ is the agent's own corpus, not the user's records",
-            ),
-            ("get_vault_context", "reads"),
-            ("search_notes", "reads"),
-            ("get_note", "reads"),
-            ("knowledge_about", "reads"),
-            ("list_inbox", "reads"),
-            ("open_note", "moves the UI, changes nothing on disk"),
-            ("navigate", "moves the UI, changes nothing on disk"),
-            ("propose_organize", "shows a card; the user decides"),
-            (
-                "report_window_outcome",
-                "records a run's own verdict in memory; writes no file and no event",
-            ),
-            (
-                "submit_answer",
-                "records a run's own answer in memory; writes no file and no event",
-            ),
-            (
-                "hand_to",
-                "writes nothing itself; the run it starts writes under the CALLEE's own grant, minted from the callee's record — calling never lends the caller's scope",
-            ),
-        ]
-        .into_iter()
-        .collect();
-        for tool in tool_catalog(true) {
-            let name = tool["name"].as_str().unwrap();
-            if write_target(name, &args).is_some() {
+        for name in every_served_name() {
+            let Some(row) = crate::policy::tools::row(&name) else {
+                let generated = crate::policy::tools::generated();
+                assert!(
+                    name.starts_with(&generated.prefix),
+                    "{name} is served and the manifest has no row for it"
+                );
+                assert!(
+                    generated
+                        .exempt
+                        .as_deref()
+                        .is_some_and(|why| !why.trim().is_empty()),
+                    "the generated tools declare no exemption"
+                );
                 continue;
-            }
-            // The proposal surface writes through the LEDGER, not to a path.
-            // `RunGrant.scope` is a folder primitive by deliberate design
-            // (it is checkable without knowing the vault's schema), and
-            // "which Beliefs may this run change" is not a folder — so a
-            // folder scope cannot express it and pretending otherwise would
-            // be a rule that looks like protection. Governing WHICH
-            // mutations a run may propose belongs to the policy table,
-            // which already does it per op and per risk.
-            if name.starts_with(PROPOSAL_PREFIX) || name == COMMIT_TOOL {
+            };
+            if row.door == "note" {
+                assert!(
+                    write_target(&name, &args).is_some(),
+                    "{name} writes notes and must be scope-checked"
+                );
                 continue;
             }
             assert!(
-                exempt.contains_key(name),
+                row.axis == Axis::Read
+                    || row
+                        .exempt
+                        .as_deref()
+                        .is_some_and(|why| !why.trim().is_empty()),
                 "{name} is served, is not scope-checked, and declares no exemption"
             );
         }
+    }
+
+    // --- What the open pages are told (M53.6) ---------------------------
+    //
+    // The watcher drops the echo of every write the app makes, the agent's
+    // included, so an announcement is the only way a page with the file open
+    // learns it changed.
+
+    /// A vault with one note in it, `notes/a.md`, for `landing_path` to resolve.
+    fn announcing_vault(label: &str) -> PathBuf {
+        let vault = std::env::temp_dir().join(format!("cerebro-announce-{label}"));
+        let _ = std::fs::remove_dir_all(&vault);
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+        std::fs::write(vault.join("notes/a.md"), "# A\n").unwrap();
+        vault
+    }
+
+    /// What `name` announces for a call that succeeded.
+    fn announced(vault: &Path, name: &str, args: Value) -> Option<Value> {
+        let args: Map<String, Value> = serde_json::from_value(args).unwrap();
+        announced_change(vault, name, &args, &Ok(text_result("Done.".into())))
+    }
+
+    #[test]
+    fn a_write_that_knows_its_file_names_it_as_the_scan_lists_it() {
+        let vault = announcing_vault("named");
+        assert_eq!(
+            announced(
+                &vault,
+                "append_to_note",
+                json!({ "path": "./notes/a.md", "content": "More." })
+            ),
+            Some(json!({ "action": "vault_changed", "paths": ["notes/a.md"] }))
+        );
+        // The concept as write_concept spells it, and the log it appends.
+        assert_eq!(
+            announced(
+                &vault,
+                "write_concept",
+                json!({ "path": "Knowledge/sys/x.md", "type": "Reference" })
+            ),
+            Some(json!({
+                "action": "vault_changed",
+                "paths": ["knowledge/sys/x.md", "knowledge/log.md"]
+            }))
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_write_that_cannot_name_its_files_asks_for_a_rescan() {
+        let vault = announcing_vault("rescan");
+        let proposal = proposal_tool_names()
+            .into_iter()
+            .find(|name| name != COMMIT_TOOL)
+            .expect("the policy table serves proposal tools");
+        for (name, args) in [
+            (
+                "update_frontmatter",
+                json!({ "path": "notes/a.md", "patch": { "status": "done" } }),
+            ),
+            (
+                "create_note",
+                json!({ "folder": "notes", "slug": "b", "body": "# B" }),
+            ),
+            (
+                "cache_source",
+                json!({ "id": "PHX-1", "kind": "issue", "title": "T", "body": "B" }),
+            ),
+            (
+                "recheck_concept",
+                json!({ "path": "knowledge/x.md", "stale_after": "2099-01-01" }),
+            ),
+            (COMMIT_TOOL, json!({ "proposal_ids": ["p-1"] })),
+            (proposal.as_str(), json!({})),
+        ] {
+            let change = announced(&vault, name, args);
+            // No `paths` means "somewhere: rescan", never "nothing changed".
+            assert_eq!(change, Some(json!({ "action": "vault_changed" })), "{name}");
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_refusal_or_a_card_announces_nothing() {
+        let vault = announcing_vault("quiet");
+        let args: Map<String, Value> =
+            serde_json::from_value(json!({ "path": "notes/a.md", "content": "More." })).unwrap();
+        let refused: Result<Value, String> = Err("refused".into());
+        assert_eq!(
+            announced_change(&vault, "append_to_note", &args, &refused),
+            None
+        );
+        let readable = Ok(error_result("refused".into()));
+        assert_eq!(
+            announced_change(&vault, "append_to_note", &args, &readable),
+            None
+        );
+        // The generated prefix in its name does not make it a write: its
+        // door writes nothing.
+        assert_eq!(
+            announced(
+                &vault,
+                ORGANIZE_TOOL,
+                json!({ "path": "notes/a.md", "reasoning": "R" })
+            ),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn every_write_tool_tells_the_open_pages() {
+        // The tripwire, over the manifest: a served tool announces a change
+        // when it succeeds exactly when its door writes, so a new write tool
+        // cannot ship with writes an open page never hears about and then
+        // saves over.
+        let vault = announcing_vault("tripwire");
+        let args = json!({ "path": "notes/a.md", "folder": "notes", "slug": "b" });
+        let (mut loud, mut quiet) = (0, 0);
+        for name in every_served_name() {
+            let change = announced(&vault, &name, args.clone());
+            let writes = crate::policy::tools::writes_disk(&name);
+            assert_eq!(
+                change.is_some(),
+                writes,
+                "{name}: writes_disk says {writes}, and it announces {change:?}"
+            );
+            if let Some(change) = change {
+                assert_eq!(change["action"], "vault_changed", "{name}");
+                loud += 1;
+            } else {
+                quiet += 1;
+            }
+        }
+        assert!(
+            loud > 0 && quiet > 0,
+            "{loud} announce and {quiet} stay quiet"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     // --- The tools narrowing (M31.1b) ----------------------------------
@@ -4011,15 +5854,7 @@ mod tests {
         // reads server-side — a compromised CLI that ignores its argv still
         // cannot read the vault through the loopback. Minted through the REAL
         // `run_token`, which needs state but no live socket.
-        let run_actors = Arc::new(Mutex::new(Vec::new()));
-        let state = McpState {
-            inner: Mutex::new(Some(Running {
-                port: 0,
-                token: "base".into(),
-                vault: Arc::new(Mutex::new(PathBuf::new())),
-                run_actors: run_actors.clone(),
-            })),
-        };
+        let state = test_state();
         let token = state
             .run_token(
                 Some("agent:m26-ingest"),
@@ -4027,9 +5862,10 @@ mod tests {
                 None,
                 Some(vec![COMMIT_TOOL.into()]),
                 crate::ledger::new_run_id(),
+                Path::new("/vaults/a"),
             )
             .expect("minting needs state, not a socket");
-        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+        let grant = resolve_in(&state, &token, Instant::now())
             .expect("a minted token resolves to its grant");
 
         let refusal = ungranted_tool_refusal(&grant, "get_note")
@@ -4050,15 +5886,7 @@ mod tests {
         // runs to proposals, answers, or costs needs them to be ONE id.
         // Minted through the REAL `run_token`, resolved through the REAL
         // `resolve_grant` — state, no socket.
-        let run_actors = Arc::new(Mutex::new(Vec::new()));
-        let state = McpState {
-            inner: Mutex::new(Some(Running {
-                port: 0,
-                token: "base".into(),
-                vault: Arc::new(Mutex::new(PathBuf::new())),
-                run_actors: run_actors.clone(),
-            })),
-        };
+        let state = test_state();
         let durable = crate::ledger::new_run_id();
         let token = state
             .run_token(
@@ -4067,11 +5895,135 @@ mod tests {
                 None,
                 None,
                 durable.clone(),
+                Path::new("/vaults/a"),
             )
             .expect("minting needs state, not a socket");
-        let grant = resolve_grant(&token, "base", &run_actors.lock().unwrap())
+        let grant = resolve_in(&state, &token, Instant::now())
             .expect("a minted token resolves to its grant");
         assert_eq!(grant.run_id, durable);
+    }
+
+    /// An endpoint's state with no socket behind it: enough to mint, revoke
+    /// and resolve bearers through the real code.
+    fn test_state() -> McpState {
+        McpState {
+            inner: Mutex::new(Some(Running {
+                port: 0,
+                run_actors: Arc::new(Mutex::new(Vec::new())),
+                revoked: Arc::new(Mutex::new(BTreeMap::new())),
+            })),
+        }
+    }
+
+    /// Resolve `presented` against `state` at `now`, through the lookup
+    /// `bearer_grant` makes.
+    fn resolve_in(state: &McpState, presented: &str, now: Instant) -> Option<RunGrant> {
+        let guard = state.inner.lock().unwrap();
+        guard.as_ref().unwrap().resolve(presented, now)
+    }
+
+    /// Mint a bearer for a fresh run in `vault`, through the real `run_token`.
+    fn mint_in(state: &McpState, vault: &str) -> String {
+        state
+            .run_token(
+                Some("process:scout"),
+                None,
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                Path::new(vault),
+            )
+            .unwrap()
+    }
+
+    // --- Grants own their vault (M53.10) -----------------------------------
+    //
+    // Every tool call used to read one vault pointer the endpoint shared, and
+    // every `ensure` retargeted it: a run still going in one vault wrote into
+    // whichever vault had been opened since.
+
+    #[test]
+    fn a_minted_grant_carries_the_vault_it_was_minted_for() {
+        let state = test_state();
+        let in_a = mint_in(&state, "/vaults/a");
+        // A vault opened since, and a run minted for it, move nothing.
+        let in_b = mint_in(&state, "/vaults/b");
+        let now = Instant::now();
+        let a = resolve_in(&state, &in_a, now).unwrap();
+        let b = resolve_in(&state, &in_b, now).unwrap();
+        assert_eq!(bound_vault(&a), Ok(PathBuf::from("/vaults/a")));
+        assert_eq!(bound_vault(&b), Ok(PathBuf::from("/vaults/b")));
+    }
+
+    #[test]
+    fn a_handed_to_run_works_in_its_callers_vault() {
+        // The path `hand_to` takes: `call_tool` resolves the caller's vault
+        // from its grant, `start_handoff_run` mints the callee's bearer from
+        // that same grant, and the callee's tool calls resolve the vault it
+        // hands down, whatever was opened since.
+        let state = test_state();
+        let caller_token = state
+            .run_token(
+                Some("process:lead"),
+                None,
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                Path::new("/vaults/a"),
+            )
+            .unwrap();
+        let caller = resolve_in(&state, &caller_token, Instant::now()).unwrap();
+        state
+            .run_token(
+                None,
+                None,
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                Path::new("/vaults/b"),
+            )
+            .unwrap();
+        let callee_token = state
+            .handoff_token(
+                "process:helper",
+                Some(vec!["notes".into()]),
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                &caller,
+            )
+            .unwrap();
+        let callee = resolve_in(&state, &callee_token, Instant::now()).unwrap();
+        assert_eq!(bound_vault(&callee), Ok(PathBuf::from("/vaults/a")));
+        assert_eq!(callee.chain, vec!["process:lead", "process:helper"]);
+        assert_eq!(callee.scope, Some(vec!["notes".to_string()]));
+
+        // And a caller bound to no vault hands down nothing to work in.
+        let refusal = state
+            .handoff_token(
+                "process:helper",
+                None,
+                None,
+                None,
+                crate::ledger::new_run_id(),
+                &RunGrant::unrestricted("process:lead"),
+            )
+            .unwrap_err();
+        assert!(refusal.contains("bound to no vault"), "{refusal}");
+    }
+
+    #[test]
+    fn a_bearer_bound_to_no_vault_reaches_no_tool() {
+        // No mint makes one any more: the endpoint's base token was the last,
+        // and M53.11 retired it. A fixture stands in, and `call_tool` refuses
+        // it before any tool runs, rather than lending it a vault.
+        let unbound = RunGrant::unrestricted(DEFAULT_ACTOR);
+        assert_eq!(unbound.vault, None);
+        let refusal = bound_vault(&unbound).unwrap_err();
+        assert_eq!(
+            refusal,
+            "This bearer is bound to no vault, so it can call no tool."
+        );
     }
 
     #[test]
@@ -4118,6 +6070,1212 @@ mod tests {
         }
     }
 
+    // --- Grant refusals are typed and recorded (M54.10) --------------------
+    //
+    // Write scope, tools, read scope and the corpus answered with a plain
+    // error and recorded nothing. Each records under its own code now,
+    // against its run, once per run, code, tool and target, in the same words.
+
+    /// A grant bound to `vault` under a fresh run id, so no other test shares
+    /// its dedupe or its rows.
+    fn bound(vault: &Path) -> RunGrant {
+        RunGrant {
+            run_id: crate::ledger::new_run_id(),
+            vault: Some(vault.to_path_buf()),
+            ..RunGrant::unrestricted("process:scout")
+        }
+    }
+
+    fn args_of(value: Value) -> Map<String, Value> {
+        serde_json::from_value(value).unwrap()
+    }
+
+    /// The text of a call refused before dispatch, as the model reads it.
+    fn refused_text(answer: Option<Value>) -> String {
+        let answer = answer.expect("refused before dispatch");
+        assert_eq!(answer["isError"], json!(true), "{answer}");
+        answer["content"][0]["text"].as_str().unwrap().to_string()
+    }
+
+    /// Every regular file under `dir`, dot-folders included, with its bytes.
+    fn vault_bytes(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| (e.path().to_path_buf(), std::fs::read(e.path()).unwrap()))
+            .collect()
+    }
+
+    /// The sink, armed on a fresh runtime database for one test, under the
+    /// lock every test that arms it holds; disarmed when it drops.
+    struct ArmedSink {
+        _lock: MutexGuard<'static, ()>,
+        dir: PathBuf,
+    }
+
+    impl ArmedSink {
+        fn new(label: &str) -> Self {
+            let lock = crate::runtime::sink::test_lock();
+            let dir = crate::vault::testutil::temp_vault(label);
+            crate::runtime::sink::arm(&dir).expect("the runtime database opens");
+            Self { _lock: lock, dir }
+        }
+    }
+
+    impl Drop for ArmedSink {
+        fn drop(&mut self) {
+            crate::runtime::sink::disarm();
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// The armed sink's rows for `run_id` as (code, surface, detail), oldest
+    /// first. Keyed on the run, so a row another thread records while the
+    /// sink is armed cannot land in the count.
+    fn rows_for_run(run_id: &str) -> Vec<(String, String, String)> {
+        crate::runtime::sink::with_sink(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT code, surface, detail FROM operational_log WHERE run_id = ?1 \
+                     ORDER BY id",
+                )
+                .unwrap();
+            let rows = statement
+                .query_map([run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap()
+        })
+        .expect("the sink is armed")
+    }
+
+    #[test]
+    fn a_read_scope_refusal_writes_one_operational_row_with_its_run_id() {
+        let _sink = ArmedSink::new("mcp-refusal-sink-read");
+        let vault = crate::vault::testutil::temp_vault("mcp-refusal-read");
+        crate::vault::testutil::write(&vault, "visible/a.md", "# A\n");
+        crate::vault::testutil::write(&vault, "hidden/b.md", "# B\n");
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({ "path": "hidden/b.md" }));
+        let message = "This run may read only visible and cannot read hidden/b.md.";
+
+        let answer = refuse_before_dispatch(&vault, &grant, "get_note", &args);
+        assert_eq!(refused_text(answer), message);
+        let one = vec![(
+            READ_OUTSIDE_SCOPE.to_string(),
+            "get_note".to_string(),
+            message.to_string(),
+        )];
+        assert_eq!(rows_for_run(&grant.run_id), one);
+
+        // Repeated, the call is refused again and recorded once.
+        let again = refuse_before_dispatch(&vault, &grant, "get_note", &args);
+        assert_eq!(refused_text(again), message);
+        assert_eq!(rows_for_run(&grant.run_id), one);
+        // What the scope admits goes on to its tool body.
+        let visible = args_of(json!({ "path": "visible/a.md" }));
+        assert_eq!(
+            refuse_before_dispatch(&vault, &grant, "get_note", &visible),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn every_grant_axis_records_its_own_code() {
+        let _sink = ArmedSink::new("mcp-refusal-sink-axes");
+        let vault = crate::vault::testutil::temp_vault("mcp-refusal-axes");
+        for (rel, bytes) in [
+            (".git/config", "[core]\n\tbare = false\n"),
+            (".cerebro/connectors.json", "{\"mcpServers\":{}}\n"),
+            ("knowledge/systems/kept.md", "# Kept\n"),
+            ("inbox/a.md", "# A\n"),
+        ] {
+            crate::vault::testutil::write(&vault, rel, bytes);
+        }
+        let before = vault_bytes(&vault);
+        let cases = [
+            (
+                RunGrant {
+                    scope: Some(vec!["projects/atlas".into()]),
+                    ..bound(&vault)
+                },
+                "update_frontmatter",
+                json!({ "path": "inbox/a.md", "patch": { "status": "done" } }),
+                WRITE_OUTSIDE_SCOPE,
+            ),
+            (
+                RunGrant {
+                    tools: Some(vec!["get_note".into()]),
+                    ..bound(&vault)
+                },
+                "search_notes",
+                json!({ "query": "kept" }),
+                TOOL_OUTSIDE_GRANT,
+            ),
+            (
+                RunGrant {
+                    read_scope: Some(vec![]),
+                    ..bound(&vault)
+                },
+                "write_concept",
+                json!({
+                    "path": "knowledge/systems/kept.md",
+                    "type": "Reference",
+                    "title": "Kept",
+                    "description": "A concept this run may not read.",
+                    "body": "Replaced unseen."
+                }),
+                READ_OUTSIDE_SCOPE,
+            ),
+            (
+                bound(&vault),
+                "append_to_note",
+                json!({ "path": ".git/config", "content": "[core]\n\tfsmonitor = touch /tmp/x" }),
+                TARGET_OUTSIDE_CORPUS,
+            ),
+            (
+                bound(&vault),
+                "update_frontmatter",
+                json!({ "path": ".cerebro/connectors.json", "patch": { "mcpServers": {} } }),
+                TARGET_OUTSIDE_CORPUS,
+            ),
+            (
+                bound(&vault),
+                "create_note",
+                json!({ "folder": ".git/hooks", "slug": "pre-commit", "body": "#!/bin/sh\n" }),
+                TARGET_OUTSIDE_CORPUS,
+            ),
+        ];
+        for (grant, tool, args, code) in cases {
+            let text = refused_text(refuse_before_dispatch(&vault, &grant, tool, &args_of(args)));
+            assert_eq!(
+                rows_for_run(&grant.run_id),
+                vec![(code.to_string(), tool.to_string(), text)],
+                "{tool}"
+            );
+        }
+        assert_eq!(vault_bytes(&vault), before, "every byte where it was");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn grant_refusal_messages_are_byte_identical() {
+        // The model reads these words, so typing the refusals changed none.
+        let _sink = ArmedSink::new("mcp-refusal-sink-words");
+        let vault = crate::vault::testutil::temp_vault("mcp-refusal-words");
+        crate::vault::testutil::write(&vault, "knowledge/systems/kept.md", "# Kept\n");
+        crate::vault::testutil::write(&vault, ".git/config", "[core]\n");
+        let scope = |folders: &[&str]| RunGrant {
+            scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+            ..bound(&vault)
+        };
+        let tools = |names: &[&str]| RunGrant {
+            tools: Some(names.iter().map(|n| n.to_string()).collect()),
+            ..bound(&vault)
+        };
+        let reads = |folders: &[&str]| RunGrant {
+            read_scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+            ..bound(&vault)
+        };
+        let append = json!({ "path": ".git/config", "content": "x" });
+        let hook = json!({ "folder": ".git/hooks", "slug": "pre-commit", "body": "x" });
+        let cases = [
+            (
+                scope(&["projects/atlas"]),
+                "update_frontmatter",
+                json!({ "path": "inbox/a.md", "patch": { "status": "done" } }),
+                "This run is scoped to projects/atlas and cannot write to inbox/a.md.",
+            ),
+            (
+                scope(&[]),
+                "create_note",
+                json!({ "folder": "inbox", "slug": "a", "body": "# A" }),
+                "This run is scoped to nothing and cannot write to inbox.",
+            ),
+            (
+                tools(&["get_note"]),
+                "search_notes",
+                json!({ "query": "x" }),
+                "This run is granted get_note and cannot call search_notes.",
+            ),
+            (
+                tools(&[]),
+                "get_note",
+                json!({ "path": "a.md" }),
+                "This run is granted nothing and cannot call get_note.",
+            ),
+            (
+                reads(&["visible"]),
+                "get_note",
+                json!({ "path": "hidden/b.md" }),
+                "This run may read only visible and cannot read hidden/b.md.",
+            ),
+            (
+                reads(&[]),
+                "get_note",
+                json!({ "path": "hidden/b.md" }),
+                "This run may read only nothing and cannot read hidden/b.md.",
+            ),
+            (
+                reads(&[]),
+                "write_concept",
+                json!({ "path": "knowledge/systems/kept.md" }),
+                "This run cannot read knowledge/systems/kept.md, so it cannot replace it — write \
+                 a new concept instead, or ask for read access to it.",
+            ),
+            (
+                bound(&vault),
+                "append_to_note",
+                append.clone(),
+                "not a note: .git/config — dot-folders and dotfiles hold no notes",
+            ),
+            (
+                bound(&vault),
+                "create_note",
+                hook.clone(),
+                "not a note: .git/hooks/pre-commit.md — dot-folders and dotfiles hold no notes",
+            ),
+        ];
+        for (grant, tool, args, words) in cases {
+            let answer = refuse_before_dispatch(&vault, &grant, tool, &args_of(args));
+            assert_eq!(refused_text(answer), words, "{tool}");
+        }
+        // And a corpus refusal is the door's own, byte for byte.
+        assert_eq!(
+            tool_append(&vault, &args_of(append)).unwrap_err(),
+            "not a note: .git/config — dot-folders and dotfiles hold no notes"
+        );
+        assert_eq!(
+            tool_create_note(&vault, &args_of(hook)).unwrap_err(),
+            "not a note: .git/hooks/pre-commit.md — dot-folders and dotfiles hold no notes"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_bundle_guard_still_speaks_first_for_knowledge_paths() {
+        let _sink = ArmedSink::new("mcp-refusal-sink-bundle");
+        let vault = crate::vault::testutil::temp_vault("mcp-refusal-bundle");
+        let grant = bound(&vault);
+        let args = args_of(json!({ "path": "knowledge/.x.md", "content": "More." }));
+        // The corpus would refuse it as a dotfile, but a path into the bundle
+        // is the guard's to answer, in its words and under its code.
+        assert!(crate::vault::write::note_target_refusal(&vault, "knowledge/.x.md").is_some());
+        assert_eq!(corpus_refusal(&vault, "append_to_note", &args), None);
+        assert_eq!(
+            refuse_before_dispatch(&vault, &grant, "append_to_note", &args),
+            None
+        );
+        let guarded = || {
+            crate::runtime::sink::with_sink(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM operational_log \
+                     WHERE surface = 'agent_write' AND code = 'malformed_arguments'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+            })
+            .expect("the sink is armed")
+        };
+        let before = guarded();
+        let refusal = tool_append(&vault, &args).expect_err("the bundle is guarded");
+        assert!(guarded() > before, "the guard recorded its own code");
+        assert_eq!(
+            refusal,
+            crate::knowledge::guard_agent_write("knowledge/.x.md").unwrap_err()
+        );
+        // The other doors, and the folded spelling, leave it to the guard too.
+        let folder = args_of(json!({ "folder": "knowledge", "slug": "x", "body": "# X" }));
+        assert_eq!(corpus_refusal(&vault, "create_note", &folder), None);
+        let folded = args_of(json!({ "path": "Knowledge/.x.md", "patch": { "status": "done" } }));
+        assert_eq!(corpus_refusal(&vault, "update_frontmatter", &folded), None);
+        assert!(rows_for_run(&grant.run_id).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unarmed_sink_still_refuses() {
+        let _lock = crate::runtime::sink::test_lock();
+        crate::runtime::sink::disarm();
+        let vault = crate::vault::testutil::temp_vault("mcp-refusal-unarmed");
+        let grant = RunGrant {
+            read_scope: Some(vec!["visible".into()]),
+            ..bound(&vault)
+        };
+        let args = args_of(json!({ "path": "hidden/b.md" }));
+        let answer = refuse_before_dispatch(&vault, &grant, "get_note", &args);
+        assert_eq!(
+            refused_text(answer),
+            "This run may read only visible and cannot read hidden/b.md."
+        );
+        assert!(crate::runtime::sink::with_sink(|_| ()).is_none());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn corpus_targets_cover_every_scoped_writer() {
+        // Every tool the write scope binds is a note door the corpus check
+        // judges, and no other, so a note writer cannot skip the check.
+        let args = args_of(json!({
+            "path": "projects/atlas/a.md",
+            "folder": "projects/atlas",
+            "slug": "a"
+        }));
+        let scoped: BTreeSet<String> = every_served_name()
+            .into_iter()
+            .filter(|name| write_target(name, &args).is_some())
+            .collect();
+        let judged: BTreeSet<String> = every_served_name()
+            .into_iter()
+            .filter(|name| corpus_target(name, &args).is_some())
+            .collect();
+        assert_eq!(judged, scoped);
+        assert!(judged.contains("create_note"), "{judged:?}");
+        assert!(judged.contains("append_to_note"), "{judged:?}");
+    }
+
+    #[test]
+    fn evicting_a_run_token_forgets_its_recorded_refusals() {
+        let evicted = crate::ledger::new_run_id();
+        let survivor = crate::ledger::new_run_id();
+        let seen = |run: &str| first_refusal(run, READ_OUTSIDE_SCOPE, "get_note", "hidden/b.md");
+        assert!(seen(&evicted), "the evicted run's first refusal");
+        assert!(seen(&survivor), "the survivor's first refusal");
+        let mut runs: Vec<(String, RunGrant)> = Vec::new();
+        let mut first = RunGrant::unrestricted("agent:a");
+        first.run_id = evicted.clone();
+        push_run_token(&mut runs, "token-0".into(), first);
+        for n in 1..=RUN_TOKEN_WINDOW {
+            let mut grant = RunGrant::unrestricted("agent:a");
+            grant.run_id = format!("refusal-later-{n}");
+            push_run_token(&mut runs, format!("token-{n}"), grant);
+        }
+        assert!(seen(&evicted), "forgotten with its token");
+        assert!(!seen(&survivor), "and only that run's");
+        forget_refusals(&evicted);
+        forget_refusals(&survivor);
+    }
+
+    // --- The loopback's transport (M54.6) ----------------------------------
+    //
+    // One thread used to answer every run, so one slow call stalled four runs
+    // and one panic ended the server. Nothing checked Host or Origin, and the
+    // protocol's own `ping` was an unknown method.
+
+    /// A loopback pool on a free port, for the socket tests.
+    struct Pool {
+        server: Arc<tiny_http::Server>,
+        port: u16,
+        workers: Vec<JoinHandle<()>>,
+    }
+
+    impl Pool {
+        fn start<F>(workers: usize, max_body: usize, dispatch: F) -> Self
+        where
+            F: Fn(Option<&str>, &str) -> Reply + Send + Sync + 'static,
+        {
+            let server = Arc::new(tiny_http::Server::http("127.0.0.1:0").expect("a free port"));
+            let port = server.server_addr().to_ip().expect("an IP address").port();
+            let started = serve_loopback(
+                Arc::clone(&server),
+                port,
+                workers,
+                max_body,
+                Arc::new(dispatch),
+            );
+            assert_eq!(started.len(), workers, "every worker started");
+            Self {
+                server,
+                port,
+                workers: started,
+            }
+        }
+
+        /// The Host a client of this pool sends.
+        fn host(&self) -> String {
+            format!("127.0.0.1:{}", self.port)
+        }
+
+        /// Stop every worker and wait for each. `unblock` hands one idle
+        /// worker nothing and it returns, so a join that fails is a worker
+        /// that died.
+        fn stop(self) {
+            for _ in &self.workers {
+                self.server.unblock();
+            }
+            for worker in self.workers {
+                worker.join().expect("a worker never dies");
+            }
+        }
+    }
+
+    /// One POST to the loopback with exactly these headers, and what came
+    /// back: the status, and the JSON body (`Null` when there is none).
+    fn post(port: u16, headers: &[(&str, &str)], body: &str) -> (u16, Value) {
+        use std::io::Write;
+        let mut stream =
+            std::net::TcpStream::connect(("127.0.0.1", port)).expect("the loopback accepts");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .expect("a read timeout");
+        let mut request = String::from("POST /mcp HTTP/1.1\r\n");
+        for (name, value) in headers {
+            request.push_str(&format!("{name}: {value}\r\n"));
+        }
+        request.push_str(&format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        ));
+        request.push_str(body);
+        stream
+            .write_all(request.as_bytes())
+            .expect("the request is sent");
+        let mut response = String::new();
+        stream
+            .read_to_string(&mut response)
+            .expect("the response is read");
+        let status = response
+            .split(' ')
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .expect("a status line");
+        let body = response.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+        (status, serde_json::from_str(body).unwrap_or(Value::Null))
+    }
+
+    #[test]
+    fn only_our_own_address_reaches_the_loopback() {
+        let (port, other) = (51234_u16, 51235_u16);
+        let ours = format!("127.0.0.1:{port}");
+        let local = format!("localhost:{port}");
+        let loud = format!("LOCALHOST:{port}");
+        let from_ours = format!("http://{ours}");
+        let from_local = format!("http://{local}");
+
+        // Our two names, in any case, with no Origin or with our own.
+        for host in [&ours, &local, &loud] {
+            for origin in [None, Some(&from_ours), Some(&from_local)] {
+                assert_eq!(
+                    loopback_refusal(Some(host), origin.map(String::as_str), port),
+                    None,
+                    "{host} {origin:?}"
+                );
+            }
+        }
+
+        // Any other Host: another name, another port, the v6 loopback, a
+        // trailing dot, no port, a port that merely starts with ours, and a
+        // second Host joined onto ours.
+        for host in [
+            format!("evil.test:{port}"),
+            format!("127.0.0.1:{other}"),
+            format!("[::1]:{port}"),
+            format!("127.0.0.1.:{port}"),
+            "127.0.0.1".to_string(),
+            format!("127.0.0.1:{port}0"),
+            format!("127.0.0.1:{port}, evil.test:{port}"),
+        ] {
+            assert_eq!(
+                loopback_refusal(Some(&host), None, port),
+                Some((403, FOREIGN_HOST)),
+                "{host}"
+            );
+        }
+
+        // Any other Origin, from a page or from the app's own webview.
+        for origin in [
+            "null".to_string(),
+            "http://evil.test".to_string(),
+            "tauri://localhost".to_string(),
+            format!("https://127.0.0.1:{port}"),
+            format!("http://127.0.0.1:{other}"),
+            format!("http://127.0.0.1:{port}/"),
+        ] {
+            assert_eq!(
+                loopback_refusal(Some(&ours), Some(&origin), port),
+                Some((403, FOREIGN_ORIGIN)),
+                "{origin}"
+            );
+        }
+
+        // No Host at all is malformed, whatever else is sent.
+        assert_eq!(
+            loopback_refusal(None, None, port),
+            Some((400, MISSING_HOST))
+        );
+        assert_eq!(
+            loopback_refusal(None, Some(&from_ours), port),
+            Some((400, MISSING_HOST))
+        );
+    }
+
+    #[test]
+    fn ping_is_empty_unknown_methods_are_not_found_and_the_server_has_a_title() {
+        assert_eq!(
+            answer_protocol(&json!({ "jsonrpc": "2.0", "id": 7, "method": "ping" })),
+            Some(json!({ "jsonrpc": "2.0", "id": 7, "result": {} }))
+        );
+
+        let unknown =
+            answer_protocol(&json!({ "jsonrpc": "2.0", "id": 8, "method": "resources/list" }))
+                .expect("answered without the app");
+        assert_eq!(unknown["id"], 8);
+        assert_eq!(unknown["error"]["code"], -32601, "{unknown}");
+        assert!(
+            unknown["error"]["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("resources/list"),
+            "the error names the method: {unknown}"
+        );
+
+        for body in [
+            json!([]),
+            json!({ "id": 1 }),
+            json!({ "id": 2, "method": 5 }),
+            json!("ping"),
+        ] {
+            let answer = answer_protocol(&body).expect("answered without the app");
+            assert_eq!(answer["error"]["code"], -32600, "{body}: {answer}");
+        }
+
+        let init = answer_protocol(
+            &json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {} }),
+        )
+        .expect("answered without the app");
+        assert_eq!(init["id"], 0);
+        assert_eq!(init["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(
+            init["result"]["serverInfo"],
+            json!({ "name": "cerebro", "title": "Cerebro", "version": env!("CARGO_PKG_VERSION") })
+        );
+
+        // The two methods that need the bearer's run are handle_rpc's.
+        for method in ["tools/list", "tools/call"] {
+            assert_eq!(
+                answer_protocol(&json!({ "jsonrpc": "2.0", "id": 3, "method": method })),
+                None,
+                "{method}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_server_instructions_fit_the_clis_cap() {
+        // The CLI keeps at most 2048 UTF-16 units of a server's instructions
+        // (shared/prompt/README.md), so a longer file would be cut mid-rule.
+        let served = SERVER_INSTRUCTIONS.trim();
+        assert!(!served.is_empty());
+        let units = served.encode_utf16().count();
+        assert!(units <= 2048, "{units} UTF-16 units");
+    }
+
+    /// Does `text` name `tool`, bare or as `mcp__cerebro__<tool>`, at an
+    /// identifier boundary? `get_notes` and `xget_note` name no `get_note`.
+    fn names_at_a_boundary(text: &str, tool: &str) -> bool {
+        let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        [
+            tool.to_string(),
+            format!("{}{tool}", crate::agent::MCP_PREFIX),
+        ]
+        .iter()
+        .any(|spelled| {
+            text.match_indices(spelled.as_str()).any(|(at, _)| {
+                !text[..at].chars().next_back().is_some_and(ident)
+                    && !text[at + spelled.len()..].chars().next().is_some_and(ident)
+            })
+        })
+    }
+
+    #[test]
+    fn the_server_instructions_name_no_tool() {
+        // Every run hears them, whatever it holds (M54.7), so a tool named
+        // there is named to every run that lacks it. Checked against every
+        // name this build can serve, the generated proposals included.
+        let mut tools: BTreeSet<String> = tool_catalog(true)
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_string))
+            .collect();
+        tools.extend(proposal_tool_names());
+        assert!(
+            tools.contains("get_note") && tools.contains(COMMIT_TOOL),
+            "{tools:?}"
+        );
+        // The check sees a name at a boundary, and only there.
+        assert!(names_at_a_boundary("read it with get_note.", "get_note"));
+        assert!(names_at_a_boundary(
+            "call `mcp__cerebro__get_note`",
+            "get_note"
+        ));
+        assert!(!names_at_a_boundary("get_notes, xget_note", "get_note"));
+        let named: Vec<&String> = tools
+            .iter()
+            .filter(|tool| names_at_a_boundary(SERVER_INSTRUCTIONS, tool))
+            .collect();
+        assert!(named.is_empty(), "the server instructions name {named:?}");
+    }
+
+    #[test]
+    fn initialize_serves_the_same_instructions_to_every_bearer() {
+        // `initialize_result` takes no grant, and `answer_protocol` answers
+        // before any bearer's grant is read, so a panel turn, a narrowed agent
+        // and a hand_to callee are all handed the file, trimmed.
+        let result = initialize_result();
+        assert_eq!(result["instructions"], SERVER_INSTRUCTIONS.trim());
+        assert_eq!(result["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(
+            result["serverInfo"],
+            json!({ "name": "cerebro", "title": "Cerebro", "version": env!("CARGO_PKG_VERSION") })
+        );
+        assert_eq!(result["capabilities"], json!({ "tools": {} }));
+        let init = answer_protocol(
+            &json!({ "jsonrpc": "2.0", "id": 4, "method": "initialize", "params": {} }),
+        )
+        .expect("answered without the app");
+        assert_eq!(init["result"], result);
+    }
+
+    /// What the four calls' rendezvous saw.
+    #[derive(Clone, Debug, Default)]
+    struct Gathering {
+        in_flight: usize,
+        /// The most calls in flight at once.
+        peak: usize,
+        /// Whether all four were ever in flight at once.
+        met: bool,
+    }
+
+    /// Where the four calls wait for each other: each arrives, waits until all
+    /// four are in flight at once or its cap runs out, and leaves after its
+    /// search.
+    #[derive(Default)]
+    struct Rendezvous {
+        gathering: Mutex<Gathering>,
+        all_here: Condvar,
+    }
+
+    impl Rendezvous {
+        fn arrive(&self, all: usize, cap: Duration) {
+            let mut gathering = self.gathering.lock().unwrap();
+            gathering.in_flight += 1;
+            gathering.peak = gathering.peak.max(gathering.in_flight);
+            if gathering.in_flight >= all {
+                gathering.met = true;
+                self.all_here.notify_all();
+            }
+            let _ = self
+                .all_here
+                .wait_timeout_while(gathering, cap, |gathering| !gathering.met)
+                .unwrap();
+        }
+
+        fn leave(&self) {
+            self.gathering.lock().unwrap().in_flight -= 1;
+        }
+    }
+
+    /// The notes the four runs search for, one word each.
+    const FOUR_WORDS: [&str; 4] = ["aurora", "basalt", "cobalt", "dunlin"];
+
+    /// What one of the four runs got back, and how long it took.
+    struct Searched {
+        word: String,
+        status: u16,
+        answer: Value,
+        took: Duration,
+    }
+
+    /// Four runs, each holding a bearer minted through the real `run_token`,
+    /// call search_notes at once through a pool of `workers`. Each call
+    /// resolves its bearer through `bearer_grant`, waits at the rendezvous for
+    /// at most `cap`, then runs the real `tool_search`. Returns what each run
+    /// got back, and what the rendezvous saw.
+    fn four_runs_search(workers: usize, cap: Duration) -> (Vec<Searched>, Gathering) {
+        let vault = temp_vault("four-runs");
+        for word in FOUR_WORDS {
+            write(
+                &vault,
+                &format!("notes/{word}.md"),
+                &format!("---\ntitle: {word}\n---\nWhere the {word} lives.\n"),
+            );
+        }
+        let state = test_state();
+        let tokens: Vec<String> = FOUR_WORDS
+            .iter()
+            .map(|word| {
+                state
+                    .run_token(
+                        Some(format!("process:{word}").as_str()),
+                        None,
+                        None,
+                        None,
+                        crate::ledger::new_run_id(),
+                        &vault,
+                    )
+                    .expect("a minted bearer")
+            })
+            .collect();
+        let running = state
+            .inner
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the endpoint is up");
+
+        let rendezvous = Arc::new(Rendezvous::default());
+        let gathering = Arc::clone(&rendezvous);
+        let pool = Pool::start(
+            workers,
+            MAX_BODY_BYTES,
+            move |bearer: Option<&str>, body: &str| {
+                routed(bearer_grant(bearer, &running), body, |grant, body| {
+                    gathering.arrive(FOUR_WORDS.len(), cap);
+                    let request: Value = serde_json::from_str(body).unwrap_or_default();
+                    let args = request["params"]["arguments"]
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default();
+                    let found =
+                        bound_vault(grant).and_then(|vault| tool_search(&vault, &args, grant));
+                    gathering.leave();
+                    match found {
+                        Ok(result) => rpc_result(request["id"].clone(), result),
+                        Err(message) => rpc_error(request["id"].clone(), -32000, &message),
+                    }
+                })
+            },
+        );
+
+        let together = Arc::new(Barrier::new(FOUR_WORDS.len()));
+        let clients: Vec<_> = FOUR_WORDS
+            .iter()
+            .zip(tokens)
+            .enumerate()
+            .map(|(id, (word, token))| {
+                let together = Arc::clone(&together);
+                let (port, host, word) = (pool.port, pool.host(), word.to_string());
+                std::thread::spawn(move || {
+                    let call = json!({
+                        "jsonrpc": "2.0", "id": id, "method": "tools/call",
+                        "params": { "name": "search_notes", "arguments": { "query": word } }
+                    })
+                    .to_string();
+                    let bearer = format!("Bearer {token}");
+                    together.wait();
+                    let began = Instant::now();
+                    let (status, answer) = post(
+                        port,
+                        &[("Host", host.as_str()), ("Authorization", bearer.as_str())],
+                        &call,
+                    );
+                    Searched {
+                        word,
+                        status,
+                        answer,
+                        took: began.elapsed(),
+                    }
+                })
+            })
+            .collect();
+        let searched = clients
+            .into_iter()
+            .map(|client| client.join().expect("a client"))
+            .collect();
+        pool.stop();
+        let seen = rendezvous.gathering.lock().unwrap().clone();
+        let _ = std::fs::remove_dir_all(&vault);
+        (searched, seen)
+    }
+
+    #[test]
+    fn four_concurrent_runs_each_finish_search_notes_inside_the_timeout() {
+        let (searched, seen) = four_runs_search(LOOPBACK_WORKERS, Duration::from_secs(5));
+        assert!(
+            seen.met && seen.peak == FOUR_WORDS.len(),
+            "the four calls were never in flight at once: {seen:?}"
+        );
+        let timeout = Duration::from_millis(crate::agent::CEREBRO_TOOL_TIMEOUT_MS);
+        for run in &searched {
+            assert_eq!(run.status, 200, "{}: {}", run.word, run.answer);
+            let text = run.answer["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(
+                text.contains(&format!("notes/{}.md", run.word)),
+                "{}: {}",
+                run.word,
+                run.answer
+            );
+            assert!(run.took < timeout, "{} took {:?}", run.word, run.took);
+        }
+    }
+
+    #[test]
+    fn one_worker_cannot_overlap_the_same_four_calls() {
+        // The control: through one worker the same four calls are never in
+        // flight at once, so every wait at the rendezvous runs out. The check
+        // above can fail.
+        let (searched, seen) = four_runs_search(1, Duration::from_millis(300));
+        assert!(!seen.met, "{seen:?}");
+        assert_eq!(seen.peak, 1, "{seen:?}");
+        for run in &searched {
+            assert_eq!(run.status, 200, "still answered, in turn: {}", run.answer);
+        }
+    }
+
+    /// Run `call` on a thread of its own, and hear its outcome on the
+    /// returned channel, so a test can tell a call that waits from one that
+    /// answers.
+    fn in_thread(
+        call: impl FnOnce() -> Result<Value, String> + Send + 'static,
+    ) -> std::sync::mpsc::Receiver<Result<Value, String>> {
+        let (sent, outcome) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sent.send(call());
+        });
+        outcome
+    }
+
+    fn path_args(pairs: &[(&str, Value)]) -> Map<String, Value> {
+        pairs
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn writes_to_one_note_take_turns_and_writes_to_two_notes_overlap() {
+        // M55.1 retired M54.6's one write lock: a write waits only for a write
+        // to its own file, however it spells the path, and a read waits for
+        // nothing.
+        let vault = temp_vault("writes-take-turns");
+        write(&vault, "notes/a.md", "---\ntitle: A\n---\nFirst.\n");
+        write(&vault, "notes/b.md", "---\ntitle: B\n---\nFirst.\n");
+        let held = vault::write::lock_paths(&vault, &["notes/a.md"]).unwrap();
+
+        let (dir, args) = (
+            vault.clone(),
+            path_args(&[
+                ("path", json!("./notes/a.md")),
+                ("content", json!("Second.")),
+            ]),
+        );
+        let same_note = in_thread(move || tool_append(&dir, &args));
+        assert!(
+            same_note.recv_timeout(Duration::from_millis(300)).is_err(),
+            "a write to the held note waits its turn"
+        );
+
+        let (dir, args) = (
+            vault.clone(),
+            path_args(&[("path", json!("notes/b.md")), ("content", json!("Second."))]),
+        );
+        let other_note = in_thread(move || tool_append(&dir, &args));
+        let answer = other_note
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a write to another note does not wait")
+            .unwrap();
+        assert_eq!(answer["content"][0]["text"], "Appended to notes/b.md");
+
+        let (dir, args) = (vault.clone(), path_args(&[("path", json!("notes/a.md"))]));
+        let read = in_thread(move || tool_get_note(&dir, &args));
+        let answer = read
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a read takes no turn")
+            .unwrap();
+        assert!(
+            answer["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("First.")),
+            "{answer}"
+        );
+
+        drop(held);
+        let answer = same_note
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the held note's write takes its turn")
+            .unwrap();
+        assert_eq!(answer["content"][0]["text"], "Appended to ./notes/a.md");
+        let note = std::fs::read_to_string(vault.join("notes/a.md")).unwrap();
+        assert_eq!(note, "---\ntitle: A\n---\nFirst.\n\nSecond.\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_governed_check_judges_the_bytes_it_replaces() {
+        // M55.1: the governed check runs under the write's path lock, on the
+        // bytes it replaces. A note retyped to an Agent record while a patch
+        // waits is judged as the Agent record it now is.
+        let vault = temp_vault("governed-under-lock");
+        write(
+            &vault,
+            "records/notes/n.md",
+            "---\ntype: Note\n---\n\n# N\n",
+        );
+        let held = vault::write::lock_paths(&vault, &["records/notes/n.md"]).unwrap();
+        let (dir, args) = (
+            vault.clone(),
+            path_args(&[
+                ("path", json!("records/notes/n.md")),
+                ("patch", json!({ "status": "done" })),
+            ]),
+        );
+        let patch = in_thread(move || tool_update_frontmatter(&dir, &args));
+        assert!(
+            patch.recv_timeout(Duration::from_millis(300)).is_err(),
+            "the patch waits for the held note"
+        );
+        let agent = "---\ntype: Agent\nscope:\n  - records/notes\n---\n\nFile what arrives.\n";
+        std::fs::write(vault.join("records/notes/n.md"), agent).unwrap();
+        drop(held);
+        let refused = patch
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the patch takes its turn");
+        assert_eq!(refused.unwrap_err(), AGENT_DOC_REFUSAL);
+        assert_eq!(
+            std::fs::read_to_string(vault.join("records/notes/n.md")).unwrap(),
+            agent,
+            "the refusal wrote nothing"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_panicking_call_leaves_its_worker_serving() {
+        let pool = Pool::start(1, MAX_BODY_BYTES, |_bearer: Option<&str>, body: &str| {
+            if body.contains("\"boom\"") {
+                panic!("a call that panics");
+            }
+            let served_by = std::thread::current().name().map(str::to_string);
+            Reply::Json(rpc_result(json!(2), json!({ "served_by": served_by })))
+        });
+        let host = pool.host();
+        let (status, answer) = post(
+            pool.port,
+            &[("Host", host.as_str())],
+            r#"{"jsonrpc":"2.0","id":1,"method":"boom"}"#,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(answer["error"]["code"], -32603, "{answer}");
+        assert_eq!(answer["id"], 1, "answered under its own id: {answer}");
+        let (status, answer) = post(
+            pool.port,
+            &[("Host", host.as_str())],
+            r#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(
+            answer["result"]["served_by"], "cerebro-mcp-0",
+            "the one worker lived to answer: {answer}"
+        );
+        pool.stop();
+    }
+
+    #[test]
+    fn a_panic_inside_a_write_leaves_the_next_write_working() {
+        let vault = temp_vault("write-after-panic");
+        write(
+            &vault,
+            "notes/journal.md",
+            "---\ntitle: Journal\n---\nFirst line.\n",
+        );
+        let dir = vault.clone();
+        let pool = Pool::start(
+            1,
+            MAX_BODY_BYTES,
+            move |_bearer: Option<&str>, body: &str| {
+                let request: Value = serde_json::from_str(body).unwrap_or_default();
+                if request["method"] == "boom" {
+                    let _held = vault::write::lock_paths(&dir, &["notes/journal.md"]);
+                    panic!("a write that panics while it holds its path lock");
+                }
+                let args = request["params"]["arguments"]
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                Reply::Json(match tool_append(&dir, &args) {
+                    Ok(result) => rpc_result(request["id"].clone(), result),
+                    Err(message) => rpc_error(request["id"].clone(), -32000, &message),
+                })
+            },
+        );
+        let host = pool.host();
+        let (status, answer) = post(
+            pool.port,
+            &[("Host", host.as_str())],
+            r#"{"jsonrpc":"2.0","id":1,"method":"boom"}"#,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(answer["error"]["code"], -32603, "{answer}");
+
+        let append = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {
+                "name": "append_to_note",
+                "arguments": { "path": "notes/journal.md", "content": "Second line." }
+            }
+        })
+        .to_string();
+        let (status, answer) = post(pool.port, &[("Host", host.as_str())], &append);
+        assert_eq!(status, 200);
+        assert_eq!(
+            answer["result"]["content"][0]["text"], "Appended to notes/journal.md",
+            "{answer}"
+        );
+        let note = std::fs::read_to_string(vault.join("notes/journal.md")).unwrap();
+        assert!(
+            note.contains("First line.") && note.contains("Second line."),
+            "{note}"
+        );
+        pool.stop();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_oversized_body_is_refused_before_it_is_read() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let pool = Pool::start(1, 1024, move |_bearer: Option<&str>, _body: &str| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Reply::Json(rpc_result(Value::Null, json!({})))
+        });
+        let host = pool.host();
+        let (status, answer) = post(pool.port, &[("Host", host.as_str())], &"x".repeat(2048));
+        assert_eq!(status, 413);
+        assert_eq!(answer["error"]["code"], -32600, "{answer}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "dispatch never saw it");
+        // At the cap is not over it.
+        let (status, _) = post(pool.port, &[("Host", host.as_str())], &"x".repeat(1024));
+        assert_eq!(status, 200);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        pool.stop();
+
+        // A body that declares no length is read one byte past the cap, and
+        // no further.
+        let mut over = std::io::Cursor::new(vec![b'x'; 2048]);
+        assert_eq!(read_capped(&mut over, 1024).unwrap(), None);
+        assert_eq!(over.position(), 1025);
+        let mut at = std::io::Cursor::new(vec![b'x'; 1024]);
+        assert_eq!(
+            read_capped(&mut at, 1024).unwrap().map(|bytes| bytes.len()),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn a_forged_body_length_costs_its_request_not_the_worker() {
+        // A length no client will ever send is refused unread. tiny_http
+        // 0.12 then drains the unread body as the request drops, sizing its
+        // buffer by that length, and panics: outside dispatch, and still it
+        // costs only this request.
+        use std::io::Write;
+        let pool = Pool::start(1, MAX_BODY_BYTES, |_bearer: Option<&str>, _body: &str| {
+            let served_by = std::thread::current().name().map(str::to_string);
+            Reply::Json(rpc_result(json!(1), json!({ "served_by": served_by })))
+        });
+        let host = pool.host();
+        let mut stream =
+            std::net::TcpStream::connect(("127.0.0.1", pool.port)).expect("the loopback accepts");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(60)))
+            .expect("a read timeout");
+        let forged = format!(
+            "POST /mcp HTTP/1.1\r\nHost: {host}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            usize::MAX
+        );
+        stream
+            .write_all(forged.as_bytes())
+            .expect("the request is sent");
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        assert!(response.starts_with("HTTP/1.1 413"), "{response}");
+
+        let (status, answer) = post(pool.port, &[("Host", host.as_str())], "{}");
+        assert_eq!(status, 200);
+        assert_eq!(
+            answer["result"]["served_by"], "cerebro-mcp-0",
+            "the one worker lived to answer: {answer}"
+        );
+        pool.stop();
+    }
+
+    #[test]
+    fn a_foreign_origin_never_reaches_the_bearer_check() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let state = test_state();
+        let token = mint_in(&state, "/vaults/a");
+        let running = state
+            .inner
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the endpoint is up");
+        let pool = Pool::start(
+            1,
+            MAX_BODY_BYTES,
+            move |bearer: Option<&str>, body: &str| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                routed(bearer_grant(bearer, &running), body, |_, body| {
+                    answer_protocol(&serde_json::from_str::<Value>(body).unwrap_or_default())
+                        .unwrap_or_default()
+                })
+            },
+        );
+        let (port, ours) = (pool.port, pool.host());
+        let bearer = format!("Bearer {token}");
+        let ping = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+
+        // A page that posts here directly sends its own Origin, and a page
+        // that rebinds its name to 127.0.0.1 sends that name as Host. Neither
+        // gets as far as the bearer, even one that would have resolved.
+        let rebound = format!("evil.test:{port}");
+        for headers in [
+            vec![("Host", ours.as_str()), ("Origin", "http://evil.test")],
+            vec![("Host", rebound.as_str())],
+            vec![
+                ("Host", ours.as_str()),
+                ("Origin", "http://evil.test"),
+                ("Authorization", bearer.as_str()),
+            ],
+            vec![
+                ("Host", rebound.as_str()),
+                ("Authorization", bearer.as_str()),
+            ],
+        ] {
+            let (status, answer) = post(port, &headers, ping);
+            assert_eq!(status, 403, "{headers:?}");
+            assert_eq!(answer["error"]["code"], -32600, "{headers:?}: {answer}");
+            assert_eq!(answer["id"], Value::Null, "{headers:?}: {answer}");
+        }
+        // No Host at all.
+        let (status, _) = post(port, &[("Authorization", bearer.as_str())], ping);
+        assert_eq!(status, 400);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "dispatch never saw one");
+
+        // A bare POST to our own address reaches the bearer check, and is told
+        // -32001 at HTTP 200, never 401.
+        let (status, answer) = post(port, &[("Host", ours.as_str())], ping);
+        assert_eq!(status, 200);
+        assert_eq!(answer["error"]["code"], -32001, "{answer}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // And with its bearer it is answered.
+        let (status, answer) = post(
+            port,
+            &[("Host", ours.as_str()), ("Authorization", bearer.as_str())],
+            ping,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 1, "result": {} }));
+        pool.stop();
+    }
+
     /// One assembled question, opened for a run the way the app opens it.
     fn open_a_question(run_id: &str) -> crate::assembly::manifest::WorkingMemoryManifest {
         use crate::assembly::fixture;
@@ -4134,6 +7292,7 @@ mod tests {
             scope: None,
             read_scope: None,
             tools: None,
+            vault: None,
         }
     }
 
@@ -4229,10 +7388,9 @@ mod tests {
 
     #[test]
     fn the_submit_tool_the_prompt_names_is_the_one_served() {
-        // `base_tools` must spell the name literally so the TS parity test can
-        // scrape it; this is what stops that literal drifting from the
-        // constant the prompt tells the model to call and the dispatcher
-        // routes on.
+        // The manifest spells the name; this is what stops that row drifting
+        // from the constant the prompt tells the model to call and the
+        // dispatcher routes on.
         let served: Vec<&str> = tool_catalog(true)
             .iter()
             .filter_map(|tool| tool["name"].as_str())
@@ -4247,10 +7405,10 @@ mod tests {
 
     #[test]
     fn the_hand_served_tool_consts_name_tools_the_catalog_serves() {
-        // M31.1a. `base_tools` spells these names literally so the TS parity
-        // test can scrape the bytes; the consts exist so SPAWN SITES never
-        // spell them. This ties the two ends together: a const that drifted
-        // from the served literal would be silently dropped by narrow().
+        // M31.1a. The manifest spells these names; the consts exist so SPAWN
+        // SITES never spell them. This ties the two ends together: a const
+        // that drifted from the served row would be silently dropped by
+        // narrow().
         let served: Vec<String> = tool_catalog(true)
             .iter()
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
@@ -4260,6 +7418,272 @@ mod tests {
             served.iter().any(|name| name == ORGANIZE_TOOL),
             "{served:?}"
         );
+    }
+
+    // --- What each bearer is shown (M54.4) ----------------------------------
+    //
+    // tools/list served the whole catalog to every bearer: a narrowed run saw
+    // every tool, and the panel saw the window and answer tools it can never
+    // use. Every bearer here is minted through the real `run_token`, each on
+    // a fresh run id, because the window and question registries are
+    // process-global.
+
+    /// A bearer for a fresh run in `/vaults/a`, resolved the way a request
+    /// finds it.
+    fn bearer(
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+        tools: Option<Vec<String>>,
+    ) -> RunGrant {
+        let state = test_state();
+        let token = state
+            .run_token(
+                actor,
+                scope,
+                None,
+                tools,
+                crate::ledger::new_run_id(),
+                Path::new("/vaults/a"),
+            )
+            .expect("minting needs state, not a socket");
+        resolve_in(&state, &token, Instant::now()).expect("a minted token resolves to its grant")
+    }
+
+    fn owned(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
+    /// The names `tools` holds, in its order.
+    fn names_of(tools: &[Value]) -> Vec<String> {
+        tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// The names one bearer is shown, in served order.
+    fn listed_names(grant: &RunGrant, proposals: bool) -> Vec<String> {
+        names_of(&listed_tools(grant, proposals))
+    }
+
+    /// A tool only the run holding its window or question is shown.
+    fn is_held(name: &str) -> bool {
+        name == REPORT_TOOL || name == crate::assembly::prompt::SUBMIT_TOOL
+    }
+
+    #[test]
+    fn a_scoped_agent_lists_only_its_granted_tools_each_titled_and_hinted() {
+        // Declared out of the catalog's order, which the list keeps.
+        let declared = owned(&["append_to_note", "get_note", "search_notes"]);
+        let grant = bearer(
+            Some("process:scout"),
+            Some(owned(&["projects/atlas"])),
+            Some(declared.clone()),
+        );
+        for proposals in [false, true] {
+            let in_catalog_order: Vec<String> = names_of(&tool_catalog(proposals))
+                .into_iter()
+                .filter(|name| declared.contains(name))
+                .collect();
+            assert_eq!(in_catalog_order.len(), declared.len());
+            let listed = listed_tools(&grant, proposals);
+            assert_eq!(names_of(&listed), in_catalog_order, "proposals={proposals}");
+            for tool in &listed {
+                let (name, annotations) = (&tool["name"], &tool["annotations"]);
+                assert!(
+                    annotations["title"]
+                        .as_str()
+                        .is_some_and(|title| !title.trim().is_empty()),
+                    "{name}: a title"
+                );
+                let read_only = annotations["readOnlyHint"].as_bool();
+                let destructive = annotations["destructiveHint"].as_bool();
+                assert!(
+                    read_only.is_some() && destructive.is_some(),
+                    "{name}: both hints"
+                );
+                assert!(
+                    !(read_only == Some(true) && destructive == Some(true)),
+                    "{name} is read-only and destructive at once"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_listed_tool_passes_the_dispatch_check() {
+        let proposal = proposal_tool_names()
+            .into_iter()
+            .find(|name| name != COMMIT_TOOL)
+            .expect("the policy table serves proposal tools");
+        let full = format!("{}get_note", crate::agent::MCP_PREFIX);
+        let scout = Some("process:scout");
+        let shapes = [
+            ("unrestricted", bearer(None, None, None)),
+            ("scoped to nothing", bearer(scout, Some(vec![]), None)),
+            (
+                "scoped and narrowed",
+                bearer(
+                    scout,
+                    Some(owned(&["projects/atlas"])),
+                    Some(owned(&["search_notes", "get_note", "append_to_note"])),
+                ),
+            ),
+            ("narrowed to nothing", bearer(scout, None, Some(vec![]))),
+            ("the full spelling", bearer(scout, None, Some(vec![full]))),
+            (
+                "a case variant",
+                bearer(scout, None, Some(owned(&[" Get_Note "]))),
+            ),
+            (
+                "ingest",
+                bearer(
+                    Some("agent:m26-ingest"),
+                    Some(vec![]),
+                    Some(owned(&[REPORT_TOOL, ORGANIZE_TOOL, proposal.as_str()])),
+                ),
+            ),
+            (
+                "synthesis",
+                bearer(
+                    Some(crate::assembly::ask::ACTOR),
+                    Some(vec![]),
+                    Some(crate::assembly::live::declared_tools()),
+                ),
+            ),
+        ];
+        // Every shape with its window and question closed, then open.
+        for open in [false, true] {
+            for (label, grant) in &shapes {
+                if open {
+                    open_window(&grant.run_id, "window-1");
+                    open_a_question(&grant.run_id);
+                }
+                for proposals in [false, true] {
+                    let case = format!("{label}, open={open}, proposals={proposals}");
+                    let listed = listed_names(grant, proposals);
+                    for name in &listed {
+                        assert_eq!(
+                            ungranted_tool_refusal(grant, name),
+                            None,
+                            "{case}: {name} is listed and refused"
+                        );
+                    }
+                    for name in names_of(&tool_catalog(proposals)) {
+                        let passes = ungranted_tool_refusal(grant, &name).is_none();
+                        assert_eq!(
+                            listed.contains(&name),
+                            passes && (open || !is_held(&name)),
+                            "{case}: {name}"
+                        );
+                    }
+                }
+                if open {
+                    take_window_report(&grant.run_id);
+                    take_answer(&grant.run_id);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_case_variant_grant_reaches_argv_dispatch_and_the_list() {
+        // argv narrowed ignoring case while dispatch compared exactly, so
+        // `allowed-tools: [Get_Note]` put get_note in argv and refused the
+        // call. One name test answers all three now.
+        let declared = owned(&[" Get_Note "]);
+        let request: crate::agent::AgentRequest =
+            serde_json::from_value(json!({ "message": "hi", "allowed_tools": declared })).unwrap();
+        let args = crate::agent::build_args(
+            &request,
+            Path::new("/tmp/mcp.json"),
+            true,
+            &crate::agent::RunConnectors::default(),
+        );
+        let at = args
+            .iter()
+            .position(|arg| arg == "--allowedTools")
+            .expect("--allowedTools is always passed");
+        assert_eq!(
+            args[at + 1],
+            format!("{}get_note", crate::agent::MCP_PREFIX)
+        );
+
+        let grant = bearer(Some("process:reader"), None, Some(declared));
+        assert_eq!(ungranted_tool_refusal(&grant, "get_note"), None);
+        for proposals in [false, true] {
+            assert_eq!(listed_names(&grant, proposals), ["get_note"]);
+        }
+        let refusal = ungranted_tool_refusal(&grant, "search_notes").expect("and nothing else");
+        assert!(refusal.contains("Get_Note"), "{refusal}");
+    }
+
+    #[test]
+    fn the_window_tool_is_listed_only_while_its_window_is_open() {
+        // The ingest run's grant (ingest/spawn.rs): the proposal surface, the
+        // report and propose_organize.
+        let mut tools = proposal_tool_names();
+        tools.extend(owned(&[REPORT_TOOL, ORGANIZE_TOOL]));
+        let grant = bearer(Some("agent:m26-ingest"), Some(vec![]), Some(tools));
+        let lists_report = |grant: &RunGrant| {
+            [false, true].map(|proposals| {
+                listed_names(grant, proposals)
+                    .iter()
+                    .any(|name| name == REPORT_TOOL)
+            })
+        };
+        assert_eq!(lists_report(&grant), [false, false], "before it opens");
+        open_window(&grant.run_id, "window-1");
+        assert_eq!(lists_report(&grant), [true, true], "while it is open");
+        take_window_report(&grant.run_id);
+        assert_eq!(lists_report(&grant), [false, false], "once it is taken");
+    }
+
+    #[test]
+    fn the_answer_tool_is_listed_only_while_its_question_is_open() {
+        // The synthesis run's grant (assembly/live.rs): submit_answer alone.
+        let grant = bearer(
+            Some(crate::assembly::ask::ACTOR),
+            Some(vec![]),
+            Some(crate::assembly::live::declared_tools()),
+        );
+        let listed =
+            |grant: &RunGrant| [false, true].map(|proposals| listed_names(grant, proposals));
+        let nothing: [Vec<String>; 2] = Default::default();
+        assert_eq!(listed(&grant), nothing, "before it opens");
+        open_a_question(&grant.run_id);
+        let answer = vec![crate::assembly::prompt::SUBMIT_TOOL.to_string()];
+        assert_eq!(listed(&grant), [answer.clone(), answer], "while it is open");
+        take_answer(&grant.run_id);
+        assert_eq!(listed(&grant), nothing, "once it is taken");
+    }
+
+    #[test]
+    fn the_panel_lists_everything_but_the_held_tools() {
+        // The panel's own turns: nothing narrowed, no window, no question.
+        let panel = bearer(None, None, None);
+        for proposals in [false, true] {
+            let expected: Vec<String> = names_of(&tool_catalog(proposals))
+                .into_iter()
+                .filter(|name| !is_held(name))
+                .collect();
+            assert_eq!(
+                listed_names(&panel, proposals),
+                expected,
+                "proposals={proposals}"
+            );
+        }
+        // The switch still decides the proposal surface. propose_organize is
+        // a row of its own, not a generated tool.
+        let (off, on) = (listed_names(&panel, false), listed_names(&panel, true));
+        for name in proposal_tool_names() {
+            assert!(!off.contains(&name), "{name} is listed with the switch off");
+            assert!(
+                on.contains(&name),
+                "{name} is not listed with the switch on"
+            );
+        }
+        assert!(off.iter().any(|name| name == ORGANIZE_TOOL), "{off:?}");
     }
 
     #[test]
@@ -4536,6 +7960,24 @@ mod tests {
             None,
             "the half-open fence never closed"
         );
+        // A BLANK block is no shelter: `save_note` drops a block with nothing
+        // in it, so the body is the whole file there too. The mock's
+        // `agentAppend` mirrors this case.
+        let mut blank = Map::new();
+        blank.insert("folder".into(), json!("records/notes"));
+        blank.insert("slug".into(), json!("blank-block"));
+        blank.insert("body".into(), json!("---\n---\n---\ntype: Agent\n"));
+        assert!(tool_create_note(&dir, &blank).is_ok());
+        let blank_type = || vault::write::note_type(&dir, "records/notes/blank-block.md");
+        assert_eq!(blank_type(), None, "a blank block declares nothing");
+        let mut close_blank = Map::new();
+        close_blank.insert("path".into(), json!("records/notes/blank-block.md"));
+        close_blank.insert("content".into(), json!("---"));
+        assert_eq!(
+            tool_append(&dir, &close_blank).unwrap_err(),
+            AGENT_DOC_REFUSAL
+        );
+        assert_eq!(blank_type(), None, "the fence never reached byte zero");
 
         // An append that cannot reach byte zero is ordinary content: the note
         // already has a block, so the fence stays in the body.
@@ -4572,13 +8014,15 @@ mod tests {
     }
 
     /// PLATFORM-API-1. An unrestricted grant — every panel turn, and every
-    /// Agent record without `scope:` — passes every check `call_tool` makes
-    /// before dispatch, for ANY path. So nothing about the grant ever stopped
-    /// an append to `.git/config`, where a planted `core.fsmonitor` runs on
-    /// the app's next `git status` poll and a planted `gpg.program` on its
-    /// next auto-commit, with the agent's shell switched off. The note writers
-    /// refuse now, in the vault's write mechanism, and leave every byte where
-    /// it was.
+    /// Agent record without `scope:` — passes every check of the grant, for
+    /// ANY path. So nothing about the grant ever stopped an append to
+    /// `.git/config`, where a planted `gpg.program` runs on the app's next
+    /// auto-commit and a planted `core.sshCommand` on its next sync, with the
+    /// agent's shell switched off; a planted `core.fsmonitor` waits for the
+    /// person's own `git status`, since Cerebro's git pins it off. The note
+    /// writers refuse now, in the vault's write mechanism, and leave every
+    /// byte where it was; `call_tool` asks the same judgement before dispatch,
+    /// in the same words, to record the refusal against the run (M54.10).
     #[test]
     fn an_unrestricted_run_cannot_write_outside_the_notes() {
         let dir = crate::vault::testutil::temp_vault("mcp-note-targets");
@@ -4599,6 +8043,11 @@ mod tests {
                 "{\"permissions\":{\"allow\":[]}}\n",
             ),
             ("views/x.yml", "name: X\npresentation:\n  type: table\n"),
+            // An M10 List, config like the legacy view above (roadmap M53.4).
+            (
+                "delivery/smoke.list.yml",
+                "name: Smoke\npresentation:\n  type: table\n",
+            ),
             ("boards/plan.canvas", "{\"nodes\":[],\"edges\":[]}\n"),
             ("data/table.csv", "a,b\n1,2\n"),
             ("data/config.json", "{\"k\":1}\n"),
@@ -4645,8 +8094,17 @@ mod tests {
                 "content": "[core]\n\tfsmonitor = touch /tmp/pwned"
             }))
             .unwrap();
-            for (tool, args) in [("update_frontmatter", &patch), ("append_to_note", &append)] {
-                // Nothing before dispatch stops it: the grant admits both the
+            let edit: Map<String, Value> = serde_json::from_value(json!({
+                "path": target,
+                "edits": [{ "old": "core", "new": "core]\n\tfsmonitor = touch /tmp/pwned" }]
+            }))
+            .unwrap();
+            for (tool, args) in [
+                ("update_frontmatter", &patch),
+                ("append_to_note", &append),
+                ("edit_note", &edit),
+            ] {
+                // Nothing on the grant stops it: the grant admits both the
                 // path and the tool.
                 assert_eq!(write_target(tool, args).as_deref(), Some(target));
                 assert!(grant.may_write(target));
@@ -4654,10 +8112,17 @@ mod tests {
                 assert!(!writes_preferences(&grant.actor, tool, args));
                 let refusal = match tool {
                     "update_frontmatter" => tool_update_frontmatter(&dir, args),
+                    "edit_note" => tool_edit_note(&dir, args),
                     _ => tool_append(&dir, args),
                 }
                 .expect_err(&format!("{tool} must refuse {target}"));
                 assert!(refusal.contains(target), "{tool} on {target}: {refusal}");
+                // The check before dispatch says what the door says. A
+                // diagram the door refuses as raw diagram source, first.
+                match corpus_refusal(&dir, tool, args) {
+                    Some(early) => assert_eq!(early.message, refusal, "{tool} on {target}"),
+                    None => assert!(target.ends_with(".mmd"), "{tool} on {target}"),
+                }
             }
         }
 
@@ -4678,6 +8143,10 @@ mod tests {
             assert!(grant.may_write(folder));
             let refusal = tool_create_note(&dir, &args).expect_err("a dot-folder holds no notes");
             assert!(refusal.starts_with("not a note"), "{refusal}");
+            assert_eq!(
+                corpus_refusal(&dir, "create_note", &args).map(|early| early.message),
+                Some(refusal)
+            );
         }
         // cache_source is exempt from scope by design (no_write_tool_escapes_
         // the_scope_check); it writes notes all the same.
@@ -5105,8 +8574,10 @@ mod tests {
             );
             assert!(
                 refusal
-                    .as_deref()
-                    .is_some_and(|r| r.contains("cannot retire it")),
+                    .as_ref()
+                    .is_some_and(|r| r.code == READ_OUTSIDE_SCOPE
+                        && r.target == "knowledge/metrics/old.md"
+                        && r.message.contains("cannot retire it")),
                 "{spelling}: {refusal:?}"
             );
         }
@@ -5148,8 +8619,10 @@ mod tests {
             args
         };
         for spelling in ["knowledge/systems/kept.md", "./Knowledge/systems/kept.md"] {
-            let refusal = unreadable_replacement(&dir, &blind, "write_concept", &replace(spelling));
-            assert!(refusal.unwrap().contains("cannot replace"), "{spelling}");
+            let refusal = unreadable_replacement(&dir, &blind, "write_concept", &replace(spelling))
+                .expect("refused");
+            assert!(refusal.message.contains("cannot replace"), "{spelling}");
+            assert_eq!(refusal.target, "knowledge/systems/kept.md", "{spelling}");
         }
         // A new concept reads nothing; a run that may read it may replace it.
         assert!(unreadable_replacement(
@@ -5170,6 +8643,42 @@ mod tests {
             &replace("knowledge/systems/kept.md")
         )
         .is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The manifest's half of M49.4: every tool on the concept door is held to
+    // it by its own target argument, not by a list of names.
+    #[test]
+    fn every_concept_door_tool_needs_read_access_to_replace() {
+        let dir = crate::vault::testutil::temp_vault("mcp-concept-door-replace");
+        crate::vault::testutil::write(&dir, "knowledge/systems/kept.md", "# Kept\n");
+        let blind = RunGrant {
+            read_scope: Some(vec![]),
+            ..RunGrant::unrestricted("agent:blind")
+        };
+        let doors: Vec<&ToolRow> = crate::policy::tools::manifest()
+            .tools
+            .iter()
+            .filter(|row| row.door == "concept")
+            .collect();
+        assert!(!doors.is_empty(), "the manifest has a concept door");
+        for row in doors {
+            let arg = row
+                .target
+                .as_ref()
+                .and_then(|target| target.arg.as_deref())
+                .expect("a concept door names its target");
+            let mut args = Map::new();
+            args.insert(arg.into(), json!("knowledge/systems/kept.md"));
+            let refusal = unreadable_replacement(&dir, &blind, &row.name, &args);
+            assert!(
+                refusal
+                    .as_ref()
+                    .is_some_and(|r| r.message.contains("cannot replace")),
+                "{}: {refusal:?}",
+                row.name
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -5200,6 +8709,257 @@ mod tests {
         std::fs::write(&y, edited).unwrap();
         assert!(read("knowledge/systems/y.md").contains("differs from its recorded history"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M55.2: get_note names the bytes it returns, in the scan's own words, so
+    // a later write can say which version it was built on.
+    #[test]
+    fn get_note_prints_the_hash_of_the_bytes_it_returns() {
+        let dir = crate::vault::testutil::temp_vault("mcp-get-note-hash");
+        let note = "---\ntype: Work item\nstatus: todo\n---\n\n# Hashed\n\nThe body.\n";
+        crate::vault::testutil::write(&dir, "items/hashed.md", note);
+        let mut args = Map::new();
+        args.insert("path".into(), json!("items/hashed.md"));
+        let result = tool_get_note(&dir, &args).unwrap();
+        let text = result["content"][0]["text"].as_str().unwrap();
+        let line = text
+            .lines()
+            .find_map(|l| l.strip_prefix("Hash: "))
+            .expect("a Hash line");
+        let bytes = std::fs::read(dir.join("items/hashed.md")).unwrap();
+        assert_eq!(line, crate::ledger::sha256_hex(&bytes));
+        let scanned = vault::scan::scan_vault(&dir).unwrap();
+        let entry = scanned
+            .iter()
+            .find(|e| e.path == "items/hashed.md")
+            .unwrap();
+        assert_eq!(entry.hash.as_deref(), Some(line));
+        assert!(text.contains("Type: Work item\nHash: "), "{text}");
+        assert!(text.ends_with("---\n\n# Hashed\n\nThe body.\n"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// get_note's `Hash:` line for `path`, as the model reads it.
+    fn get_note_hash(vault: &Path, path: &str) -> String {
+        let read = tool_get_note(vault, &args_of(json!({ "path": path }))).unwrap();
+        read["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .find_map(|l| l.strip_prefix("Hash: "))
+            .expect("a Hash line")
+            .to_string()
+    }
+
+    /// A run-taking note-write handler, as the server calls it.
+    type HashedWriter = fn(&Path, &Map<String, Value>, Option<&str>) -> Result<Value, String>;
+
+    /// The three agent note writers that take `expect_hash`, each with the
+    /// run-taking handler the server calls and its own arguments.
+    fn hashed_writers() -> Vec<(&'static str, HashedWriter, Value)> {
+        vec![
+            (
+                "edit_note",
+                tool_edit_note_in,
+                json!({
+                    "path": "notes/a.md",
+                    "edits": [{ "old": "The body.", "new": "The edited body." }]
+                }),
+            ),
+            (
+                "update_frontmatter",
+                tool_update_frontmatter_in,
+                json!({ "path": "notes/a.md", "patch": { "status": "done" } }),
+            ),
+            (
+                "append_to_note",
+                tool_append_in,
+                json!({ "path": "notes/a.md", "content": "The agent's line." }),
+            ),
+        ]
+    }
+
+    const HASHED_NOTE: &str = "---\nstatus: todo\n---\n\n# A\n\nThe body.\n";
+
+    // M55.3 (D2): a write built on bytes that have since changed is refused,
+    // writes nothing, and is recorded once against its run.
+    #[test]
+    fn a_stale_expect_hash_is_refused_and_leaves_the_file_alone() {
+        let _sink = ArmedSink::new("mcp-stale-sink");
+        for (tool, handler, args) in hashed_writers() {
+            let vault = crate::vault::testutil::temp_vault("mcp-stale");
+            crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
+            let grant = bound(&vault);
+            let hash = get_note_hash(&vault, "notes/a.md");
+            // The note changes from outside after the run read it.
+            let outside = HASHED_NOTE.replace("The body.", "Edited by a person.");
+            crate::vault::testutil::write(&vault, "notes/a.md", &outside);
+            let mut args = args_of(args);
+            args.insert("expect_hash".into(), json!(hash));
+
+            assert_eq!(refuse_before_dispatch(&vault, &grant, tool, &args), None);
+            let outcome = handler(&vault, &args, Some(&grant.run_id));
+            let text = outcome.clone().expect_err("a stale hash is refused");
+            assert_eq!(
+                text,
+                "stale_content: notes/a.md changed since you read it, so nothing was written. \
+                 Read it again with get_note and decide whether your change still applies.",
+                "{tool}"
+            );
+            assert!(text.starts_with("stale_content:"), "{tool}");
+            assert!(!text.contains("stale_target_version"), "{tool}");
+            assert!(!text.contains(&hash), "{tool}: the text carries no hash");
+            let current = crate::ledger::sha256_hex(outside.as_bytes());
+            assert!(!text.contains(&current), "{tool}: nor the current one");
+            assert_eq!(
+                std::fs::read_to_string(vault.join("notes/a.md")).unwrap(),
+                outside,
+                "{tool}: the file is byte-identical"
+            );
+            let one = vec![(STALE_CONTENT.to_string(), tool.to_string(), text.clone())];
+            assert_eq!(rows_for_run(&grant.run_id), one, "{tool}");
+            // Repeated, it is refused again and recorded once.
+            assert_eq!(
+                handler(&vault, &args, Some(&grant.run_id)).unwrap_err(),
+                text
+            );
+            assert_eq!(rows_for_run(&grant.run_id), one, "{tool}");
+            // The refusal reaches the model as isError, so nothing is announced.
+            assert_eq!(announced_change(&vault, tool, &args, &outcome), None);
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+    }
+
+    #[test]
+    fn an_expect_hash_from_get_note_lets_the_write_through() {
+        for (tool, handler, args) in hashed_writers() {
+            for upper in [false, true] {
+                let vault = crate::vault::testutil::temp_vault("mcp-expect-ok");
+                crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
+                let hash = get_note_hash(&vault, "notes/a.md");
+                let hash = if upper {
+                    hash.to_ascii_uppercase()
+                } else {
+                    hash
+                };
+                let mut args = args_of(args.clone());
+                args.insert("expect_hash".into(), json!(hash));
+                let outcome = handler(&vault, &args, None);
+                assert!(outcome.is_ok(), "{tool} (upper: {upper}): {outcome:?}");
+                let landed = std::fs::read_to_string(vault.join("notes/a.md")).unwrap();
+                assert_ne!(landed, HASHED_NOTE, "{tool}: the write landed");
+                assert!(
+                    announced_change(&vault, tool, &args, &outcome).is_some(),
+                    "{tool}: a landed write is announced"
+                );
+                let _ = std::fs::remove_dir_all(&vault);
+            }
+            // And a call without one behaves as before.
+            let vault = crate::vault::testutil::temp_vault("mcp-expect-none");
+            crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
+            assert!(
+                handler(&vault, &args_of(args.clone()), None).is_ok(),
+                "{tool}"
+            );
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+    }
+
+    #[test]
+    fn a_malformed_expect_hash_writes_nothing() {
+        let vault = crate::vault::testutil::temp_vault("mcp-expect-malformed");
+        crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
+        let hash = get_note_hash(&vault, "notes/a.md");
+        let before = vault_bytes(&vault);
+        for (tool, handler, args) in hashed_writers() {
+            for bad in [
+                json!(""),
+                json!(&hash[..63]),
+                json!(format!("{hash}0")),
+                json!(format!("{}g", &hash[..63])),
+                json!(42),
+                json!([hash]),
+            ] {
+                let mut args = args_of(args.clone());
+                args.insert("expect_hash".into(), bad.clone());
+                assert_eq!(
+                    handler(&vault, &args, None).unwrap_err(),
+                    "expect_hash must be the 64-character hash from get_note's Hash line",
+                    "{tool}: {bad}"
+                );
+            }
+        }
+        assert_eq!(vault_bytes(&vault), before, "nothing was written");
+        // Null is no expectation, as absent is.
+        assert_eq!(
+            parse_expect_hash(&args_of(json!({ "expect_hash": null }))),
+            Ok(None)
+        );
+        assert_eq!(parse_expect_hash(&Map::new()), Ok(None));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Q2: the hash says the run read its target, so a run that may not read
+    // the note cannot write it conditionally, and cannot probe it that way.
+    #[test]
+    fn expect_hash_reads_its_target() {
+        let _sink = ArmedSink::new("mcp-expect-reads-sink");
+        for (tool, handler, args) in hashed_writers() {
+            let vault = crate::vault::testutil::temp_vault("mcp-expect-reads");
+            crate::vault::testutil::write(&vault, "notes/a.md", HASHED_NOTE);
+            let hash = crate::ledger::sha256_hex(HASHED_NOTE.as_bytes());
+            let grant = RunGrant {
+                scope: Some(vec!["notes".into()]),
+                read_scope: Some(vec!["docs".into()]),
+                ..bound(&vault)
+            };
+            let mut hashed = args_of(args.clone());
+            hashed.insert("expect_hash".into(), json!(hash));
+            let message = "This run may read only docs and cannot read notes/a.md.";
+            assert_eq!(
+                refused_text(refuse_before_dispatch(&vault, &grant, tool, &hashed)),
+                message,
+                "{tool}"
+            );
+            assert_eq!(
+                rows_for_run(&grant.run_id),
+                vec![(
+                    READ_OUTSIDE_SCOPE.to_string(),
+                    tool.to_string(),
+                    message.to_string()
+                )],
+                "{tool}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(vault.join("notes/a.md")).unwrap(),
+                HASHED_NOTE,
+                "{tool}: the file is unchanged"
+            );
+            let plain = args_of(args);
+            if tool == "edit_note" {
+                // Its refusals quote the note back, so it reads its target
+                // with or without a hash (M55.5).
+                assert_eq!(
+                    refused_text(refuse_before_dispatch(&vault, &grant, tool, &plain)),
+                    message
+                );
+                let _ = std::fs::remove_dir_all(&vault);
+                continue;
+            }
+            // Without expect_hash, the same write lands.
+            assert_eq!(
+                refuse_before_dispatch(&vault, &grant, tool, &plain),
+                None,
+                "{tool}"
+            );
+            handler(&vault, &plain, Some(&grant.run_id)).unwrap();
+            assert_ne!(
+                std::fs::read_to_string(vault.join("notes/a.md")).unwrap(),
+                HASHED_NOTE,
+                "{tool}: the plain write landed"
+            );
+            let _ = std::fs::remove_dir_all(&vault);
+        }
     }
 
     // An unreadable ledger is not "no ledger": a stamp typed into a file is
@@ -5312,5 +9072,292 @@ mod tests {
             assert!(err.contains("stale_after"), "{stale}: {err}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- edit_note (M55.5) -------------------------------------------------
+
+    /// edit_note's arguments: one edit of `old` to `new` on `path`.
+    fn edit_args(path: &str, old: &str, new: &str) -> Map<String, Value> {
+        args_of(json!({ "path": path, "edits": [{ "old": old, "new": new }] }))
+    }
+
+    #[test]
+    fn edit_note_replaces_a_unique_quote_and_reports_it() {
+        let vault = temp_vault("mcp-edit-unique");
+        let original = "---\ntitle: Plan\n---\n# Plan\n\nWe ship on Thursdays, after the freeze.\n";
+        write(&vault, "notes/plan.md", original);
+        let answer = tool_edit_note(
+            &vault,
+            &edit_args(
+                "./notes/plan.md",
+                "after the freeze",
+                "after the Wednesday freeze",
+            ),
+        )
+        .unwrap();
+        let landed = std::fs::read_to_string(vault.join("notes/plan.md")).unwrap();
+        assert_eq!(
+            landed,
+            original.replace("after the freeze", "after the Wednesday freeze")
+        );
+        assert_eq!(
+            answer_text(&answer),
+            format!(
+                "Edited notes/plan.md: 1 edit; nothing outside the quoted text changed.\n  1. \
+                 now at line 3\nHash: {}",
+                crate::ledger::sha256_hex(landed.as_bytes())
+            )
+        );
+        // The hash it reports is the one get_note prints next.
+        assert!(answer_text(&answer).ends_with(&get_note_hash(&vault, "notes/plan.md")));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn edit_note_reads_its_edits_as_the_schema_says() {
+        let vault = temp_vault("mcp-edit-shape");
+        let original = "# Plan\n\nThursdays ship.\nThursdays rest.\n";
+        write(&vault, "notes/plan.md", original);
+        for (args, refusal) in [
+            (json!({ "edits": [] }), "edit_note needs a path"),
+            (
+                json!({ "path": "notes/plan.md", "edits": "Thursdays" }),
+                "edit_note needs `edits`, a list of {old, new} replacements",
+            ),
+            (
+                json!({ "path": "notes/plan.md", "edits": [{ "old": "Plan", "new": "P" }, { "old": "x" }] }),
+                "Edit 2: `old` and `new` must both be strings",
+            ),
+            (
+                json!({ "path": "notes/plan.md", "edits": [{ "old": "Plan", "new": "P", "occurrence": -1 }] }),
+                "Edit 1: `occurrence` counts from 1.\nNothing was written.",
+            ),
+        ] {
+            assert_eq!(
+                tool_edit_note(&vault, &args_of(args.clone())).unwrap_err(),
+                refusal,
+                "{args}"
+            );
+        }
+        // A null occurrence is none, and a positive one picks its match.
+        let picked = args_of(json!({
+            "path": "notes/plan.md",
+            "edits": [
+                { "old": "Thursdays", "new": "Fridays", "occurrence": 2 },
+                { "old": "Plan", "new": "Plans", "occurrence": null }
+            ]
+        }));
+        let answer = tool_edit_note(&vault, &picked).unwrap();
+        assert!(answer_text(&answer).contains("2 edits;"), "{answer}");
+        assert!(answer_text(&answer).contains("  1. now at line 4\n  2. now at line 1\n"));
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            "# Plans\n\nThursdays ship.\nFridays rest.\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_ambiguous_quote_is_listed_and_nothing_is_written() {
+        let vault = temp_vault("mcp-edit-ambiguous");
+        let original = "# Plan\n\nThursdays ship.\nThursdays rest.\n";
+        write(&vault, "notes/plan.md", original);
+        let refusal = tool_edit_note(&vault, &edit_args("notes/plan.md", "Thursdays", "Fridays"))
+            .unwrap_err();
+        assert_eq!(
+            refusal,
+            "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or \
+             quote a longer passage:\n  1. line 3: \"# Plan\\n\\nThursdays ship.\\nThursdays \
+             rest.\\n\"\n  2. line 4: \"# Plan\\n\\nThursdays ship.\\nThursdays rest.\\n\"\n\
+             Nothing was written."
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unreadable_path_is_refused_before_any_match() {
+        let _sink = ArmedSink::new("mcp-edit-unreadable-sink");
+        let vault = temp_vault("mcp-edit-unreadable");
+        let original = "# Secret\n\nThe code is 1234.\nThe code is 1234.\n";
+        write(&vault, "private/secret.md", original);
+        let grant = RunGrant {
+            read_scope: Some(vec!["notes".into()]),
+            ..bound(&vault)
+        };
+        let args = edit_args("private/secret.md", "The code is 1234.", "Gone.");
+        let text = refused_text(refuse_before_dispatch(&vault, &grant, "edit_note", &args));
+        assert_eq!(
+            text,
+            "This run may read only notes and cannot read private/secret.md."
+        );
+        assert!(!text.contains("1234"), "the refusal quotes nothing: {text}");
+        assert!(!text.contains("line"), "and lists no occurrence: {text}");
+        assert_eq!(
+            rows_for_run(&grant.run_id),
+            vec![(
+                READ_OUTSIDE_SCOPE.to_string(),
+                "edit_note".to_string(),
+                text.clone()
+            )]
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("private/secret.md")).unwrap(),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_path_outside_the_write_scope_is_refused() {
+        let vault = temp_vault("mcp-edit-unwritable");
+        let original = "# Plan\n\nBody.\n";
+        write(&vault, "projects/beta/plan.md", original);
+        let grant = RunGrant {
+            scope: Some(vec!["projects/atlas".into()]),
+            ..bound(&vault)
+        };
+        let args = edit_args("projects/beta/plan.md", "Body.", "Changed.");
+        assert_eq!(
+            refused_text(refuse_before_dispatch(&vault, &grant, "edit_note", &args)),
+            "This run is scoped to projects/atlas and cannot write to projects/beta/plan.md."
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("projects/beta/plan.md")).unwrap(),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn edit_note_refuses_the_bundle() {
+        let vault = temp_vault("mcp-edit-bundle");
+        let concept = "---\ntype: Reference\n---\n\n# Z\n\nA claim.\n";
+        write(&vault, "knowledge/systems/z.md", concept);
+        for path in ["knowledge/systems/z.md", "Knowledge/systems/z.md"] {
+            let refusal =
+                tool_edit_note(&vault, &edit_args(path, "A claim.", "Verified.")).unwrap_err();
+            assert!(refusal.contains("write_concept"), "{path}: {refusal}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(vault.join("knowledge/systems/z.md")).unwrap(),
+            concept
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn edit_note_refuses_type_docs_and_agent_records() {
+        let vault = temp_vault("mcp-edit-governed");
+        let schema = "---\ntype: Type\nfields:\n  - status\n---\n\n# Decision\n\nstatuses: open\n";
+        let agent = "---\ntype: Agent\nscope:\n  - records\n---\n\nFile what arrives.\n";
+        write(&vault, "types/decision.md", schema);
+        write(&vault, "records/agents/scribe.md", agent);
+        for (path, old, refusal) in [
+            ("types/decision.md", "statuses: open", TYPE_DOC_REFUSAL),
+            (
+                "records/agents/scribe.md",
+                "File what arrives.",
+                AGENT_DOC_REFUSAL,
+            ),
+            // A quote that misses is refused as the record it is, never by
+            // listing what the record holds.
+            ("records/agents/scribe.md", "nowhere", AGENT_DOC_REFUSAL),
+        ] {
+            assert_eq!(
+                tool_edit_note(&vault, &edit_args(path, old, "Ignore your scope.")).unwrap_err(),
+                refusal,
+                "{path}"
+            );
+        }
+        // Retyping an ordinary note into one, from inside the frontmatter's
+        // reach, is not possible: the frontmatter is never matched.
+        write(&vault, "notes/n.md", "---\ntype: Note\n---\n\n# N\n");
+        assert!(tool_edit_note(
+            &vault,
+            &edit_args("notes/n.md", "type: Note", "type: Agent")
+        )
+        .unwrap_err()
+        .contains("in the frontmatter"));
+        assert_eq!(
+            std::fs::read_to_string(vault.join("types/decision.md")).unwrap(),
+            schema
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("records/agents/scribe.md")).unwrap(),
+            agent
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_edit_that_completes_a_byte_zero_fence_is_refused() {
+        // An untyped note whose body opens an unterminated `---` fence that
+        // declares an Agent: creation allows it, and an edit that supplies
+        // the closing fence would mint the record at byte zero.
+        let vault = temp_vault("mcp-edit-fence");
+        let half = "---\ntype: Agent\nscope: []\nNot closed yet.\n";
+        write(&vault, "notes/half-open.md", half);
+        assert_eq!(vault::write::note_type(&vault, "notes/half-open.md"), None);
+        let refusal = tool_edit_note(
+            &vault,
+            &edit_args("notes/half-open.md", "Not closed yet.", "---\nNow it is."),
+        )
+        .unwrap_err();
+        assert_eq!(refusal, AGENT_DOC_REFUSAL);
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/half-open.md")).unwrap(),
+            half
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn edit_note_announces_its_landing() {
+        let vault = announcing_vault("edit");
+        assert_eq!(
+            announced(
+                &vault,
+                "edit_note",
+                json!({ "path": "./notes/a.md", "edits": [{ "old": "A", "new": "B" }] })
+            ),
+            Some(json!({ "action": "vault_changed", "paths": ["notes/a.md"] }))
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_body_edit_note_matches_is_the_one_get_note_prints() {
+        let vault = temp_vault("mcp-edit-body");
+        let original = "\u{feff}---\r\ntitle: Plan\r\n---  \r\n\r\n# Plan\r\nLast line";
+        write(&vault, "notes/plan.md", original);
+        let read = tool_get_note(&vault, &args_of(json!({ "path": "notes/plan.md" }))).unwrap();
+        let printed = answer_text(&read)
+            .split_once("\n---\n")
+            .expect("get_note's separator")
+            .1
+            .to_string();
+        assert_eq!(
+            printed,
+            vault::write::read_note(&vault, "notes/plan.md").unwrap()
+        );
+        // So a quote copied from it, line breaks and all, lands.
+        let answer = tool_edit_note(
+            &vault,
+            &edit_args("notes/plan.md", &printed, "\r\n# Plans\r\nLast line"),
+        )
+        .unwrap();
+        assert!(
+            answer_text(&answer).contains("  1. now at line 1\n"),
+            "{answer}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            original.replace("# Plan\r", "# Plans\r")
+        );
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

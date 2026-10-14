@@ -21,12 +21,14 @@ pub mod author;
 pub mod command;
 pub mod commit;
 pub mod conflict;
+pub mod credentials;
 pub mod dates;
 pub mod history;
 pub mod provider;
 pub mod pulse;
 pub mod remote;
 pub mod status;
+pub mod upstream;
 pub mod workspace;
 
 use std::path::Path;
@@ -97,21 +99,50 @@ pub fn file_url(ws: &GitWorkspaceInfo, vault_relative: &str) -> Option<String> {
     Some(format!("{base}/blob/{branch}/{path}"))
 }
 
-/// Normalize `git@host:owner/repo.git` and `https://host/owner/repo.git`
-/// into `https://host/owner/repo`.
+/// Normalize `git@host:owner/repo.git`, `ssh://user@host:port/owner/repo.git`
+/// and `https://host/owner/repo.git` into `https://host/owner/repo`.
+///
+/// A web link keeps nothing only the transport needed. Userinfo goes: an
+/// `https://user:token@host` remote would otherwise put its token in a link.
+/// So does an ssh port, which is where sshd listens, not where the forge
+/// serves pages. An http(s) port is the web's own, so it stays.
 pub fn web_base(remote_url: &str) -> Option<String> {
     let url = remote_url.trim().trim_end_matches(".git");
     if let Some(rest) = url.strip_prefix("git@") {
         let (host, path) = rest.split_once(':')?;
         return Some(format!("https://{host}/{path}"));
     }
-    if let Some(rest) = url.strip_prefix("ssh://git@") {
-        return Some(format!("https://{rest}"));
+    if let Some(rest) = url.strip_prefix("ssh://") {
+        let (authority, path) = rest.split_once('/')?;
+        let host = without_port(without_userinfo(authority));
+        return Some(format!("https://{host}/{path}"));
     }
-    if url.starts_with("https://") || url.starts_with("http://") {
-        return Some(url.to_string());
+    for scheme in ["https://", "http://"] {
+        if let Some(rest) = url.strip_prefix(scheme) {
+            let (authority, path) = match rest.find('/') {
+                Some(slash) => rest.split_at(slash),
+                None => (rest, ""),
+            };
+            return Some(format!("{scheme}{}{path}", without_userinfo(authority)));
+        }
     }
     None
+}
+
+/// `user[:password]@host[:port]` without its userinfo. The last `@` ends it:
+/// a host never contains one.
+fn without_userinfo(authority: &str) -> &str {
+    authority
+        .rsplit_once('@')
+        .map_or(authority, |(_userinfo, host)| host)
+}
+
+/// `host[:port]` without its port. A bracketed IPv6 literal keeps its colons.
+fn without_port(host: &str) -> &str {
+    if host.starts_with('[') {
+        return host.find(']').map_or(host, |end| &host[..=end]);
+    }
+    host.split_once(':').map_or(host, |(name, _port)| name)
 }
 
 #[cfg(test)]
@@ -132,6 +163,38 @@ mod tests {
             web_base("ssh://git@gitlab.com/acme/notes.git").as_deref(),
             Some("https://gitlab.com/acme/notes")
         );
+    }
+
+    #[test]
+    fn a_web_base_never_carries_userinfo_or_an_ssh_port() {
+        for (remote, expected) in [
+            // A token in an https remote must not reach a link.
+            (
+                "https://me:ghp_secret@github.com/acme/notes.git",
+                "https://github.com/acme/notes",
+            ),
+            (
+                "http://me@git.example.test/acme/notes",
+                "http://git.example.test/acme/notes",
+            ),
+            // The ssh port is sshd's, and the user is the transport's.
+            (
+                "ssh://git@host.example.test:2222/o/r.git",
+                "https://host.example.test/o/r",
+            ),
+            (
+                "ssh://deploy@gitlab.example.test/acme/notes.git",
+                "https://gitlab.example.test/acme/notes",
+            ),
+            ("ssh://[::1]:2222/o/r.git", "https://[::1]/o/r"),
+            // An https port is the web's own.
+            (
+                "https://git.example.test:8443/acme/notes.git",
+                "https://git.example.test:8443/acme/notes",
+            ),
+        ] {
+            assert_eq!(web_base(remote).as_deref(), Some(expected), "{remote}");
+        }
     }
 
     #[test]

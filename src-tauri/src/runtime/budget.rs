@@ -878,7 +878,10 @@ fn ambient_busy(conn: &Connection, now: DateTime<Utc>) -> Result<bool, String> {
 /// Record what the gate saw and what it decided. Every column is the value
 /// OBSERVED, not one re-derived later, which is what makes a historical
 /// decision reproducible.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per observed column of the gate decision row it writes"
+)]
 pub fn record_decision(
     conn: &Connection,
     decision_id: &str,

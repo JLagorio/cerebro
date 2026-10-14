@@ -1,0 +1,1106 @@
+{
+  "format": 1,
+  "artifact_version": 3,
+  "rule_version": "tools/2026-10-14",
+  "server": "cerebro",
+  "tokens": {
+    "concept_types": {
+      "why": "rendered from concept-types.v1.json by knowledge::concept_type_menu"
+    }
+  },
+  "doors": [
+    {
+      "id": "none",
+      "writes": false,
+      "kinds": [
+        "read_only"
+      ],
+      "axes": [
+        "read"
+      ]
+    },
+    {
+      "id": "note",
+      "writes": true,
+      "kinds": [
+        "additive",
+        "destructive"
+      ],
+      "axes": [
+        "write",
+        "read_write"
+      ]
+    },
+    {
+      "id": "concept",
+      "writes": true,
+      "kinds": [
+        "destructive"
+      ],
+      "axes": [
+        "none"
+      ]
+    },
+    {
+      "id": "source",
+      "writes": true,
+      "kinds": [
+        "additive",
+        "destructive"
+      ],
+      "axes": [
+        "none"
+      ]
+    },
+    {
+      "id": "ledger",
+      "writes": true,
+      "kinds": [
+        "additive",
+        "destructive"
+      ],
+      "axes": [
+        "none"
+      ]
+    },
+    {
+      "id": "ui",
+      "writes": false,
+      "kinds": [
+        "additive"
+      ],
+      "axes": [
+        "none"
+      ]
+    },
+    {
+      "id": "run",
+      "writes": false,
+      "kinds": [
+        "additive"
+      ],
+      "axes": [
+        "none"
+      ]
+    },
+    {
+      "id": "memory",
+      "writes": false,
+      "kinds": [
+        "additive"
+      ],
+      "axes": [
+        "none"
+      ]
+    }
+  ],
+  "toolsets": [
+    {
+      "id": "read",
+      "label": "Read the vault",
+      "hint": "Look things up. Changes nothing."
+    },
+    {
+      "id": "write",
+      "label": "Write to the vault",
+      "hint": "Creates and edits notes — inside whatever scope is set below."
+    },
+    {
+      "id": "knowledge",
+      "label": "Knowledge and sources",
+      "hint": "The agent-written bundle: every write is recorded in its history, replacing a concept needs read access to it, and a concept still needs your stamp to count as verified."
+    },
+    {
+      "id": "propose",
+      "label": "Propose, don’t apply",
+      "hint": "Shows the user an accept/reject card instead of writing."
+    },
+    {
+      "id": "agents",
+      "label": "Hand work to agents",
+      "hint": "Starts another agent, which writes under its OWN scope — calling never lends the caller anything. Two hops, then it stops."
+    },
+    {
+      "id": "ui",
+      "label": "Move the app",
+      "hint": "Changes what is on screen. Rarely what you want for an unattended run — it moves the user while they are working."
+    },
+    {
+      "id": "proposals",
+      "label": "Propose changes to Knowledge",
+      "hint": "Suggests changes through the policy layer. Low- and medium-risk ones apply automatically once committed; high-risk ones wait for you on a card. Off unless the proposal surface is switched on."
+    }
+  ],
+  "prefix_exceptions": [
+    {
+      "name": "propose_organize",
+      "why": "it predates the generated namespace (M9.5), and proposal_op_of asks the policy table, so it never reaches the mutation boundary"
+    }
+  ],
+  "tools": [
+    {
+      "name": "get_vault_context",
+      "surface": "base",
+      "title": "Get vault context",
+      "summary": "The vault’s types, collections and counts",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": null,
+      "exempt": null,
+      "renderer": "step",
+      "icon": "compass",
+      "always_load": true,
+      "search_hint": "vault overview types counts inbox",
+      "description": "Orient yourself: what this app is, the vault's types and collections, note counts, and how many captures are waiting in the Inbox. Call this first.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "search_notes",
+      "surface": "base",
+      "title": "Search notes",
+      "summary": "Search titles, bodies and frontmatter",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": null,
+      "exempt": null,
+      "renderer": "step",
+      "icon": "search",
+      "always_load": true,
+      "search_hint": "find notes by text",
+      "description": "Full-text search over note titles, bodies, and frontmatter. Returns paths with matching excerpts.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Text to search for"
+          },
+          "type": {
+            "type": "string",
+            "description": "Optional: only notes with this frontmatter type"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default 20)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "get_note",
+      "surface": "base",
+      "title": "Read a note",
+      "summary": "Read one note in full",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "step",
+      "icon": "file-text",
+      "always_load": true,
+      "search_hint": "read one note in full",
+      "description": "Read one note in full: frontmatter and body. For knowledge/ concepts the derived trust tier is included. The Hash line names the note's exact bytes: pass it as expect_hash to update_frontmatter, append_to_note or edit_note, and the write lands only if the note is unchanged since this read.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Vault-relative path, e.g. records/risks/r-1.md"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_about",
+      "surface": "base",
+      "title": "Read what Knowledge holds",
+      "summary": "What Knowledge already holds about one entity",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": {
+        "arg": null,
+        "kind": "bundle"
+      },
+      "exempt": null,
+      "renderer": "step",
+      "icon": "library",
+      "always_load": true,
+      "search_hint": "what knowledge says about an entity",
+      "description": "What the knowledge/ bundle already knows about one entity — the same read the app shows beside a record. Call it before answering a question about something the vault holds, so you build on what the base has already worked out instead of rediscovering it. Reports each concept's description, type, lifecycle, whether a human has verified it, whether it is due a recheck, what replaced it, and what it disagrees with. Reading only: nothing here writes. An entity nobody has written about comes back empty and says so — that is an answer, not a failure.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "A vault path (records/risks/r-1.md) or a bare wikilink target (rq-84b-kestrel, atlas). Resolved the way the app resolves a wikilink: filename stem, then project folder, then exact title, case-insensitively."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max concepts (default 20). Any it cannot fit are counted, never dropped silently."
+          }
+        },
+        "required": [
+          "target"
+        ]
+      }
+    },
+    {
+      "name": "report_window_outcome",
+      "surface": "base",
+      "title": "Report window outcome",
+      "summary": "Background ingest: report what this change-window concluded",
+      "toolset": null,
+      "kind": "additive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "memory",
+      "axis": "none",
+      "target": null,
+      "exempt": "records a run's own verdict in memory; writes no file and no event",
+      "renderer": "step",
+      "icon": "flag",
+      "always_load": true,
+      "search_hint": "report an ingest window verdict",
+      "description": "Background ingest only: report what you concluded about this run's change-window, once, at the end. `material` requires that you actually proposed something; `undetermined` names one blocked_reason. Say which of the four dimensions you evaluated.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "material",
+              "non_material",
+              "undetermined"
+            ],
+            "description": "What you concluded about the window"
+          },
+          "explanation": {
+            "type": "string",
+            "description": "In your own words, why"
+          },
+          "evaluated_dimensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "world_state",
+                "belief_state",
+                "evidence_state",
+                "attention"
+              ]
+            },
+            "description": "Which of the four you actually considered"
+          },
+          "material_dimensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "world_state",
+                "belief_state",
+                "evidence_state",
+                "attention"
+              ]
+            },
+            "description": "Which of those moved. A subset of evaluated_dimensions."
+          },
+          "blocked_reason": {
+            "type": "string",
+            "enum": [
+              "batch_input_incomplete",
+              "policy_dependency_unavailable",
+              "runtime_unavailable",
+              "semantic_validation_failed",
+              "source_access_lost"
+            ],
+            "description": "Required when outcome is undetermined"
+          }
+        },
+        "required": [
+          "outcome",
+          "explanation"
+        ]
+      }
+    },
+    {
+      "name": "submit_answer",
+      "surface": "base",
+      "title": "Submit the answer",
+      "summary": "Attended synthesis: submit the nine-part answer to this run’s question",
+      "toolset": null,
+      "kind": "additive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "memory",
+      "axis": "none",
+      "target": null,
+      "exempt": "records a run's own answer in memory; writes no file and no event",
+      "renderer": "step",
+      "icon": "send",
+      "always_load": true,
+      "search_hint": "submit a synthesis answer",
+      "description": "Attended synthesis only: submit the nine-part answer to the question this run was given, once. It is checked against the working-memory manifest the app assembled — every ref must name an item that manifest held, and the intended use must come back unchanged. A refusal names what to fix.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "object",
+            "description": "The SynthesisAnswer object, in the shape the prompt printed"
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      }
+    },
+    {
+      "name": "list_inbox",
+      "surface": "base",
+      "title": "List Inbox captures",
+      "summary": "Captures waiting to be filed",
+      "toolset": "read",
+      "kind": "read_only",
+      "idempotent": true,
+      "open_world": false,
+      "door": "none",
+      "axis": "read",
+      "target": null,
+      "exempt": null,
+      "renderer": "step",
+      "icon": "inbox",
+      "always_load": false,
+      "search_hint": "inbox captures waiting to be filed",
+      "description": "Captures waiting to be organized: untyped notes the user has not yet filed.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "hand_to",
+      "surface": "base",
+      "title": "Hand work to an agent",
+      "summary": "Start a run of another agent with a task",
+      "toolset": "agents",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "run",
+      "axis": "none",
+      "target": null,
+      "exempt": "writes nothing itself; the run it starts writes under the CALLEE's own grant, minted from the callee's record — calling never lends the caller's scope",
+      "renderer": "step",
+      "icon": "forward",
+      "always_load": false,
+      "search_hint": "start another agent with a task",
+      "description": "Start a run of another agent with a task. Fire-and-forget: the callee runs under its OWN scope and tools (calling never lends yours), writes to the vault, and cannot reply here — read its output from the vault, or say where the user can. Two hops then it stops; a cycle refuses; a paused agent cannot be called.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "The agent's handle — its declared slug, or its slugified title"
+          },
+          "message": {
+            "type": "string",
+            "description": "What you are handing it: the task, and any context it cannot read for itself"
+          }
+        },
+        "required": [
+          "agent",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "create_note",
+      "surface": "base",
+      "title": "Create a note",
+      "summary": "Create a note",
+      "toolset": "write",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "note",
+      "axis": "write",
+      "target": {
+        "arg": "folder",
+        "kind": "folder"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "icon": "file-plus",
+      "always_load": false,
+      "search_hint": "create a new note",
+      "description": "Create a note. Use for ordinary vault content, not knowledge concepts (use write_concept for those).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "Vault-relative folder, '' for the root"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Filename stem, kebab-case"
+          },
+          "frontmatter": {
+            "type": "object",
+            "description": "YAML frontmatter as a mapping"
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown body, starting with an H1"
+          }
+        },
+        "required": [
+          "folder",
+          "slug",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "update_frontmatter",
+      "surface": "base",
+      "title": "Update note properties",
+      "summary": "Patch a note’s frontmatter",
+      "toolset": "write",
+      "kind": "destructive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "note",
+      "axis": "write",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "icon": "list",
+      "always_load": false,
+      "search_hint": "set or remove note properties",
+      "description": "Patch a note's frontmatter. Keys set to null are removed; untouched keys and key order are preserved. Pass the hash from get_note's Hash line as expect_hash: if the note changed since you read it, the write is refused as stale_content, nothing is written, and you should read it again.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "patch": {
+            "type": "object",
+            "description": "Keys to set; null deletes"
+          },
+          "expect_hash": {
+            "type": "string",
+            "description": "The hash from get_note's Hash line for this note. If the note has changed since, nothing is written."
+          }
+        },
+        "required": [
+          "path",
+          "patch"
+        ]
+      }
+    },
+    {
+      "name": "append_to_note",
+      "surface": "base",
+      "title": "Append to a note",
+      "summary": "Add markdown to the end of a note",
+      "toolset": "write",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "note",
+      "axis": "write",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "icon": "file-pen",
+      "always_load": false,
+      "search_hint": "add text to the end of a note",
+      "description": "Append markdown to the end of an existing note's body. Pass the hash from get_note's Hash line as expect_hash: if the note changed since you read it, the write is refused as stale_content, nothing is written, and you should read it again.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "expect_hash": {
+            "type": "string",
+            "description": "The hash from get_note's Hash line for this note. If the note has changed since, nothing is written."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "edit_note",
+      "surface": "base",
+      "title": "Edit text in a note",
+      "summary": "Replace quoted text in a note, in place",
+      "toolset": "write",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "note",
+      "axis": "read_write",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": null,
+      "renderer": "change",
+      "icon": "replace",
+      "always_load": false,
+      "search_hint": "replace quoted text in a note",
+      "description": "Change text that is already in a note, in place. Each edit replaces one passage: put the passage in `old`, quoted exactly as get_note shows the note's body (same spacing, line breaks and markdown), and the markdown that replaces it in `new`; an empty `new` deletes the passage. If `old` appears more than once, nothing is written and the reply lists each appearance with its line: pass `occurrence` (counting from 1) or quote a longer passage. Every edit is matched against the note as it is now, they all land together or none do, and nothing you did not quote changes. Lines that start with `:::` and fences named `cerebro-…` hold page blocks; keep each one whole. The frontmatter is not edited here; use update_frontmatter. Pass the hash from get_note's `Hash:` line as `expect_hash`: if the note changed since you read it, nothing is written and you should read it again. knowledge/ concepts, `type: Type` docs and `type: Agent` records are refused, and the run needs read access to the note as well as write access.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "edits": {
+            "type": "array",
+            "description": "The replacements, matched against the note as it is now and landed together or not at all.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "old": {
+                  "type": "string",
+                  "description": "The passage to replace, quoted exactly as get_note shows the body."
+                },
+                "new": {
+                  "type": "string",
+                  "description": "The markdown that replaces it; empty deletes it."
+                },
+                "occurrence": {
+                  "type": "integer",
+                  "description": "Which appearance of `old` to replace, counting from 1, when it appears more than once."
+                }
+              },
+              "required": [
+                "old",
+                "new"
+              ]
+            }
+          },
+          "expect_hash": {
+            "type": "string",
+            "description": "The hash from get_note's Hash line for this note. If the note has changed since, nothing is written."
+          }
+        },
+        "required": [
+          "path",
+          "edits"
+        ]
+      }
+    },
+    {
+      "name": "write_concept",
+      "surface": "base",
+      "title": "Write a concept",
+      "summary": "Record a concept in knowledge/",
+      "toolset": "knowledge",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "concept",
+      "axis": "none",
+      "target": {
+        "arg": "path",
+        "kind": "concept"
+      },
+      "exempt": "records findings into knowledge/ through the ledger; replacing a concept needs read access to it (M49.4)",
+      "renderer": "change",
+      "icon": "brain",
+      "always_load": false,
+      "search_hint": "record a knowledge concept",
+      "description": "Create or replace a concept in the knowledge/ bundle (Open Knowledge Format). You maintain this bundle; the user only verifies it. Always record where a claim came from in `sources`. Never write `verified` — that is the human's stamp, and claiming it would defeat the review model. If the body says one thing replaced, narrowed or disagrees with another, say it in `supersedes`/`refines`/`contradicts` as well: prose is for the reader, the fields are what lets anything answer 'is this still true'. Only assert a relation whose target you read in this run.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path under knowledge/, e.g. knowledge/metrics/churn.md"
+          },
+          "type": {
+            "type": "string",
+            "description": "OKF concept type. Pick the closest of: {{concept_types}}. Use the vault's own type name instead when one fits better."
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "description": "One sentence saying what this concept is. It is what appears beside the title wherever concepts are listed, so 'what it is' beats 'why it matters'."
+          },
+          "about": {
+            "type": "array",
+            "description": "The vault entities this concept is knowledge OF, as wikilinks — e.g. [\"[[phoenix-warehouse-rollout]]\", \"[[risk-rollback-unrehearsed]]\"]. Distinct from `sources`: that is where the claim came from, this is what it is about. Anchor every concept you can; an unanchored concept cannot surface anywhere but the bundle.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown body. Favour structure: headings, tables, lists."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "description": "Where this came from. Each: {id, resource, title?}. `resource` may be a vault path or a URL.",
+            "items": {
+              "type": "object"
+            }
+          },
+          "supersedes": {
+            "type": "array",
+            "description": "Concepts this one REPLACES, as wikilinks. Use it instead of writing a second concept that contradicts an old one: the old concept stops being offered as current, and the record of what was believed before survives. Do not edit the concept being replaced.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "refines": {
+            "type": "array",
+            "description": "Concepts this one narrows or makes more exact, as wikilinks. Both stay true — this is a hierarchy, not a correction.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contradicts": {
+            "type": "array",
+            "description": "Concepts this one disagrees with, where you cannot tell which is right. Say so rather than picking a winner; that judgement belongs to the person who owns the work.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lifecycle": {
+            "type": "string",
+            "description": "draft | stable | deprecated. Use deprecated when a concept is no longer true and nothing replaces it — a wrong concept left stable is worse than one that is gone."
+          },
+          "stale_after": {
+            "type": "string",
+            "description": "YYYY-MM-DD after which this should be rechecked"
+          }
+        },
+        "required": [
+          "path",
+          "type",
+          "title",
+          "description",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "recheck_concept",
+      "surface": "base",
+      "title": "Recheck a concept",
+      "summary": "Mark a rechecked concept still true, and when to check it next",
+      "toolset": "knowledge",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "concept",
+      "axis": "none",
+      "target": {
+        "arg": "path",
+        "kind": "concept"
+      },
+      "exempt": "stamps one concept's stale_after through the ledger; needs read access to it (M49.7)",
+      "renderer": "change",
+      "icon": "calendar-check",
+      "always_load": false,
+      "search_hint": "mark a concept still true",
+      "description": "Record that a concept you rechecked STILL HOLDS, and when to check it next. Moves `stale_after` and nothing else — no rewrite, no new timestamp, no log entry. Use this, not write_concept, for the 'still true' verdict; use write_concept only when the content itself changes. Refused for a concept a person has verified: say what you found in your reply instead. On a concept a machine confirmed, or a heavily referenced one, the stamp waits for a person's approval.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The concept's path under knowledge/"
+          },
+          "stale_after": {
+            "type": "string",
+            "description": "YYYY-MM-DD, later than today: when this should be rechecked next"
+          }
+        },
+        "required": [
+          "path",
+          "stale_after"
+        ]
+      }
+    },
+    {
+      "name": "cache_source",
+      "surface": "base",
+      "title": "Cache a fetched source",
+      "summary": "Save fetched external material under sources/",
+      "toolset": "knowledge",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "source",
+      "axis": "none",
+      "target": {
+        "arg": "id",
+        "kind": "source_id"
+      },
+      "exempt": "sources/ is the agent's own corpus, not the user's records",
+      "renderer": "change",
+      "icon": "download",
+      "always_load": false,
+      "search_hint": "save fetched external material",
+      "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. ALWAYS call this after fetching through a connector. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Issue key (PHX-421) or the URL you fetched"
+          },
+          "kind": {
+            "type": "string",
+            "description": "issue | web"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "The content, as markdown"
+          },
+          "source_url": {
+            "type": "string",
+            "description": "Canonical link back to the original"
+          },
+          "stale_after": {
+            "type": "string",
+            "description": "YYYY-MM-DD after which the copy should be refetched. Default: 30 days out."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "body"
+        ]
+      }
+    },
+    {
+      "name": "propose_organize",
+      "surface": "base",
+      "title": "Propose a filing",
+      "summary": "Suggest how to file a capture",
+      "toolset": "propose",
+      "kind": "additive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "ui",
+      "axis": "none",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": "shows a card; the user decides",
+      "renderer": "step",
+      "icon": "wand-sparkles",
+      "always_load": false,
+      "search_hint": "suggest how to file a capture",
+      "description": "Propose how to file an Inbox capture. This does NOT write — it shows the user an accept/reject card. Use it instead of editing a capture directly.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The capture's path"
+          },
+          "type": {
+            "type": "string",
+            "description": "Suggested cerebro type"
+          },
+          "title": {
+            "type": "string",
+            "description": "Suggested H1, if the current one is unclear"
+          },
+          "properties": {
+            "type": "object",
+            "description": "Suggested frontmatter, e.g. status, priority, assignee"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "One or two sentences: why this filing"
+          }
+        },
+        "required": [
+          "path",
+          "reasoning"
+        ]
+      }
+    },
+    {
+      "name": "open_note",
+      "surface": "base",
+      "title": "Open a note",
+      "summary": "Open a note in the UI",
+      "toolset": "ui",
+      "kind": "additive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "ui",
+      "axis": "none",
+      "target": {
+        "arg": "path",
+        "kind": "note"
+      },
+      "exempt": "moves the UI, changes nothing on disk",
+      "renderer": "step",
+      "icon": "eye",
+      "always_load": false,
+      "search_hint": "show a note to the user",
+      "description": "Open a note in the cerebro UI so the user sees what you are talking about.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "navigate",
+      "surface": "base",
+      "title": "Move the app",
+      "summary": "Go to a surface",
+      "toolset": "ui",
+      "kind": "additive",
+      "idempotent": true,
+      "open_world": false,
+      "door": "ui",
+      "axis": "none",
+      "target": null,
+      "exempt": "moves the UI, changes nothing on disk",
+      "renderer": "step",
+      "icon": "compass",
+      "always_load": false,
+      "search_hint": "move the app to a surface",
+      "description": "Move the cerebro UI to a surface: home, inbox, knowledge, or a saved view.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "home | inbox | knowledge | view"
+          },
+          "id": {
+            "type": "string",
+            "description": "View id, when to = view"
+          }
+        },
+        "required": [
+          "to"
+        ]
+      }
+    },
+    {
+      "name": "commit_proposals",
+      "surface": "proposals",
+      "title": "Commit proposals",
+      "summary": "Decide this run’s proposals as one atomic batch",
+      "toolset": "proposals",
+      "kind": "destructive",
+      "idempotent": false,
+      "open_world": false,
+      "door": "ledger",
+      "axis": "none",
+      "target": null,
+      "exempt": "decides this run's own proposals through the policy table, not a path",
+      "renderer": "step",
+      "icon": "check-check",
+      "always_load": false,
+      "search_hint": "apply this run's proposals",
+      "description": "Close this run's proposal set and decide it as one atomic batch. Nothing you proposed has been applied before this call. Returns each proposal's outcome: applied, queued for a person, or rejected with the rule that refused it.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "proposal_ids": {
+            "type": "array",
+            "description": "The proposals to commit, in order. All must belong to this run.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "proposal_ids"
+        ]
+      }
+    }
+  ],
+  "generated": {
+    "prefix": "propose_",
+    "title_prefix": "Propose",
+    "toolset": "proposals",
+    "kind": "additive",
+    "idempotent": false,
+    "open_world": false,
+    "door": "ledger",
+    "axis": "none",
+    "exempt": "writes through the ledger, not to a path: a folder scope cannot say which beliefs a run may change, and the policy table governs each proposal per op and per risk",
+    "renderer": "step",
+    "icon": "git-pull-request-arrow",
+    "always_load": false,
+    "search_hint": "propose a knowledge change"
+  },
+  "cli_tools": [
+    {
+      "name": "Write",
+      "writes": true,
+      "denied_without_shell": true,
+      "denied_when_read_scoped": false,
+      "with_shell": true,
+      "renderer": "change",
+      "icon": "pencil"
+    },
+    {
+      "name": "Edit",
+      "writes": true,
+      "denied_without_shell": true,
+      "denied_when_read_scoped": false,
+      "with_shell": true,
+      "renderer": "change",
+      "icon": "file-pen"
+    },
+    {
+      "name": "MultiEdit",
+      "writes": true,
+      "denied_without_shell": true,
+      "denied_when_read_scoped": false,
+      "with_shell": false,
+      "renderer": "change",
+      "icon": "file-pen"
+    },
+    {
+      "name": "NotebookEdit",
+      "writes": true,
+      "denied_without_shell": true,
+      "denied_when_read_scoped": false,
+      "with_shell": false,
+      "renderer": "change",
+      "icon": "notebook-pen"
+    },
+    {
+      "name": "Bash",
+      "writes": false,
+      "denied_without_shell": true,
+      "denied_when_read_scoped": false,
+      "with_shell": true,
+      "renderer": "step",
+      "icon": "terminal"
+    },
+    {
+      "name": "Read",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": true,
+      "with_shell": true,
+      "renderer": "step",
+      "icon": "file-text"
+    },
+    {
+      "name": "Glob",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": true,
+      "with_shell": true,
+      "renderer": "step",
+      "icon": "folder-open"
+    },
+    {
+      "name": "Grep",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": true,
+      "with_shell": true,
+      "renderer": "step",
+      "icon": "search"
+    },
+    {
+      "name": "WebFetch",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": false,
+      "with_shell": false,
+      "renderer": "step",
+      "icon": "globe"
+    },
+    {
+      "name": "WebSearch",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": false,
+      "with_shell": false,
+      "renderer": "step",
+      "icon": "globe"
+    },
+    {
+      "name": "Task",
+      "writes": false,
+      "denied_without_shell": false,
+      "denied_when_read_scoped": false,
+      "with_shell": false,
+      "renderer": "step",
+      "icon": "bot"
+    }
+  ]
+}

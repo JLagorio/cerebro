@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { onAgentEvent, runAgent, startMcp, startedOrThrow, stopAgent } from './agentIpc';
+import { onAgentEvent, runAgent, startedOrThrow, stopAgent } from './agentIpc';
 import { newRunId } from './runs';
-import type { AgentEvent, ChatMessage, McpInfo } from './types';
+import type { AgentEvent, ChatMessage } from './types';
+import { flushOpenPages } from '@/editor/openPages';
 import { narrowTools, readAddress } from '@/engine/agents';
 import type { Place } from '@/engine/place';
-import { addressedAgentPrompt } from '@/lib/prompts';
+import { grantedTools, type PromptGrant } from '@/engine/toolGrant';
+import { isWriteTool } from '@/engine/tools';
+import { readNote } from '@/lib/ipc';
+import { addressedAgentPrompt, standingInstructionsBlock } from '@/lib/prompts';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -15,11 +19,18 @@ import { useVaultStore } from '@/stores/vaultStore';
  * rather than values for two reasons. The panel builds the prompt from the
  * conversation's context chips, and the conversation list is built on top of
  * this hook — so none of this exists yet when the hook is called. And a send
- * parks on a skill expansion and the MCP handshake before it spawns, so
- * reading afterwards would describe the context the user drifted INTO.
+ * parks on the open pages' saves, a skill expansion and an addressed agent's
+ * record before it spawns, so reading afterwards would describe the context
+ * the user drifted INTO.
+ *
+ * The system prompt is not a value either but a composer (M54.7): what a turn
+ * holds is known only once its skill and its recipient have narrowed it, and
+ * the prompt must name nothing else, so the hook calls it with the turn's
+ * grant. The context it composes from is still the context frozen here.
  */
 export interface TurnContext {
-  systemPrompt: string;
+  /** The turn's system prompt, for the tools the turn holds. */
+  systemPrompt: (grant: PromptGrant) => string;
   /** Where this turn is happening, for the run list. */
   place: Place | null;
   /** Which conversation, so the run list can open it. */
@@ -141,11 +152,11 @@ export function useAgentChat(
   const turnInFlight = useRef(false);
   // Cancellation for send()'s async leg (PR #5 review). stop/reset/restore
   // end the TURN synchronously, but the send that started it may still be
-  // parked on a skill expansion or the MCP handshake — and on resume it would
-  // spawn a child for a turn the user already cancelled. Bumping the epoch
-  // makes that pending work quit at its next checkpoint instead.
+  // parked on the open pages' saves, a skill expansion or an addressed
+  // agent's record — and on resume it would spawn a child for a turn the user
+  // already cancelled. Bumping the epoch makes that pending work quit at its
+  // next checkpoint instead.
   const sendEpoch = useRef(0);
-  const mcpRef = useRef<McpInfo | null>(null);
   // The agent writes straight to disk; a turn that touched files must end
   // with a rescan or the UI keeps showing the pre-agent vault.
   const touchedFiles = useRef(false);
@@ -323,10 +334,11 @@ export function useAgentChat(
         { id: assistantId, role: 'assistant', text: '', tools: [], streaming: true },
       ]);
       setStreaming(true);
-      // The task exists from now, not from when the child does: a first send
-      // spends a whole MCP handshake before it has a run id, and a task list
-      // that showed nothing for that window would be reporting "idle" while
-      // the user waits.
+      // The task exists from now, not from when the child does: a send waits
+      // on the open pages' saves, any skill expansion and an addressed
+      // agent's record before it has a run id, and a task list that showed
+      // nothing for that window would be reporting "idle" while the user
+      // waits.
       const taskId = newRunId();
       taskRef.current = taskId;
       startRun({
@@ -351,9 +363,48 @@ export function useAgentChat(
           return true;
         };
         try {
+          // M53.6 — every open page's pending save lands before the child
+          // starts, so the agent reads, and writes over, what is on screen;
+          // a save that lands after its write would put the old text back.
+          await flushOpenPages();
+          if (cancelled()) return;
           const expanded =
             typeof message === 'function' ? await message().catch(() => trimmed) : message?.trim();
           const composed = expanded === undefined || expanded === '' ? trimmed : expanded;
+          // M53.5 — the recipient's standing instructions close this turn's
+          // system prompt, where useJobRunner (M34.1.4) and hand_to put them.
+          // The turn is not told to fetch its own record: a read-scoped
+          // agent's one reader is get_note, which holds that record to its
+          // read limit like any other note. This read is the app's, made for
+          // the person who addressed the agent, so no agent's limit applies.
+          let instructions = '';
+          if (recipient !== null) {
+            let body: string;
+            try {
+              body = await readNote(vaultPath, recipient.path);
+            } catch (err) {
+              if (cancelled()) return;
+              // Nothing spawns: a turn that answered as the agent without its
+              // instructions would be the app guessing at them.
+              const reason = err instanceof Error ? err.message : String(err);
+              throw new Error(
+                `Could not read ${recipient.title}'s instructions at ${recipient.path}, so the turn was not sent: ${reason}`,
+                { cause: err },
+              );
+            }
+            instructions = standingInstructionsBlock(recipient.path, body);
+          }
+          // Two narrowings can meet on one turn — a skill's `allowed-tools:`
+          // and the addressed agent's — so they intersect. Never union. What
+          // the turn then holds is what its prompts may name (M54.7): the
+          // narrowing, the shell this turn is granted, which a read limit
+          // withdraws in Rust (M53.5), and a person watching.
+          const allowed = narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null);
+          const grant: PromptGrant = {
+            tools: grantedTools(allowed),
+            shell: shell && (recipient?.shell ?? true) && recipient?.readScope == null,
+            attended: true,
+          };
           // The recipient's block LEADS, like useJobRunner's CURRENT STATE
           // block and for the same reason. An unresolved mention adds nothing
           // here: `@nobody` was only ever text, and inventing a preamble about
@@ -361,15 +412,14 @@ export function useAgentChat(
           const outgoing =
             recipient === null
               ? composed
-              : `${addressedAgentPrompt(recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope, recipient.readScope)}\n\n${composed}`;
-          mcpRef.current ??= await startMcp(vaultPath);
+              : `${addressedAgentPrompt(grant, recipient.path, recipient.title, recipient.actor, recipient.memory, recipient.scope, recipient.readScope)}\n\n${composed}`;
           if (cancelled()) return;
           // Attended, no lane: never gated, so a deferral here would be a
           // contract break — startedOrThrow turns it into a visible error.
           const { run } = startedOrThrow(
             await runAgent(vaultPath, {
               message: outgoing,
-              systemPrompt: turn.systemPrompt,
+              systemPrompt: turn.systemPrompt(grant) + instructions,
               sessionId: sessionRef.current,
               model,
               // M33b.6 — the addressed agent's grant, and it can only ever
@@ -383,12 +433,18 @@ export function useAgentChat(
               connectorNames: recipient?.connectors ?? null,
               // A person typed this turn and is watching it stream — the one
               // kind of run allowed to fall back to their global MCP config
-              // when the vault has no connectors.json (PR #5 security review).
+              // when the vault has no connectors.json and the turn names no
+              // connector, in the recipient's `connectors:` or in the tools
+              // below (PR #5 security review, M54.9), and to reach connectors
+              // a record does not name.
               attended: true,
               approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
-              // Two narrowings can meet on one turn — a skill's `allowed-tools:`
-              // and the addressed agent's — so they intersect. Never union.
-              allowedTools: narrowTools(allowedTools ?? null, recipient?.allowedTools ?? null),
+              // The narrowing the grant above was read from, so the prompt and
+              // the CLI's tools are the same set.
+              allowedTools: allowed,
+              // M54.9: the connector tools the recipient's record denies. A
+              // skill names none, so an unaddressed turn denies nothing here.
+              disallowedTools: recipient?.disallowedTools ?? null,
               // M17.13: enforced in Rust against the bearer the child presents,
               // so an addressed agent cannot talk its way out of its folders.
               scope: recipient?.scope ?? null,
@@ -399,7 +455,6 @@ export function useAgentChat(
               // writes is stamped as the agent — and, free, the `runs` row it
               // books carries the actor the fleet reads.
               actor: recipient?.actor ?? null,
-              mcp: mcpRef.current,
             }),
           );
           // Cancelled during the spawn itself: the child exists now, so it has
@@ -455,8 +510,9 @@ export function useAgentChat(
    */
   useEffect(() => {
     return () => {
-      // Reaches a send still parked on a skill expansion or the MCP
-      // handshake, which killRun cannot: it has no child to kill yet.
+      // Reaches a send still parked on the open pages' saves, a skill
+      // expansion or an addressed agent's record, which killRun cannot: it
+      // has no child to kill yet.
       sendEpoch.current += 1;
       if (!turnInFlight.current) return;
       killRun();
@@ -504,11 +560,4 @@ export function useAgentChat(
   );
 
   return { messages, streaming, send, stop, reset, sessionId, restore };
-}
-
-/** Tools that change disk — the ones that make a rescan necessary. */
-export function isWriteTool(name: string): boolean {
-  return /create_note|update_frontmatter|append_to_note|write_concept|recheck_concept|cache_source|^Write$|^Edit$/.test(
-    name,
-  );
 }

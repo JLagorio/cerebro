@@ -32,11 +32,6 @@ export interface AgentStatus {
   path: string | null;
 }
 
-export interface McpInfo {
-  url: string;
-  token: string;
-}
-
 /**
  * What the Claude Code CLI has stored about this vault OUTSIDE it (M17.14).
  *
@@ -174,5 +169,10 @@ export interface OrganizeProposal {
 export type UiAction =
   | { action: 'open_note'; path: string }
   | { action: 'navigate'; to: string; id?: string }
-  | { action: 'vault_changed' }
+  /**
+   * An agent tool wrote the vault (M53.6). `paths` names the files it changed,
+   * as the scan lists them, when the tool could name them; absent means
+   * "somewhere — rescan", never "nothing changed".
+   */
+  | { action: 'vault_changed'; paths?: string[] }
   | ({ action: 'propose_organize' } & OrganizeProposal);

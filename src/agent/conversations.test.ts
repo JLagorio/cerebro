@@ -142,11 +142,11 @@ describe('anchor (M17.5)', () => {
 });
 
 describe('a stored place this build cannot read (M17.5)', () => {
-  const write = (place: unknown, placeLabel?: unknown) =>
+  const write = (place: unknown, placeLabel?: unknown, messages: ChatMessage[] = []) =>
     window.localStorage.setItem(
       'cerebro.conversations',
       JSON.stringify([
-        { id: 'c-1', title: 'x', usesDefaultTitle: true, messages: [], place, placeLabel },
+        { id: 'c-1', title: 'x', usesDefaultTitle: true, messages, place, placeLabel },
       ]),
     );
 
@@ -174,6 +174,40 @@ describe('a stored place this build cannot read (M17.5)', () => {
     // The name it HAD, not the one re-derived from a vault that no longer
     // holds the List.
     expect(c.placeLabel).toBe('Roadmap');
+  });
+
+  // M53.14 — the guard had no case for My work or Work, so a thread anchored
+  // on either came back unanchored on every reload.
+  it('keeps a My work anchor and the name it had', () => {
+    write({ kind: 'mywork' }, 'My work');
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'mywork' });
+    expect(c.placeLabel).toBe('My work');
+  });
+
+  it('keeps a Work anchor and the name it had', () => {
+    write({ kind: 'workspace' }, 'Workspace');
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'workspace' });
+    expect(c.placeLabel).toBe('Workspace');
+  });
+
+  it('rebuilds a My work label that went missing', () => {
+    write({ kind: 'mywork' });
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'mywork' });
+    expect(c.placeLabel).toBe('My work');
+  });
+
+  it('drops an anchor on the retired review surface and keeps the thread (M53.14)', () => {
+    // M33.3 took `review` out of Selection and placeLabel but left it in the
+    // guard, so the anchor came back as a place nothing renders.
+    write({ kind: 'review' }, 'Needs review', [msg('user', 'What is waiting on me?')]);
+    const [c] = loadConversations();
+    expect(c.place).toBeNull();
+    expect(c.placeLabel).toBeUndefined();
+    expect(c.title).toBe('x');
+    expect(c.messages.map((m) => m.text)).toEqual(['What is waiting on me?']);
   });
 });
 

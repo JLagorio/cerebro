@@ -24,6 +24,7 @@ use rusqlite::Connection;
 
 use crate::ledger::reduce::EpistemicState;
 use crate::runtime::budget::{GateReason, Reservation};
+use crate::runtime::cause::{CauseKind, RunCause};
 use crate::runtime::dispatch::{self, Dispatched, ItemOutcome, RunOutcome};
 
 use super::pass::{self, Runner, Tick};
@@ -114,6 +115,8 @@ pub fn attempt<R: Runner>(
         &[],
         // M33.1 — maintenance owns the lease it takes with no items at all.
         Some(pass::ACTOR),
+        // M56.7 — and records why it started, with the row.
+        Some(&RunCause::of(CauseKind::Maintenance)),
         now,
     )? {
         Dispatched::Started(lease) => lease,

@@ -5,7 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { checkAgent } from '@/agent/agentIpc';
-import { AiActionCard } from '@/agent/AiActionCard';
+import { AiActionCard, historyOf, type GitHistory } from '@/agent/AiActionCard';
 import { ChatInput } from '@/agent/ChatInput';
 import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
 import {
@@ -22,6 +22,7 @@ import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
 import { listSkills, matchSkillInvocation, skillPrompt } from '@/engine/skills';
 import { buildSystemPrompt } from '@/agent/systemPrompt';
+import type { PromptGrant } from '@/engine/toolGrant';
 import { isKnowledgePath, listConcepts, type Concept } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import {
@@ -106,12 +107,16 @@ function Message({
   onOpen,
   onOpenPath,
   onViewDiff,
+  history,
   onRetry,
 }: {
   message: ChatMessage;
   onOpen: (t: string) => void;
   onOpenPath: (p: string) => void;
   onViewDiff?: (p: string) => void;
+  /** Whether the vault keeps git history, so a write card can say it has no
+   * revert (M55.5); undefined until git status is read. */
+  history?: GitHistory;
   /** Re-send the question this answer belongs to (M15). */
   onRetry?: () => void;
 }) {
@@ -127,6 +132,7 @@ function Message({
               tool={tool}
               onOpenPath={onOpenPath}
               onViewDiff={onViewDiff}
+              history={history}
             />
           ))}
         </div>
@@ -261,7 +267,7 @@ export function AiPanel({
 
   // M9.4: an agent turn that wrote files becomes its own commit, so its work
   // is revertible independently of the user's.
-  const { isRepo, refresh } = useGit();
+  const { isRepo, ready, refresh } = useGit();
   const checkpoint = useAgentCheckpoint(refresh);
 
   // M13.1: the skill catalog — names and descriptions only; a body loads when
@@ -281,7 +287,11 @@ export function AiPanel({
   // built from the CONVERSATION's chips, and the conversation list is built on
   // top of the chat hook — so none of it exists yet at this point in the
   // render. Assigned below, once it does.
-  const turnRef = useRef<TurnContext>({ systemPrompt: '', place: null, conversationId: null });
+  const turnRef = useRef<TurnContext>({
+    systemPrompt: () => '',
+    place: null,
+    conversationId: null,
+  });
   const getTurn = useCallback(() => turnRef.current, []);
   const chat = useAgentChat(getTurn, { shell, connectors }, null, isRepo ? checkpoint : undefined);
   // M17.5: the SUBJECT of the current selection, with its lenses stripped —
@@ -428,18 +438,23 @@ export function AiPanel({
       concepts,
     ],
   );
-  const systemPrompt = useMemo(() => {
-    const base = buildSystemPrompt(contextSelection ?? { kind: 'none' }, {
-      connectors,
-      issuePrefixes,
-      skills,
-      // M34.1.3: the human-facing assistant keeps the OKF contract — the
-      // capability exists so OTHER agents stop inheriting it, not to take it
-      // from the panel.
-      capabilities: ['knowledge'],
-    });
-    return `${base}${renderSnapshot(snapshot)}`;
-  }, [connectors, issuePrefixes, skills, contextSelection, snapshot]);
+  // A composer, not a string (M54.7): the chat hook knows what a turn holds
+  // only once its skill and its recipient have narrowed it, and calls this
+  // with that grant, so the prompt names only tools the turn can call.
+  const composeSystemPrompt = useMemo(
+    () => (grant: PromptGrant) =>
+      buildSystemPrompt(contextSelection ?? { kind: 'none' }, {
+        connectors,
+        issuePrefixes,
+        skills,
+        // M34.1.3: the human-facing assistant keeps the OKF contract — the
+        // capability exists so OTHER agents stop inheriting it, not to take
+        // it from the panel.
+        capabilities: ['knowledge'],
+        grant,
+      }) + renderSnapshot(snapshot),
+    [connectors, issuePrefixes, skills, contextSelection, snapshot],
+  );
   // M50.4: what Knowledge the turn carries, shown with the other context —
   // an answer that leaned on a concept should be traceable to it. M52.4: the
   // chip counts what STANDS, as the page's own strip does; a replaced concept
@@ -465,7 +480,7 @@ export function AiPanel({
   // started, so it stays findable under what it was about rather than moving
   // to wherever the agent's own `open_note` left the user.
   turnRef.current = {
-    systemPrompt,
+    systemPrompt: composeSystemPrompt,
     place: conversations.active?.place ?? place,
     conversationId: conversations.activeId,
   };
@@ -683,6 +698,7 @@ export function AiPanel({
               onOpen={openTarget}
               onOpenPath={openPath}
               onViewDiff={isRepo ? viewDiff : undefined}
+              history={historyOf(ready, isRepo)}
               onRetry={message.error !== undefined ? () => retry(message.id) : undefined}
             />
           ))

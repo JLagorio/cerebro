@@ -34,6 +34,7 @@ use tauri::AppHandle;
 use crate::agent::meter::{Meter, Mode, RunEnd};
 use crate::agent::{AgentRequest, AgentState};
 use crate::mcp::McpState;
+use crate::runtime::cause::{CauseKind, RunCause};
 
 use super::cli::{CliRunner, Session};
 use super::pass::Runner;
@@ -66,10 +67,8 @@ pub struct Live<'a> {
 pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
     CliRunner {
         mint_token: move |run_id: &str| {
-            // The endpoint must already be up: `ensure` retargets a running
-            // server at this vault, and returns an error if none is running
-            // rather than starting one behind the user's back.
-            live.mcp.ensure(live.app, live.vault)?;
+            // A bearer needs the endpoint up; `ensure` starts it if it is not.
+            live.mcp.ensure(live.app)?;
             // Scoped to nothing. An ingest run proposes; it does not write.
             // M31.1b: the grant carries the SAME narrowing the argv declares
             // — one list, so the boundary and the advice cannot disagree.
@@ -83,10 +82,13 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                 None,
                 Some(declared_tools()),
                 run_id.to_string(),
+                // M53.10: bound to this vault, whatever is opened while it
+                // runs.
+                live.vault,
             )
         },
         spawn: move |session: &Session| {
-            let url = live.mcp.ensure(live.app, live.vault)?.url;
+            let url = live.mcp.ensure(live.app)?.url;
             let (tx, rx) = sync_channel::<RunEnd>(1);
             crate::agent::stream(
                 live.app.clone(),
@@ -104,13 +106,14 @@ pub fn runner<'a>(live: &'a Live<'a>) -> impl Runner + 'a {
                     store_uuid: Some(live.store_uuid.clone()),
                     started_at: chrono::Utc::now(),
                     elapsed_limit_seconds: Some(session.elapsed_limit_seconds),
-                    // Carried for completeness, not written here: a
-                    // supervised meter returns before touching `runs`, and
-                    // `dispatch::claim` already attributed the row this
-                    // lease belongs to with the same constant.
+                    // Not written by this meter: `dispatch::claim` already
+                    // attributed the row this lease belongs to with the same
+                    // constant, and gave it its cause. A supervised meter
+                    // writes only the run's session id (M56.7).
                     actor: Some(ACTOR.to_string()),
                     // Root by construction (M34.3): no tool call started this run.
                     parent_run_id: None,
+                    cause: Some(RunCause::of(CauseKind::Ingest)),
                 }),
                 Some(tx),
             )?;
@@ -165,6 +168,11 @@ fn request(session: &Session, url: &str) -> AgentRequest {
         // M31.1a — see `declared_tools` for what is granted and why. The
         // same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // Connectors are off, so there is nothing to deny (M54.9).
+        disallowed_tools: None,
+        // The claim recorded this run's cause, and the ingest prompt is a
+        // versioned contract, so no WHY block is prepended (M56.7).
+        cause: None,
         // Claimed by this driver's own dispatch, never by the request
         // (M34.2.4's lane field is the renderer's path to the same gate).
         lane: None,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import LINKS from '../../../shared/policy/links.v1.json';
 import { isVaultPath, isWebUrl } from './linkTargets';
 
 // One predicate pair, two callers: the popover that OFFERS targets and the
@@ -45,5 +46,20 @@ describe('link target classification (M29.38)', () => {
   it('the two readings never overlap, and a target can be neither', () => {
     expect(isWebUrl('https://a.b') && isVaultPath('https://a.b')).toBe(false);
     expect(isWebUrl('mailto:x@y.com') || isVaultPath('mailto:x@y.com')).toBe(false);
+  });
+
+  // M53.12: the badge that opens a web URL and the Rust guard that routes it
+  // read ONE scheme list. A case with a dev_root is about the devUrl being the
+  // app's own origin under `tauri dev`, which a click-line target never is, so
+  // only the rest replay here.
+  it('replays shared/policy/links.v1.json, the cases shell/links.rs replays too', () => {
+    let replayed = 0;
+    for (const c of LINKS.cases) {
+      expect([c.url, isVaultPath(c.url)]).toEqual([c.url, false]);
+      if (c.dev_root !== undefined) continue;
+      expect([c.url, isWebUrl(c.url)]).toEqual([c.url, c.verdict === 'external']);
+      replayed += 1;
+    }
+    expect(replayed).toBeGreaterThan(20);
   });
 });

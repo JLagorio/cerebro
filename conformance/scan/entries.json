@@ -1,0 +1,4342 @@
+{
+  "description": "Rust's scan of demo-vault/ and its build_entry over the fixtures, without createdAt/modifiedAt. Written by src-tauri/src/vault/scan.rs; replayed by src/lib/scanGolden.test.ts.",
+  "demo_vault": [
+    {
+      "path": "delivery/delivery.md",
+      "filename": "delivery.md",
+      "folder": "delivery",
+      "project": null,
+      "title": "Delivery",
+      "type": "Collection",
+      "properties": {
+        "icon": "rocket",
+        "color": "#3D8BE8",
+        "order": 1
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Everything in flight, and the shape of the month. The three views below are the same Work item database seen three ways — the schedule is the one to open when s",
+      "parseError": null,
+      "hash": "e4112d632e646ca6041a43c175a94747bca984a7f72c6d02ce5ce58776591aa5"
+    },
+    {
+      "path": "delivery/how-we-schedule.md",
+      "filename": "how-we-schedule.md",
+      "folder": "delivery",
+      "project": null,
+      "title": "How we schedule",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A doc living inside a Collection, next to the Lists it describes — which is the point of the container. Before M10 a saved view was both the container and the q",
+      "parseError": null,
+      "hash": "5ce385376de4e4433695e7cbf83d12b919e7cfb58be90a025762a2a9643e177f"
+    },
+    {
+      "path": "diagrams/pipeline.mmd",
+      "filename": "pipeline.mmd",
+      "folder": "diagrams",
+      "project": null,
+      "title": "Pipeline",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "flowchart TD",
+      "parseError": null,
+      "hash": "e9553a6c84e49b45d2fb6bfb6ee466b67bb3a154536a32f2d7b91663fbf039ca"
+    },
+    {
+      "path": "inbox/capture-2026-07-28-0914.md",
+      "filename": "capture-2026-07-28-0914.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Capture 2026 07 28 0914",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Sync error rate looked spiky again overnight — check whether it correlates with the batch window before raising it as a risk.",
+      "parseError": null,
+      "hash": "3b2a99380cd1ff88a7416b4c357540fdb29b5579782b7858a98ae456d2184a4d"
+    },
+    {
+      "path": "inbox/capture-2026-07-28-1642.md",
+      "filename": "capture-2026-07-28-1642.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Three work items reference a 72-hour window that is only written down in one decision",
+      "type": null,
+      "properties": {
+        "generated": {
+          "by": "claude-code",
+          "at": "2026-07-28T16:42:00Z"
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [
+        "dec-offline-window-72h"
+      ],
+      "snippet": "While reading the sync project I noticed SYN-9, the crew FAQ draft, and the sales one-pager each state the offline guarantee independently. Only dec-offline-win",
+      "parseError": null,
+      "hash": "1c5dadeff8d65252ea2a01a9f30638cd5c6a3338ec9bb737291037fc05b3873a"
+    },
+    {
+      "path": "inbox/crew-lead-quote-worth-keeping.md",
+      "filename": "crew-lead-quote-worth-keeping.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Crew lead quote worth keeping",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Rosa on the pilot call: \"I don't need it to be clever, I need it to not lose the job when the van goes under the bridge.\" Best one-line statement of the offline",
+      "parseError": null,
+      "hash": "a14f32eafa976f5271c43c96a46d90bcc60b850bf2f68a6aefbeebf84aca103f"
+    },
+    {
+      "path": "inbox/onboarding-webinar-idea.md",
+      "filename": "onboarding-webinar-idea.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Run the onboarding webinar as office hours instead",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Attendance is the metric we keep missing. A scheduled webinar asks people to show up at our time; recurring office hours ask them to show up at theirs. Cheaper ",
+      "parseError": null,
+      "hash": "338c033f3b32b537df55d2c4167a7c322a75ad563a9af29327571cc44f78160d"
+    },
+    {
+      "path": "inbox/phoenix-cutover-standup.md",
+      "filename": "phoenix-cutover-standup.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Phoenix cutover standup",
+      "type": null,
+      "properties": {
+        "title": "Phoenix cutover standup",
+        "ingested_at": "2026-07-28T09:14:00Z",
+        "ingest_format": "vtt",
+        "source_file": "2026-07-28 Phoenix cutover standup.vtt",
+        "speakers": [
+          "Marcus Webb",
+          "Priya Nair",
+          "Tom Keller"
+        ],
+        "duration": "00:01:14"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "00:00:04 Marcus Webb: Right, cutover. We are eleven days out and the thing I keep coming back to is that nobody has actually run the rollback. We have it writte",
+      "parseError": null,
+      "hash": "8fb0970f0f7c4eafee5f1dd4a127785a70b790b75d8f84b376ad4ffda78a455d"
+    },
+    {
+      "path": "inbox/pick-queue-drain-timing.md",
+      "filename": "pick-queue-drain-timing.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "How long does the pick queue actually take to drain?",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [
+        "marcus-webb"
+      ],
+      "snippet": "Nobody could answer this in the cutover review. It is the difference between a rollback that works and one that strands inventory. Ask marcus-webb to time it in",
+      "parseError": null,
+      "hash": "7c37155bb605f431ab0b3875479a0906818e1795755c7ff5b8e16d3e90418222"
+    },
+    {
+      "path": "inbox/warehouse-cutover-thought.md",
+      "filename": "warehouse-cutover-thought.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Warehouse cutover needs a rollback rehearsal",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [
+        "tom-keller",
+        "phoenix-warehouse-rollout"
+      ],
+      "snippet": "Talked to tom-keller after standup. We have a cutover plan but nobody has actually practised the rollback — we'd be improvising during the one hour where improv",
+      "parseError": null,
+      "hash": "94607bfbd617d92fa55b227d6f1f35e120204c122add460538c316b5026ce1c1"
+    },
+    {
+      "path": "inbox/welcome.md",
+      "filename": "welcome.md",
+      "folder": "inbox",
+      "project": null,
+      "title": "Welcome to Cerebro",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "This vault is plain markdown: projects are folders, work items and docs are files, and YAML frontmatter carries the metadata.",
+      "parseError": null,
+      "hash": "a2cea7bb71a79d612c524b7f52fdfec51093b13e5bcab64752be6de235b2afe9"
+    },
+    {
+      "path": "knowledge/index.md",
+      "filename": "index.md",
+      "folder": "knowledge",
+      "project": null,
+      "title": "Knowledge",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "What the assistant has learned about how this team works. Every concept records where it came from and who has confirmed it. [Metrics](metrics/) - the numbers t",
+      "parseError": null,
+      "hash": "8d06ffa9fc50dc1e14e5faf26971122a64bc366b6e7208579463f73b645bf1fe"
+    },
+    {
+      "path": "knowledge/log.md",
+      "filename": "log.md",
+      "folder": "knowledge",
+      "project": null,
+      "title": "Knowledge Update Log",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Creation: [Pick queue drain time](/systems/pick-queue-drain.md) — distilled from the cutover standup transcript and the cached PHX-421 ticket. Creation: [Wareho",
+      "parseError": null,
+      "hash": "c9b5b086e44b7f1313eb3b29522bd0f9afb457e1df3077a34872f97392888e25"
+    },
+    {
+      "path": "knowledge/metrics/onboarding-completion.md",
+      "filename": "onboarding-completion.md",
+      "folder": "knowledge/metrics",
+      "project": null,
+      "title": "Onboarding completion",
+      "type": "Metric",
+      "properties": {
+        "title": "Onboarding completion",
+        "description": "Share of new accounts that finish guided onboarding within 14 days.",
+        "tags": [
+          "onboarding",
+          "activation"
+        ],
+        "lifecycle": "stable",
+        "generated": {
+          "by": "claude-code/2.0",
+          "at": "2026-07-24T10:12:00Z"
+        },
+        "verified": [
+          {
+            "by": "process:metrics-nightly",
+            "at": "2026-07-26T02:00:00Z"
+          },
+          {
+            "by": "human:josef",
+            "at": "2026-07-26T09:15:00Z"
+          }
+        ],
+        "usage_window": {
+          "from": "2026-06-01",
+          "to": "2026-06-30"
+        },
+        "sources": [
+          {
+            "id": "kr-onboarding",
+            "resource": "/records/key-results/kr-onboarding-completion.md",
+            "title": "KR — Onboarding completion",
+            "author": "human:maya-chen",
+            "last_modified": "2026-07-22"
+          },
+          {
+            "id": "ga-dashboard",
+            "resource": "https://example.com/dashboards/onboarding",
+            "title": "Onboarding funnel dashboard",
+            "usage_count": 1840,
+            "last_modified": "2026-07-25"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "guided-onboarding-ga",
+          "kr-onboarding-completion"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "An account counts as completed when it has finished every required step of guided onboarding within 14 days of first login.[^kr-onboarding] | Term | Meaning | |",
+      "parseError": null,
+      "hash": "6834e751408493fc8baaf50839bbab629f8ddf12ceb349800eebecead8b4eaf5"
+    },
+    {
+      "path": "knowledge/metrics/sync-error-rate.md",
+      "filename": "sync-error-rate.md",
+      "folder": "knowledge/metrics",
+      "project": null,
+      "title": "Sync error rate",
+      "type": "Metric",
+      "properties": {
+        "title": "Sync error rate",
+        "description": "Failed sync operations as a share of all sync attempts, per hour.",
+        "tags": [
+          "reliability",
+          "offline-sync"
+        ],
+        "lifecycle": "stable",
+        "stale_after": "2026-07-26",
+        "generated": {
+          "by": "claude-code",
+          "at": "2026-07-19T16:40:00Z"
+        },
+        "sources": [
+          {
+            "id": "syn-project",
+            "resource": "/records/projects/offline-sync-hardening.md",
+            "title": "Offline sync hardening",
+            "author": "human:tom-keller",
+            "last_modified": "2026-07-23"
+          },
+          {
+            "id": "dec-manual",
+            "resource": "/records/decisions/dec-conflict-resolution-is-manual.md",
+            "title": "Decision: conflicts are resolved by a person"
+          },
+          {
+            "id": "sync-logs",
+            "resource": "all sync telemetry in the eu-west region",
+            "usage_count": 42000,
+            "usage_window": {
+              "from": "2026-07-01",
+              "to": "2026-07-25"
+            }
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "offline-sync-hardening",
+          "kr-sync-error-rate"
+        ]
+      },
+      "outgoingLinks": [
+        "epic-offline-conflict-model"
+      ],
+      "snippet": "failedsyncs / totalsyncattempts, bucketed hourly. A sync counts as failed when it exhausts its retries, not on the first error.[^syn-project] epic-offline-confl",
+      "parseError": null,
+      "hash": "055762c0b271371d778766c7a27bd2e077aff08cdc10e0a92c28617fbc1860b7"
+    },
+    {
+      "path": "knowledge/metrics/webinar-attendance.md",
+      "filename": "webinar-attendance.md",
+      "folder": "knowledge/metrics",
+      "project": null,
+      "title": "Webinar attendance",
+      "type": "Metric",
+      "properties": {
+        "title": "Webinar attendance",
+        "description": "Live attendees as a share of registrations for the onboarding webinar.",
+        "tags": [
+          "onboarding",
+          "marketing"
+        ],
+        "lifecycle": "deprecated",
+        "generated": {
+          "by": "claude-code/2.0",
+          "at": "2026-07-20T11:00:00Z"
+        },
+        "verified": {
+          "by": "human:josef",
+          "at": "2026-07-27T08:30:00Z"
+        },
+        "sources": [
+          {
+            "id": "kr-webinar",
+            "resource": "/records/key-results/kr-webinar-attendance.md",
+            "title": "KR — Webinar attendance",
+            "author": "human:dana-fox",
+            "last_modified": "2026-07-21"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "kr-webinar-attendance",
+          "field-app-launch-campaign"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "liveattendees / registrations for each scheduled onboarding webinar.[^kr-webinar] The team is replacing scheduled webinars with recurring office hours, which ha",
+      "parseError": null,
+      "hash": "f783994ea249b6752e31a4ef796a120916f0303c51cb32c39a990e79eb17522c"
+    },
+    {
+      "path": "knowledge/playbooks/warehouse-cutover.md",
+      "filename": "warehouse-cutover.md",
+      "folder": "knowledge/playbooks",
+      "project": null,
+      "title": "Warehouse cutover: go-live and rollback",
+      "type": "Playbook",
+      "properties": {
+        "title": "Warehouse cutover: go-live and rollback",
+        "description": "What to run, in what order, on Phoenix warehouse go-live night.",
+        "tags": [
+          "operations",
+          "phoenix"
+        ],
+        "lifecycle": "draft",
+        "generated": {
+          "by": "process:knowledge",
+          "at": "2026-07-28T09:05:00Z"
+        },
+        "sources": [
+          {
+            "id": "ops-project",
+            "resource": "/records/projects/phoenix-warehouse-rollout.md",
+            "title": "Phoenix warehouse rollout",
+            "author": "human:marcus-webb",
+            "last_modified": "2026-07-26"
+          },
+          {
+            "id": "risk-rollback",
+            "resource": "/records/risks/risk-rollback-unrehearsed.md",
+            "title": "Warehouse rollback has never been rehearsed"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "phoenix-warehouse-rollout",
+          "risk-rollback-unrehearsed"
+        ]
+      },
+      "outgoingLinks": [
+        "ops-9"
+      ],
+      "snippet": "Go-live night for the Phoenix warehouse, or any decision to abort mid-cutover. 1. Freeze inbound receiving in the legacy system. 2. Drain the in-flight pick que",
+      "parseError": null,
+      "hash": "1fb771bf3803b29cd652bd684faaa8394c648542d562b00f85a59ce874788bdd"
+    },
+    {
+      "path": "knowledge/systems/offline-guarantee.md",
+      "filename": "offline-guarantee.md",
+      "folder": "knowledge/systems",
+      "project": null,
+      "title": "The offline guarantee",
+      "type": "Reference",
+      "properties": {
+        "title": "The offline guarantee",
+        "description": "What the product promises when a crew loses connectivity, and where that number comes from.",
+        "tags": [
+          "offline-sync",
+          "product"
+        ],
+        "lifecycle": "stable",
+        "generated": {
+          "by": "claude-code",
+          "at": "2026-07-26T11:20:00Z"
+        },
+        "verified": {
+          "by": "human:tom-keller",
+          "at": "2026-07-27T09:10:00Z"
+        },
+        "stale_after": "2026-10-01",
+        "sources": [
+          {
+            "id": "dec-window",
+            "resource": "/records/decisions/dec-offline-window-72h.md",
+            "title": "Decision: offline window is 72 hours",
+            "author": "human:tom-keller",
+            "last_modified": "2026-06-28"
+          },
+          {
+            "id": "syn-9",
+            "resource": "/projects/offline-sync-hardening/items/syn-9.md",
+            "title": "Warn past the 72-hour offline window"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "offline-sync-hardening",
+          "dec-offline-window-72h"
+        ],
+        "supersedes": [
+          "offline-window-pilot"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The app guarantees 72 hours of offline operation with a clean merge on reconnect.[^dec-window] | Window | Behaviour | |--------|-----------| | 0–72h | Clean mer",
+      "parseError": null,
+      "hash": "d98fab8fd7ae4d8bd187e9f8fa0df78cadeaad8524bf803e99adc5373643acca"
+    },
+    {
+      "path": "knowledge/systems/offline-window-pilot.md",
+      "filename": "offline-window-pilot.md",
+      "folder": "knowledge/systems",
+      "project": null,
+      "title": "The offline window",
+      "type": "Reference",
+      "properties": {
+        "title": "The offline window",
+        "description": "How long a crew can work disconnected before sync stops being safe.",
+        "tags": [
+          "offline-sync",
+          "product"
+        ],
+        "lifecycle": "stable",
+        "generated": {
+          "by": "claude-code",
+          "at": "2026-05-14T10:05:00Z"
+        },
+        "sources": [
+          {
+            "id": "pilot-brief",
+            "resource": "/records/projects/offline-sync-hardening.md",
+            "title": "Offline sync hardening",
+            "last_modified": "2026-05-12"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "offline-sync-hardening"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Field crews are told they can work disconnected for a week and sync when they get back to signal.[^pilot-brief] This came out of the pilot, where nobody was off",
+      "parseError": null,
+      "hash": "a3b235d7bc7af039c54980888f678581ce466a897234dbc45ee5858fd6d37c8b"
+    },
+    {
+      "path": "knowledge/systems/pick-queue-drain.md",
+      "filename": "pick-queue-drain.md",
+      "folder": "knowledge/systems",
+      "project": null,
+      "title": "Pick queue drain time",
+      "type": "Reference",
+      "properties": {
+        "title": "Pick queue drain time",
+        "description": "How long the in-flight pick queue takes to clear, and why it gates the cutover.",
+        "tags": [
+          "operations",
+          "phoenix"
+        ],
+        "lifecycle": "stable",
+        "generated": {
+          "by": "process:knowledge",
+          "at": "2026-07-28T09:26:00Z"
+        },
+        "stale_after": "2026-08-15",
+        "sources": [
+          {
+            "id": "standup",
+            "resource": "/inbox/phoenix-cutover-standup.md",
+            "title": "Phoenix cutover standup, 2026-07-28",
+            "author": "human:priya-nair",
+            "last_modified": "2026-07-28"
+          },
+          {
+            "id": "phx-421",
+            "resource": "/sources/issues/phx-421.md",
+            "title": "PHX-421 — Rehearse the warehouse rollback end to end",
+            "last_modified": "2026-07-28"
+          }
+        ]
+      },
+      "relationships": {
+        "about": [
+          "phoenix-warehouse-rollout",
+          "risk-rollback-unrehearsed"
+        ]
+      },
+      "outgoingLinks": [
+        "risk-rollback-unrehearsed"
+      ],
+      "snippet": "Draining the in-flight pick queue took about 40 minutes in staging, at roughly a tenth of production volume.[^standup] Plan for at least an hour; anything short",
+      "parseError": null,
+      "hash": "7a16429a1dbb381cbe5af90622856f4cdfa525486b24e0cf49b553722fb660a6"
+    },
+    {
+      "path": "knowledge/systems/status-model.md",
+      "filename": "status-model.md",
+      "folder": "knowledge/systems",
+      "project": null,
+      "title": "How status works in this vault",
+      "type": "Reference",
+      "properties": {
+        "title": "How status works in this vault",
+        "description": "The resolution order cerebro uses to decide a record's status set.",
+        "tags": [
+          "cerebro",
+          "schema"
+        ],
+        "lifecycle": "stable",
+        "generated": {
+          "by": "claude-code/2.0",
+          "at": "2026-07-25T14:20:00Z"
+        },
+        "verified": [
+          {
+            "by": "human:josef",
+            "at": "2026-07-25T15:00:00Z"
+          }
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A record's available statuses are resolved by walking a chain and taking the first set that exists: 1. statuses: on the record's own Type doc 2. The built-in de",
+      "parseError": null,
+      "hash": "c4589df398d05847bc32f2683b2385a4f720c7648240c94c1e06a1197ec19c3e"
+    },
+    {
+      "path": "people/ana-rios.md",
+      "filename": "ana-rios.md",
+      "folder": "people",
+      "project": null,
+      "title": "Ana Rios",
+      "type": "Person",
+      "properties": {
+        "role": "Product manager",
+        "team": "Field Platform"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "d5edfcd9cc9f07d0f9854c3b519cc0ab3589e94b8d4800ed058362bc51ec8205"
+    },
+    {
+      "path": "people/dana-fox.md",
+      "filename": "dana-fox.md",
+      "folder": "people",
+      "project": null,
+      "title": "Dana Fox",
+      "type": "Person",
+      "properties": {
+        "role": "IT systems admin",
+        "team": "Internal Systems"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "e3b9dd202a4bd41b17e4ebd4eb267fb47f11614bd74dab2571ec53fd4831386d"
+    },
+    {
+      "path": "people/elena-vasquez.md",
+      "filename": "elena-vasquez.md",
+      "folder": "people",
+      "project": null,
+      "title": "Elena Vasquez",
+      "type": "Person",
+      "properties": {
+        "role": "Design lead",
+        "team": "Field Platform"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "f636fdd01182970ba39094d31680fd40c2fb17e0dcd6fef572f5911093fe370e"
+    },
+    {
+      "path": "people/josef-lang.md",
+      "filename": "josef-lang.md",
+      "folder": "people",
+      "project": null,
+      "title": "Josef Lang",
+      "type": "Person",
+      "properties": {
+        "role": "Product manager",
+        "team": "Internal Systems"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "f84e4a5bae6691f2e80f67775256fef3c34355a899c10a8ccc91ffaa7d0673ca"
+    },
+    {
+      "path": "people/lena-ortiz.md",
+      "filename": "lena-ortiz.md",
+      "folder": "people",
+      "project": null,
+      "title": "Lena Ortiz",
+      "type": "Person",
+      "properties": {
+        "role": "Support lead",
+        "team": "Support"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "400854f3fab19497098912aa487b064e33a1a12cbb214ba1ed42b7770ce35f5f"
+    },
+    {
+      "path": "people/marcus-webb.md",
+      "filename": "marcus-webb.md",
+      "folder": "people",
+      "project": null,
+      "title": "Marcus Webb",
+      "type": "Person",
+      "properties": {
+        "role": "Head of field ops",
+        "team": "Field Ops"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "7340919ae2cbbf83aa54c77fa86d2def50c05c5e1a8c1f8225c1ccacd3e733b8"
+    },
+    {
+      "path": "people/maya-chen.md",
+      "filename": "maya-chen.md",
+      "folder": "people",
+      "project": null,
+      "title": "Maya Chen",
+      "type": "Person",
+      "properties": {
+        "role": "Group product manager",
+        "team": "Field Platform"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "d37503a64255bde6df76f32cb4af144ee14a24f7831e4b70d957f3bfe0ae5dbe"
+    },
+    {
+      "path": "people/mo-byrd.md",
+      "filename": "mo-byrd.md",
+      "folder": "people",
+      "project": null,
+      "title": "Mo Byrd",
+      "type": "Person",
+      "properties": {
+        "role": "Operations PM",
+        "team": "Finance Ops"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "0246507b53c925de297936e0790d4e4f3c1f97dd961821d29e1db94dd089a147"
+    },
+    {
+      "path": "people/priya-nair.md",
+      "filename": "priya-nair.md",
+      "folder": "people",
+      "project": null,
+      "title": "Priya Nair",
+      "type": "Person",
+      "properties": {
+        "role": "Product manager",
+        "team": "Knowledge"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "ff688c423645d0c3fb19715881173ab98d67a53484ef7a923b9dc6faa532c513"
+    },
+    {
+      "path": "people/rosa-alvine.md",
+      "filename": "rosa-alvine.md",
+      "folder": "people",
+      "project": null,
+      "title": "Rosa Alvine",
+      "type": "Person",
+      "properties": {
+        "role": "Field supervisor",
+        "team": "Field Ops"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "eef0a1caa1a8ad948eaad24e2b958f9d1a193be0cbfef0634c83e86e6ebf6493"
+    },
+    {
+      "path": "people/sam-ito.md",
+      "filename": "sam-ito.md",
+      "folder": "people",
+      "project": null,
+      "title": "Sam Ito",
+      "type": "Person",
+      "properties": {
+        "role": "Engineering lead",
+        "team": "Platform"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "c3edc6b60adab24f50e355e62c2c71f1d7a704116e64d77b8ba7b35f26e13b49"
+    },
+    {
+      "path": "people/tom-keller.md",
+      "filename": "tom-keller.md",
+      "folder": "people",
+      "project": null,
+      "title": "Tom Keller",
+      "type": "Person",
+      "properties": {
+        "role": "Sales operations",
+        "team": "Sales EU"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "8a6366c63f3ada83cf8fd7618827fcb97ba0e1d1722ae14e52b04042fa301eeb"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-1.md",
+      "filename": "lnc-1.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Campaign brief",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-1",
+        "status": "review",
+        "priority": "high",
+        "due": "2026-07-24",
+        "window": {
+          "start": "2026-07-07",
+          "end": "2026-07-24"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "5bf55f0e90d13529d3b35ddccfa3ab822aa3b0f5bb95bcf80ec26e71280e5ec4"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-10.md",
+      "filename": "lnc-10.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Time-on-job proof from the Phoenix pilot",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-10",
+        "status": "backlog",
+        "priority": "medium",
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ],
+        "blocked_by": [
+          "lnc-9"
+        ],
+        "epic": [
+          "epic-launch-narrative"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "48f1a9b7395c7d0496e5d202abd3ea16922c7553ceaf46329202da02328144be"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-11.md",
+      "filename": "lnc-11.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Convert the webinar slot to office hours",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-11",
+        "status": "todo",
+        "priority": "medium",
+        "due": "2026-08-20",
+        "window": {
+          "start": "2026-08-03",
+          "end": "2026-08-20"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [
+        "bet-office-hours-beat-webinars"
+      ],
+      "snippet": "Runs bet-office-hours-beat-webinars. Keep the webinar landing page alive so the comparison is like for like.",
+      "parseError": null,
+      "hash": "1aab5b01915ed3855772b71e29757446f91716053d8fc7cc7e9c73128825f0f4"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-2.md",
+      "filename": "lnc-2.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Positioning + message house",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-2",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-07-31",
+        "window": {
+          "start": "2026-07-20",
+          "end": "2026-07-31"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "08d3029f34fe76c7e1557c295571d7473546141b72b43788f74203fbd3fbaa4f"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-3.md",
+      "filename": "lnc-3.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Launch email sequence (3 touches)",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-3",
+        "status": "backlog",
+        "priority": "medium",
+        "due": "2026-08-18",
+        "window": {
+          "start": "2026-07-31",
+          "end": "2026-08-18"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "josef-lang"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "a17a310e621b3c32675bd3da0baf384389620c9227de43ab494a23406268c66d"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-4.md",
+      "filename": "lnc-4.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Landing page refresh",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-4",
+        "status": "backlog",
+        "priority": "medium",
+        "due": "2026-09-02",
+        "window": {
+          "start": "2026-08-18",
+          "end": "2026-09-02"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "josef-lang"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "86c67d141b60233d4342f2e78133b1b979e1207d99e18c9e383be99274e0080b"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-5.md",
+      "filename": "lnc-5.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Field champions webinar",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-5",
+        "status": "backlog",
+        "priority": "low",
+        "due": "2026-09-16",
+        "window": {
+          "start": "2026-08-31",
+          "end": "2026-09-16"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "maya-chen"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "e867ee4d5459bce8bd32736dc4295c852ebf99b4fe0431a1574134c38fa15569"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-6.md",
+      "filename": "lnc-6.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "GA dry run with support",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-6",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-08-26",
+        "window": {
+          "start": "2026-08-14",
+          "end": "2026-08-26"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "maya-chen"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "7874fe56d801f154f2ff4fac40df17fc58895a91c3645478900a8962e48ea8d3"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-7.md",
+      "filename": "lnc-7.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Press + analyst notes",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-7",
+        "status": "cancelled",
+        "priority": "none",
+        "due": "2026-09-09",
+        "window": {
+          "start": "2026-08-25",
+          "end": "2026-09-09"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "7f4f9fe1ffd2c164298a7cfca2063687b1c51f42bdef00239536d957baba519b"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-8.md",
+      "filename": "lnc-8.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Rewrite messaging for the console split",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-8",
+        "status": "progress",
+        "priority": "urgent",
+        "due": "2026-08-06",
+        "window": {
+          "start": "2026-07-21",
+          "end": "2026-08-06"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ],
+        "epic": [
+          "epic-launch-narrative"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-supervisor-web-console"
+      ],
+      "snippet": "Every asset currently describes one app for both audiences, which dec-supervisor-web-console made untrue.",
+      "parseError": null,
+      "hash": "f8f8c1ef432a234e9411e83a3b25ae5c2ccc0d60c17e7ef6f866b3bfa2375756"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/items/lnc-9.md",
+      "filename": "lnc-9.md",
+      "folder": "projects/field-app-launch-campaign/items",
+      "project": null,
+      "title": "Secure a named reference customer",
+      "type": "Work item",
+      "properties": {
+        "key": "LNC-9",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-09-05",
+        "window": {
+          "start": "2026-08-22",
+          "end": "2026-09-05"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "ana-rios"
+        ],
+        "epic": [
+          "epic-launch-narrative"
+        ]
+      },
+      "outgoingLinks": [
+        "bet-named-customer-unlocks-pipeline"
+      ],
+      "snippet": "The settling condition for bet-named-customer-unlocks-pipeline.",
+      "parseError": null,
+      "hash": "cbdade93fb5f0a31383c41838a0684e21fd25067b5b686a4b0c83c7883d203d0"
+    },
+    {
+      "path": "projects/field-app-launch-campaign/meetings/kickoff.md",
+      "filename": "kickoff.md",
+      "folder": "projects/field-app-launch-campaign/meetings",
+      "project": null,
+      "title": "Field App launch campaign kickoff",
+      "type": "Meeting",
+      "properties": {
+        "date": "2026-07-24"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Agenda and notes for the Field App launch campaign kickoff. [ ] Confirm scope [ ] Assign owners [x] Book the room",
+      "parseError": null,
+      "hash": "152e6abd5bb35301446da666402d86baec3889e065200d397cfe08c28236e242"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-1.md",
+      "filename": "fld-1.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "First-run walkthrough GA",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-1",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-09-18",
+        "window": {
+          "start": "2026-08-28",
+          "end": "2026-09-18"
+        },
+        "estimate": "XL"
+      },
+      "relationships": {
+        "assignee": [
+          "ana-rios"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Umbrella for everything the GA gate needs: flow, coaching, telemetry, and the fallback path.",
+      "parseError": null,
+      "hash": "bca2eda5342bfe4dd37b7368251c34d32eefb5342d91a08d8b5fa89803d5c0df"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-10.md",
+      "filename": "fld-10.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Day-3 nudge for crews with no completed job",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-10",
+        "status": "todo",
+        "priority": "medium",
+        "due": "2026-08-28",
+        "window": {
+          "start": "2026-08-23",
+          "end": "2026-08-28"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ],
+        "epic": [
+          "epic-first-week-activation"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "87c17468e53178414391ece02df65d53147bcd89aca02dae49a1fd91c3832064"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-11.md",
+      "filename": "fld-11.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Instrument the first seven days",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-11",
+        "status": "done",
+        "priority": "high",
+        "due": "2026-07-22",
+        "window": {
+          "start": "2026-07-10",
+          "end": "2026-07-22"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ],
+        "epic": [
+          "epic-first-week-activation"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "6491be437fe31e151c9baba657b6628ad65ee9b3535805dbd2339e8fba522bec"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-12.md",
+      "filename": "fld-12.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Support playbook for stuck first runs",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-12",
+        "status": "todo",
+        "priority": "low",
+        "due": "2026-08-14",
+        "window": {
+          "start": "2026-08-04",
+          "end": "2026-08-14"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "eca0e72f744f9e26d4ab1685275e0a9bdbe919c6d2947ce3a4677750a5b32a06"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-2.md",
+      "filename": "fld-2.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Coach marks on job screen",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-2",
+        "status": "review",
+        "priority": "high",
+        "due": "2026-07-23",
+        "window": {
+          "start": "2026-07-18",
+          "end": "2026-07-23"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "elena-vasquez"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "30805f8dc923fb06a40fd3db13490b8c9964a96169c033513ea62e17cbd5e1b8"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-3.md",
+      "filename": "fld-3.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Progress tracker states",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-3",
+        "status": "done",
+        "priority": "medium",
+        "due": "2026-07-17",
+        "window": {
+          "start": "2026-07-09",
+          "end": "2026-07-17"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "elena-vasquez"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "a15fb566bb77395fdb32497258eeacfbff694a7262da2fcc9f5637d910bc6e94"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-4.md",
+      "filename": "fld-4.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Blank-state coaching copy",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-4",
+        "status": "progress",
+        "priority": "medium",
+        "due": "2026-07-24",
+        "window": {
+          "start": "2026-07-18",
+          "end": "2026-07-24"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "65aadf530e6e61d14cca5aedfaee75e0b87e6103ffb4d0540551336a09c878ae"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-5.md",
+      "filename": "fld-5.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Resume-after-interrupt QA pass",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-5",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-07-27",
+        "window": {
+          "start": "2026-07-23",
+          "end": "2026-07-27"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "maya-chen"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "12246850b58523abfd4f94e6c4e18c9bfce1570cccc456a74d6dd295bb5ac14e"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-6.md",
+      "filename": "fld-6.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Onboarding telemetry events",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-6",
+        "status": "done",
+        "priority": "high",
+        "due": "2026-07-16",
+        "window": {
+          "start": "2026-07-09",
+          "end": "2026-07-16"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "8fb4dde5e992d8c283a68bd411ca7fb07cb6c1e101896e7aff019fb70dd8038a"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-7.md",
+      "filename": "fld-7.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Checklist stalls on step 3 offline",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-7",
+        "status": "progress",
+        "priority": "urgent",
+        "due": "2026-07-22",
+        "window": {
+          "start": "2026-07-13",
+          "end": "2026-07-22"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "88868b0104f9e1906c1f23ffc3965cb561c20a1bb47fab856135073cf65cbadd"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-8.md",
+      "filename": "fld-8.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "First-job checklist inside the app",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-8",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-08-12",
+        "window": {
+          "start": "2026-07-29",
+          "end": "2026-08-12"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "maya-chen"
+        ],
+        "epic": [
+          "epic-first-week-activation"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "9555f78d49df860fd2dd4a92ddddef8c64b883d08e05f7c6a21f899d78dfb4bf"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/items/fld-9.md",
+      "filename": "fld-9.md",
+      "folder": "projects/guided-onboarding-ga/items",
+      "project": null,
+      "title": "Recover gracefully from the first failed sync",
+      "type": "Work item",
+      "properties": {
+        "key": "FLD-9",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-08-25",
+        "window": {
+          "start": "2026-08-19",
+          "end": "2026-08-25"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "maya-chen"
+        ],
+        "blocked_by": [
+          "syn-8"
+        ],
+        "epic": [
+          "epic-first-week-activation"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Depends on the resolution screen: there is no graceful recovery to show until there is somewhere to send them.",
+      "parseError": null,
+      "hash": "00556f5ddb68c77653ca691061ec8999fb170e806d0cea9ff04cf417e8404d96"
+    },
+    {
+      "path": "projects/guided-onboarding-ga/meetings/kickoff.md",
+      "filename": "kickoff.md",
+      "folder": "projects/guided-onboarding-ga/meetings",
+      "project": null,
+      "title": "Guided onboarding GA kickoff",
+      "type": "Meeting",
+      "properties": {
+        "date": "2026-07-24"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Agenda and notes for the Guided onboarding GA kickoff. [ ] Confirm scope [ ] Assign owners [x] Book the room",
+      "parseError": null,
+      "hash": "e1e42252e736ca8ebd78fbbbb0ebe7f707e8dfc9a6b95ea291e6e8323e2a75aa"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-1.md",
+      "filename": "syn-1.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Conflict resolution UX spec",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-1",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-07-29",
+        "window": {
+          "start": "2026-07-17",
+          "end": "2026-07-29"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "6061dda789ac6c0189fea9dcf7b66fc27f85ae0b399499919f5ebb887fa82cf8"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-10.md",
+      "filename": "syn-10.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Instrument conflict rate separately from sync errors",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-10",
+        "status": "backlog",
+        "priority": "high",
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "tom-keller"
+        ],
+        "blocked_by": [
+          "syn-6"
+        ],
+        "epic": [
+          "epic-offline-conflict-model"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-conflict-resolution-is-manual"
+      ],
+      "snippet": "Without this the KR reads as a regression the day the epic ships. See the consequences section of dec-conflict-resolution-is-manual.",
+      "parseError": null,
+      "hash": "8b514cf29188c11d7a25025db890b69c77262c32705320b91ccc9e98edc030f7"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-2.md",
+      "filename": "syn-2.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Delta sync backoff tuning",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-2",
+        "status": "todo",
+        "priority": "medium",
+        "due": "2026-08-05",
+        "window": {
+          "start": "2026-07-26",
+          "end": "2026-08-05"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "6d8f9959568e6e48797265b55db3f206e349ebb037535e2728cdd76fae19589b"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-3.md",
+      "filename": "syn-3.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Duplicate jobs after reconnect",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-3",
+        "status": "progress",
+        "priority": "urgent",
+        "due": "2026-07-24",
+        "window": {
+          "start": "2026-07-17",
+          "end": "2026-07-24"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "42d8ac47c875a6edba2b621f43f0624e910e7913e8d3bc8c3abc03ddb9d77163"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-4.md",
+      "filename": "syn-4.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Sync health dashboard",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-4",
+        "status": "backlog",
+        "priority": "medium",
+        "due": "2026-09-04",
+        "window": {
+          "start": "2026-08-17",
+          "end": "2026-09-04"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "60a22e84984a7acffb1cc321ef73f9570deab2e4bde63b615ba2a9eb8a8a00ce"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-5.md",
+      "filename": "syn-5.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Field kill-switch for sync",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-5",
+        "status": "backlog",
+        "priority": "low",
+        "due": "2026-09-25",
+        "window": {
+          "start": "2026-09-15",
+          "end": "2026-09-25"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "2f77f97c429139bcb67f1dc8f9eafa435993c4f5ccdc6edbf21caf320390e3e7"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-6.md",
+      "filename": "syn-6.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Detect write conflicts on job close",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-6",
+        "status": "done",
+        "priority": "high",
+        "due": "2026-07-18",
+        "window": {
+          "start": "2026-07-07",
+          "end": "2026-07-18"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "tom-keller"
+        ],
+        "epic": [
+          "epic-offline-conflict-model"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "29c0fb92f6a424fd4d6e4e02f9f1dce0cfa929d4670c2a6ff10a71d5368a7170"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-7.md",
+      "filename": "syn-7.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Hold both versions instead of discarding",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-7",
+        "status": "progress",
+        "priority": "urgent",
+        "due": "2026-08-04",
+        "window": {
+          "start": "2026-07-24",
+          "end": "2026-08-04"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ],
+        "blocked_by": [
+          "syn-6"
+        ],
+        "epic": [
+          "epic-offline-conflict-model"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-conflict-resolution-is-manual"
+      ],
+      "snippet": "Storage side of dec-conflict-resolution-is-manual. Both versions live until someone picks; neither is authoritative in the meantime. The migration is the awkwar",
+      "parseError": null,
+      "hash": "6b4d40052d093d3de075d7a0bf2328969ec52ea1a6f2d91893cce9d862ced543"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-8.md",
+      "filename": "syn-8.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Side-by-side resolution screen",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-8",
+        "status": "todo",
+        "priority": "urgent",
+        "due": "2026-08-22",
+        "window": {
+          "start": "2026-08-05",
+          "end": "2026-08-22"
+        },
+        "estimate": "XL"
+      },
+      "relationships": {
+        "assignee": [
+          "mo-byrd"
+        ],
+        "blocked_by": [
+          "syn-7"
+        ],
+        "epic": [
+          "epic-offline-conflict-model"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The half of the epic that makes the other half worth shipping. Detection without this just tells crews something went wrong and offers them nothing.",
+      "parseError": null,
+      "hash": "c1798575a9cc2fe04c56d8882a2c32e433964339c00388a0e48e3a0667c4e866"
+    },
+    {
+      "path": "projects/offline-sync-hardening/items/syn-9.md",
+      "filename": "syn-9.md",
+      "folder": "projects/offline-sync-hardening/items",
+      "project": null,
+      "title": "Warn past the 72-hour offline window",
+      "type": "Work item",
+      "properties": {
+        "key": "SYN-9",
+        "status": "todo",
+        "priority": "medium",
+        "due": "2026-08-29",
+        "window": {
+          "start": "2026-08-20",
+          "end": "2026-08-29"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "sam-ito"
+        ],
+        "epic": [
+          "epic-offline-conflict-model"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-offline-window-72h"
+      ],
+      "snippet": "Implements the boundary from dec-offline-window-72h. The warning has to be honest without being alarming — crews work long weekends routinely.",
+      "parseError": null,
+      "hash": "3e37d416f05ea6b93c02113b03556e3238ca173552bd0b47e231baa1b0f27a00"
+    },
+    {
+      "path": "projects/offline-sync-hardening/meetings/kickoff.md",
+      "filename": "kickoff.md",
+      "folder": "projects/offline-sync-hardening/meetings",
+      "project": null,
+      "title": "Offline sync hardening kickoff",
+      "type": "Meeting",
+      "properties": {
+        "date": "2026-07-24"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Agenda and notes for the Offline sync hardening kickoff. [ ] Confirm scope [ ] Assign owners [x] Book the room",
+      "parseError": null,
+      "hash": "8ae7824851db3352c5b4aa76c88c168d561f941b5292301bb1498f83721978d6"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/cutover-prd.md",
+      "filename": "cutover-prd.md",
+      "folder": "projects/phoenix-warehouse-rollout",
+      "project": null,
+      "title": "Phoenix cutover — go-live PRD",
+      "type": "Spec",
+      "properties": {
+        "title": "Phoenix cutover — go-live PRD",
+        "status": "draft"
+      },
+      "relationships": {
+        "owner": [
+          "marcus-webb"
+        ],
+        "project": [
+          "phoenix-warehouse-rollout"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Move the Phoenix warehouse onto the new stack in a single night, with a rollback path that can be taken at any point before receiving is unfrozen. We are planni",
+      "parseError": null,
+      "hash": "326ad1f507399f210c6d6caf6772ddd1cfd3491fc4497da7a7b26d22ffd91a73"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-1.md",
+      "filename": "ops-1.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Rack layout sign-off",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-1",
+        "status": "done",
+        "priority": "high",
+        "due": "2026-07-10",
+        "window": {
+          "start": "2026-07-05",
+          "end": "2026-07-10"
+        },
+        "estimate": "XS"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "f7bfa9dbaed1f5f663eb09852cf8bd64a000661d7d2e52d5e1be0240800c7660"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-10.md",
+      "filename": "ops-10.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Camera-based scanning fallback",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-10",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-08-14",
+        "window": {
+          "start": "2026-08-03",
+          "end": "2026-08-14"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "mo-byrd"
+        ],
+        "epic": [
+          "epic-warehouse-cutover"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-no-custom-scanner-hardware"
+      ],
+      "snippet": "Takes hardware off the critical path per dec-no-custom-scanner-hardware.",
+      "parseError": null,
+      "hash": "5f5749b72fd571d81500524256664b6f2def81aab5625a65cca13815ec7132e0"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-11.md",
+      "filename": "ops-11.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Go-live runbook sign-off",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-11",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-08-18",
+        "window": {
+          "start": "2026-08-14",
+          "end": "2026-08-18"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ],
+        "blocked_by": [
+          "ops-9",
+          "ops-10"
+        ],
+        "epic": [
+          "epic-warehouse-cutover"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "4ff66ddaaac3125d570356fe8d05e5bfa7d39b2da824122375c7ae541114c855"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-12.md",
+      "filename": "ops-12.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Train the night shift on the fallback path",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-12",
+        "status": "backlog",
+        "priority": "medium",
+        "due": "2026-08-19",
+        "window": {
+          "start": "2026-08-09",
+          "end": "2026-08-19"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "rosa-alvine"
+        ],
+        "blocked_by": [
+          "ops-10"
+        ],
+        "epic": [
+          "epic-warehouse-cutover"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "3bf2fddf34d06ecf0f9269acc4e0c6a9e021b5950c81dfb7ca51e3d9606e97d1"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-2.md",
+      "filename": "ops-2.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Vendor contract countersign",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-2",
+        "status": "todo",
+        "priority": "urgent",
+        "due": "2026-07-23",
+        "window": {
+          "start": "2026-07-16",
+          "end": "2026-07-23"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "2cbbce45d9f2ceadc3368bf069f32b85d11b1d6ac20a08540617742808d7bb4e"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-3.md",
+      "filename": "ops-3.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Rack delivery + install window",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-3",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-08-01",
+        "window": {
+          "start": "2026-07-17",
+          "end": "2026-08-01"
+        },
+        "estimate": "L"
+      },
+      "relationships": {
+        "assignee": [
+          "mo-byrd"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "649a5dc266c424203dff86855aaba089c615bdad7b3e87ed40645e6bc973f16e"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-4.md",
+      "filename": "ops-4.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Forklift certification schedule",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-4",
+        "status": "progress",
+        "priority": "medium",
+        "due": "2026-07-30",
+        "window": {
+          "start": "2026-07-25",
+          "end": "2026-07-30"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "mo-byrd"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "8fd530bee05a3549bb55c1180197096b265c525c8ad1256a7b533ca73aa9144d"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-5.md",
+      "filename": "ops-5.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "WMS device provisioning (40 scanners)",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-5",
+        "status": "progress",
+        "priority": "high",
+        "due": "2026-08-08",
+        "window": {
+          "start": "2026-07-28",
+          "end": "2026-08-08"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "a5a17940dfd50ce7aebf53270c888acdb073d08441c5d426f947156891abf900"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-6.md",
+      "filename": "ops-6.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Network drops — floor 2",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-6",
+        "status": "todo",
+        "priority": "medium",
+        "due": "2026-08-15",
+        "window": {
+          "start": "2026-07-29",
+          "end": "2026-08-15"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "0c092452accc002364dc1b97c43fe2b5633b4c6f883383723ba7728448d58a9d"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-7.md",
+      "filename": "ops-7.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Safety walkthrough with county inspector",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-7",
+        "status": "todo",
+        "priority": "high",
+        "due": "2026-08-21",
+        "window": {
+          "start": "2026-08-09",
+          "end": "2026-08-21"
+        },
+        "estimate": "S"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "7ac987f8bf5ebc98b175df7197b6b10422626a7e2aa8576fb88da6740c5445fe"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-8.md",
+      "filename": "ops-8.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Go-live readiness review",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-8",
+        "status": "todo",
+        "priority": "urgent",
+        "due": "2026-09-12",
+        "window": {
+          "start": "2026-09-08",
+          "end": "2026-09-12"
+        },
+        "estimate": "XS"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "",
+      "parseError": null,
+      "hash": "926a71669e2026b86170e0afb11d8d0c75dfb99a3b2af30726a8a0018650ee9f"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/items/ops-9.md",
+      "filename": "ops-9.md",
+      "folder": "projects/phoenix-warehouse-rollout/items",
+      "project": null,
+      "title": "Rehearse the rollback in staging",
+      "type": "Work item",
+      "properties": {
+        "key": "OPS-9",
+        "status": "todo",
+        "priority": "urgent",
+        "due": "2026-08-08",
+        "window": {
+          "start": "2026-07-22",
+          "end": "2026-08-08"
+        },
+        "estimate": "M"
+      },
+      "relationships": {
+        "assignee": [
+          "marcus-webb"
+        ],
+        "epic": [
+          "epic-warehouse-cutover"
+        ]
+      },
+      "outgoingLinks": [
+        "risk-rollback-unrehearsed"
+      ],
+      "snippet": "Mitigation for risk-rollback-unrehearsed. Full sequence, including the pick-queue drain, with the clock running.",
+      "parseError": null,
+      "hash": "6f0ed8dcb0e4cf81b4441d766259717a3fae123a41a1f0bda27c0b94b452df67"
+    },
+    {
+      "path": "projects/phoenix-warehouse-rollout/meetings/kickoff.md",
+      "filename": "kickoff.md",
+      "folder": "projects/phoenix-warehouse-rollout/meetings",
+      "project": null,
+      "title": "Phoenix warehouse rollout kickoff",
+      "type": "Meeting",
+      "properties": {
+        "date": "2026-07-24"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Agenda and notes for the Phoenix warehouse rollout kickoff. [ ] Confirm scope [ ] Assign owners [x] Book the room",
+      "parseError": null,
+      "hash": "89c17b6f7dd0d8859149c5302c4a146e67bb9d2820b654869ec21953df809ce0"
+    },
+    {
+      "path": "records/agents/knowledge.md",
+      "filename": "knowledge.md",
+      "folder": "records/agents",
+      "project": null,
+      "title": "Knowledge agent",
+      "type": "Agent",
+      "properties": {
+        "slug": "knowledge",
+        "description": "Maintains the knowledge bundle — distills what the vault's records and cached sources show into concepts you can verify, and keeps the copies it relies on fresh.",
+        "tools": "safe",
+        "capabilities": [
+          "knowledge"
+        ],
+        "scope": [],
+        "allowed-tools": [
+          "get_vault_context",
+          "search_notes",
+          "get_note",
+          "knowledge_about",
+          "list_inbox",
+          "write_concept",
+          "cache_source"
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Maintain the knowledge bundle in knowledge/ so it stays a defensible index over what this vault actually holds. 1. Read what changed — records, docs, and the ca",
+      "parseError": null,
+      "hash": "2bdfa8c48b74373e616501a8213e13c44797aff2714d48f71e024658359ca57e"
+    },
+    {
+      "path": "records/agents/release-scout.md",
+      "filename": "release-scout.md",
+      "folder": "records/agents",
+      "project": null,
+      "title": "Release scout",
+      "type": "Agent",
+      "properties": {
+        "slug": "release-scout",
+        "description": "Watches open risks and slipping work for anything that threatens a release, and keeps a short brief current.",
+        "tools": "safe",
+        "scope": [
+          "records/risks"
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Keep a running brief on what threatens the next release. 1. Read the open Risk records and any work item whose due has passed or whose status has not moved in a",
+      "parseError": null,
+      "hash": "d63d94c736ca7c8b2287fe792760df2edd87c6451ba7e7efa74ca9a6285a2ec4"
+    },
+    {
+      "path": "records/bets/bet-conflict-ui-lowers-support.md",
+      "filename": "bet-conflict-ui-lowers-support.md",
+      "folder": "records/bets",
+      "project": null,
+      "title": "Showing conflicts lowers support volume",
+      "type": "Bet",
+      "properties": {
+        "status": "open",
+        "confidence": "high",
+        "horizon": "this-quarter",
+        "stake": "The whole conflict epic — roughly six weeks",
+        "settles_by": "2026-10-01"
+      },
+      "relationships": {
+        "supports": [
+          "obj-retention-foundation"
+        ]
+      },
+      "outgoingLinks": [
+        "epic-offline-conflict-model"
+      ],
+      "snippet": "The theory behind epic-offline-conflict-model: most \"the app lost my work\" contacts are conflicts resolved silently against the crew. We win if support contact ",
+      "parseError": null,
+      "hash": "e7c0aef6d0db8a06c4b865c6bd39bd369830f34dd8966af803a6ae6696aaa5b4"
+    },
+    {
+      "path": "records/bets/bet-named-customer-unlocks-pipeline.md",
+      "filename": "bet-named-customer-unlocks-pipeline.md",
+      "folder": "records/bets",
+      "project": null,
+      "title": "One named customer is worth ten anonymous case studies",
+      "type": "Bet",
+      "properties": {
+        "status": "open",
+        "confidence": "low",
+        "horizon": "next-quarter",
+        "stake": "Launch timing, and a discount to the reference customer",
+        "settles_by": "2026-11-01"
+      },
+      "relationships": {
+        "supports": [
+          "obj-launch-pipeline"
+        ]
+      },
+      "outgoingLinks": [
+        "epic-launch-narrative"
+      ],
+      "snippet": "epic-launch-narrative is stuck because everything we can say is unattributed. The bet is that a single named logo moves more pipeline than a larger volume of an",
+      "parseError": null,
+      "hash": "509dcda22bc10db668de2c8f20538bb5759ce653a67cd3447aed451bb03a44a4"
+    },
+    {
+      "path": "records/bets/bet-office-hours-beat-webinars.md",
+      "filename": "bet-office-hours-beat-webinars.md",
+      "folder": "records/bets",
+      "project": null,
+      "title": "Office hours beat webinars",
+      "type": "Bet",
+      "properties": {
+        "status": "open",
+        "confidence": "medium",
+        "horizon": "this-quarter",
+        "stake": "Four weeks of one person, and the Q3 webinar slot",
+        "settles_by": "2026-09-15"
+      },
+      "relationships": {
+        "supports": [
+          "obj-launch-pipeline"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Scheduled webinars ask people to show up at our time. Recurring office hours ask them to show up at theirs. We win if attendance per session is lower but total ",
+      "parseError": null,
+      "hash": "93b232fe9a75773de568fb973cd1148b05d67e6d853508936d877933e050db47"
+    },
+    {
+      "path": "records/bets/bet-paper-fallback-is-the-real-competitor.md",
+      "filename": "bet-paper-fallback-is-the-real-competitor.md",
+      "folder": "records/bets",
+      "project": null,
+      "title": "Our competitor is paper, not the other vendor",
+      "type": "Bet",
+      "properties": {
+        "status": "won",
+        "confidence": "high",
+        "horizon": "this-year",
+        "stake": "Positioning for the whole launch",
+        "settles_by": "2026-07-01"
+      },
+      "relationships": {
+        "supports": [
+          "obj-field-app-readiness"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Crews that churn do not move to a competing product. They go back to a clipboard. Settled won. Exit interviews on the pilot: five of six lapsed crews reverted t",
+      "parseError": null,
+      "hash": "67b11d2a7f662c5dbf92c5f85564ba98254902916b17c0ae1798fa2fa45d3d03"
+    },
+    {
+      "path": "records/decisions/dec-conflict-resolution-is-manual.md",
+      "filename": "dec-conflict-resolution-is-manual.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "Conflicts are resolved by a person, not a rule",
+      "type": "Decision",
+      "properties": {
+        "status": "accepted",
+        "decided": "2026-07-14"
+      },
+      "relationships": {
+        "affects": [
+          "offline-sync-hardening"
+        ],
+        "deciders": [
+          "tom-keller",
+          "elena-vasquez"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Two crews editing the same job offline produce two valid histories. We can merge automatically, pick a winner by timestamp, or ask someone. Automatic merge was ",
+      "parseError": null,
+      "hash": "a3ace292a2923946c30e1b889858921342d2e87622242eb90044b3351702e4ae"
+    },
+    {
+      "path": "records/decisions/dec-no-custom-scanner-hardware.md",
+      "filename": "dec-no-custom-scanner-hardware.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "No custom scanner hardware",
+      "type": "Decision",
+      "properties": {
+        "status": "accepted",
+        "decided": "2026-07-21"
+      },
+      "relationships": {
+        "affects": [
+          "phoenix-warehouse-rollout"
+        ],
+        "deciders": [
+          "marcus-webb",
+          "elena-vasquez"
+        ]
+      },
+      "outgoingLinks": [
+        "risk-scanner-delivery"
+      ],
+      "snippet": "The scanner vendor's lead time put risk-scanner-delivery on the critical path. Building our own sled was floated as a way around it. Use the phone camera as the",
+      "parseError": null,
+      "hash": "e8e0c78be816670c75d09e8d64f5c0251902fcc2086b7d4e082051795935c0e7"
+    },
+    {
+      "path": "records/decisions/dec-offline-window-72h.md",
+      "filename": "dec-offline-window-72h.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "Offline window is 72 hours, not indefinite",
+      "type": "Decision",
+      "properties": {
+        "status": "accepted",
+        "decided": "2026-06-28"
+      },
+      "relationships": {
+        "affects": [
+          "offline-sync-hardening"
+        ],
+        "deciders": [
+          "tom-keller",
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Crews asked for \"works offline\" without a bound. An unbounded window means unbounded local state, and conflict probability that climbs with the age of the diver",
+      "parseError": null,
+      "hash": "c9f05098e605ce71a1d8aab64cea84a8e9fa660d89ff7e0fbbd3397446b4bd6f"
+    },
+    {
+      "path": "records/decisions/dec-one-app-not-two.md",
+      "filename": "dec-one-app-not-two.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "One app for crews and supervisors",
+      "type": "Decision",
+      "properties": {
+        "status": "superseded",
+        "decided": "2026-04-02"
+      },
+      "relationships": {
+        "affects": [
+          "field-app-launch-campaign"
+        ],
+        "deciders": [
+          "elena-vasquez",
+          "lena-ortiz"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-supervisor-web-console"
+      ],
+      "snippet": "Supervisors need scheduling and approvals; crews need jobs. Two audiences, one codebase, or two apps. Ship one app with role-based surfaces. Superseded by dec-s",
+      "parseError": null,
+      "hash": "cbdb53a635e957d35b98a6546aa53d1c55e35bd1548db6269fe876c0ac4d167f"
+    },
+    {
+      "path": "records/decisions/dec-postpone-multi-tenant-billing.md",
+      "filename": "dec-postpone-multi-tenant-billing.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "Postpone multi-tenant billing to next quarter",
+      "type": "Decision",
+      "properties": {
+        "status": "proposed",
+        "decided": "2026-07-27"
+      },
+      "relationships": {
+        "affects": [
+          "guided-onboarding-ga"
+        ],
+        "deciders": [
+          "ana-rios"
+        ]
+      },
+      "outgoingLinks": [
+        "epic-first-week-activation"
+      ],
+      "snippet": "Two enterprise prospects have asked for consolidated billing across subsidiaries. Neither has signed. Do not build it this quarter. Revisit when a signed contra",
+      "parseError": null,
+      "hash": "d8927a697cfac1744e2742ff29693d16a67d5241fdb9a0b8f28fbff9bee73b8d"
+    },
+    {
+      "path": "records/decisions/dec-supervisor-web-console.md",
+      "filename": "dec-supervisor-web-console.md",
+      "folder": "records/decisions",
+      "project": null,
+      "title": "Supervisors get a web console",
+      "type": "Decision",
+      "properties": {
+        "status": "accepted",
+        "decided": "2026-07-08"
+      },
+      "relationships": {
+        "affects": [
+          "field-app-launch-campaign"
+        ],
+        "deciders": [
+          "elena-vasquez",
+          "lena-ortiz",
+          "ana-rios"
+        ],
+        "supersedes": [
+          "dec-one-app-not-two"
+        ]
+      },
+      "outgoingLinks": [
+        "risk-messaging-unvalidated"
+      ],
+      "snippet": "Six weeks of usage data: supervisors open the app on a phone under 4% of sessions, and every scheduling action they take is followed by a desktop login. Split t",
+      "parseError": null,
+      "hash": "f94321096f7a367f8f486348ffb4289bfaf18385ea16450c44a13db03968f7e4"
+    },
+    {
+      "path": "records/epics/epic-first-week-activation.md",
+      "filename": "epic-first-week-activation.md",
+      "folder": "records/epics",
+      "project": null,
+      "title": "First-week activation",
+      "type": "Epic",
+      "properties": {
+        "status": "building",
+        "target": "2026-08-30"
+      },
+      "relationships": {
+        "delivers": [
+          "kr-onboarding-completion",
+          "kr-weekly-active-crews"
+        ],
+        "owner": [
+          "maya-chen"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Guided onboarding gets a crew through setup. It does not get them through their first real job, which is where they actually decide whether to keep using this. ",
+      "parseError": null,
+      "hash": "d102d17ee79afb0d1903d40c5e2f6d8db8ed824b86a89f0b543fc45fc44715cf"
+    },
+    {
+      "path": "records/epics/epic-launch-narrative.md",
+      "filename": "epic-launch-narrative.md",
+      "folder": "records/epics",
+      "project": null,
+      "title": "Launch narrative and proof",
+      "type": "Epic",
+      "properties": {
+        "status": "shaping",
+        "target": "2026-09-30"
+      },
+      "relationships": {
+        "delivers": [
+          "kr-qualified-leads"
+        ],
+        "owner": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The campaign has reach and no proof. Every asset currently asserts that crews save time; none of them show it. Shaping is blocked on having one customer willing",
+      "parseError": null,
+      "hash": "16bc4d57112258224e50b5d0a24b36e87230406425c3b9b3a1c3531462868b9c"
+    },
+    {
+      "path": "records/epics/epic-offline-conflict-model.md",
+      "filename": "epic-offline-conflict-model.md",
+      "folder": "records/epics",
+      "project": null,
+      "title": "A conflict model crews can understand",
+      "type": "Epic",
+      "properties": {
+        "status": "building",
+        "target": "2026-09-12"
+      },
+      "relationships": {
+        "delivers": [
+          "kr-sync-error-rate"
+        ],
+        "owner": [
+          "tom-keller"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Sync currently resolves conflicts last-write-wins and tells nobody. Crews discover it when a job they closed reopens. The epic replaces silent resolution with a",
+      "parseError": null,
+      "hash": "f96e9e607626a699f43df87d80a485db823e4b63cfc6166f42a057bddf3a9f55"
+    },
+    {
+      "path": "records/epics/epic-warehouse-cutover.md",
+      "filename": "epic-warehouse-cutover.md",
+      "folder": "records/epics",
+      "project": null,
+      "title": "Phoenix warehouse cutover",
+      "type": "Epic",
+      "properties": {
+        "status": "committed",
+        "target": "2026-08-21"
+      },
+      "relationships": {
+        "delivers": [
+          "kr-warehouse-go-live"
+        ],
+        "owner": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Everything that has to be true on go-live night, in the order it has to be true. The rehearsal item is the one that keeps slipping, and it is the only one whose",
+      "parseError": null,
+      "hash": "07fdb07b759988872a40b8df06666da5d415cf4f0d883baa1ba1aee8b09b6f0f"
+    },
+    {
+      "path": "records/key-results/kr-onboarding-completion.md",
+      "filename": "kr-onboarding-completion.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Onboarding completion rate ≥ 80%",
+      "type": "Key result",
+      "properties": {
+        "status": "on-track",
+        "metric": "First-run onboarding completion rate",
+        "baseline": 51,
+        "target_value": 80,
+        "current_value": 73,
+        "attainment": 76
+      },
+      "relationships": {
+        "deliverables": [
+          "fld-1",
+          "fld-3",
+          "fld-4"
+        ],
+        "objective": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "ana-rios"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Share of new crews finishing first-run setup without support contact.",
+      "parseError": null,
+      "hash": "0c04fba78e4c8a7b6f1dc04732eb71fe9bc8f0cfbee591ec98ed9ac77f3b1d7a"
+    },
+    {
+      "path": "records/key-results/kr-qualified-leads.md",
+      "filename": "kr-qualified-leads.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "500 marketing-qualified leads",
+      "type": "Key result",
+      "properties": {
+        "status": "off-track",
+        "metric": "Marketing-qualified leads",
+        "baseline": 120,
+        "target_value": 500,
+        "current_value": 210,
+        "attainment": 34
+      },
+      "relationships": {
+        "deliverables": [
+          "lnc-1",
+          "lnc-3",
+          "lnc-4"
+        ],
+        "objective": [
+          "obj-launch-pipeline"
+        ],
+        "owner": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Email sequence is still in drafting, which is the main reason this is behind.",
+      "parseError": null,
+      "hash": "e634285e30cd05e98468dca49a792db1acf1e4db72594adbd13fef3c0d5f74c1"
+    },
+    {
+      "path": "records/key-results/kr-support-contact-rate.md",
+      "filename": "kr-support-contact-rate.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Support contacts per 100 crews per week",
+      "type": "Key result",
+      "properties": {
+        "status": "on-track",
+        "baseline": 22,
+        "target_value": 12,
+        "current_value": 16,
+        "attainment": 60
+      },
+      "relationships": {
+        "objective": [
+          "obj-retention-foundation"
+        ],
+        "owner": [
+          "dana-fox"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The proxy for \"the product is confusing\". Falling steadily since the guided onboarding work shipped. Watch for the floor: some contact volume is healthy, and dr",
+      "parseError": null,
+      "hash": "61e536110ad7d178f2522f370e639b36f4d33f6eb7496f711657a977c14f4f8a"
+    },
+    {
+      "path": "records/key-results/kr-sync-error-rate.md",
+      "filename": "kr-sync-error-rate.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Offline sync error rate under 1%",
+      "type": "Key result",
+      "properties": {
+        "status": "at-risk",
+        "metric": "Sync errors per 1000 jobs",
+        "baseline": 8.2,
+        "target_value": 1,
+        "current_value": 2.4,
+        "attainment": 45
+      },
+      "relationships": {
+        "deliverables": [
+          "syn-1",
+          "syn-3"
+        ],
+        "objective": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "sam-ito"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Duplicate jobs after reconnect are the biggest remaining contributor.",
+      "parseError": null,
+      "hash": "440fd951ceb4c1e1e0d05e3ceec7bcd4340b07ea84194fd71afddd6a62b74c11"
+    },
+    {
+      "path": "records/key-results/kr-warehouse-go-live.md",
+      "filename": "kr-warehouse-go-live.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Phoenix warehouse live on schedule",
+      "type": "Key result",
+      "properties": {
+        "status": "on-track",
+        "metric": "Phoenix warehouse live on the new stack",
+        "baseline": 0,
+        "target_value": 100,
+        "current_value": 88,
+        "attainment": 88
+      },
+      "relationships": {
+        "deliverables": [
+          "ops-5",
+          "ops-8"
+        ],
+        "objective": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Racks are installed; scanner provisioning is the remaining path to go-live.",
+      "parseError": null,
+      "hash": "8ac6f9381981caf342d82bc0cea0eb3c19f73e54fe25acbf268a231a8643187d"
+    },
+    {
+      "path": "records/key-results/kr-webinar-attendance.md",
+      "filename": "kr-webinar-attendance.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Field champions webinar hits 200 attendees",
+      "type": "Key result",
+      "properties": {
+        "status": "on-track",
+        "metric": "Live attendees at the field champions webinar",
+        "baseline": 0,
+        "target_value": 200,
+        "current_value": 130,
+        "attainment": 65
+      },
+      "relationships": {
+        "deliverables": [
+          "lnc-5"
+        ],
+        "objective": [
+          "obj-launch-pipeline"
+        ],
+        "owner": [
+          "maya-chen"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Registrations are ahead of pace; attendance rate is the risk.",
+      "parseError": null,
+      "hash": "aafc8dd5647ed7a528cd6f1edaa0f8ebd8582822357d141ce8b181b58e7b9e52"
+    },
+    {
+      "path": "records/key-results/kr-weekly-active-crews.md",
+      "filename": "kr-weekly-active-crews.md",
+      "folder": "records/key-results",
+      "project": null,
+      "title": "Weekly active crews",
+      "type": "Key result",
+      "properties": {
+        "status": "at-risk",
+        "baseline": 34,
+        "target_value": 70,
+        "current_value": 41,
+        "attainment": 19
+      },
+      "relationships": {
+        "objective": [
+          "obj-retention-foundation"
+        ],
+        "owner": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "A crew counts as active when at least one member completes a job in the app in a calendar week. Movement has been slow and most of it came from the Phoenix pilo",
+      "parseError": null,
+      "hash": "fb523e5b91eee4eb6df5b40752e069b97e3751021937be05799ce9fc62aade64"
+    },
+    {
+      "path": "records/objectives/obj-field-app-readiness.md",
+      "filename": "obj-field-app-readiness.md",
+      "folder": "records/objectives",
+      "project": null,
+      "title": "Field App reaches production readiness",
+      "type": "Objective",
+      "properties": {
+        "status": "on-track",
+        "quarter": "2026-q3"
+      },
+      "relationships": {
+        "key_results": [
+          "kr-onboarding-completion",
+          "kr-sync-error-rate",
+          "kr-warehouse-go-live"
+        ],
+        "owner": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Everything shipping this quarter ladders up to one outcome: crews can run a full day on the Field App without a fallback. Three separate programs (onboarding, o",
+      "parseError": null,
+      "hash": "f6bbf0ebf44e82ffecd6317a84d7106783a2f4da4074f0db613d6f635ae5443a"
+    },
+    {
+      "path": "records/objectives/obj-launch-pipeline.md",
+      "filename": "obj-launch-pipeline.md",
+      "folder": "records/objectives",
+      "project": null,
+      "title": "Launch campaign drives qualified pipeline",
+      "type": "Objective",
+      "properties": {
+        "status": "at-risk",
+        "quarter": "2026-q3"
+      },
+      "relationships": {
+        "key_results": [
+          "kr-qualified-leads",
+          "kr-webinar-attendance"
+        ],
+        "owner": [
+          "josef-lang"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The launch is only a success if it produces pipeline, not impressions. Marketing work is easy to measure by output (emails sent, pages shipped). Both key result",
+      "parseError": null,
+      "hash": "8bc69663a20c6147fc88a2c784a9c614e316fc5599602b2882b20c95bc5395b5"
+    },
+    {
+      "path": "records/objectives/obj-retention-foundation.md",
+      "filename": "obj-retention-foundation.md",
+      "folder": "records/objectives",
+      "project": null,
+      "title": "Keep the crews we win",
+      "type": "Objective",
+      "properties": {
+        "status": "at-risk",
+        "quarter": "Q3 2026"
+      },
+      "relationships": {
+        "key_results": [
+          "kr-weekly-active-crews",
+          "kr-support-contact-rate"
+        ],
+        "owner": [
+          "elena-vasquez"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Acquisition is not our problem this quarter — the field app lands well and the launch pipeline is full. What we cannot yet show is that a crew still uses it in ",
+      "parseError": null,
+      "hash": "ebbd56d6e560893ecd671dc3dd8b07698d724fe0247c670a125dd304fe7b3ab7"
+    },
+    {
+      "path": "records/projects/field-app-launch-campaign.md",
+      "filename": "field-app-launch-campaign.md",
+      "folder": "records/projects",
+      "project": null,
+      "title": "Field App launch campaign",
+      "type": "Project",
+      "properties": {
+        "key": "LNC",
+        "state": "planning",
+        "color": "#D8569E"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "The GA moment: positioning, a three-touch email sequence, a refreshed landing page, and a field champions webinar.",
+      "parseError": null,
+      "hash": "f163d38445be44232eca6f26d33e8a4b44446822d6328b0045fc33327bff05b7"
+    },
+    {
+      "path": "records/projects/guided-onboarding-ga.md",
+      "filename": "guided-onboarding-ga.md",
+      "folder": "records/projects",
+      "project": null,
+      "title": "Guided onboarding GA",
+      "type": "Project",
+      "properties": {
+        "key": "FLD",
+        "state": "execution",
+        "color": "#14B8A6"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Ship the guided first-run to every field technician: role-based setup, coach marks, and a finish-line moment. GA gate is the Cycle 13 review.",
+      "parseError": null,
+      "hash": "41423001f7f5a6cba8c49c45ec2347beda041d45b2f3fbf5f5f7fff7820734a6"
+    },
+    {
+      "path": "records/projects/offline-sync-hardening.md",
+      "filename": "offline-sync-hardening.md",
+      "folder": "records/projects",
+      "project": null,
+      "title": "Offline sync hardening",
+      "type": "Project",
+      "properties": {
+        "key": "SYN",
+        "state": "planning",
+        "color": "#14B8A6"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Close the reliability gap in zero-coverage areas: conflict resolution, delta sync tuning, and a sync health dashboard.",
+      "parseError": null,
+      "hash": "02bbb3abc089d07a742ac56897b3b64d04df0a43165c042b615f6430adac6e34"
+    },
+    {
+      "path": "records/projects/phoenix-warehouse-rollout.md",
+      "filename": "phoenix-warehouse-rollout.md",
+      "folder": "records/projects",
+      "project": null,
+      "title": "Phoenix warehouse rollout",
+      "type": "Project",
+      "properties": {
+        "key": "OPS",
+        "state": "execution",
+        "color": "#E0562E"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Stand up the Phoenix distribution site: fit-out, systems provisioning, and go-live readiness by end of September.",
+      "parseError": null,
+      "hash": "ac53e9fbbcdd38814e062d82dc0ab1326be4368a5aec47e196cc33db48971769"
+    },
+    {
+      "path": "records/risks/risk-console-splits-the-team.md",
+      "filename": "risk-console-splits-the-team.md",
+      "folder": "records/risks",
+      "project": null,
+      "title": "The web console splits an already thin team",
+      "type": "Risk",
+      "properties": {
+        "status": "open",
+        "severity": "medium",
+        "mitigation": "Timebox the console to the scheduling surface only; revisit scope after go-live."
+      },
+      "relationships": {
+        "affects": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "lena-ortiz"
+        ]
+      },
+      "outgoingLinks": [
+        "dec-supervisor-web-console"
+      ],
+      "snippet": "dec-supervisor-web-console is the right call and it doubles our surface area with the same four engineers, during the quarter with a warehouse cutover in it.",
+      "parseError": null,
+      "hash": "15d459dda9cb758500877b7a9aef4952c4f8ff5a528b02c2b94be81772f639e2"
+    },
+    {
+      "path": "records/risks/risk-messaging-unvalidated.md",
+      "filename": "risk-messaging-unvalidated.md",
+      "folder": "records/risks",
+      "project": null,
+      "title": "Positioning has not been validated with customers",
+      "type": "Risk",
+      "properties": {
+        "status": "open",
+        "severity": "medium",
+        "mitigation": "Five customer interviews booked to test the message house."
+      },
+      "relationships": {
+        "affects": [
+          "obj-launch-pipeline"
+        ],
+        "owner": [
+          "josef-lang"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "The message house was written from internal input only.",
+      "parseError": null,
+      "hash": "419d92bdfc560393604efddf9e83b4a041fa2898e53179767feeb751c33d9cea"
+    },
+    {
+      "path": "records/risks/risk-rollback-unrehearsed.md",
+      "filename": "risk-rollback-unrehearsed.md",
+      "folder": "records/risks",
+      "project": null,
+      "title": "Warehouse rollback has never been rehearsed",
+      "type": "Risk",
+      "properties": {
+        "status": "open",
+        "severity": "critical",
+        "mitigation": "Run the full rollback against the staging warehouse before the go-live date locks."
+      },
+      "relationships": {
+        "affects": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "We have a cutover plan and a written rollback. Nobody has executed the rollback end to end. The step that worries me is draining the pick queue: it does not dra",
+      "parseError": null,
+      "hash": "f56ae176fe3863be4e3fff2d5ec08a1c054d83aeee52c5e5d180e4b587abab6d"
+    },
+    {
+      "path": "records/risks/risk-scanner-delivery.md",
+      "filename": "risk-scanner-delivery.md",
+      "folder": "records/risks",
+      "project": null,
+      "title": "Scanner hardware delivery is slipping",
+      "type": "Risk",
+      "properties": {
+        "status": "mitigating",
+        "severity": "high",
+        "mitigation": "Second supplier quoted; 10 loaner units confirmed for go-live week."
+      },
+      "relationships": {
+        "affects": [
+          "obj-field-app-readiness"
+        ],
+        "owner": [
+          "marcus-webb"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "40 scanners were due before install week. The vendor has moved the date twice.",
+      "parseError": null,
+      "hash": "a5350a3ecaab251357a6430717d3392e59246000a799957024f68874ab6a595c"
+    },
+    {
+      "path": "records/risks/risk-single-pilot-customer.md",
+      "filename": "risk-single-pilot-customer.md",
+      "folder": "records/risks",
+      "project": null,
+      "title": "Retention evidence rests on one pilot customer",
+      "type": "Risk",
+      "properties": {
+        "status": "mitigating",
+        "severity": "high",
+        "mitigation": "Recruit two more pilot crews outside Phoenix before treating the trend as real."
+      },
+      "relationships": {
+        "affects": [
+          "obj-retention-foundation"
+        ],
+        "owner": [
+          "priya-nair"
+        ]
+      },
+      "outgoingLinks": [],
+      "snippet": "Weekly active crews moved this month, and almost all of the movement is Phoenix. One customer's operational quirks are currently indistinguishable from a produc",
+      "parseError": null,
+      "hash": "7a4d1174013ae1b3379846978110c9bc47a13a9cb66dd1929e12628ff226bdfe"
+    },
+    {
+      "path": "records/skills/create-an-agent.md",
+      "filename": "create-an-agent.md",
+      "folder": "records/skills",
+      "project": null,
+      "title": "Create an agent",
+      "type": "Skill",
+      "properties": {
+        "slug": "create-an-agent",
+        "description": "Interview the user about a job worth delegating, then draft an Agent record they can review and activate."
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Build the user a new agent through a short interview. Never draft it from the first message alone — the quality of an agent is the quality of the questions that",
+      "parseError": null,
+      "hash": "e9fd25a87f095818e1c18c535ef43a16c061a2990dc6291a81d91c7d8b6feae9"
+    },
+    {
+      "path": "records/skills/risk-sweep.md",
+      "filename": "risk-sweep.md",
+      "folder": "records/skills",
+      "project": null,
+      "title": "Risk sweep",
+      "type": "Skill",
+      "properties": {
+        "slug": "risk-sweep",
+        "description": "Sweep open work for risks nobody has written down, and draft Risk records for the ones that matter.",
+        "arguments": [
+          {
+            "name": "scope",
+            "description": "A project or list to sweep; the whole vault when omitted."
+          }
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [
+        "wikilinks"
+      ],
+      "snippet": "Find the risks this vault is carrying but not naming. 1. Read the open records — anything with an active status — and the knowledge bundle's concepts about the ",
+      "parseError": null,
+      "hash": "1c56f3c01c14d9a6521f31e4e7e688ef46ad94c93290c477ef338173b5675f7a"
+    },
+    {
+      "path": "records/skills/weekly-review.md",
+      "filename": "weekly-review.md",
+      "folder": "records/skills",
+      "project": null,
+      "title": "Weekly review",
+      "type": "Skill",
+      "properties": {
+        "slug": "weekly-review",
+        "description": "Summarize the week — what moved, what stalled, what is at risk — from the vault's records and knowledge.",
+        "allowed-tools": "get_vault_context, search_notes, get_note, open_note"
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Prepare a weekly review of this vault. Work only from what is written down. 1. With getvaultcontext and searchnotes, find records whose status or dates changed ",
+      "parseError": null,
+      "hash": "09e7e30beb026a3b4457b8fa7c444fbae77a86c2331cec16be5aeb30836b440e"
+    },
+    {
+      "path": "sources/issues/phx-421.md",
+      "filename": "phx-421.md",
+      "folder": "sources/issues",
+      "project": null,
+      "title": "PHX-421 — Rehearse the warehouse rollback end to end",
+      "type": "Source",
+      "properties": {
+        "title": "PHX-421 — Rehearse the warehouse rollback end to end",
+        "source_id": "PHX-421",
+        "source_kind": "issue",
+        "source_url": "https://example.atlassian.net/browse/PHX-421",
+        "fetched_at": "2026-07-28T09:20:00Z",
+        "stale_after": "2026-08-27",
+        "generated": {
+          "by": "claude-code",
+          "at": "2026-07-28T09:20:00Z"
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "| Field | Value | |-------|-------| | Status | Open | | Assignee | Unassigned | | Priority | High | | Reporter | Marcus Webb | | Created | 2026-07-14 | Execute ",
+      "parseError": null,
+      "hash": "e834dbe2fcb27899c079820238ef8dac699c9b5a9b44160ba40ccf1a8e54210f"
+    },
+    {
+      "path": "strategy/strategy.md",
+      "filename": "strategy.md",
+      "folder": "strategy",
+      "project": null,
+      "title": "Strategy",
+      "type": "Collection",
+      "properties": {
+        "icon": "target",
+        "color": "#8B5CF6",
+        "order": 0
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "What we are trying to be true by the end of the year, and the work that would make it so. :::columns ::::column width=2 :::: ::::column The nesting is one group",
+      "parseError": null,
+      "hash": "088de74721bcbdf2c2db0069038df21dd7591bf6125b32bed561d9f96f71c4ba"
+    },
+    {
+      "path": "strategy/systems-map.md",
+      "filename": "systems-map.md",
+      "folder": "strategy",
+      "project": null,
+      "title": "Systems map",
+      "type": null,
+      "properties": {},
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "How the demo product's pieces talk to each other. The flowchart below uses the default layout; the last one uses ELK, which proves the optional engine loads.",
+      "parseError": null,
+      "hash": "25c4d20592e8f5fa2c9e57853e7082fb95bb70d92d38ca44edd17e8d019fac57"
+    },
+    {
+      "path": "templates/meeting.md",
+      "filename": "meeting.md",
+      "folder": "templates",
+      "project": null,
+      "title": "{{title}}",
+      "type": "Meeting",
+      "properties": {
+        "date": "{{date}}"
+      },
+      "relationships": {},
+      "outgoingLinks": [
+        "maya-chen"
+      ],
+      "snippet": "Date: {{date}} Attendees: @maya-chen Topic one [ ] Follow up 📅 {{date}}",
+      "parseError": null,
+      "hash": "92dbc814f1ff3d397d6b4ca3c8755a10b56c546af1da853bad58af0b21516f4e"
+    },
+    {
+      "path": "templates/prd.md",
+      "filename": "prd.md",
+      "folder": "templates",
+      "project": null,
+      "title": "{{title}}",
+      "type": null,
+      "properties": {
+        "fill": "A product requirements draft. Fill the four sections below from the records and knowledge already in context — the project this sits under, what the base believes about it, and any Risk records that touch it. Cite the note each claim came from."
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Drafted {{date}}.",
+      "parseError": null,
+      "hash": "42724eff55dd8ae90085b3c78a04055bc2f51a140d95237752d74e8b44f05fc1"
+    },
+    {
+      "path": "types/bet.md",
+      "filename": "bet.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Bet",
+      "type": "Type",
+      "properties": {
+        "icon": "dice-5",
+        "color": "#F59E0B",
+        "statuses": [
+          {
+            "id": "open",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "won",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "lost",
+            "group": "closed",
+            "color": "#DE3B4E"
+          },
+          {
+            "id": "void",
+            "group": "closed",
+            "color": "#A8AFC2",
+            "hollow": true
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "confidence": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "low",
+                "color": "#DE3B4E"
+              },
+              {
+                "id": "medium",
+                "color": "#DE8F0A"
+              },
+              {
+                "id": "high",
+                "color": "#1F9D61"
+              }
+            ]
+          },
+          "horizon": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "this-quarter",
+                "color": "#3D8BE8"
+              },
+              {
+                "id": "next-quarter",
+                "color": "#6580EC"
+              },
+              {
+                "id": "this-year",
+                "color": "#A8AFC2"
+              }
+            ]
+          },
+          "stake": {
+            "kind": "text"
+          },
+          "supports": {
+            "kind": "relation",
+            "target": "Objective"
+          },
+          "settles_by": {
+            "kind": "date"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Something we are choosing to believe before we have the evidence, written down with what would settle it. A bet is not a task and not a goal. It is a claim with",
+      "parseError": null,
+      "hash": "df02c85221dfaf9f86c9799c117daf4bfdf74ecfe97d57274d5a9e191004791f"
+    },
+    {
+      "path": "types/decision.md",
+      "filename": "decision.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Decision",
+      "type": "Type",
+      "properties": {
+        "icon": "gavel",
+        "color": "#0EA5E9",
+        "statuses": [
+          {
+            "id": "proposed",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "accepted",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "superseded",
+            "group": "closed",
+            "color": "#A8AFC2",
+            "hollow": true
+          },
+          {
+            "id": "rejected",
+            "group": "closed",
+            "color": "#7E8699"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "decided": {
+            "kind": "date"
+          },
+          "deciders": {
+            "kind": "person"
+          },
+          "affects": {
+            "kind": "relation",
+            "target": "Project"
+          },
+          "supersedes": {
+            "kind": "relation",
+            "target": "Decision"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A choice that was expensive to make and would be expensive to remake. Decisions are written down because the reasoning decays faster than the outcome: six month",
+      "parseError": null,
+      "hash": "6a1f9e34edb724d76d7a39b7b0e033aefaca345ec39ce111955c849866a69f6f"
+    },
+    {
+      "path": "types/epic.md",
+      "filename": "epic.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Epic",
+      "type": "Type",
+      "properties": {
+        "icon": "layers",
+        "color": "#8B5CF6",
+        "statuses": [
+          {
+            "id": "shaping",
+            "group": "active",
+            "color": "#A8AFC2",
+            "hollow": true
+          },
+          {
+            "id": "committed",
+            "group": "active",
+            "color": "#6580EC"
+          },
+          {
+            "id": "building",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "shipped",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "dropped",
+            "group": "closed",
+            "color": "#A8AFC2"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "target": {
+            "kind": "date"
+          },
+          "delivers": {
+            "kind": "relation",
+            "target": "Key result"
+          },
+          "progress": {
+            "kind": "rollup",
+            "from": {
+              "type": "Work item",
+              "field": "epic"
+            },
+            "property": "status",
+            "calculate": "count"
+          }
+        },
+        "tabs": [
+          {
+            "id": "overview",
+            "name": "Overview",
+            "content": "overview"
+          },
+          {
+            "id": "work-items",
+            "name": "Work items",
+            "icon": "square-check",
+            "content": "view",
+            "source": {
+              "type": "Work item"
+            },
+            "scope": "related"
+          }
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A body of work large enough to plan but small enough to finish: a handful of work items that only make sense shipped together. An epic points at the key result ",
+      "parseError": null,
+      "hash": "5f73cafffe31383ad4f3e0af8063df2282fc7b9d2bf07b8ca09fe3ae63f651b4"
+    },
+    {
+      "path": "types/key-result.md",
+      "filename": "key-result.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Key result",
+      "type": "Type",
+      "properties": {
+        "icon": "gauge",
+        "color": "#38BDF8",
+        "statuses": [
+          {
+            "id": "not-started",
+            "group": "active",
+            "color": "#A8AFC2",
+            "hollow": true
+          },
+          {
+            "id": "on-track",
+            "group": "active",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "at-risk",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "off-track",
+            "group": "active",
+            "color": "#DE3B4E"
+          },
+          {
+            "id": "achieved",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "missed",
+            "group": "closed",
+            "color": "#7E8699"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "objective": {
+            "kind": "relation",
+            "target": "Objective"
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "metric": {
+            "kind": "text"
+          },
+          "baseline": {
+            "kind": "number"
+          },
+          "target_value": {
+            "kind": "number"
+          },
+          "current_value": {
+            "kind": "number"
+          },
+          "attainment": {
+            "kind": "number",
+            "format": "progress",
+            "precision": 0
+          },
+          "deliverables": {
+            "kind": "relation",
+            "target": "Work item"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A measurable result under an objective. objective: points back up (for navigation and grouping), deliverables: points down at the work items that move the numbe",
+      "parseError": null,
+      "hash": "6d85bb26d0a81f3ec418489ccb75c4d90bc798aa632e07fa5a1e124a84c63cea"
+    },
+    {
+      "path": "types/meeting.md",
+      "filename": "meeting.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Meeting",
+      "type": "Type",
+      "properties": {
+        "icon": "calendar-days",
+        "color": "#8B7CF6",
+        "fields": {
+          "date": {
+            "kind": "date"
+          },
+          "attendees": {
+            "kind": "person"
+          },
+          "decisions": {
+            "kind": "text"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Meeting notes. A meeting is a record: it opens in the record panel, carries its date and attendees as properties, and shows up in views — never in Docs.",
+      "parseError": null,
+      "hash": "c6c075d921b5b5c8f5437cc7fa47c84b14b52fbb6647d653a15a06842579c7b7"
+    },
+    {
+      "path": "types/objective.md",
+      "filename": "objective.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Objective",
+      "type": "Type",
+      "properties": {
+        "icon": "target",
+        "color": "#8B7CF6",
+        "statuses": [
+          {
+            "id": "not-started",
+            "group": "active",
+            "color": "#A8AFC2",
+            "hollow": true
+          },
+          {
+            "id": "on-track",
+            "group": "active",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "at-risk",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "off-track",
+            "group": "active",
+            "color": "#DE3B4E"
+          },
+          {
+            "id": "achieved",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "missed",
+            "group": "closed",
+            "color": "#7E8699"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "quarter": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "2026-q3",
+                "label": "2026 Q3",
+                "color": "#6580EC"
+              },
+              {
+                "id": "2026-q4",
+                "label": "2026 Q4",
+                "color": "#38BDF8"
+              }
+            ]
+          },
+          "key_results": {
+            "kind": "relation",
+            "target": "Key result"
+          },
+          "progress": {
+            "kind": "rollup",
+            "relation": "key_results",
+            "property": "attainment",
+            "calculate": "avg",
+            "format": "progress",
+            "precision": 0
+          },
+          "key_result_count": {
+            "kind": "rollup",
+            "relation": "key_results",
+            "calculate": "count"
+          }
+        },
+        "views": [
+          {
+            "id": "okr-tree",
+            "name": "OKR tree",
+            "icon": null,
+            "filters": null,
+            "presentation": {
+              "type": "table",
+              "group": [
+                {
+                  "field": "objective",
+                  "descend": {
+                    "direction": "reverse",
+                    "type": "Key result",
+                    "field": "objective"
+                  }
+                },
+                {
+                  "field": "deliverables",
+                  "descend": {
+                    "direction": "forward",
+                    "field": "deliverables"
+                  }
+                }
+              ],
+              "sort": [
+                {
+                  "field": "title",
+                  "dir": "asc"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "owner"
+                },
+                {
+                  "field": "progress"
+                },
+                {
+                  "field": "key_result_count"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A quarterly outcome. The objective OWNS the link to its key results (keyresults:) — rollups follow links forward, so the parent lists its children. progress ave",
+      "parseError": null,
+      "hash": "1f17e45fe55beed2f12b79bef01f2f2663314d3b280d1276fb3100d0fde24580"
+    },
+    {
+      "path": "types/person.md",
+      "filename": "person.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Person",
+      "type": "Type",
+      "properties": {
+        "icon": "user",
+        "color": "#38BDF8",
+        "fields": {
+          "role": {
+            "kind": "text"
+          },
+          "team": {
+            "kind": "text"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "People are assignees and leads. Person notes are referenced by wikilink from work items.",
+      "parseError": null,
+      "hash": "6f7bf409c53c60fddda84b73d305351559595c1c9da8d8292ad88f0e0770526e"
+    },
+    {
+      "path": "types/project.md",
+      "filename": "project.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Project",
+      "type": "Type",
+      "properties": {
+        "icon": "folder-kanban",
+        "color": "#14B8A6",
+        "fields": {
+          "key": {
+            "kind": "text"
+          },
+          "state": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "draft",
+                "color": "#A8AFC2",
+                "hollow": true
+              },
+              {
+                "id": "planning",
+                "color": "#6580EC"
+              },
+              {
+                "id": "execution",
+                "color": "#DE8F0A"
+              },
+              {
+                "id": "monitoring",
+                "color": "#38BDF8"
+              },
+              {
+                "id": "completed",
+                "color": "#1F9D61"
+              }
+            ]
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A project is an ordinary record: it carries the key and state, and work items point at it with a project: relation.",
+      "parseError": null,
+      "hash": "d0d3719b17d048ace25c3c3c83cd2d21c3c948190d39dae6aeafa62c58e19cf8"
+    },
+    {
+      "path": "types/risk.md",
+      "filename": "risk.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Risk",
+      "type": "Type",
+      "properties": {
+        "icon": "triangle-alert",
+        "color": "#DE3B4E",
+        "statuses": [
+          {
+            "id": "open",
+            "group": "active",
+            "color": "#DE3B4E"
+          },
+          {
+            "id": "mitigating",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "accepted",
+            "group": "done",
+            "color": "#7E8699"
+          },
+          {
+            "id": "retired",
+            "group": "closed",
+            "color": "#A8AFC2",
+            "hollow": true
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "severity": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "low",
+                "color": "#A8AFC2"
+              },
+              {
+                "id": "medium",
+                "color": "#3D8BE8"
+              },
+              {
+                "id": "high",
+                "color": "#DE8F0A"
+              },
+              {
+                "id": "critical",
+                "color": "#DE3B4E"
+              }
+            ]
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "affects": {
+            "kind": "relation",
+            "target": "Objective"
+          },
+          "mitigation": {
+            "kind": "text"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Something that could stop an objective landing. A risk earns its own type because it has its own fields and lifecycle; a blocker, by contrast, is just a relatio",
+      "parseError": null,
+      "hash": "a9c497a3ae78d3504b3cc1d7e02fca4c71af652a522d4173fdf5fbb4306deadb"
+    },
+    {
+      "path": "types/source.md",
+      "filename": "source.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Source",
+      "type": "Type",
+      "properties": {
+        "icon": "link",
+        "color": "#64748B",
+        "display": "doc",
+        "fields": {
+          "source_url": {
+            "kind": "url"
+          },
+          "source_id": {
+            "kind": "text"
+          },
+          "fetched_at": {
+            "kind": "date"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "A local copy of something fetched from another system — a ticket, a wiki page. The assistant writes these with cachesource so the same ticket is fetched once ra",
+      "parseError": null,
+      "hash": "8b6319305492ada0cad25159b2299f7d00eaa8e14eb332819d059a5e8a9c387a"
+    },
+    {
+      "path": "types/spec.md",
+      "filename": "spec.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Spec",
+      "type": "Type",
+      "properties": {
+        "icon": "file-text",
+        "color": "#0EA5E9",
+        "fields": {
+          "status": {
+            "kind": "select",
+            "options": [
+              "draft",
+              "in review",
+              "approved"
+            ]
+          },
+          "owner": {
+            "kind": "person"
+          },
+          "project": {
+            "kind": "relation",
+            "target": "Project"
+          }
+        }
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Written specifications — PRDs, design docs, proposals. A spec is a record with a status and an owner; its prose lives in the record's body.",
+      "parseError": null,
+      "hash": "409e965dcee91f6b59b331917eaa33349755a0ea48a9b372025fe0d04090500c"
+    },
+    {
+      "path": "types/work-item.md",
+      "filename": "work-item.md",
+      "folder": "types",
+      "project": "types/project.md",
+      "title": "Work item",
+      "type": "Type",
+      "properties": {
+        "icon": "square-check",
+        "color": "#3D8BE8",
+        "statuses": [
+          {
+            "id": "backlog",
+            "group": "active",
+            "color": "#A8AFC2",
+            "hollow": true
+          },
+          {
+            "id": "todo",
+            "group": "active",
+            "color": "#7E8699"
+          },
+          {
+            "id": "progress",
+            "group": "active",
+            "color": "#DE8F0A"
+          },
+          {
+            "id": "review",
+            "group": "active",
+            "color": "#38BDF8"
+          },
+          {
+            "id": "done",
+            "group": "done",
+            "color": "#1F9D61"
+          },
+          {
+            "id": "cancelled",
+            "group": "closed",
+            "color": "#A8AFC2"
+          }
+        ],
+        "fields": {
+          "status": {
+            "kind": "status"
+          },
+          "priority": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "urgent",
+                "color": "#DE3B4E"
+              },
+              {
+                "id": "high",
+                "color": "#DE8F0A"
+              },
+              {
+                "id": "medium",
+                "color": "#3D8BE8"
+              },
+              {
+                "id": "low",
+                "color": "#A8AFC2"
+              },
+              {
+                "id": "none",
+                "color": "#7E8699"
+              }
+            ]
+          },
+          "assignee": {
+            "kind": "person"
+          },
+          "due": {
+            "kind": "date"
+          },
+          "window": {
+            "kind": "daterange"
+          },
+          "estimate": {
+            "kind": "select",
+            "options": [
+              {
+                "id": "XS"
+              },
+              {
+                "id": "S"
+              },
+              {
+                "id": "M"
+              },
+              {
+                "id": "L"
+              },
+              {
+                "id": "XL"
+              }
+            ]
+          },
+          "epic": {
+            "kind": "relation",
+            "target": "Epic"
+          },
+          "blocked_by": {
+            "kind": "relation",
+            "target": "Work item"
+          }
+        },
+        "layout": {
+          "heading": [
+            "status",
+            "priority"
+          ],
+          "groups": [
+            {
+              "id": "planning",
+              "name": "Planning",
+              "fields": [
+                "assignee",
+                "due",
+                "estimate"
+              ]
+            }
+          ]
+        },
+        "views": [
+          {
+            "id": "all",
+            "name": "All",
+            "icon": null,
+            "filters": null,
+            "presentation": {
+              "type": "table",
+              "group": [
+                {
+                  "field": "status"
+                }
+              ],
+              "sort": [
+                {
+                  "field": "due",
+                  "dir": "asc"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "priority"
+                },
+                {
+                  "field": "assignee"
+                },
+                {
+                  "field": "due"
+                },
+                {
+                  "field": "estimate"
+                }
+              ]
+            }
+          },
+          {
+            "id": "at-risk-work",
+            "name": "At risk",
+            "icon": null,
+            "filters": {
+              "all": [
+                {
+                  "field": "priority",
+                  "op": "any_of",
+                  "value": [
+                    "urgent",
+                    "high"
+                  ]
+                },
+                {
+                  "any": [
+                    {
+                      "field": "status",
+                      "op": "equals",
+                      "value": "progress"
+                    },
+                    {
+                      "field": "status",
+                      "op": "equals",
+                      "value": "review"
+                    }
+                  ]
+                }
+              ]
+            },
+            "presentation": {
+              "type": "table",
+              "group": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "assignee"
+                }
+              ],
+              "sort": [
+                {
+                  "field": "due",
+                  "dir": "asc"
+                },
+                {
+                  "field": "priority",
+                  "dir": "asc"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "priority"
+                },
+                {
+                  "field": "assignee"
+                },
+                {
+                  "field": "due",
+                  "width": 120
+                },
+                {
+                  "field": "estimate"
+                }
+              ]
+            }
+          },
+          {
+            "id": "this-month",
+            "name": "This month",
+            "icon": null,
+            "filters": null,
+            "presentation": {
+              "type": "calendar",
+              "group": [],
+              "sort": [
+                {
+                  "field": "due",
+                  "dir": "asc"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "assignee"
+                }
+              ],
+              "dateField": "window"
+            }
+          },
+          {
+            "id": "delivery-schedule",
+            "name": "Delivery schedule",
+            "icon": null,
+            "filters": null,
+            "presentation": {
+              "type": "gantt",
+              "group": [
+                {
+                  "field": "status"
+                }
+              ],
+              "sort": [
+                {
+                  "field": "due",
+                  "dir": "asc"
+                }
+              ],
+              "columns": [
+                {
+                  "field": "status"
+                },
+                {
+                  "field": "assignee"
+                },
+                {
+                  "field": "due"
+                },
+                {
+                  "field": "estimate"
+                }
+              ],
+              "dateField": "window",
+              "zoom": "month",
+              "dependencyField": "blocked_by"
+            }
+          }
+        ]
+      },
+      "relationships": {},
+      "outgoingLinks": [],
+      "snippet": "Work items are the unit of delivery: tasks, bugs, and milestones tracked on project boards. blockedby is how blocking is modelled — a relation between two items",
+      "parseError": null,
+      "hash": "004afb55b4b265d06e21e1a5e5ab5c4d16bb4d7d0f13179172a60502f0b18f14"
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "items/fld-7.md",
+      "content": "---\ntype: Work item\nkey: FLD-7\nstatus: progress\npriority: urgent\nproject: \"[[guided-onboarding-ga]]\"\n---\n\n# Checklist stalls on step 3 offline\n\nSteps to reproduce the stall, see [[offline-sync-hardening]].\n",
+      "entry": {
+        "path": "items/fld-7.md",
+        "filename": "fld-7.md",
+        "folder": "items",
+        "project": null,
+        "title": "Checklist stalls on step 3 offline",
+        "type": "Work item",
+        "properties": {
+          "key": "FLD-7",
+          "status": "progress",
+          "priority": "urgent"
+        },
+        "relationships": {
+          "project": [
+            "guided-onboarding-ga"
+          ]
+        },
+        "outgoingLinks": [
+          "offline-sync-hardening"
+        ],
+        "snippet": "Steps to reproduce the stall, see offline-sync-hardening.",
+        "parseError": null,
+        "hash": "5e118f3f33f4428afa4004abcffdc635e8540f301fa0759b5a0b618f5d7b586c"
+      }
+    },
+    {
+      "path": "items/broken.md",
+      "content": "---\ntype: [unclosed\nstatus: todo\n---\n\n# Broken note\n",
+      "entry": {
+        "path": "items/broken.md",
+        "filename": "broken.md",
+        "folder": "items",
+        "project": null,
+        "title": "Broken note",
+        "type": null,
+        "properties": {},
+        "relationships": {},
+        "outgoingLinks": [],
+        "snippet": "",
+        "parseError": "did not find expected ',' or ']' at line 2 column 7, while parsing a flow sequence at line 1 column 7",
+        "hash": "c172f9b4f33bd1d15ce45b6364effa72ed7d0c225c777673a4aab8e89bde11bf"
+      }
+    },
+    {
+      "path": "notes/meeting-notes.md",
+      "content": "Just a plain paragraph that links to [[field-platform]].\n",
+      "entry": {
+        "path": "notes/meeting-notes.md",
+        "filename": "meeting-notes.md",
+        "folder": "notes",
+        "project": null,
+        "title": "Meeting notes",
+        "type": null,
+        "properties": {},
+        "relationships": {},
+        "outgoingLinks": [
+          "field-platform"
+        ],
+        "snippet": "Just a plain paragraph that links to field-platform.",
+        "parseError": null,
+        "hash": "5ecf6c329185ad45710208ccf25032e431e253506cd2f5a5d4ef43de18b7fcf0"
+      }
+    }
+  ]
+}

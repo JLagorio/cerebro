@@ -22,6 +22,7 @@ import { RecordProperties } from '@/detail/RecordProperties';
 import { RecordTabs, recordTabSet } from '@/detail/RecordTabs';
 import { TabSections } from '@/detail/TabSections';
 import { setTypeTabs } from '@/app/typeActions';
+import { isAgentEntry } from '@/engine/agents';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import { resolveLayout } from '@/engine/layout';
 import { isKnowledgePath } from '@/engine/okf';
@@ -29,6 +30,7 @@ import { isRecordEntry } from '@/engine/typeCatalog';
 import { resolveViewTab } from '@/engine/viewTab';
 import type { Entry, Selection } from '@/engine/types';
 import { ViewTabEmbed } from '@/views/ViewTabEmbed';
+import { AgentPageBody, agentTabOf } from '@/library/AgentPage';
 import { ConceptHeading } from '@/knowledge/ConceptHeading';
 import { ConceptReviewBar } from '@/knowledge/ConceptReviewBar';
 import { KnowledgeStrip } from '@/knowledge/KnowledgeStrip';
@@ -277,6 +279,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // its frontmatter is provenance, which the review bar and the Details tab
   // read, not a property stack to edit.
   const record = entry !== null && isRecordEntry(entry) && !isKnowledgePath(entry.path);
+  // M55.12 — an agent is a page too: its body is its standing instructions,
+  // its grants are the properties above the strip, and its tabs are the
+  // app's own (Instructions, Runs, Memory), riding the selection like a
+  // record's. Not a record (`isRecordEntry` turns agents away), so neither
+  // branch above can claim it.
+  const agent = entry !== null && isAgentEntry(entry);
+  const agentTab = agentTabOf(selection.tab);
   // M44.5 — the record page's tabs come from its TYPE (`typeTabs` synthesizes
   // Overview when none are saved) and the open one rides the selection, so
   // "the Spec tab of DOC-14" is a place the back button returns to. A stale
@@ -295,7 +304,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // tracks the editor's MOUNT, not the tab's identity: two Overview tabs share
   // one mounted editor (one key), so switching between them re-fires no
   // onReady — nulling on the id would strand the outline on its placeholder.
-  const showsEditor = activeTab === null || activeTab.content === 'overview';
+  const showsEditor = agent
+    ? agentTab === 'instructions'
+    : activeTab === null || activeTab.content === 'overview';
 
   useEffect(() => {
     // The keyed editor remounts per doc; wait for onReady. `showsEditor` is a
@@ -422,11 +433,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // Breadcrumb: Docs root, then folders; a multi-page doc's folder segment
   // becomes the doc crumb (its pages are tabs, not tree entries).
   const folderSegments = entry.folder === '' ? [] : entry.folder.split('/');
-  const crumbFolders = knowledgeFile
-    ? folderSegments.slice(1)
-    : docPages !== null
-      ? folderSegments.slice(0, -1)
-      : folderSegments;
+  // An agent's place is the Agents surface, not the folder its file sits in.
+  const crumbFolders = agent
+    ? []
+    : knowledgeFile
+      ? folderSegments.slice(1)
+      : docPages !== null
+        ? folderSegments.slice(0, -1)
+        : folderSegments;
 
   // A record's crumb root is its backdrop — the Collection it lives in when
   // it has one, its type screen otherwise: the same rule useOpenPath applies
@@ -668,12 +682,20 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             ]
           : []),
         { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
-        { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
-        {
-          icon: 'layout-template',
-          label: 'Save as template',
-          onSelect: () => void saveAsTemplate(),
-        },
+        // Not on an agent page (M55.12): growing an agent into a doc folder
+        // moves its file, which changes an un-slugged agent's identity and
+        // costs it a catch-up run, and a template copied from it would carry
+        // `type: Agent` and its grants into every page made from it.
+        ...(agent
+          ? []
+          : [
+              { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
+              {
+                icon: 'layout-template',
+                label: 'Save as template',
+                onSelect: () => void saveAsTemplate(),
+              },
+            ]),
         {
           icon: 'folder-input',
           label: 'Move to folder…',
@@ -740,22 +762,24 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               icon: 'brain',
               onClick: () => navigate({ kind: 'knowledge' }),
             })
-          : record
-            ? recordFolder !== null
-              ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
-                  icon: 'folder',
-                  onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
-                })
-              : crumb(entry.type ?? 'Records', {
-                  icon: 'database',
-                  onClick:
-                    entry.type === null
-                      ? undefined
-                      : () => navigate({ kind: 'type', name: entry.type as string }),
-                })
-            : // M38.3: no Docs surface to root at — a doc's crumb is its
-              // folder path, and the Pages tree in the nav is the way up.
-              crumb('Pages', { icon: 'library' })}
+          : agent
+            ? crumb('Agents', { icon: 'bot', onClick: () => navigate({ kind: 'agents' }) })
+            : record
+              ? recordFolder !== null
+                ? crumb(humanizeSlug(recordFolder.split('/').pop() ?? recordFolder), {
+                    icon: 'folder',
+                    onClick: () => navigate({ kind: 'collection', folder: recordFolder }),
+                  })
+                : crumb(entry.type ?? 'Records', {
+                    icon: 'database',
+                    onClick:
+                      entry.type === null
+                        ? undefined
+                        : () => navigate({ kind: 'type', name: entry.type as string }),
+                  })
+              : // M38.3: no Docs surface to root at — a doc's crumb is its
+                // folder path, and the Pages tree in the nav is the way up.
+                crumb('Pages', { icon: 'library' })}
         {crumbFolders.map((seg, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
             {separator}
@@ -788,7 +812,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
             {separator}
             {crumb(entry.title, {
-              icon: concept !== null ? 'lightbulb' : docPages === null ? 'file-text' : undefined,
+              icon:
+                concept !== null
+                  ? 'lightbulb'
+                  : agent
+                    ? 'bot'
+                    : docPages === null
+                      ? 'file-text'
+                      : undefined,
               strong: true,
             })}
           </span>
@@ -957,7 +988,14 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                   {/* M44.5 — the record canvas swaps by the open tab: the
                       body, the tab's free text, or its database. An untyped
                       doc knows nothing of tabs and keeps its document form. */}
-                  {record && activeTab !== null ? (
+                  {agent ? (
+                    <AgentPageBody
+                      entry={entry}
+                      tab={agentTab}
+                      onTab={(tab) => navigate({ kind: 'doc', path: entry.path, tab })}
+                      editor={editorBlock}
+                    />
+                  ) : record && activeTab !== null ? (
                     <>
                       {/* M38.2 — the property surface the peek shows, on the
                           page. The SAME component: one property editor, two
@@ -1047,7 +1085,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               )}
             </div>
           </div>
-          {blank && !busy && !knowledgeFile && (
+          {/* Never on an agent page: a template's frontmatter could retype
+              the record it lands on (M55.12). */}
+          {blank && !busy && !knowledgeFile && !agent && (
             <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />
           )}
         </div>

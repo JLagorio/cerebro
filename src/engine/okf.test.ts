@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import BUNDLE_PATHS from '../../src-tauri/fixtures/bundle-paths.json';
 import STALENESS_CASES from '../../shared/policy/staleness.v1.json';
 import {
   commitOf,
@@ -57,29 +58,22 @@ const concept = (properties: Record<string, unknown>, path = 'knowledge/metrics/
   makeEntry({ path, filename: path.split('/').pop(), type: 'Metric', properties });
 
 describe('bundle boundary', () => {
+  interface BundlePathCase {
+    path: string;
+    canonical: string | null;
+    why?: string;
+  }
+
+  // M49.4 (K17): the resolved path, not the raw string; and M53.28: its first
+  // name heard as a folding disk hears it. The same file knowledge.rs replays
+  // through `canonical_path`, so the two backends cannot disagree about what
+  // the bundle is.
   it('recognises the knowledge bundle by path', () => {
-    expect(isKnowledgePath('knowledge/metrics/revenue.md')).toBe(true);
-    expect(isKnowledgePath('knowledge')).toBe(true);
-    // Must not match a sibling directory that merely shares the prefix.
-    expect(isKnowledgePath('knowledge-archive/x.md')).toBe(false);
-    expect(isKnowledgePath('records/risks/r.md')).toBe(false);
-    // M49.4 (K17): the resolved path — the same table knowledge.rs asserts.
-    const table: [string, string | null][] = [
-      ['./knowledge/x.md', 'knowledge/x.md'],
-      ['Knowledge/x.md', 'knowledge/x.md'],
-      ['KNOWLEDGE/log.md', 'knowledge/log.md'],
-      ['knowledge//a/./b.md', 'knowledge/a/b.md'],
-      ['records/../knowledge/x.md', 'knowledge/x.md'],
-      ['knowledge/../knowledge/x.md', 'knowledge/x.md'],
-      ['knowledge/../records/x.md', null],
-      ['../knowledge/x.md', null],
-      ['/knowledge/x.md', null],
-      ['knowledge-archive/x.md', null],
-      ['', null],
-    ];
-    for (const [raw, canonical] of table) {
-      expect(canonicalKnowledgePath(raw), raw).toBe(canonical);
-      expect(isKnowledgePath(raw), raw).toBe(canonical !== null);
+    const cases = BUNDLE_PATHS.cases as BundlePathCase[];
+    expect(cases.length).toBeGreaterThan(0);
+    for (const c of cases) {
+      expect(canonicalKnowledgePath(c.path), JSON.stringify(c)).toBe(c.canonical);
+      expect(isKnowledgePath(c.path), JSON.stringify(c)).toBe(c.canonical !== null);
     }
   });
 
@@ -489,6 +483,11 @@ describe('entity anchors', () => {
     // The same rule from a bare path — what a `doc` selection carries (M52.3).
     expect(sectionOfPath('knowledge/metrics/a.md')).toBe('metrics');
     expect(sectionOfPath('knowledge/a.md')).toBe('');
+    // Read off the canonical spelling (M53.28), whatever length the bundle's
+    // name had as written.
+    expect(sectionOfPath('\u212anowledge/metrics/a.md')).toBe('metrics');
+    expect(sectionOfPath('know\u200cledge/metrics/a.md')).toBe('metrics');
+    expect(sectionOfPath('./knowledge/metrics/a.md')).toBe('metrics');
   });
 
   it('counts sections and sorts root-level leftovers last', () => {

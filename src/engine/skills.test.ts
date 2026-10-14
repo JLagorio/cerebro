@@ -8,6 +8,10 @@ import {
   skillPrompt,
 } from './skills';
 import { makeEntry } from './testHelpers';
+import { grantedTools, mentionedTools, type PromptGrant } from './toolGrant';
+
+/** A panel turn that holds every tool. */
+const FULL: PromptGrant = { tools: grantedTools(null), shell: true, attended: true };
 
 const skill = (title: string, patch: Parameters<typeof makeEntry>[0] = {}) =>
   makeEntry({
@@ -123,15 +127,60 @@ describe('skillPrompt', () => {
 
 describe('skillIndex', () => {
   it('is null when the vault defines no skills', () => {
-    expect(skillIndex([])).toBeNull();
+    expect(skillIndex([], FULL)).toBeNull();
   });
 
   it('lists each skill as /name — description', () => {
     const line = skillIndex(
       listSkills([skill('Weekly review'), skill('Bare', { properties: {} })]),
+      FULL,
     );
     expect(line).toContain('/weekly-review — Run Weekly review.');
     expect(line).toContain('/bare;');
+  });
+});
+
+/**
+ * M54.7 — how to reach a skill names a tool, so the catalogue follows the
+ * run's grant. A run that holds both readers reads what every run read before.
+ */
+describe('the catalogue names only the tools the run holds', () => {
+  const many = Array.from({ length: 60 }, (_, i) =>
+    skill(`Skill ${String(i).padStart(2, '0')}`, {
+      path: `records/skills/s${i}.md`,
+      properties: { description: 'A reasonably wordy description of what this skill does.' },
+    }),
+  );
+  const holding = (...tools: string[]): PromptGrant => ({
+    tools: new Set(tools),
+    shell: false,
+    attended: true,
+  });
+
+  it('reads byte for byte as before under a full grant', () => {
+    expect(skillIndex(listSkills([skill('Weekly review')]), FULL)).toBe(
+      'This vault defines skills: records of type Skill whose body is a reusable instruction set. ' +
+        "The user runs one by typing /name in this panel. When a request matches a skill's purpose, " +
+        'read its note with get_note and follow it. Skills: /weekly-review — Run Weekly review..',
+    );
+    const index = skillIndex(listSkills(many), FULL)!;
+    expect(index).toMatch(
+      / \d+ more skills are defined but not listed here — search_notes for type Skill to find them\.$/,
+    );
+  });
+
+  it('offers no read of a skill’s note to a run without get_note', () => {
+    const index = skillIndex(listSkills(many), holding('search_notes'))!;
+    expect(index).not.toContain('read its note with get_note');
+    expect(index).toContain('The user runs one by typing /name in this panel. Skills: /');
+    expect(mentionedTools(index)).toEqual(['search_notes']);
+  });
+
+  it('says the unlisted skills exist, and names no tool, to a run without search_notes', () => {
+    const index = skillIndex(listSkills(many), holding('get_note'))!;
+    expect(index).toMatch(/ \d+ more skills are defined but not listed here\.$/);
+    expect(mentionedTools(index)).toEqual(['get_note']);
+    expect(mentionedTools(skillIndex(listSkills(many), holding())!)).toEqual([]);
   });
 });
 
@@ -215,7 +264,7 @@ describe('declared arguments', () => {
   });
 
   it('shows required and optional differently in the catalogue', () => {
-    expect(skillIndex(listSkills([withArgs]))).toContain('/sweep <project> [since]');
+    expect(skillIndex(listSkills([withArgs]), FULL)).toContain('/sweep <project> [since]');
   });
 
   it('names them in the prompt, and asks rather than inventing when required input is missing', () => {
@@ -261,21 +310,21 @@ describe('the catalogue is budgeted', () => {
   );
 
   it('stops well short of spending the context window on skills it is not running', () => {
-    const index = skillIndex(listSkills(many))!;
+    const index = skillIndex(listSkills(many), FULL)!;
     expect(index.length).toBeLessThan(2_000);
   });
 
   it('says how many it dropped instead of reading as the complete set', () => {
     // A silently truncated catalogue makes the agent tell the user a skill
     // does not exist.
-    const index = skillIndex(listSkills(many))!;
+    const index = skillIndex(listSkills(many), FULL)!;
     expect(index).toMatch(/\d+ more skills are defined but not listed here/);
     expect(index).toContain('search_notes');
   });
 
   it('always ships at least one, however long its description', () => {
     const wordy = skill('Verbose', { properties: { description: 'x'.repeat(5_000) } });
-    expect(skillIndex(listSkills([wordy]))).toContain('/verbose');
+    expect(skillIndex(listSkills([wordy]), FULL)).toContain('/verbose');
   });
 });
 

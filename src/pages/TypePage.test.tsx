@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toIsoDate } from '@/engine/dates';
 import type { Entry } from '@/engine/types';
 import { resetMockFs } from '@/lib/mockIpc';
 import { TypePage } from '@/pages/TypePage';
@@ -86,6 +87,89 @@ describe('TypePage — Records tab', () => {
     // Work item declares `due: { kind: date }` and nothing else dated, so the
     // view infers it rather than rendering blank until someone configures one.
     expect(calendar.getAttribute('data-date-field')).toBe('due');
+  });
+
+  /**
+   * A day's "+" writes the date in the shape the field DECLARES (M53.16). It
+   * wrote the bare day whatever the field was, so on a calendar keyed to a
+   * `daterange` every record it made failed its own validation on the next
+   * read: "window must be a start/end range".
+   */
+  describe('creates on a calendar day (M53.16)', () => {
+    // Captured before the stub replaces it, and put back after: the file's
+    // beforeEach never resets `createItem`.
+    const realCreateItem = useVaultStore.getState().createItem;
+    let created: { folder: string; slug: string; frontmatter: Record<string, unknown> }[];
+
+    beforeEach(() => {
+      created = [];
+      useVaultStore.setState({
+        createItem: vi.fn(
+          async (args: { folder: string; slug: string; frontmatter: Record<string, unknown> }) => {
+            created.push(args);
+            return `${args.folder}/${args.slug}.md`;
+          },
+        ),
+      });
+    });
+
+    // Unmount FIRST: the page subscribes to `createItem`, and restoring it
+    // over a live tree re-renders outside act().
+    afterEach(() => {
+      cleanup();
+      useVaultStore.setState({ createItem: realCreateItem });
+    });
+
+    /** Type a title into a day's "+" and submit it; resolves once it is created. */
+    const createOn = async (day: string, title: string) => {
+      fireEvent.click(screen.getByRole('button', { name: `New record on ${day}` }));
+      const input = screen.getByRole('textbox', { name: `New record on ${day}` });
+      fireEvent.change(input, { target: { value: title } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(created).toHaveLength(1));
+    };
+
+    it('writes an open range into a field declared daterange', async () => {
+      // The type screen passes no `today`, so the grid opens on the real one —
+      // computed here the way CalendarView computes it.
+      const day = toIsoDate(new Date());
+      useVaultStore.setState({
+        entries: fixtureVault().map((e) =>
+          e.path === 'types/work-item.md'
+            ? {
+                ...e,
+                properties: {
+                  ...e.properties,
+                  fields: {
+                    ...(e.properties.fields as unknown as Record<string, unknown>),
+                    window: { kind: 'daterange' },
+                  },
+                } as unknown as typeof e.properties,
+              }
+            : e,
+        ),
+      });
+      render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+      switchLayout('calendar');
+      // A daterange outranks the plain `due` when the calendar infers its key.
+      expect(screen.getByTestId('calendar-view').getAttribute('data-date-field')).toBe('window');
+      await createOn(day, 'Retro');
+      expect(created[0].folder).toBe('records/work-items');
+      expect(created[0].frontmatter).toEqual({
+        type: 'Work item',
+        window: { start: day, end: null },
+      });
+    });
+
+    it('writes the bare day into a field declared date', async () => {
+      const day = toIsoDate(new Date());
+      // The unpatched fixture declares only `due: { kind: date }`.
+      render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+      switchLayout('calendar');
+      expect(screen.getByTestId('calendar-view').getAttribute('data-date-field')).toBe('due');
+      await createOn(day, 'Retro');
+      expect(created[0].frontmatter).toEqual({ type: 'Work item', due: day });
+    });
   });
 
   it('opens a record in the right-hand detail panel from the list layout', () => {

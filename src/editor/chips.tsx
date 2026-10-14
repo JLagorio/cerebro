@@ -299,20 +299,24 @@ function CitationRender({
   // a rule nothing can test is a rule nothing stops from rotting.
   const pillClass = `${CITATION_PILL} ${tone}${definition ? ' cb-citation-def' : ''}`;
   const label = cite.number === null ? id : String(cite.number);
+  // A name read from the link (M69.2) stays one hover from the link it came
+  // from: an external source's URL is its own line whenever the name is not it.
+  const external = target !== null && 'external' in target ? target.external : null;
+  const link = external !== null && external !== name ? `\n${external}` : '';
   const common = {
     // The marker the number stands in for, under the name: it is still in the
     // file, and it is what anyone citing the same source again has to type.
-    title: `${name}\n${citationText({ id, def: definition ? '1' : '' })}`,
+    title: `${name}${link}\n${citationText({ id, def: definition ? '1' : '' })}`,
     'aria-label': `Source ${label}: ${name}`,
     'data-citation': definition ? 'def' : 'ref',
     'data-id': id,
   };
 
   const pill =
-    target !== null && 'external' in target ? (
+    external !== null ? (
       <a
         {...common}
-        href={target.external}
+        href={external}
         target="_blank"
         rel="noreferrer noopener"
         tabIndex={-1}

@@ -27,6 +27,7 @@ function setup(docPartial: Partial<Entry> = {}) {
     createdAt: '2026-07-01T00:00:00Z',
     modifiedAt: '2026-07-02T00:00:00Z',
     parseError: null,
+    hash: null,
     ...docPartial,
   };
   const all = [...entries, doc];

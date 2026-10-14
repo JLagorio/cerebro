@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { ToolCall } from '@/agent/types';
+import { bareToolName, showsAsChange, toolIconName } from '@/engine/tools';
 
 /**
  * One thing the agent did (M9.5).
@@ -10,68 +11,42 @@ import type { ToolCall } from '@/agent/types';
  * pill tells you something happened, not what.
  *
  * Read tools collapse to one line; WRITE tools keep their path visible while
- * collapsed, because that is the thing you might want to undo.
+ * collapsed, because that is the thing you might want to undo. Undo needs git
+ * history: a turn that wrote becomes its own commit (M9.4), which View diff
+ * reads. A vault with no git history has no revert for an agent's write, and
+ * an expanded write card says so (M55.5) rather than leave it implied.
  */
+
+/** What an expanded write card says when the vault keeps no git history. */
+export const NO_REVERT =
+  "Cerebro found no git history for this vault, so it can't revert this change.";
+
+/** Whether the vault keeps git history, as the panel last read it. */
+export type GitHistory = 'git' | 'none';
+
+/** The vault's history from `useGit`'s state: undefined until git status has
+ * been read, so a card never claims either way on a guess. */
+export function historyOf(ready: boolean, isRepo: boolean): GitHistory | undefined {
+  if (!ready) return undefined;
+  return isRepo ? 'git' : 'none';
+}
 
 /** Tool names arrive namespaced by the CLI (`mcp__cerebro__get_note`). */
 export function toolLabel(name: string): string {
-  const bare = name.replace(/^mcp__cerebro__/, '');
+  const bare = bareToolName(name);
   // Native CLI tools are already capitalized and read fine as-is.
   if (/^[A-Z]/.test(bare)) return bare;
   return bare.replace(/_/g, ' ');
 }
 
-/** Icon per tool, across both vocabularies the CLI mixes in one transcript. */
-const TOOL_ICONS: Record<string, string> = {
-  // Native CLI tools
-  Bash: 'terminal',
-  Read: 'file-text',
-  Write: 'pencil',
-  Edit: 'file-pen',
-  Glob: 'folder-open',
-  Grep: 'search',
-  WebFetch: 'globe',
-  WebSearch: 'globe',
-  // cerebro MCP tools (src-tauri/src/mcp.rs)
-  get_vault_context: 'compass',
-  search_notes: 'search',
-  get_note: 'file-text',
-  list_inbox: 'inbox',
-  create_note: 'file-plus',
-  update_frontmatter: 'list',
-  append_to_note: 'file-pen',
-  write_concept: 'brain',
-  recheck_concept: 'calendar-check',
-  cache_source: 'download',
-  propose_organize: 'wand-sparkles',
-  open_note: 'eye',
-  navigate: 'compass',
-};
+/** The icon the tool manifest gives a call, in either vocabulary the CLI
+ * mixes in one transcript (M54.2); the wrench only for a tool it does not
+ * know. */
+export const toolIcon = toolIconName;
 
-export function toolIcon(name: string): string {
-  return TOOL_ICONS[name.replace(/^mcp__cerebro__/, '')] ?? 'wrench';
-}
-
-/**
- * Tools that change the vault. Mirrors `isWriteTool` in useAgentChat rather
- * than duplicating the list — one of them drifting would mean a write shown
- * as a read.
- */
-const WRITE_TOOLS = new Set([
-  'Write',
-  'Edit',
-  'NotebookEdit',
-  'create_note',
-  'update_frontmatter',
-  'append_to_note',
-  'write_concept',
-  'recheck_concept',
-  'cache_source',
-]);
-
-export function isWrite(name: string): boolean {
-  return WRITE_TOOLS.has(name.replace(/^mcp__cerebro__/, ''));
-}
+/** A write card: the manifest draws this call as a change, so its path stays
+ * visible while collapsed and it offers a diff. */
+export const isWrite = showsAsChange;
 
 /** The path a tool touched, for the collapsed line. */
 export function toolPath(input: string | null): string | null {
@@ -103,16 +78,20 @@ export function AiActionCard({
   tool,
   onOpenPath,
   onViewDiff,
+  history,
 }: {
   tool: ToolCall;
   onOpenPath: (path: string) => void;
   /** M9.4 present: review what this write changed. */
   onViewDiff?: (path: string) => void;
+  /** Whether the vault keeps git history; unknown says nothing (M55.5). */
+  history?: GitHistory;
 }) {
   const [expanded, setExpanded] = useState(false);
   const path = toolPath(tool.input);
   const write = isWrite(tool.name);
   const hasDetail = tool.input !== null || tool.output !== null;
+  const noRevert = write && history === 'none' && !tool.failed;
 
   const statusIcon = !tool.done ? 'loader' : tool.failed ? 'circle-x' : 'circle-check';
   const statusColor = !tool.done
@@ -126,6 +105,7 @@ export function AiActionCard({
       data-testid="action-card"
       data-tool={tool.name}
       data-write={write ? 'true' : 'false'}
+      data-failed={tool.failed ? 'true' : 'false'}
       className={[
         'overflow-hidden rounded-lg border text-xs',
         tool.failed
@@ -188,6 +168,11 @@ export function AiActionCard({
               </pre>
             </>
           )}
+          {noRevert && (
+            <div data-testid="action-no-revert" className="pt-1.5 text-2xs text-n-500">
+              {NO_REVERT}
+            </div>
+          )}
           {path !== null && (
             <div className="flex gap-1.5 pt-1.5">
               <button
@@ -199,7 +184,7 @@ export function AiActionCard({
               </button>
               {/* Only for writes, and only when there is a history to diff
                   against — the payoff for having built M9.4 first. */}
-              {write && onViewDiff !== undefined && (
+              {write && onViewDiff !== undefined && history !== 'none' && (
                 <button
                   type="button"
                   data-testid="action-view-diff"

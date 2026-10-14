@@ -345,14 +345,14 @@ export function Sidebar({
     return favorites.flatMap((path) => {
       const entry = byPath.get(path);
       if (entry === undefined) return [];
+      // An agent opens as its page like any pin (M55.12); it keeps its bot.
       if (isAgentEntry(entry)) {
-        const ref = agentRef(entry);
         return [
           {
             entry,
             icon: 'bot',
             color: 'var(--synapse-500)',
-            onOpen: () => navigate({ kind: 'agents', actor: ref.actor }),
+            onOpen: () => openPath(entry.path),
           },
         ];
       }
@@ -366,7 +366,7 @@ export function Sidebar({
         },
       ];
     });
-  }, [favorites, entries, schema, navigate, openPath]);
+  }, [favorites, entries, schema, openPath]);
   useEffect(() => {
     if (vaultPath === null) return;
     pruneFavorites(vaultPath, new Set(entries.map((e) => e.path)));
@@ -825,8 +825,9 @@ export function Sidebar({
         )}
         {/* M43 — Agents is a SECTION now, the design's sec(): the fleet is a
             roster of subjects, and the ↗ is the door to the fleet surface the
-            M41 destination row used to be. Rows keep their testids and stay
-            outside `nav-surfaces` (the e2e scoping rule survives the move). */}
+            M41 destination row used to be. Each row opens that agent's page
+            (M55.12). Rows keep their testids and stay outside `nav-surfaces`
+            (the e2e scoping rule survives the move). */}
         <SectionHeader
           label="Agents"
           open={groupOpen('agents')}
@@ -848,14 +849,14 @@ export function Sidebar({
         {groupOpen('agents') && (
           <div data-section="nav-agents">
             {agents.map(({ ref, paused }) => {
-              const on = selection.kind === 'agents' && selection.actor === ref.actor;
+              const on = selection.kind === 'doc' && selection.path === ref.path;
               return (
                 <button
                   key={ref.path}
                   type="button"
                   data-testid="nav-agent"
                   aria-current={on ? 'page' : undefined}
-                  onClick={() => navigate({ kind: 'agents', actor: ref.actor })}
+                  onClick={() => navigate({ kind: 'doc', path: ref.path })}
                   className={`${rowClass(on)}${paused && !on ? ' text-n-500' : ''}`}
                 >
                   {/* Synapse, the one violet in the chrome: these rows ARE

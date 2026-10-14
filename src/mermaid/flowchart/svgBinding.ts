@@ -262,14 +262,16 @@ export function bindFlowchartSvg(
   // mermaid attaches no click HANDLER, but a `click` line still emits a real
   // anchor that WRAPS the node `<g>` bound above. A default action is not
   // propagation, so the node handler's `stopPropagation()` never touched it —
-  // clicking a linked node merely to SELECT it followed the link, and inside
-  // the Tauri webview that takes the whole app off the SPA. The EDITOR owns
-  // click semantics here (M29.36) and the badge is the hit target, so no link
-  // in this subtree survives — including one around a node the model could
-  // not resolve, which is just as navigable. Shared with the read-only
-  // viewers, which have exactly the same problem and no binding pass to hang
-  // it on; `../svgLinks` documents what was measured and why the attribute
-  // goes rather than the click being intercepted.
+  // clicking a linked node merely to SELECT it followed the link. The packaged
+  // shell guard would now refuse that navigation or hand it to the system
+  // browser (M53.12), and `pnpm dev` has no guard at all; either way a click
+  // that selects must not also follow a link. The EDITOR owns click semantics
+  // here (M29.36) and the badge is the hit target, so no link in this subtree
+  // survives — including one around a node the model could not resolve, which
+  // is just as navigable. Shared with the read-only viewers, which have
+  // exactly the same problem and no binding pass to hang it on; `../svgLinks`
+  // documents what was measured and why the attribute goes rather than the
+  // click being intercepted.
   neutralizeDiagramLinks(container);
 
   return { nodeEls, edgeEls, clusterEls };

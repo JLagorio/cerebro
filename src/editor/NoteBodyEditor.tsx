@@ -5,10 +5,49 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
 import type { EditorReadyInfo } from './MarkdownEditor';
+import type { LossyCause } from './markdown';
 import { NotePathContext } from './notePath';
+import { onExternalWrite, registerFlush } from './openPages';
 
 /** Where the body currently stands relative to disk. */
 export type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'failed';
+
+/** A save autosave did not write, while the page waits on the person (M53.6). */
+interface Held {
+  vault: string;
+  path: string;
+  markdown: string;
+}
+
+/**
+ * The read-only banner's words for each reason a save would change the file
+ * (`lossyImportCause`, M55.15). It once blamed raw HTML whatever the cause.
+ */
+const LOSSY_COPY: Record<LossyCause, { locked: string; unlocked: string; button: string }> = {
+  html: {
+    locked:
+      "Parts of this file (raw HTML) can't be shown in the rich editor. It is open read-only so editing can't strip them.",
+    unlocked: 'Editing enabled — saving this page will remove the raw HTML it contains.',
+    button: 'Edit anyway (raw HTML will be removed)',
+  },
+  dropped: {
+    locked:
+      "Parts of this file can't be shown in the rich editor. It is open read-only so editing can't strip them.",
+    unlocked: "Editing enabled — saving this page will remove the parts the editor can't show.",
+    button: 'Edit anyway (those parts will be removed)',
+  },
+  added: {
+    locked:
+      "Saving this file from the rich editor would add text it doesn't have. It is open read-only.",
+    unlocked: 'Editing enabled — saving this page will add that text.',
+    button: 'Edit anyway (text will be added)',
+  },
+  rewritten: {
+    locked: 'Saving this file from the rich editor would reorder its text. It is open read-only.',
+    unlocked: 'Editing enabled — saving this page will reorder its text.',
+    button: 'Edit anyway (text will be reordered)',
+  },
+};
 
 /**
  * Loads a note's body, shows the rich editor, and persists debounced edits.
@@ -62,27 +101,51 @@ export function NoteBodyEditor({
   // lands (M17.4).
   const [loaded, setLoaded] = useState<{ path: string; body: string; gen: number } | null>(null);
   const [failed, setFailed] = useState(false);
-  const [lossy, setLossy] = useState(false);
+  const [lossy, setLossy] = useState<LossyCause | null>(null);
   /**
-   * Reconciliation with the disk (M17.4).
+   * Reconciliation with the disk (M17.4, M53.6).
    *
-   * The editor is uncontrolled and its load effect ran on `[path, vaultPath]`
-   * alone, so NOTHING reloaded it when the file changed underneath. The agent
-   * writes straight to disk through its MCP tools; the watcher suppresses
-   * own-writes for four seconds; and the next keystroke's debounce saved the
-   * stale buffer back over the agent's work. That is not a race with a narrow
-   * window — it is the guaranteed outcome of asking the assistant to revise a
-   * note you have open.
+   * The editor is uncontrolled, so nothing reloads it when the file changes
+   * underneath, and the next keystroke's debounce would save the stale buffer
+   * back over whoever wrote it. Almost always the agent. Its MCP writes go
+   * through the app's own `write_file`, which registers every write as the
+   * app's, so the watcher drops their echo; the tools announce what they
+   * wrote instead (`openPages.ts`). A write announced for this path is handled
+   * by that announcement alone. Anything else (a write that names no path, an
+   * outside editor) is noticed through `baseline`, the modifiedAt this buffer
+   * corresponds to, which Rust stamps to the second and so cannot see a
+   * second write within one.
    *
-   * `baseline` is the modifiedAt this buffer corresponds to. A different one
-   * on the entry means someone else wrote the file: reload silently when the
-   * buffer is clean, and ask when it is not, because discarding what someone
-   * typed is not a decision this component gets to make.
+   * Either way: reload silently when the buffer is clean, and ask when it is
+   * not, because discarding what someone typed is not a decision this
+   * component gets to make. While an announced write is catching up, or the
+   * question is open, autosave HOLDS what is typed instead of writing it over
+   * the new version (`held`). Keep writes it; Load drops it. Leaving the page
+   * writes it too: theirs wins, as it did before there was a hold.
    */
   const baseline = useRef<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const [conflict, setConflict] = useState(false);
+  // The banner's state, readable synchronously — a save deciding whether to
+  // hold cannot wait for a render to learn the question is open.
+  const conflictRef = useRef(false);
+  const showConflict = useCallback((on: boolean) => {
+    conflictRef.current = on;
+    setConflict(on);
+  }, []);
   const dirty = useRef(false);
+  // Every edit, counted, so a save that lands clears `dirty` only if nothing
+  // was typed while it was in flight.
+  const edits = useRef(0);
+  // Announced writes to this path still catching up.
+  const externalPending = useRef(0);
+  const held = useRef<Held | null>(null);
+  // A body the person chose to discard (Load): saves from its editor are
+  // dropped, however late they arrive.
+  const discarded = useRef<{ path: string; gen: number } | null>(null);
+  const mounted = useRef(false);
+  const pathRef = useRef(path);
+  pathRef.current = path;
   // An own save's rescan publishes the new mtime to the store BEFORE the
   // `await rescan()` continuation below re-baselines — and React can flush
   // the reconciler effect in that gap (observed in the M29.13 e2e: every
@@ -98,7 +161,8 @@ export function NoteBodyEditor({
   // later — the warning was the entire mitigation. Editing is now an
   // explicit, undoable-by-choice act.
   const [unlocked, setUnlocked] = useState(false);
-  const flushRef = useRef<(() => void) | null>(null);
+  const flushRef = useRef<(() => Promise<void>) | null>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
 
   const onSaveStateRef = useRef(onSaveState);
   onSaveStateRef.current = onSaveState;
@@ -109,9 +173,17 @@ export function NoteBodyEditor({
   }, []);
 
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
     setFailed(false);
-    setLossy(false);
+    setLossy(null);
     setUnlocked(false);
+    conflictRef.current = false;
     setConflict(false);
     dirty.current = false;
     emitSaveState('idle');
@@ -144,20 +216,51 @@ export function NoteBodyEditor({
     // makes a reload a reload rather than a remount of the same stale body.
   }, [path, vaultPath, toast, emitSaveState, generation]);
 
-  // Someone else wrote this file (M17.4). Almost always the agent, which is
-  // why this is Phase 0 of a milestone about putting AI into the editor.
+  // Someone else wrote this file (M17.4), and nobody announced it for this
+  // path: a write that named no path, or an editor outside the app.
   useEffect(() => {
     if (loaded === null || loaded.path !== path) return;
     if (ownSaveInFlight.current) return;
+    // An announced write is settled by its announcement (below), which knows
+    // when its rescan has landed; this would only act on half of it.
+    if (externalPending.current > 0) return;
     if (entryModifiedAt === null || entryModifiedAt === baseline.current) return;
     if (dirty.current) {
-      setConflict(true);
+      showConflict(true);
       return;
     }
     // Clean buffer: nothing of the user's to lose, so take the new version
     // without asking. Asking here would be a dialog for every agent write.
     setGeneration((g) => g + 1);
-  }, [entryModifiedAt, loaded, path]);
+  }, [entryModifiedAt, loaded, path, showConflict]);
+
+  // An agent wrote THIS file (M53.6). Saves hold from the announcement until
+  // the vault has caught up; then a clean page reloads and a dirty one asks.
+  useEffect(() => {
+    let live = true;
+    const stop = onExternalWrite(path, {
+      pending: () => {
+        if (live) externalPending.current += 1;
+      },
+      settled: () => {
+        if (!live) return;
+        externalPending.current = Math.max(0, externalPending.current - 1);
+        // A burst is answered once, after its last catch-up.
+        if (externalPending.current > 0) return;
+        if (dirty.current) showConflict(true);
+        else setGeneration((g) => g + 1);
+      },
+    });
+    return () => {
+      live = false;
+      externalPending.current = 0;
+      stop();
+    };
+  }, [path, showConflict]);
+
+  // A panel turn lands every open page's pending save before its child
+  // starts (useAgentChat), so the agent reads what is on screen.
+  useEffect(() => registerFlush(() => flushRef.current?.() ?? Promise.resolve()), []);
 
   // ⌘S / Ctrl+S force-flushes the debounce. The instinctive shortcut was a
   // no-op before, which read as "my work is not being saved".
@@ -165,56 +268,101 @@ export function NoteBodyEditor({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 's' || !(e.metaKey || e.ctrlKey) || e.altKey) return;
       e.preventDefault();
-      flushRef.current?.();
+      void flushRef.current?.();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Saves target the path the body was LOADED for, never the current prop —
-  // a debounce flush racing a navigation must land in its own file.
-  const saveFor = (forPath: string) => (markdown: string) => {
-    if (vaultPath === null) return;
+  /**
+   * Write `markdown` to `forPath` now. Resolves once the save has landed, or
+   * failed and said so; the rescan, re-baseline and pin that follow a landed
+   * save run on behind it.
+   */
+  const write = (vault: string, forPath: string, markdown: string): Promise<void> => {
+    const upTo = edits.current;
     emitSaveState('saving');
-    void (async () => {
-      // Separate catches: after a successful save the disk already holds the
-      // edit, so a refresh failure must not claim the save failed.
-      try {
-        await saveNote(vaultPath, forPath, markdown);
-      } catch (err) {
+    // Separate catches: after a successful save the disk already holds the
+    // edit, so a refresh failure must not claim the save failed.
+    return saveNote(vault, forPath, markdown).then(
+      () => {
+        emitSaveState('saved');
+        if (edits.current === upTo) dirty.current = false;
+        void (async () => {
+          ownSaveInFlight.current = true;
+          try {
+            await rescan();
+            // Our own write moved the file's mtime. Re-baselining here is what
+            // stops the reconciler treating every save as somebody else's edit
+            // and reloading the buffer out from under the person typing.
+            baseline.current =
+              useVaultStore.getState().entries.find((e) => e.path === forPath)?.modifiedAt ??
+              baseline.current;
+          } catch {
+            toast("Couldn't refresh vault");
+          } finally {
+            ownSaveInFlight.current = false;
+          }
+          // What the disk holds now — a capture may have canonicalized it.
+          if (onBodyLoadedRef.current !== undefined) {
+            try {
+              onBodyLoadedRef.current(forPath, await readNote(vault, forPath));
+            } catch {
+              // The pin stays on the last body read; a Verify against it refuses
+              // as stale rather than attesting unseen text.
+            }
+          }
+        })();
+      },
+      (err: unknown) => {
         emitSaveState('failed');
         // The refusal says why — a knowledge file that differs from its
         // recorded history, recording paused for the vault (M49.6, K13).
         toast(`Couldn't save page: ${refusalText(err)}`);
-        return;
-      }
-      emitSaveState('saved');
-      dirty.current = false;
-      ownSaveInFlight.current = true;
-      try {
-        await rescan();
-        // Our own write moved the file's mtime. Re-baselining here is what
-        // stops the reconciler treating every save as somebody else's edit
-        // and reloading the buffer out from under the person typing.
-        baseline.current =
-          useVaultStore.getState().entries.find((e) => e.path === forPath)?.modifiedAt ??
-          baseline.current;
-      } catch {
-        toast("Couldn't refresh vault");
-      } finally {
-        ownSaveInFlight.current = false;
-      }
-      // What the disk holds now — a capture may have canonicalized it.
-      if (onBodyLoadedRef.current !== undefined) {
-        try {
-          onBodyLoadedRef.current(forPath, await readNote(vaultPath, forPath));
-        } catch {
-          // The pin stays on the last body read; a Verify against it refuses
-          // as stale rather than attesting unseen text.
-        }
-      }
-    })();
+      },
+    );
   };
+
+  /** Write it, or hold it while the page on screen waits on an announced
+   *  write or on the person's answer. */
+  const land = (parked: Held): Promise<void> => {
+    if (
+      mounted.current &&
+      parked.path === pathRef.current &&
+      (externalPending.current > 0 || conflictRef.current)
+    ) {
+      held.current = parked;
+      emitSaveState('dirty');
+      return Promise.resolve();
+    }
+    return write(parked.vault, parked.path, parked.markdown);
+  };
+
+  // Saves target the path the body was LOADED for, never the current prop —
+  // a debounce flush racing a navigation must land in its own file.
+  const saveFor = (forPath: string, gen: number) => (markdown: string) => {
+    if (vaultPath === null) return Promise.resolve();
+    const dropped = discarded.current;
+    if (dropped !== null && dropped.path === forPath && gen <= dropped.gen) {
+      return Promise.resolve();
+    }
+    return land({ vault: vaultPath, path: forPath, markdown });
+  };
+
+  // Leaving the page (another path, or unmounting) writes what was held for
+  // it: theirs wins, as before the hold. Through a ref, because the cleanup
+  // belongs to the render that created it.
+  const writeRef = useRef(write);
+  writeRef.current = write;
+  useEffect(
+    () => () => {
+      const parked = held.current;
+      if (parked === null || parked.path !== path) return;
+      held.current = null;
+      void writeRef.current(parked.vault, parked.path, parked.markdown);
+    },
+    [path],
+  );
 
   if (failed) {
     return <p className="m-0 px-1 py-2 text-sm text-n-500">This page couldn't be loaded.</p>;
@@ -223,7 +371,7 @@ export function NoteBodyEditor({
     return <div data-testid="note-body-loading" />;
   }
 
-  const locked = readOnly || (lossy && !unlocked);
+  const locked = readOnly || (lossy !== null && !unlocked);
 
   return (
     <div
@@ -238,15 +386,22 @@ export function NoteBodyEditor({
           className="mx-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-sm text-warn-700"
         >
           <span className="min-w-0 flex-1">
-            This page changed on disk while you were editing it — usually the assistant. Keeping
-            yours will overwrite that version when you next save.
+            This page changed on disk while you were editing it — usually the assistant. Your edits
+            are held, not saved, until you choose.
           </span>
           <button
             type="button"
             data-testid="external-change-reload"
             onClick={() => {
+              // Discarded means discarded: the pending debounce is cancelled
+              // and the held save dropped BEFORE the remount, whose unmount
+              // flush would otherwise write this buffer back over the version
+              // being loaded.
+              cancelRef.current?.();
+              held.current = null;
+              discarded.current = { path: loaded.path, gen: loaded.gen };
               dirty.current = false;
-              setConflict(false);
+              showConflict(false);
               setGeneration((g) => g + 1);
             }}
             className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
@@ -260,7 +415,12 @@ export function NoteBodyEditor({
               // Take the disk's mtime as ours so the banner does not come
               // back on the next rescan; the user has answered this question.
               baseline.current = entryModifiedAt;
-              setConflict(false);
+              showConflict(false);
+              // And write what was held. Through `land`, so a write announced
+              // while they decided is asked about rather than overwritten.
+              const parked = held.current;
+              held.current = null;
+              if (parked !== null) void land(parked);
             }}
             className="flex-none rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-warn-700 underline"
           >
@@ -268,16 +428,14 @@ export function NoteBodyEditor({
           </button>
         </div>
       )}
-      {lossy && !readOnly && (
+      {lossy !== null && !readOnly && (
         <div
           role="alert"
           data-testid="lossy-import-banner"
           className="mx-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-sm text-warn-700"
         >
           <span className="min-w-0 flex-1">
-            {locked
-              ? "Parts of this file (raw HTML) can't be shown in the rich editor. It is open read-only so editing can't strip them."
-              : 'Editing enabled — saving this page will remove the raw HTML it contains.'}
+            {locked ? LOSSY_COPY[lossy].locked : LOSSY_COPY[lossy].unlocked}
           </span>
           {locked && (
             <button
@@ -285,7 +443,7 @@ export function NoteBodyEditor({
               onClick={() => setUnlocked(true)}
               className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
             >
-              Edit anyway (raw HTML will be removed)
+              {LOSSY_COPY[lossy].button}
             </button>
           )}
         </div>
@@ -300,14 +458,16 @@ export function NoteBodyEditor({
           key={`${loaded.path}#${loaded.gen}`}
           markdown={loaded.body}
           readOnly={locked}
-          onChange={saveFor(loaded.path)}
+          onChange={saveFor(loaded.path, loaded.gen)}
           onDirty={() => {
             dirty.current = true;
+            edits.current += 1;
             emitSaveState('dirty');
           }}
           onReady={(info: EditorReadyInfo) => {
             flushRef.current = info.flushPendingSave;
-            setLossy(info.lossyImport);
+            cancelRef.current = info.cancelPendingSave;
+            setLossy(info.lossyCause);
             onReady?.(info);
           }}
           autoFocus={autoFocus}

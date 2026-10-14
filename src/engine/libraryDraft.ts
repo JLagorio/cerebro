@@ -17,7 +17,8 @@ import type { Entry } from './types';
  * So the rule here: **absent and empty are different values, and the draft
  * knows which one it holds.** A patch emits `null` for a key that should be
  * REMOVED — both backends delete on null — and only ever writes the keys the
- * form owns, so anything else in the file survives untouched.
+ * form owns, so anything else in the file survives untouched. The agent page
+ * narrows that to one row: each Done writes only that row's keys (M55.12).
  *
  * Every field below maps to behaviour that already exists. There is no
  * `visibility:` and no "agent only / slash only" toggle, however well they
@@ -86,15 +87,22 @@ export interface AgentDraft {
    * would make the safest write scope also the blindest reader. */
   readScope: string[] | null;
   allowedTools: string[] | null;
-  /** Connectors it may reach. Null = whatever the vault enabled; [] = none. */
+  /** `disallowed-tools:` (M54.9): connector tools it may never call. Read
+   * from the file and shown, never written — no AgentKey names it, so
+   * `agentPatch` leaves the key to whoever wrote it. */
+  disallowedTools: string[] | null;
+  /** Connectors it may reach. Null = none when it runs on its own, every
+   * enabled and approved one in a turn you address it in (M54.9); [] =
+   * none. */
   connectors: string[] | null;
-  /** `tools: shell` — the host tools, still capped by the Settings ceiling. */
+  /** `tools: shell` — the host tools, still capped by the Settings ceiling
+   * and withdrawn in Rust by a read limit (M53.5). */
   shell: boolean;
   schedule: string;
   triggers: Trigger[];
   /** What the human corrected. The agent may read it and never write it. */
   preferences: string;
-  /** The agent's own notes. Shown, never edited here — see the editor. */
+  /** The agent's own notes. Shown, never written — no AgentKey names it. */
   recent: string;
   instructions: string;
 }
@@ -107,6 +115,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     scope: parseScope(entry),
     readScope: parseReadScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
+    disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     connectors: parseAllowedTools(entry.properties.connectors),
     shell: entry.properties.tools === 'shell',
     schedule: text(entry.properties.schedule),
@@ -117,22 +126,84 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
   };
 }
 
-export function agentPatch(draft: AgentDraft): Record<string, unknown> {
-  return {
-    slug: draft.slug.trim() === '' ? null : slugify(draft.slug),
-    description: blank(draft.description),
-    scope: draft.scope,
-    'read-scope': draft.readScope,
-    'allowed-tools': draft.allowedTools,
-    connectors: draft.connectors,
-    // `tools: safe` is written rather than removed: the default is safe either
-    // way, but a record that says so out loud is one you can read the policy
-    // off without knowing what the default is.
-    tools: draft.shell ? 'shell' : 'safe',
-    schedule: blank(draft.schedule),
-    when: draft.triggers.length === 0 ? null : draft.triggers.map(triggerToYaml),
-    preferences: blank(draft.preferences),
-  };
+/**
+ * A frontmatter axis the agent page writes (M55.12). One row of the page owns
+ * one or two of these and writes only those on Done: a grant written whole is
+ * a grant some other row's half-built draft could overwrite.
+ *
+ * Never keys: `recent` (the agent's own notes), `disallowedTools` (shown,
+ * edited in the file — M54.9) and the body, which the page editor saves.
+ */
+export type AgentKey =
+  | 'slug'
+  | 'description'
+  | 'scope'
+  | 'readScope'
+  | 'allowedTools'
+  | 'connectors'
+  | 'shell'
+  | 'schedule'
+  | 'triggers'
+  | 'preferences';
+
+export const AGENT_KEYS: readonly AgentKey[] = [
+  'slug',
+  'description',
+  'scope',
+  'readScope',
+  'allowedTools',
+  'connectors',
+  'shell',
+  'schedule',
+  'triggers',
+  'preferences',
+];
+
+/**
+ * The patch for the asked keys, and nothing else. The agent page writes one
+ * property per Done through this builder, so a row never carries another
+ * row's value along with its own.
+ */
+export function agentPatch(draft: AgentDraft, keys: readonly AgentKey[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    switch (key) {
+      case 'slug':
+        out.slug = draft.slug.trim() === '' ? null : slugify(draft.slug);
+        break;
+      case 'description':
+        out.description = blank(draft.description);
+        break;
+      case 'scope':
+        out.scope = draft.scope;
+        break;
+      case 'readScope':
+        out['read-scope'] = draft.readScope;
+        break;
+      case 'allowedTools':
+        out['allowed-tools'] = draft.allowedTools;
+        break;
+      case 'connectors':
+        out.connectors = draft.connectors;
+        break;
+      case 'shell':
+        // `tools: safe` is written rather than removed: the default is safe
+        // either way, but a record that says so out loud is one you can read
+        // the policy off without knowing what the default is.
+        out.tools = draft.shell ? 'shell' : 'safe';
+        break;
+      case 'schedule':
+        out.schedule = blank(draft.schedule);
+        break;
+      case 'triggers':
+        out.when = draft.triggers.length === 0 ? null : draft.triggers.map(triggerToYaml);
+        break;
+      case 'preferences':
+        out.preferences = blank(draft.preferences);
+        break;
+    }
+  }
+  return out;
 }
 
 function triggerToYaml(trigger: Trigger): Record<string, unknown> {
@@ -151,8 +222,8 @@ function triggerToYaml(trigger: Trigger): Record<string, unknown> {
  *
  * DERIVED, never stored. An agent is active exactly when something can fire
  * it, so there is no `enabled:` flag to fall out of step with a `schedule:`
- * somebody deleted — and the switch in the editor turns activation on by
- * writing a real trigger rather than by flipping a bit that means nothing.
+ * somebody deleted — and the agent page turns activation on by writing a
+ * real schedule or trigger rather than by flipping a bit that means nothing.
  */
 export function agentActive(draft: Pick<AgentDraft, 'schedule' | 'triggers'>): boolean {
   return draft.schedule.trim() !== '' || draft.triggers.length > 0;

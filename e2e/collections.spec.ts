@@ -289,3 +289,71 @@ test('views: a database keeps several views as tabs, each with its own layout', 
   await expect(page.getByTestId('table-view')).toBeVisible();
   await expect(page.getByTestId('board-column')).toHaveCount(0);
 });
+
+/** The file the mock disk holds at `path`, or '' while there is none. */
+const mockFile = (page: Page, path: string) =>
+  page.evaluate((p) => window.__cerebroMockFs.get(p) ?? '', path);
+
+/**
+ * Create-on-day writes the date in the shape the field declares (M53.16).
+ *
+ * "This month" is keyed to `window`, a `daterange`. The day "+" wrote the bare
+ * day there, and the new record failed its own validation on the next read:
+ * "window must be a start/end range". Asserted on the DISK, because the shape
+ * of the file is the defect — and then on the grid, because a range that never
+ * lands on the day it was created on would be a different defect.
+ */
+test('calendar: a day + on a range field writes a range (M53.16)', async ({ page }) => {
+  await boot(page);
+  await openDatabaseView(page, 'Work item', 'This month');
+
+  const calendar = page.getByTestId('calendar-view');
+  await expect(calendar).toHaveAttribute('data-date-field', 'window');
+  await calendar.getByRole('button', { name: 'New record on 2026-07-30' }).click();
+  const title = calendar.getByRole('textbox', { name: 'New record on 2026-07-30' });
+  await title.fill('Retro');
+  await title.press('Enter');
+
+  await expect
+    .poll(() => mockFile(page, 'records/work-items/retro.md'))
+    .toContain('window:\n  start: 2026-07-30\n  end: null');
+  const chip = calendar
+    .locator('[data-testid="calendar-day"][data-day="2026-07-30"]')
+    .getByText('Retro');
+  await expect(chip).toBeVisible();
+  // And it is a record like any other: it opens.
+  await chip.click();
+  await expect(page.getByTestId('detail-title')).toHaveValue('Retro');
+});
+
+/**
+ * The same "+" on a calendar embedded in a page (M53.16). `delivery.md` embeds
+ * Work item's "This month", which offered no day "+" at all. This is also the
+ * first spec to type into an input inside a database block in the real editor,
+ * which only a browser can show ProseMirror leaving alone.
+ */
+test('calendar: the embedded calendar on the Delivery page creates on a day too (M53.16)', async ({
+  page,
+}) => {
+  await boot(page);
+  const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
+  await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
+  await expect(page.getByTestId('collection-page')).toBeVisible();
+
+  const block = page
+    .getByTestId('database-block')
+    .filter({ has: page.getByTestId('calendar-view') });
+  await expect(block).toBeVisible();
+  await block.getByRole('button', { name: 'New record on 2026-07-31' }).click();
+  const title = block.getByRole('textbox', { name: 'New record on 2026-07-31' });
+  await title.fill('Planning');
+  await title.press('Enter');
+
+  // Into the database's folder, dated as an open range.
+  await expect
+    .poll(() => mockFile(page, 'records/work-items/planning.md'))
+    .toContain('window:\n  start: 2026-07-31\n  end: null');
+  await expect(
+    block.locator('[data-testid="calendar-day"][data-day="2026-07-31"]').getByText('Planning'),
+  ).toBeVisible();
+});

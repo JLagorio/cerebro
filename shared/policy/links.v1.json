@@ -1,0 +1,46 @@
+{
+  "format": 1,
+  "rule": "The webview never leaves its entry document: the entry document itself loads, an http or https address leaves for the system browser, and everything else is refused — a path or a query on the app's own origin included, because tauri serves index.html for any path, so following one reloads the app and drops unsaved state — and no request ever opens a second window.",
+  "entry": {
+    "origin": "tauri://localhost",
+    "paths": ["", "/", "/index.html"]
+  },
+  "external_schemes": ["http", "https"],
+  "cases": [
+    { "url": "tauri://localhost", "verdict": "allow" },
+    { "url": "tauri://localhost/", "verdict": "allow" },
+    { "url": "tauri://localhost/index.html", "verdict": "allow" },
+    { "url": "tauri://localhost#top", "verdict": "allow" },
+    { "url": "tauri://localhost/#/x", "verdict": "allow" },
+    { "url": "http://localhost:5173/", "dev_root": "http://localhost:5173", "verdict": "allow" },
+    { "url": "http://localhost:5173/index.html#x", "dev_root": "http://localhost:5173", "verdict": "allow" },
+
+    { "url": "https://example.com/", "verdict": "external" },
+    { "url": "http://example.com/a?b=c#d", "verdict": "external" },
+    { "url": "HTTPS://EXAMPLE.COM/", "verdict": "external" },
+    { "url": "https://localhost/", "verdict": "external" },
+    { "url": "http://localhost:5173/", "verdict": "external" },
+    { "url": "http://localhost:5174/", "dev_root": "http://localhost:5173", "verdict": "external" },
+
+    { "url": "tauri://localhost/notes/a.md", "verdict": "deny" },
+    { "url": "tauri://localhost/?x=1", "verdict": "deny" },
+    { "url": "tauri://localhost/index.html?x=1", "verdict": "deny" },
+    { "url": "tauri://evil/", "verdict": "deny" },
+    { "url": "tauri://x@localhost/", "verdict": "deny" },
+    { "url": "tauri://:pw@localhost/", "verdict": "deny" },
+    { "url": "tauri://localhost:8080/", "verdict": "deny" },
+    { "url": "mailto:x@y.com", "verdict": "deny" },
+    { "url": "tel:+15551234", "verdict": "deny" },
+    { "url": "file:///etc/passwd", "verdict": "deny" },
+    { "url": "javascript:alert(1)", "verdict": "deny" },
+    { "url": "data:text/html,x", "verdict": "deny" },
+    { "url": "blob:tauri://localhost/0b6f3c3e-0000-4000-8000-000000000000", "verdict": "deny" },
+    { "url": "about:blank", "verdict": "deny" },
+    { "url": "ftp://example.com/", "verdict": "deny" },
+    { "url": "ipc://localhost/x", "verdict": "deny" },
+    { "url": "asset://localhost/x", "verdict": "deny" },
+    { "url": "http://localhost:5173/notes/a.md", "dev_root": "http://localhost:5173", "verdict": "deny" },
+    { "url": "http://localhost:5173/?x=1", "dev_root": "http://localhost:5173", "verdict": "deny" },
+    { "url": "http://x@localhost:5173/", "dev_root": "http://localhost:5173", "verdict": "deny" }
+  ]
+}

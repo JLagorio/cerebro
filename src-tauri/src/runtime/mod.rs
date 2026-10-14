@@ -37,6 +37,8 @@
 
 pub mod budget;
 pub mod catchup;
+pub mod cause;
+pub mod connector_status;
 pub mod dispatch;
 pub mod fleet;
 pub mod governance;
@@ -94,8 +96,11 @@ pub const OPEN_MARKER: &str = "runtime.db.open";
 /// scheduling ledgers, durably — at 16. M49.10 adds `vault_writes` — where
 /// the `vault.*` write hashes moved out of the epistemic ledger — at 17.
 /// M49.9 adds `runs.counters_booked` — 0 on every row that predates
-/// booking, so its zeros read as not recorded — at 18.
-pub const USER_VERSION: i64 = 18;
+/// booking, so its zeros read as not recorded — at 18. M54.11 adds
+/// `connector_status` — the last status each connector was seen in, per
+/// vault — at 19. M56.7 adds `runs.cause` and `runs.cli_session_id`, both
+/// nullable and never backfilled, each under a CHECK, at 20.
+pub const USER_VERSION: i64 = 20;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -273,7 +278,46 @@ const MIGRATIONS: &[Migration] = &[
         sql: schema::SCHEMA_V18,
         validate: validate_v18,
     },
+    Migration {
+        to: 19,
+        sql: schema::SCHEMA_V19,
+        validate: validate_v19,
+    },
+    Migration {
+        to: 20,
+        sql: schema::SCHEMA_V20,
+        validate: validate_v20,
+    },
 ];
+
+/// v20's promise: both run columns read, and the cause column carries its
+/// CHECK. A column added without it would take any text, so the runs table's
+/// own SQL must name the kind check, or the step rolls back (M56.7).
+fn validate_v20(conn: &Connection) -> Result<(), String> {
+    conn.prepare("SELECT cause, cli_session_id FROM runs")
+        .map_err(|e| format!("validating runs.cause and runs.cli_session_id: {e}"))?;
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("validating runs: {e}"))?;
+    if !sql.contains("json_extract(cause, '$.kind')") {
+        return Err("runs.cause was added without its kind CHECK".into());
+    }
+    Ok(())
+}
+
+/// v19's promise: the connector status table exists, keyed by vault and
+/// connector (M54.11).
+fn validate_v19(conn: &Connection) -> Result<(), String> {
+    conn.prepare(
+        "SELECT vault_id, connector, state, signal, seen_at, run_id FROM connector_status",
+    )
+    .map_err(|e| format!("validating connector_status: {e}"))?;
+    Ok(())
+}
 
 /// v18's promise: a run row says whether its proposal counters were ever
 /// booked (M49.9).
@@ -614,7 +658,7 @@ fn quarantine(path: &Path, verdict: &str) -> Result<PathBuf, String> {
             );
         }
     }
-    eprintln!(
+    log::error!(
         "runtime db failed {verdict:?}; preserved at {} and replaced with a fresh database — \
          ambient work is paused until the owner rebaselines",
         target.display()
@@ -741,7 +785,7 @@ pub fn open_vault(vault: &Path) -> Option<VaultScope> {
             store_uuid: store_uuid.clone(),
         }),
         Err(detail) => {
-            eprintln!("vault_registry: {vault:?} could not be registered: {detail}");
+            log::warn!("vault_registry: {vault:?} could not be registered: {detail}");
             None
         }
     })
@@ -865,9 +909,11 @@ mod tests {
     /// Every prior `user_version` migrates atomically and keeps its rows —
     /// the acceptance row "each prior user_version migrates or rolls back
     /// intact", run for real from each version this build has ever shipped.
+    /// A database built from raw DDL never ran v3's seeding, so nothing here
+    /// asks for lanes.
     #[test]
     fn a_database_at_every_prior_version_migrates_and_keeps_its_history() {
-        for from in [1_i64, 2] {
+        for from in 1..USER_VERSION {
             let dir = testutil::temp_vault(&format!("runtime-upgrade-{from}"));
             std::fs::create_dir_all(&dir).unwrap();
             let conn = Connection::open(runtime_db_path(&dir)).unwrap();
@@ -897,9 +943,209 @@ mod tests {
                 })
                 .unwrap_or_else(|e| panic!("{table} missing after upgrade from {from}: {e}"));
             }
+            validate_v20(&conn).unwrap_or_else(|e| panic!("upgrade from {from}: {e}"));
             drop(conn);
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// v19 (M54.11): a database at 18, holding a vault and a run, comes back
+    /// at 19 with both, and the new table takes a status row for that vault
+    /// and refuses one for a vault nobody registered.
+    #[test]
+    fn v19_promises_connector_status() {
+        let dir = testutil::temp_vault("runtime-upgrade-18");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        let mut sql = String::from("BEGIN;");
+        for migration in MIGRATIONS.iter().filter(|m| m.to <= 18) {
+            sql.push_str(migration.sql);
+        }
+        sql.push_str("PRAGMA user_version = 18; COMMIT;");
+        conn.execute_batch(&sql).unwrap();
+        let vault = "b".repeat(32);
+        conn.execute(
+            "INSERT INTO vault_registry (vault_id, vault_path, first_seen_at) \
+             VALUES (?1, '/somewhere', '2026-10-13T00:00:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        assert!(
+            conn.prepare("SELECT * FROM connector_status").is_err(),
+            "no status table before v19"
+        );
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v19(&conn).is_ok());
+        let kept: i64 = conn
+            .query_row("SELECT count(*) FROM vault_registry", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "the step keeps every row it found");
+        let insert = |vault_id: &str| {
+            conn.execute(
+                "INSERT INTO connector_status (vault_id, connector, state, signal, seen_at, \
+                 run_id) VALUES (?1, 'gmail', 'needs_sign_in', 'init', \
+                 '2026-10-13T10:00:00.000Z', 'run-1')",
+                [vault_id],
+            )
+        };
+        assert!(insert(&vault).is_ok());
+        assert!(
+            insert(&"c".repeat(32)).is_err(),
+            "a status row belongs to a registered vault"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A database built from raw DDL at `version`, with its lane registry
+    /// seeded (v3's `validate` does that, and raw SQL does not run it), one
+    /// vault and one finished run.
+    fn at_version_with_a_run(label: &str, version: i64) -> (PathBuf, String) {
+        let dir = testutil::temp_vault(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        let mut sql = String::from("BEGIN;");
+        for migration in MIGRATIONS.iter().filter(|m| m.to <= version) {
+            sql.push_str(migration.sql);
+        }
+        sql.push_str(&format!("PRAGMA user_version = {version}; COMMIT;"));
+        conn.execute_batch(&sql).unwrap();
+        for (lane, priority, enabled) in schema::LANES {
+            conn.execute(
+                "INSERT INTO lane_registry (lane, priority, enabled_by_default, \
+                 introduced_version) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![lane, priority, i64::from(enabled), schema::LANE_INTRODUCED],
+            )
+            .unwrap();
+        }
+        let vault = "d".repeat(32);
+        conn.execute(
+            "INSERT INTO vault_registry (vault_id, vault_path, first_seen_at) \
+             VALUES (?1, '/somewhere', '2026-10-13T00:00:00.000Z')",
+            [&vault],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
+             outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
+             reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, \
+             rejected) VALUES ('before-causes', ?1, 'store', 'ambient', 'scheduled', \
+             '2026-10-13T09:00:00.000Z', '2026-10-13T09:01:00.000Z', 'succeeded', 'exact', \
+             5, 1, 0, 0, 0, 0, 0, 0, 0)",
+            [&vault],
+        )
+        .unwrap();
+        (dir, vault)
+    }
+
+    /// v20 (M56.7): a database at 19 keeps its runs, and the row from before
+    /// reads NULL for both new columns — nothing is backfilled.
+    #[test]
+    fn a_v19_database_gains_cause_and_session_and_keeps_its_runs() {
+        let (dir, _vault) = at_version_with_a_run("runtime-upgrade-19", 19);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        assert!(
+            conn.prepare("SELECT cause FROM runs").is_err(),
+            "no cause before v20"
+        );
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        assert_eq!(user_version(&conn).unwrap(), USER_VERSION);
+        assert!(validate_v20(&conn).is_ok());
+        let (count, cause, session): (i64, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT count(*), max(cause), max(cli_session_id) FROM runs",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "the step keeps every run it found");
+        assert_eq!((cause, session), (None, None), "and backfills nothing");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The CHECK holds the vocabulary: a kind outside it, a value that is not
+    /// JSON, a JSON array and an over-long object are each refused, and every
+    /// kind `cause.rs` records is taken.
+    #[test]
+    fn the_cause_check_refuses_a_kind_outside_the_vocabulary() {
+        let (dir, _vault) = at_version_with_a_run("runtime-cause-check", 19);
+        let conn = open(&dir).unwrap();
+        let set = |value: &str| {
+            conn.execute(
+                "UPDATE runs SET cause = ?1 WHERE run_id = 'before-causes'",
+                [value],
+            )
+        };
+        for kind in cause::CauseKind::ALL {
+            let column = cause::RunCause::of(kind).to_column();
+            assert!(set(&column).is_ok(), "{column}");
+        }
+        assert!(
+            set(r#"{"kind":"scheduled"}"#).is_err(),
+            "a lane is not a kind"
+        );
+        assert!(set(r#"{"kind":"telepathy"}"#).is_err());
+        assert!(set("schedule").is_err(), "not JSON");
+        assert!(set(r#"["schedule"]"#).is_err(), "not an object");
+        assert!(set(r#"{"subject":"x"}"#).is_err(), "no kind at all");
+        let long = format!(r#"{{"kind":"event","subject":"{}"}}"#, "x".repeat(2048));
+        assert!(set(&long).is_err(), "over 2048 characters");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_session_check_refuses_a_path_shaped_id() {
+        let (dir, _vault) = at_version_with_a_run("runtime-session-check", 19);
+        let conn = open(&dir).unwrap();
+        let set = |value: &str| {
+            conn.execute(
+                "UPDATE runs SET cli_session_id = ?1 WHERE run_id = 'before-causes'",
+                [value],
+            )
+        };
+        assert!(set("00000000-0000-4000-8000-000000000001").is_ok());
+        for bad in [
+            "../x1234",
+            "a/b/c/d/e",
+            "short",
+            "--dangerously-skip-permissions",
+            &"a".repeat(65),
+        ] {
+            assert!(set(bad).is_err(), "{bad}");
+            assert!(!cause::is_cli_session_id(bad), "Rust refuses {bad} too");
+        }
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A v20 that added the column without its CHECK would take any text, so
+    /// the validator refuses it and the step rolls back.
+    #[test]
+    fn a_cause_column_without_its_check_rolls_back() {
+        let _lock = status::test_lock();
+        let (dir, _vault) = at_version_with_a_run("runtime-cause-unchecked", 19);
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        status::clear();
+        let unchecked = Migration {
+            to: 20,
+            sql: "ALTER TABLE runs ADD COLUMN cause TEXT; \
+                  ALTER TABLE runs ADD COLUMN cli_session_id TEXT;",
+            validate: validate_v20,
+        };
+        let err = step(&conn, &unchecked).unwrap_err();
+        assert!(err.contains("without its kind CHECK"), "{err}");
+        assert_eq!(user_version(&conn).unwrap(), 19);
+        assert!(conn.prepare("SELECT cause FROM runs").is_err());
+        status::clear();
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A database that was upgraded MID-RUN comes back holding the lease it

@@ -1,0 +1,32 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "session_id": "00000000-0000-4000-8000-00000000000a",
+  "mcp_servers": [
+    {
+      "name": "cerebro",
+      "status": "connected"
+    },
+    {
+      "name": "ok",
+      "status": "connected"
+    },
+    {
+      "name": "auth",
+      "status": "needs-auth"
+    },
+    {
+      "name": "down",
+      "status": "failed"
+    },
+    {
+      "name": "slow",
+      "status": "pending"
+    },
+    {
+      "name": "off",
+      "status": "disabled"
+    }
+  ],
+  "claude_code_version": "2.1.250"
+}

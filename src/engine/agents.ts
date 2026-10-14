@@ -10,11 +10,12 @@ import type { Entry } from './types';
  * A record of `type: Agent` whose body is its standing instructions. It runs
  * unattended on its `schedule:`, its writes are attributed to
  * `process:<slug>` — the actor slot the OKF schema has reserved since M8 —
- * and its memory between runs is the `memory:` frontmatter property, which
- * it rewrites through update_frontmatter at the end of each run. Memory in
- * frontmatter rather than a hidden state file on purpose: it renders as an
- * ordinary property on the record, so what the agent carries forward is
- * always one click from the person it works for.
+ * and its working notes between runs are the `recent:` frontmatter property
+ * (M17.14; `memory:` before it), which a run that holds update_frontmatter is
+ * asked to rewrite at the end of each run (M54.7). Memory in frontmatter
+ * rather than a hidden state file on purpose: it renders as an ordinary
+ * property on the record, so what the agent carries forward is always one
+ * click from the person it works for.
  *
  * Activation is a human act: an Agent record without a `schedule:` is a
  * description, not a daemon.
@@ -43,7 +44,9 @@ export interface AgentRef {
   path: string;
   description: string;
   /** The record's `tools:` — 'shell' widens the run to the host tools,
-   * still capped by the Settings ceiling. Anything else reads as safe. */
+   * still capped by the Settings ceiling, unless the record also declares a
+   * `read-scope:`, which withdraws it in Rust (M53.5). Anything else reads as
+   * safe. */
   shell: boolean;
   /**
    * Vault-relative folders this agent may WRITE inside (M17.13).
@@ -70,8 +73,23 @@ export interface AgentRef {
    * same bearer token in Rust.
    */
   readScope: string[] | null;
-  /** Tools this agent may use, intersected with the granted policy (M17.8). */
+  /** Tools this agent may use, intersected with the granted policy (M17.8).
+   * An `mcp__<connector>` or `mcp__<connector>__<tool>` entry narrows that
+   * connector's grant the same way (M54.9). */
   allowedTools: string[] | null;
+  /**
+   * Connector tools this agent may never call (M54.9) — `disallowed-tools:`.
+   *
+   * Only entries that name one of the run's connectors count: the whole
+   * server (`mcp__gmail`), which then never loads, or one tool
+   * (`mcp__gmail__trash_thread`), which the run's `--disallowedTools` denies
+   * — and a deny binds even where the person's own Claude Code allow rules
+   * would widen the run. In a vault with no connector list, an entry that
+   * names any connector keeps the run off the person's global MCP config,
+   * which no deny could bind. Null and [] both deny nothing; it can only
+   * subtract.
+   */
+  disallowedTools: string[] | null;
   /**
    * Named system-prompt fragments this agent opts into (M34.1.3).
    * Deliberately the smallest possible mechanism: a capability selects TEXT,
@@ -83,15 +101,19 @@ export interface AgentRef {
   /**
    * Connectors this agent may reach (M18.4).
    *
-   * Null when the record names none — the run gets whatever the vault has
-   * enabled, which is what every agent had before. An empty list is the
-   * opposite: named, and named nothing.
+   * Null when the record names none: its unattended runs then reach no
+   * connector at all, and a turn you address it in reaches every enabled
+   * connector approved on this machine (M54.9). An empty list is the
+   * opposite of reaching everything: named, and named nothing. A named
+   * connector the vault cannot give a run is dropped, never conjured, and
+   * the run's prompt names it with why (M54.11).
    *
    * Worth having as its own axis rather than folding into `scope:`, because
    * they bound different things. `scope:` says what the agent may CHANGE in
-   * your vault; this says what it may READ from the outside world on your
-   * behalf — and a tightly scoped agent that can still query every connected
-   * system is only half-bounded.
+   * your vault; this says which outside systems it may act in on your behalf
+   * — a connector's tools can read, and can change things there too — and a
+   * tightly scoped agent that can still reach every connected system is only
+   * half-bounded.
    */
   connectors: string[] | null;
   /**
@@ -200,6 +222,7 @@ export function agentRef(entry: Entry): AgentRef {
     scope: parseScope(entry),
     readScope: parseReadScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
+    disallowedTools: parseAllowedTools(entry.properties['disallowed-tools']),
     capabilities: parseAllowedTools(entry.properties.capabilities) ?? [],
     connectors: parseAllowedTools(entry.properties.connectors),
     memory: parseMemory(entry),

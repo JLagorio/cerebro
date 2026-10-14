@@ -5,7 +5,12 @@ import { deleteNote, listCollections, saveCollection } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import { deleteCollection, updateCollection } from './listActions';
+import {
+  createLinkedPage,
+  deleteCollection,
+  LINKED_PAGE_FOLDER,
+  updateCollection,
+} from './listActions';
 
 vi.mock('@/lib/ipc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ipc')>()),
@@ -122,5 +127,40 @@ describe('deleteCollection on a page-declared collection', () => {
     useVaultStore.setState({ patchFrontmatter: vi.fn(async () => false) });
     expect(await deleteCollection(declaredByPage)).toBe(false);
     expect(deleteNote).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The page a link typed in the editor names (M55.7). Its stem is unique across
+ * the vault, and the caller links the path the backend answers, which can
+ * differ when a name was taken since the last scan.
+ */
+describe('createLinkedPage', () => {
+  it('writes `# <title>` at the vault root under a vault-unique stem, and answers the path written', async () => {
+    const createItem = vi.fn(async () => 'launch-notes-3.md');
+    useVaultStore.setState({
+      entries: [page, makeEntry({ path: 'notes/launch-notes.md' })],
+      createItem,
+    });
+    expect(await createLinkedPage('Launch notes')).toBe('launch-notes-3.md');
+    expect(LINKED_PAGE_FOLDER).toBe('');
+    expect(createItem).toHaveBeenCalledWith({
+      folder: LINKED_PAGE_FOLDER,
+      slug: 'launch-notes-2',
+      frontmatter: {},
+      body: '# Launch notes\n',
+    });
+  });
+
+  it('toasts once and answers null when the write fails, never throwing', async () => {
+    useVaultStore.setState({
+      createItem: vi.fn(async () => {
+        throw new Error('EACCES');
+      }),
+    });
+    await expect(createLinkedPage('Launch notes')).resolves.toBeNull();
+    const toast = vi.mocked(useUiStore.getState().toast);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith("Couldn't create the page");
   });
 });

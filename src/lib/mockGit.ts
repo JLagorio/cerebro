@@ -18,6 +18,7 @@ import type {
   PulseCommit,
   RemoteResult,
   Resolution,
+  VaultPulse,
 } from '@/engine/git';
 
 interface MockState {
@@ -45,16 +46,18 @@ function seed(): MockState {
         message: 'Distil onboarding drop-off from the support thread',
         author: 'Cerebro',
         date: 1_753_800_000,
-        files: [
-          {
-            path: 'knowledge/onboarding-drop-off.md',
-            status: 'modified',
-            title: 'Onboarding Drop Off',
-          },
-        ],
-        added: 0,
-        modified: 1,
-        deleted: 0,
+        changes: {
+          files: [
+            {
+              path: 'knowledge/onboarding-drop-off.md',
+              status: 'modified',
+              title: 'Onboarding Drop Off',
+            },
+          ],
+          added: 0,
+          modified: 1,
+          deleted: 0,
+        },
       },
       {
         hash: 'c1c1c1c1',
@@ -62,10 +65,12 @@ function seed(): MockState {
         message: 'Start tracking this vault with cerebro',
         author: 'Ana Rios',
         date: 1_753_700_000,
-        files: [{ path: 'projects/atlas/project.md', status: 'added', title: 'Project' }],
-        added: 1,
-        modified: 0,
-        deleted: 0,
+        changes: {
+          files: [{ path: 'projects/atlas/project.md', status: 'added', title: 'Project' }],
+          added: 1,
+          modified: 0,
+          deleted: 0,
+        },
       },
     ],
     modified: [],
@@ -160,9 +165,13 @@ export async function gitDiscardFile(_vault: string, path: string): Promise<void
 }
 
 export async function getFileHistory(_vault: string, path: string): Promise<GitCommit[]> {
-  return state()
-    .commits.filter((c) => c.files.some((f) => f.path === path))
-    .map(({ files: _f, added: _a, modified: _m, deleted: _d, ...commit }) => commit);
+  const s = state();
+  // Rust answers a vault that is not a repository with no history, not an
+  // error — and not whatever commits a test left in the log.
+  if (!s.isRepo) return [];
+  return s.commits
+    .filter((c) => c.changes?.files.some((f) => f.path === path) === true)
+    .map(({ changes: _changes, ...commit }) => commit);
 }
 
 export async function getFileDiff(_vault: string, path: string): Promise<string> {
@@ -181,8 +190,9 @@ export async function getCommitDiff(_vault: string, _commit: string): Promise<st
   return DEFAULT_DIFF;
 }
 
-export async function getVaultPulse(_vault: string): Promise<PulseCommit[]> {
-  return [...state().commits];
+export async function getVaultPulse(_vault: string): Promise<VaultPulse> {
+  const s = state();
+  return { tracked: s.isRepo, commits: s.isRepo ? [...s.commits] : [] };
 }
 
 export async function getLastCommitInfo(_vault: string): Promise<LastCommitInfo | null> {
@@ -202,14 +212,16 @@ export async function gitCommit(_vault: string, message: string): Promise<string
       message,
       author: 'Ana Rios',
       date: Math.floor(Date.now() / 1000),
-      files: s.modified.map((f) => ({
-        path: f.path,
-        status: f.status,
-        title: f.path.split('/').pop() ?? f.path,
-      })),
-      added: s.modified.filter((f) => f.status === 'added' || f.status === 'untracked').length,
-      modified: s.modified.filter((f) => f.status === 'modified').length,
-      deleted: s.modified.filter((f) => f.status === 'deleted').length,
+      changes: {
+        files: s.modified.map((f) => ({
+          path: f.path,
+          status: f.status,
+          title: f.path.split('/').pop() ?? f.path,
+        })),
+        added: s.modified.filter((f) => f.status === 'added' || f.status === 'untracked').length,
+        modified: s.modified.filter((f) => f.status === 'modified').length,
+        deleted: s.modified.filter((f) => f.status === 'deleted').length,
+      },
     },
     ...s.commits,
   ];

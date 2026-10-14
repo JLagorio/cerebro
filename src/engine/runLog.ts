@@ -1,4 +1,13 @@
-import type { RunOwner } from '@/agent/runs';
+import { toolFacts } from '@/lib/policy/tools';
+import { lateBy } from './whenText';
+
+/** Who a run was for (M17.7). It lives beside the log that records it, so the
+ * engine needs nothing from agent/; agent/runs.ts reads it from here. */
+export type RunOwner =
+  /** A turn someone typed and is watching. */
+  | 'chat'
+  /** A background job: distilling, a scheduled skill, an agent record. */
+  | 'job';
 
 /**
  * What the assistant did, and when (M17.15).
@@ -20,11 +29,14 @@ import type { RunOwner } from '@/agent/runs';
  *
  * ## Where it lives
  *
- * localStorage, beside the conversations and for the same reason: it is a
+ * In localStorage, beside the conversations and for the same reason: it is a
  * record of the tool, not of the work. Writing it into the vault would put it
  * in the corpus, in git, and in the user's backups — three places where a
  * machine log is noise. It is capped and it is disposable; nothing downstream
  * may depend on an entry still being there.
+ *
+ * stores/runLogStore.ts keeps it there. This module holds the shape, the
+ * parse, the cap and the wording, and touches no storage itself.
  */
 export interface RunLogEntry {
   id: string;
@@ -73,7 +85,6 @@ export interface RunLogEntry {
   durableId?: string;
 }
 
-const KEY = 'cerebro.runLog';
 /**
  * Enough to answer "what has it been doing this week"; not enough to become
  * storage. A log that grows without bound in localStorage eventually competes
@@ -88,10 +99,12 @@ function isEntry(raw: unknown): raw is RunLogEntry {
   return typeof e.id === 'string' && typeof e.at === 'string' && Array.isArray(e.files);
 }
 
-export function loadRunLog(): RunLogEntry[] {
+/** The stored log, read back: null (nothing stored) and anything that is not
+ * a JSON list read as an empty log. */
+export function parseRunLog(raw: string | null): RunLogEntry[] {
+  if (raw === null) return [];
   try {
-    const raw = window.localStorage.getItem(KEY);
-    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     // Tolerant like every other load path: one malformed row must not take the
     // whole log with it.
     return Array.isArray(parsed) ? parsed.filter(isEntry) : [];
@@ -100,25 +113,9 @@ export function loadRunLog(): RunLogEntry[] {
   }
 }
 
-/** Newest first, capped. Returns what it stored so a caller can render it
- * without re-reading. */
-export function appendRunLog(entry: RunLogEntry): RunLogEntry[] {
-  const next = [entry, ...loadRunLog()].slice(0, MAX_KEPT);
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    // Storage unavailable (private mode): the log is session-only, which is
-    // strictly better than failing the run that was trying to record itself.
-  }
-  return next;
-}
-
-export function clearRunLog(): void {
-  try {
-    window.localStorage.removeItem(KEY);
-  } catch {
-    // Nothing to do — see above.
-  }
+/** The log with `entry` recorded: newest first, capped. */
+export function capRunLog(entry: RunLogEntry, prior: readonly RunLogEntry[]): RunLogEntry[] {
+  return [entry, ...prior].slice(0, MAX_KEPT);
 }
 
 /** One line for a row. Separate from the component so the phrasing is testable
@@ -133,39 +130,26 @@ export function describeRun(entry: RunLogEntry): string {
       : entry.files.length === 1
         ? `Wrote ${entry.files[0]}`
         : `Wrote ${entry.files.length} files`;
-  const late = lateBy(entry);
+  // Late is not failed: see whenText's lateBy, the rule the fleet shares.
+  const late = entry.dueAt === undefined ? null : lateBy(entry.dueAt, entry.at);
   return late === null ? wrote : `${wrote} · ran ${late} late`;
-}
-
-/**
- * A run fired well after its due moment says how late (M34.2) — the visible
- * consequence of app-lifetime scheduling, and deliberately NOT a failure: a
- * laptop closed over the weekend owes one honest catch-up, not an apology.
- * The threshold is the runner's own cadence (60s tick + settle) with margin;
- * a run landing inside it was simply the next tick, not a missed window.
- */
-const LATE_AFTER_MS = 5 * 60_000;
-
-function lateBy(entry: RunLogEntry): string | null {
-  if (entry.dueAt === undefined) return null;
-  const gap = Date.parse(entry.at) - Date.parse(entry.dueAt);
-  if (Number.isNaN(gap) || gap < LATE_AFTER_MS) return null;
-  const minutes = Math.round(gap / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
 }
 
 /**
  * The vault path a tool call wrote, or null if it wrote nothing.
  *
  * Read from the tool's own input rather than from a response, because that is
- * what the event stream carries and because it is the same field the scope
- * check reads — one description of "what this call is aimed at", used twice.
+ * what the event stream carries. The field is the tool's target argument in
+ * the manifest (`shared/policy/tools.v1.json`), the one the server aims its
+ * scope checks by — one description of "what this call is aimed at", used
+ * twice. For a create that is the folder: the scope check sees the folder
+ * alone, and the slug is the writer's to choose. A tool that writes nothing,
+ * or writes with no target argument (a proposal, a CLI edit), reports null.
  */
 export function writtenPath(tool: string, input: string | null): string | null {
-  if (input === null) return null;
+  const facts = toolFacts(tool);
+  const arg = facts?.writes === true ? (facts.target?.arg ?? null) : null;
+  if (arg === null || input === null) return null;
   let args: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(input);
@@ -174,23 +158,6 @@ export function writtenPath(tool: string, input: string | null): string | null {
   } catch {
     return null;
   }
-  const str = (key: string): string | null =>
-    typeof args[key] === 'string' && args[key].trim() !== '' ? (args[key] as string).trim() : null;
-  const name = tool.replace(/^mcp__cerebro__/, '');
-  switch (name) {
-    case 'update_frontmatter':
-    case 'append_to_note':
-      return str('path');
-    // A create names a folder and a title; the file is the two together, and
-    // the folder alone is what the scope check sees. Reporting the folder is
-    // honest and does not pretend to know the slug the writer chose.
-    case 'create_note':
-    case 'write_concept':
-    case 'recheck_concept':
-      return str('path') ?? str('folder');
-    case 'cache_source':
-      return str('path') ?? str('id');
-    default:
-      return null;
-  }
+  const value = args[arg];
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }

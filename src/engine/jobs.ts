@@ -1,8 +1,7 @@
 import { isAgentEntry } from './agents';
 import type { VaultEvent } from './events';
 import { recordIdentity } from './identity';
-import { SOURCES_DIR } from './ingest';
-import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
+import { fireKeyDate, isSkillEntry, lastFireKey, parseSchedule } from './skills';
 import { firstMatch, parseTriggers } from './triggers';
 import { resolveTarget } from './wikilink';
 import { isKnowledgePath, type Concept } from './okf';
@@ -30,11 +29,11 @@ import type { Entry } from './types';
  * remembered to say so.
  *
  * What is left here is not distillation: scheduled skills, scheduled and
- * event-triggered agent runs, cached-source refresh, and the concept recheck
- * lanes (`stale`, `schema`) that M26.6's maintenance pass will take over.
+ * event-triggered agent runs, and the concept recheck lanes (`stale`,
+ * `schema`) that M26.6's maintenance pass will take over. Cached-source
+ * refresh derives no job since M54.9 (see `jobQueue`).
  *
- * Ranking: a standing appointment goes first; refresh and rechecks are
- * maintenance.
+ * Ranking: a standing appointment goes first; rechecks are maintenance.
  */
 
 export type JobKind = 'scheduled' | 'agent' | 'refresh' | 'stale' | 'schema';
@@ -120,7 +119,8 @@ export interface AgentJob {
   title: string;
   /**
    * What the ledger records at start, per kind (M49.7):
-   * - `refresh` — the source note's modifiedAt (the only mtime key);
+   * - `refresh` — the source note's modifiedAt (the only mtime key), though
+   *   no refresh job is derived since M54.9;
    * - `stale` — `stale:<stale_after>`, the recheck date;
    * - `schema` — `schema:<hash of the anchoring Type docs>`, plus
    *   `|stale:<stale_after>` when the concept is also stale;
@@ -173,9 +173,6 @@ export interface JobQueueInput {
   triggerRuns?: Readonly<Record<string, string>>;
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;
-  /** Connectors enabled (uiStore.agentConnectors). A stale cached source is
-   * only work when the agent can actually reach the system it came from. */
-  connectors?: boolean;
 }
 
 /** An attempt recorded as an mtime — the run key before M49.7. */
@@ -207,37 +204,18 @@ function schemaKey(docs: readonly Entry[]): string {
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],
-  { attempts, skillRuns, now, connectors = false, events = [], triggerRuns = {} }: JobQueueInput,
+  { attempts, skillRuns, now, events = [], triggerRuns = {} }: JobQueueInput,
 ): AgentJob[] {
-  // A cached source past its refresh date becomes a re-fetch (M13.3) —
-  // cache_source stamps stale_after for exactly this, and the refreshed
-  // file's new mtime makes citing concepts `behind`, so the distiller
-  // re-checks them with no extra wiring. Derived FIRST because a
-  // refresh-due source must be exactly ONE job: its own `behind`
-  // re-distillation shares the same attempts key, and letting that run
-  // first would record the key and starve the re-fetch forever. The
-  // re-distill resumes on its own once the refresh changes the mtime.
-  const refresh: AgentJob[] = [];
-  if (connectors) {
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    for (const entry of entries) {
-      if (!entry.path.startsWith(`${SOURCES_DIR}/`) || entry.parseError !== null) continue;
-      const stale = entry.properties.stale_after;
-      if (typeof stale !== 'string' || stale > today) continue;
-      if (attempts[entry.path] === entry.modifiedAt) continue;
-      refresh.push({
-        kind: 'refresh',
-        path: entry.path,
-        // An ordinary note has no declared identity: its path is what the
-        // ledger has always remembered it as, and still is.
-        key: entry.path,
-        title: entry.title,
-        runKey: entry.modifiedAt,
-        ledger: 'attempts',
-        cooldownKey: null,
-      });
-    }
-  }
+  // A cached source past its refresh date (cache_source's stale_after) is
+  // NOT a job (M54.9). Re-fetching needs the connector the source came from,
+  // and a refresh run holds none: it runs unattended with no record to name
+  // `connectors:`, and an unattended run reaches only the connectors its
+  // record names (Q8). Each stale source would cost one budgeted run that
+  // could only say it has no connector. The `refresh` kind, its budget lane
+  // and refreshSourcePrompt wait for the owner's call on which connector a
+  // refresh run may hold; cache_source records only `issue` or `web`, never
+  // the connector.
+  //
   // Re-synthesis is staleness (M13.5): when a Type doc changes after a
   // concept was generated, every concept `about` records of that type is due
   // a recheck — lazily, one at a time, never as a bulk reprocess.
@@ -380,15 +358,15 @@ export function jobQueue(
   // keys have their own format (see `AgentJob.runKey`), so they only ever
   // compare within their own kind. Give two kinds one rank and the sort
   // silently orders by format. What the descending tie-break yields:
-  // - `refresh`: the most recently modified source first;
   // - `stale`: the LATEST recheck date first, so the longest-overdue
   //   concept goes last;
   // - `schema`: hash order — stable, but meaningless;
   // - `scheduled` / `agent`: the latest fire first; within `agent`, which
   //   mixes the two formats, every `event:` key sorts before every fire key.
   // Equal keys fall back to path order.
-  // Refresh sits before stale on purpose: a concept recheck reads its
-  // sources, and rechecking against a copy about to be replaced is wasted.
+  // `refresh` keeps its slot before stale, where a re-fetch belongs: a
+  // concept recheck reads its sources, and rechecking against a copy about
+  // to be replaced is wasted.
   const RANK: Record<JobKind, number> = {
     scheduled: 0,
     agent: 1,
@@ -396,10 +374,81 @@ export function jobQueue(
     stale: 3,
     schema: 4,
   };
-  return [...scheduled, ...refresh, ...recheck].sort(
+  return [...scheduled, ...recheck].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||
       b.runKey.localeCompare(a.runKey) ||
       a.path.localeCompare(b.path),
   );
+}
+
+/**
+ * Why a job's run started, as `run_agent`'s request names it (M56.7).
+ *
+ * `kind` is a string the runtime admits or refuses: the vocabulary, its
+ * words and the CHECK that holds it live once, in
+ * `src-tauri/src/runtime/cause.rs`, and this side keeps no list of them. Rust
+ * cleans and caps every value, quotes it in the run's prompt as data, and
+ * records it on the run's row.
+ */
+export interface RunCauseRequest {
+  kind: string;
+  subject?: string;
+  detail?: string;
+  due_at?: string;
+}
+
+/** Why a recheck lane's run started, in words, by job kind (Q17: the lanes
+ * record `maintenance`, and the reason rides as detail). */
+const MAINTENANCE_DETAIL: Partial<Record<JobKind, string>> = {
+  refresh: 'a cached source passed its refresh date',
+  stale: 'a concept passed its recheck date',
+  schema: 'the schema a concept describes changed',
+};
+
+/** The path an event run key names: `event:<kind>:<path>@<modifiedAt>`. */
+function eventPath(runKey: string): string | null {
+  const match = runKey.match(/^event:[^:]+:(.+)@[^@]*$/);
+  return match === null ? null : match[1];
+}
+
+/**
+ * The cause one job's run names (M56.7).
+ *
+ * - An event run: `event`, its subject the changed path and its detail the
+ *   trigger's words. `woke` is what the runner matched; without it the path
+ *   is read back from the run key, and the words are left out.
+ * - A schedule's fire, a skill's or an agent's: `schedule`, its detail the
+ *   record's `schedule:` and its due moment the fire key's instant.
+ * - The recheck lanes: `maintenance`, the concept as subject, the lane's
+ *   reason as detail.
+ */
+export function causeOfJob(
+  job: AgentJob,
+  woke: { subject: string; because: string } | null,
+  schedule: string | null,
+): RunCauseRequest {
+  if (job.runKey.startsWith('event:')) {
+    const subject = woke?.subject ?? eventPath(job.runKey);
+    return {
+      kind: 'event',
+      ...(subject === null ? {} : { subject }),
+      ...(woke === null ? {} : { detail: woke.because }),
+    };
+  }
+  if (job.kind === 'scheduled' || job.kind === 'agent') {
+    const due = fireKeyDate(job.runKey);
+    const said = schedule?.trim() ?? '';
+    return {
+      kind: 'schedule',
+      ...(said === '' ? {} : { detail: said }),
+      ...(due === null ? {} : { due_at: due.toISOString() }),
+    };
+  }
+  const detail = MAINTENANCE_DETAIL[job.kind];
+  return {
+    kind: 'maintenance',
+    subject: job.path,
+    ...(detail === undefined ? {} : { detail }),
+  };
 }

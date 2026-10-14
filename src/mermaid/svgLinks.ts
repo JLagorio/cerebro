@@ -15,11 +15,13 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
  * - sequenceDiagram puts `<a href="…">` in its `g.actorPopupMenu`
  *
  * `sanitizeUrl` drops `javascript:`, so the danger is not script — it is
- * plain navigation. A vault-relative or absolute target followed inside the
- * Tauri webview takes the WHOLE APP off the SPA, and there is no browser
- * chrome to come back with and no navigation guard on the Rust side: unsaved
- * editor state is simply gone. An `https://` target is no gentler; opening it
- * in the system browser instead would be a feature this app does not have.
+ * plain navigation. The packaged app's shell guard now catches it
+ * (src-tauri/src/shell/links.rs, M53.12): it refuses an off-entry target on
+ * the app's own origin, where a vault-relative one lands, and sends an
+ * `https://` one to the system browser. The strip stays anyway. `pnpm dev`
+ * and the tests run with no guard, where following a relative target still
+ * takes the WHOLE APP off the SPA and unsaved editor state with it, and a
+ * read-only picture has no business opening a browser tab either.
  *
  * So a READ-ONLY viewer strips the target rather than intercepting the click.
  * `preventDefault` on a click handler would leave keyboard activation,

@@ -20,7 +20,8 @@
 //! self-certify — but `create_note`, `update_frontmatter` and `append_to_note`
 //! reached the same files with no such check, which made the refusal a
 //! formality anyone could route around. `guard_agent_write` closes those
-//! three doors, so the agent reaches the bundle through exactly two
+//! doors and M55.5's `edit_note`, four in all, so the agent reaches the
+//! bundle through exactly two
 //! server-stamped tools: `write_concept` (a whole concept) and, since M49.7,
 //! `recheck_concept` (moves `stale_after` and nothing else).
 
@@ -34,8 +35,11 @@ pub const KNOWLEDGE_DIR: &str = "knowledge";
 /// Judged on the path the filesystem will RESOLVE (M49.4, K17), not the raw
 /// argument: `./knowledge/x.md`, `records/../knowledge/x.md` and — on APFS,
 /// which folds case — `Knowledge/x.md` all land in the bundle, and each
-/// walked past the old prefix check into `update_frontmatter`. Mirrored by
-/// `isKnowledgePath` in src/engine/okf.ts.
+/// walked past the old prefix check into `update_frontmatter`. The fold is
+/// the disk's, not ASCII's (M53.28, `folds_to_bundle`): APFS also hears
+/// U+212A KELVIN SIGN as `k`, and HFS+ ignores U+200C in a name, so those
+/// spellings are the bundle too. Mirrored by `isKnowledgePath` in
+/// src/engine/okf.ts; both replay src-tauri/fixtures/bundle-paths.json.
 pub fn is_knowledge_path(path: &str) -> bool {
     canonical_path(path).is_some()
 }
@@ -117,10 +121,30 @@ pub fn validate_stale_after(value: &str, today: chrono::NaiveDate) -> Result<(),
     Ok(())
 }
 
+/// `name` as a disk that folds names may hear it: Unicode case folded — APFS
+/// hears U+212A KELVIN SIGN as `k` — with the code points HFS+ ignores in a
+/// name dropped (`vault::scan::hfs_ignorable`). Two names that fold alike may
+/// be one folder on such a disk. Mirrors okf.ts's `diskFolded`.
+pub(crate) fn disk_folded(name: &str) -> String {
+    let heard: String = name
+        .chars()
+        .filter(|c| !crate::vault::scan::hfs_ignorable(*c))
+        .collect();
+    heard.to_uppercase().to_lowercase()
+}
+
+/// Does a disk that folds names hear `name` as the bundle folder? On APFS,
+/// `Knowledge`, U+212A KELVIN SIGN + `nowledge` and `know` + U+200C +
+/// `ledge` all name `knowledge/` (M53.28).
+pub(crate) fn folds_to_bundle(name: &str) -> bool {
+    disk_folded(name) == KNOWLEDGE_DIR
+}
+
 /// The bundle path in its one canonical spelling (`knowledge/…`), or `None`
 /// when `path` does not resolve into the bundle. `.` segments drop, `..`
 /// pops (a path that climbs out of the vault is not in the bundle), and the
-/// bundle folder matches case-insensitively.
+/// first name matches as a folding disk hears it (`folds_to_bundle`). Only
+/// that name is respelled; the rest of the path stays as asked.
 pub fn canonical_path(path: &str) -> Option<String> {
     let mut segments: Vec<&str> = Vec::new();
     if path.starts_with('/') {
@@ -136,7 +160,7 @@ pub fn canonical_path(path: &str) -> Option<String> {
         }
     }
     let (head, rest) = segments.split_first()?;
-    if !head.eq_ignore_ascii_case(KNOWLEDGE_DIR) {
+    if !folds_to_bundle(head) {
         return None;
     }
     Some(
@@ -330,7 +354,8 @@ pub fn guard_human_write(path: &str) -> Result<(), String> {
 /// human's — rests on them being the ONLY writers. They were not:
 /// `update_frontmatter` could patch `verified` straight onto a concept,
 /// `create_note` could author one pre-stamped, and `append_to_note` could
-/// grow a body with no provenance at all.
+/// grow a body with no provenance at all, as `edit_note` (M55.5) could
+/// rewrite one.
 pub fn guard_agent_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
         return Err(refuse("agent_write", AGENT_USE_WRITE_CONCEPT));
@@ -473,7 +498,11 @@ const CONCEPT_TYPES_DIGEST: &str = include_str!("../../shared/policy/concept-typ
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)] // Read by the digest test and by anyone diffing the artifact.
+#[expect(
+    dead_code,
+    reason = "artifact_version and rule_version are declared so deny_unknown_fields accepts \
+              the artifact; nothing reads them"
+)]
 struct ConceptTypeArtifact {
     format: u64,
     artifact_version: u64,
@@ -1470,36 +1499,33 @@ mod tests {
         std::fs::remove_dir_all(&vault).ok();
     }
 
+    /// The cases src/engine/okf.test.ts replays through canonicalKnowledgePath.
+    const BUNDLE_PATHS: &str = include_str!("../fixtures/bundle-paths.json");
+
+    // M49.4 (K17): the path the filesystem resolves, not the raw string; and
+    // M53.28: its first name heard as a folding disk hears it. One table, so
+    // the two backends cannot disagree about what the bundle is.
     #[test]
     fn recognizes_the_bundle_but_not_a_lookalike_sibling() {
-        assert!(is_knowledge_path("knowledge"));
-        assert!(is_knowledge_path("knowledge/metrics/revenue.md"));
-        assert!(!is_knowledge_path("knowledge-archive/old.md"));
-        assert!(!is_knowledge_path("records/risks/r.md"));
-        assert!(!is_knowledge_path("my-knowledge/x.md"));
-        // M49.4 (K17): the path the filesystem resolves, not the raw string.
-        // The same table is asserted against okf.ts's isKnowledgePath.
-        for (raw, canonical) in [
-            ("./knowledge/x.md", Some("knowledge/x.md")),
-            ("Knowledge/x.md", Some("knowledge/x.md")),
-            ("KNOWLEDGE/log.md", Some("knowledge/log.md")),
-            ("knowledge//a/./b.md", Some("knowledge/a/b.md")),
-            ("records/../knowledge/x.md", Some("knowledge/x.md")),
-            ("knowledge/../knowledge/x.md", Some("knowledge/x.md")),
-            ("knowledge/../records/x.md", None),
-            ("../knowledge/x.md", None),
-            ("/knowledge/x.md", None),
-            ("knowledge-archive/x.md", None),
-            ("", None),
-        ] {
-            assert_eq!(canonical_path(raw).as_deref(), canonical, "{raw}");
-            assert_eq!(is_knowledge_path(raw), canonical.is_some(), "{raw}");
+        let file: Value = serde_json::from_str(BUNDLE_PATHS).expect("bundle-paths.json parses");
+        let cases = file["cases"].as_array().expect("cases");
+        assert!(!cases.is_empty());
+        for case in cases {
+            let raw = case["path"].as_str().expect("a path");
+            let canonical = case["canonical"].as_str();
+            assert_eq!(canonical_path(raw).as_deref(), canonical, "{case}");
+            assert_eq!(is_knowledge_path(raw), canonical.is_some(), "{case}");
         }
     }
 
     #[test]
     fn human_writes_into_the_bundle_are_refused() {
         assert!(guard_human_write("knowledge/metrics/revenue.md").is_err());
+        // The spelling APFS folds onto the bundle is the bundle (M53.28).
+        assert_eq!(
+            guard_human_write("\u{212a}nowledge/metrics/revenue.md").unwrap_err(),
+            READ_ONLY
+        );
         assert!(guard_human_write("docs/notes.md").is_ok());
     }
 
@@ -1509,6 +1535,9 @@ mod tests {
         assert!(guard_human_move("knowledge/a.md", "docs/a.md").is_err());
         // Into the bundle: would smuggle human content into the agent corpus.
         assert!(guard_human_move("docs/a.md", "knowledge/a.md").is_err());
+        // Either way under the spelling APFS folds onto it (M53.28).
+        assert!(guard_human_move("\u{212a}nowledge/a.md", "docs/a.md").is_err());
+        assert!(guard_human_move("docs/a.md", "\u{212a}nowledge/a.md").is_err());
         assert!(guard_human_move("docs/a.md", "docs/b.md").is_ok());
     }
 

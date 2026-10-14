@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import type { Selection } from '@/engine/types';
-import { humanize } from '@/lib/mockParse';
+import { humanize } from '@/engine/frontmatter';
 import { detectDiagramType } from '@/mermaid/detect';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
 import { SAVE_LABEL, useDiagramFile } from '@/mermaid/useDiagramFile';

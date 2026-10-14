@@ -70,7 +70,7 @@ pub fn park(parked: &Parked) {
     };
     if let Some(conn) = guard.as_ref() {
         if let Err(e) = parked::park(conn, parked) {
-            eprintln!(
+            log::warn!(
                 "parked_promotions: could not park {}: {e}",
                 parked.belief_id
             );
@@ -85,7 +85,7 @@ pub fn clear_park(store_id: &str, belief_id: &str) {
     };
     if let Some(conn) = guard.as_ref() {
         if let Err(e) = parked::clear(conn, store_id, belief_id) {
-            eprintln!("parked_promotions: could not clear {belief_id}: {e}");
+            log::warn!("parked_promotions: could not clear {belief_id}: {e}");
         }
     }
 }

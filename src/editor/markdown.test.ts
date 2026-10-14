@@ -2,19 +2,28 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { BlockNoteEditor, defaultBlockSpecs } from '@blocknote/core';
 import { getDefaultSlashMenuItems } from '@blocknote/core/extensions';
+import { en } from '@blocknote/core/locales';
+import { getFormattingToolbarItems } from '@blocknote/react';
 import {
   blocksToMarkdown,
   escapeMarkerLines,
   formatAiMarker,
   isLossyImport,
+  lossyImportCause,
   markdownToBlocks,
   normalizeParsedBlocks,
   parseAiMarker,
   spliceTitleIntoBlocks,
   unwrapReplyFence,
 } from './markdown';
-import { cerebroSchema, type CerebroEditor } from './MarkdownEditor';
-import { splitFrontmatter } from '@/lib/mockParse';
+import {
+  cerebroSchema,
+  DROPPED_SLASH_KEYS,
+  slashMenuItems,
+  type CerebroEditor,
+} from './MarkdownEditor';
+import { blockMenuItems, formattingToolbarItems, UNCARRIED_ACTIONS } from './SelectionToolbar';
+import { splitFrontmatter } from '@/engine/frontmatter';
 
 // The app schema, not the default one: markdownToBlocks promotes chip text
 // (wikilinks, 📅 dates, [^citations]) into custom inline nodes that only exist
@@ -757,21 +766,27 @@ describe('fenced code and the containers below it', () => {
  * them.
  */
 describe('text that only looks like a marker', () => {
-  it.each([':::', ':::columns', '::::column width=2', ':::ai', ':::ai{prompt="x"}'])(
-    'writes %s typed as a paragraph escaped, and reads it back as that text',
-    async (text) => {
-      const live = holding([
-        { type: 'paragraph', content: text },
-        { type: 'ai', props: { prompt: 'Q' }, children: [{ type: 'paragraph', content: 'A' }] },
-      ]);
-      const saved = await blocksToMarkdown(live);
-      expect(saved).toBe(`\\${text}\n\n:::ai{prompt="Q"}\nA\n:::\n`);
-      const reopened = await markdownToBlocks(editor, saved);
-      expect(reopened.map((b) => b.type)).toEqual(['paragraph', 'ai']);
-      expect(reopened[0].content[0].text).toBe(text);
-      expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
-    },
-  );
+  it.each([
+    ':::',
+    ':::columns',
+    '::::column width=2',
+    ':::ai',
+    ':::ai{prompt="x"}',
+    ':::toggle Not a toggle',
+    ':::toggle-heading',
+    ':::indent',
+  ])('writes %s typed as a paragraph escaped, and reads it back as that text', async (text) => {
+    const live = holding([
+      { type: 'paragraph', content: text },
+      { type: 'ai', props: { prompt: 'Q' }, children: [{ type: 'paragraph', content: 'A' }] },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(`\\${text}\n\n:::ai{prompt="Q"}\nA\n:::\n`);
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['paragraph', 'ai']);
+    expect(reopened[0].content[0].text).toBe(text);
+    expect(await blocksToMarkdown(editor, reopened)).toBe(saved);
+  });
 
   it('escapes a marker line that follows a break inside a paragraph', async () => {
     const saved = await blocksToMarkdown(
@@ -1068,44 +1083,37 @@ describe('parseAiMarker / formatAiMarker', () => {
 });
 
 /*
- * Every block the `/` menu can insert, and whether a save keeps it (M53.9).
+ * Every block a `/` entry can insert, and whether a save keeps it (M53.9).
  *
  * The AI block came back from every save as a paragraph of its own chrome,
  * and nothing said so: the lossy-import check compares letters and digits,
- * and every word was still there. This holds the whole menu to the question
+ * and every word was still there. This holds every entry to the question
  * that would have caught it — does a block reopen as the block it was, and
- * does a second save write the bytes of the first?
+ * does a second save write the bytes of the first? It walks the editor's own
+ * `/` builder (`slashMenuItems`), so an entry the menu offers is an entry this
+ * measures, and an entry that cannot pass leaves the menu (M55.4, AGENTS.md
+ * "Every block the editor offers has a disk carrier").
  *
  * Not here: the `/` menu's Date entry inserts an inline chip (the chip tests
  * above hold those), and a template inserts the markdown it is made of.
  */
-describe('every block the / menu inserts survives a save, or is named', () => {
+describe('every / item survives a save or is not offered', () => {
   /**
-   * The ones that do not, today. EDITOR-1
-   * (docs/superpowers/specs/2026-10-12-macro-reference/03-editor.md) is the
-   * work that gives each one a carrier. The list can only shrink: an entry
-   * that starts surviving fails below until it is taken off.
+   * Entries the menu offers whose block a save does not keep. Empty since
+   * M55.4 gave each one a carrier, and it can only stay empty: an entry that
+   * loses something leaves the menu (DROPPED_SLASH_KEYS) instead.
    */
-  const KNOWN_LOSSY: Record<string, string> = {
-    toggle_list: 'saves as a bullet and reopens as one',
-    toggle_heading: 'saves as a heading and reopens without its toggle',
-    toggle_heading_2: 'saves as a heading and reopens without its toggle',
-    toggle_heading_3: 'saves as a heading and reopens without its toggle',
-    table: 'has no header row, which a markdown table must — the first save writes an empty one',
-    image: 'reopens named "BlockNote image", the alt text the serializer invents',
-    audio: 'saves as a bare link that reopens as an empty paragraph',
-    file: 'saves as an autolink that reopens as a paragraph holding a link',
-  };
+  const KNOWN_LOSSY: Record<string, string> = {};
 
   /** Emoji opens a picker that inserts a character, not a block. */
   const NOT_A_BLOCK = new Set(['emoji']);
 
-  /** A file block needs a file to be anything at all. */
+  /** A media block needs a file to be anything at all; relative, as a vault's are. */
   const MEDIA_URL: Record<string, string> = {
-    image: 'https://example.com/plan.png',
-    video: 'https://example.com/walkthrough.mp4',
-    audio: 'https://example.com/standup.mp3',
-    file: 'https://example.com/contract.pdf',
+    image: 'attachments/plan.png',
+    video: 'attachments/walkthrough.mp4',
+    audio: 'attachments/standup.m4a',
+    file: 'attachments/contract.pdf',
   };
 
   /** Cerebro's own blocks, each the way the `/` menu leaves it once used. */
@@ -1133,6 +1141,110 @@ describe('every block the / menu inserts survives a save, or is named', () => {
   };
   OURS.column = OURS.columnList;
 
+  const para = (text: string) => ({ type: 'paragraph', content: text });
+
+  /** Shapes a person makes with those entries: children, nesting, words in the props. */
+  const SHAPES: [string, unknown[]][] = [
+    [
+      'a toggle with a rich summary and children',
+      [
+        {
+          type: 'toggleListItem',
+          content: [
+            { type: 'text', text: 'Ask ', styles: {} },
+            { type: 'wikilink', props: { target: 'maya-chen', alias: '' } },
+            { type: 'text', text: ' about it', styles: { bold: true } },
+          ],
+          children: [para('Inside.'), { type: 'bulletListItem', content: 'A point' }],
+        },
+      ],
+    ],
+    [
+      'a toggle inside a toggle',
+      [
+        {
+          type: 'toggleListItem',
+          content: 'Outer',
+          children: [{ type: 'toggleListItem', content: 'Inner', children: [para('Deep.')] }],
+        },
+      ],
+    ],
+    ...[1, 2, 3].map(
+      (level) =>
+        [
+          `a toggle heading ${level} with children`,
+          [
+            {
+              type: 'heading',
+              props: { level, isToggleable: true },
+              content: 'Plans',
+              children: [para('Under the heading.'), { type: 'checkListItem', content: 'Do it' }],
+            },
+          ],
+        ] as [string, unknown[]],
+    ),
+    ...(
+      [
+        ['a paragraph', para('Parent')],
+        ['a heading', { type: 'heading', props: { level: 2 }, content: 'Parent' }],
+        ['a quote', { type: 'quote', content: 'Parent' }],
+        ['a bullet', { type: 'bulletListItem', content: 'Parent' }],
+        ['a check item', { type: 'checkListItem', props: { checked: true }, content: 'Parent' }],
+        ['a code block', { type: 'codeBlock', props: { language: 'ts' }, content: 'x()' }],
+        ['a callout', { type: 'callout', props: { kind: 'tip' }, content: 'Parent' }],
+        [
+          'an image',
+          { type: 'image', props: { name: 'Plan', url: 'attachments/plan.png', caption: 'Cap' } },
+        ],
+      ] as [string, Record<string, unknown>][]
+    ).map(
+      ([name, parent]) =>
+        [`a paragraph nested under ${name}`, [{ ...parent, children: [para('Child.')] }]] as [
+          string,
+          unknown[],
+        ],
+    ),
+    [
+      'a numbered item with a paragraph child, and the item after it',
+      [
+        { type: 'numberedListItem', content: 'One', children: [para('More about one.')] },
+        { type: 'numberedListItem', content: 'Two' },
+        { type: 'numberedListItem', content: 'Three' },
+      ],
+    ],
+    [
+      'a sub-item with a paragraph child',
+      [
+        {
+          type: 'bulletListItem',
+          content: 'Top',
+          children: [{ type: 'bulletListItem', content: 'Sub', children: [para('Sub note.')] }],
+        },
+        { type: 'bulletListItem', content: 'Next' },
+      ],
+    ],
+    [
+      'media with a name, a caption and a width',
+      [
+        {
+          type: 'image',
+          props: {
+            name: 'Plan',
+            url: 'attachments/plan.png',
+            caption: 'The plan',
+            previewWidth: 320,
+          },
+        },
+        {
+          type: 'video',
+          props: { name: 'Demo', url: 'clips/demo.mp4', caption: 'Day one', previewWidth: 640 },
+        },
+        { type: 'audio', props: { name: 'Standup', url: 'clips/standup.m4a', caption: 'Mon' } },
+        { type: 'file', props: { name: 'Contract', url: 'docs/contract.pdf', caption: 'v2' } },
+      ],
+    ],
+  ];
+
   const withoutIds = (blocks: unknown[]): unknown[] =>
     blocks.map((block) => {
       const { id: _id, children, ...rest } = block as { id: string; children: unknown[] };
@@ -1152,61 +1264,667 @@ describe('every block the / menu inserts survives a save, or is named', () => {
     );
   }
 
-  /** What one of BlockNote's own entries inserts, run on a fresh page, with words in it. */
+  /**
+   * What the editor's own `/` entry inserts, run on a fresh page. What it
+   * inserted is kept (a table's header row with it); only words and a file's
+   * URL are filled in, as a person would.
+   */
   function insertedBy(key: string): unknown[] {
     const live = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
     live.replaceBlocks(live.document, [{ type: 'paragraph' }]);
     live.setTextCursorPosition(live.document[0]);
-    getDefaultSlashMenuItems(live)
+    slashMenuItems(live)
       .find((item) => item.key === key)
       ?.onItemClick();
-    const { type, props } = live.document[0] as { type: string; props: Record<string, unknown> };
+    const block = JSON.parse(JSON.stringify(live.document[0])) as {
+      type: string;
+      props: Record<string, unknown>;
+      content?: unknown;
+    };
     const content = (cerebroSchema.blockSpecs as Record<string, { config: { content: string } }>)[
-      type
+      block.type
     ].config.content;
-    return [
-      {
-        type,
-        props: type in MEDIA_URL ? { ...props, url: MEDIA_URL[type] } : props,
-        ...(content === 'inline' ? { content: 'Some words' } : {}),
-        ...(content === 'table'
-          ? {
-              content: {
-                type: 'tableContent',
-                rows: [{ cells: ['a', 'b'] }, { cells: ['c', 'd'] }],
-              },
-            }
-          : {}),
-      },
-    ];
+    if (block.type in MEDIA_URL) block.props.url = MEDIA_URL[block.type];
+    if (content === 'inline') block.content = 'Some words';
+    if (content === 'table') {
+      const table = block.content as { rows: { cells: { content: unknown[] }[] }[] };
+      table.rows.forEach((row, r) =>
+        row.cells.forEach((cell, c) => {
+          cell.content = [{ type: 'text', text: `r${r}c${c}`, styles: {} }];
+        }),
+      );
+    }
+    return [block];
   }
 
-  // The menu's own `getDefaultReactSlashMenuItems` is this list with an icon
-  // put on each entry; the core list keeps each entry's key in its type.
-  const MENU = getDefaultSlashMenuItems(
-    BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor,
-  )
+  const page = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
+  const OFFERED = slashMenuItems(page)
     .map((item) => item.key)
-    .filter((key) => !NOT_A_BLOCK.has(key));
+    .filter((key): key is NonNullable<typeof key> => key !== undefined && !NOT_A_BLOCK.has(key));
   const CEREBRO_TYPES = Object.keys(cerebroSchema.blockSpecs).filter(
     (type) => !(type in defaultBlockSpecs),
   );
 
-  it('names only entries the menu has', () => {
-    for (const key of Object.keys(KNOWN_LOSSY)) expect(MENU).toContain(key);
+  it('names no lossy entry, and the menu leaves nothing out', () => {
+    expect(KNOWN_LOSSY, 'give the entry a carrier, or take it off the menu').toEqual({});
+    expect([...DROPPED_SLASH_KEYS]).toEqual([]);
+    // Every entry BlockNote has is offered, in BlockNote's order.
+    expect(slashMenuItems(page).map((item) => item.key)).toEqual(
+      getDefaultSlashMenuItems(page).map((item) => item.key),
+    );
   });
 
-  it.each(MENU)("BlockNote's %s entry", async (key) => {
-    const lossy = key in KNOWN_LOSSY;
-    expect(
-      await survives(insertedBy(key)),
-      lossy ? `${key} survives a save now: take it off KNOWN_LOSSY` : `${key} lost something`,
-    ).toBe(!lossy);
+  it('inserts a table with the header row a markdown table must have', () => {
+    const [table] = insertedBy('table') as { content: { headerRows?: number } }[];
+    expect(table.content.headerRows).toBe(1);
+  });
+
+  it.each(OFFERED)("the editor's %s entry", async (key) => {
+    expect(await survives(insertedBy(key)), `${key} lost something`).toBe(!(key in KNOWN_LOSSY));
   });
 
   it.each(CEREBRO_TYPES)("Cerebro's %s block", async (type) => {
     expect(OURS[type], `${type} has no fixture here`).toBeDefined();
     expect(await survives(OURS[type])).toBe(true);
+  });
+
+  it.each(SHAPES)('%s', async (_name, blocks) => {
+    expect(await survives(blocks)).toBe(true);
+  });
+});
+
+/*
+ * The formatting toolbar and the block menu (M55.15): the `/` menu's rule, an
+ * action keeps what it did through a save or it is not offered. Every
+ * toolbar key BlockNote has is classed here, so a key a new BlockNote adds
+ * fails until someone measures it; an action that is kept round-trips, and
+ * one in UNCARRIED_ACTIONS is measured losing what it did, so the set cannot
+ * hold an action a save would keep.
+ */
+describe('every toolbar and block-menu action survives a save or is not offered', () => {
+  const text = (value: string, styles: Record<string, unknown> = {}) => ({
+    type: 'text',
+    text: value,
+    styles,
+  });
+  const styled = (styles: Record<string, unknown>) => [
+    { type: 'paragraph', content: [text('Some '), text('marked', styles), text(' words')] },
+  ];
+  const image = (props: Record<string, unknown>) => [
+    { type: 'image', props: { url: 'attachments/plan.png', ...props } },
+  ];
+  const table = (content: Record<string, unknown>) => [
+    {
+      type: 'table',
+      content: {
+        type: 'tableContent',
+        rows: [{ cells: ['a', 'b'] }, { cells: ['c', 'd'] }],
+        ...content,
+      },
+    },
+  ];
+
+  /** The kept actions, toolbar and block menu: what each leaves on a page, or why nothing. */
+  const KEPT: Record<string, unknown[] | string> = {
+    blockTypeSelect: 'turns a block into one the `/` menu offers, each held above',
+    fileCaptionButton: image({ caption: 'The plan' }),
+    replaceFileButton: image({ url: 'attachments/other.png' }),
+    fileRenameButton: image({ name: 'Plan' }),
+    fileDeleteButton: 'removes the block',
+    fileDownloadButton: 'saves a copy elsewhere and changes nothing',
+    boldStyleButton: styled({ bold: true }),
+    italicStyleButton: styled({ italic: true }),
+    strikeStyleButton: styled({ strike: true }),
+    nestBlockButton: [
+      { type: 'paragraph', content: 'Parent', children: [{ type: 'paragraph', content: 'In' }] },
+    ],
+    unnestBlockButton: 'takes a nested block back out, to the page nest leaves',
+    createLinkButton: [
+      {
+        type: 'paragraph',
+        content: [
+          text('See '),
+          { type: 'link', href: 'https://example.com', content: [text('this')] },
+        ],
+      },
+    ],
+    addCommentButton: 'renders only with a comments extension, and the editor has none',
+    addTiptapCommentButton: 'renders only with a comments extension, and the editor has none',
+    removeBlockItem: 'removes the block',
+  };
+
+  /** What each action in UNCARRIED_ACTIONS does to a page, all of it lost by a save. */
+  const LOST: Record<string, unknown[][]> = {
+    filePreviewButton: [image({ showPreview: false })],
+    underlineStyleButton: [styled({ underline: true })],
+    colorStyleButton: [styled({ textColor: 'red' }), styled({ backgroundColor: 'yellow' })],
+    // Left goes with its group: with centre and right gone, nothing on a page
+    // is anything but left, and a button for it would say otherwise.
+    textAlignLeftButton: [
+      [{ type: 'paragraph', props: { textAlignment: 'center' }, content: 'x' }],
+    ],
+    textAlignCenterButton: [
+      [{ type: 'paragraph', props: { textAlignment: 'center' }, content: 'x' }],
+    ],
+    textAlignRightButton: [
+      [{ type: 'paragraph', props: { textAlignment: 'right' }, content: 'x' }],
+    ],
+    tableCellMergeButton: [
+      [
+        {
+          type: 'table',
+          content: {
+            type: 'tableContent',
+            headerRows: 1,
+            rows: [
+              { cells: [{ type: 'tableCell', props: { colspan: 2 }, content: [text('ab')] }] },
+              { cells: ['c', 'd'] },
+            ],
+          },
+        },
+      ],
+    ],
+    blockColorsItem: [
+      [{ type: 'paragraph', props: { textColor: 'blue' }, content: 'x' }],
+      [{ type: 'paragraph', props: { backgroundColor: 'blue' }, content: 'x' }],
+    ],
+    // Off is what the toggle adds: on is where every markdown table starts.
+    tableRowHeaderItem: [table({})],
+    tableColumnHeaderItem: [table({ headerRows: 1, headerCols: 1 })],
+  };
+
+  const withoutIds = (blocks: unknown[]): unknown[] =>
+    blocks.map((block) => {
+      const { id: _id, children, ...rest } = block as { id: string; children: unknown[] };
+      return { ...rest, children: withoutIds(children ?? []) };
+    });
+
+  /** One save and one reopen give back the same blocks, and a second save the same bytes. */
+  async function survives(blocks: unknown[]): Promise<boolean> {
+    const live = holding(blocks);
+    const before = JSON.stringify(withoutIds(live.document));
+    const saved = await blocksToMarkdown(live);
+    live.replaceBlocks(live.document, await markdownToBlocks(live, saved));
+    return (
+      JSON.stringify(withoutIds(live.document)) === before &&
+      (await blocksToMarkdown(live)) === saved
+    );
+  }
+
+  const TOOLBAR = getFormattingToolbarItems().map((item) => String(item.key));
+  const BLOCK_MENU = [
+    'removeBlockItem',
+    'blockColorsItem',
+    'tableRowHeaderItem',
+    'tableColumnHeaderItem',
+  ];
+
+  it("classes every action BlockNote's toolbar and block menu have", () => {
+    const unclassed = [...TOOLBAR, ...BLOCK_MENU].filter(
+      (key) => !(key in KEPT) && !(key in UNCARRIED_ACTIONS),
+    );
+    expect(unclassed, 'measure it: keep it here, or add it to UNCARRIED_ACTIONS').toEqual([]);
+    expect(Object.keys(KEPT).filter((key) => key in UNCARRIED_ACTIONS)).toEqual([]);
+    expect(Object.keys(LOST).sort()).toEqual(Object.keys(UNCARRIED_ACTIONS).sort());
+  });
+
+  it('offers none of the actions a save drops, in either menu', () => {
+    const toolbar = formattingToolbarItems().map((item) => String(item.key));
+    const menu = blockMenuItems(en).map((item) => String(item.key));
+    expect(toolbar.filter((key) => key in UNCARRIED_ACTIONS)).toEqual([]);
+    expect(menu).toEqual(['removeBlockItem']);
+    expect(toolbar).toEqual(TOOLBAR.filter((key) => !(key in UNCARRIED_ACTIONS)));
+  });
+
+  it.each(
+    Object.entries(KEPT).filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1])),
+  )('keeps what %s does', async (_key, blocks) => {
+    expect(await survives(blocks)).toBe(true);
+  });
+
+  it.each(Object.entries(LOST))('a save drops what %s does', async (_key, pages) => {
+    for (const blocks of pages) expect(await survives(blocks)).toBe(false);
+  });
+});
+
+/*
+ * A code fence with no language (M55.15). BlockNote's code block defaulted to
+ * `javascript`, so a bare fence reopened as a JavaScript one: the save wrote
+ * a word the file never had, and the lossy-import check opened the page
+ * read-only for it.
+ */
+describe('a bare code fence', () => {
+  it('round-trips bare, byte for byte', async () => {
+    const md = 'Run:\n\n```\nnpm install\n```\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks[1]).toMatchObject({ type: 'codeBlock', props: { language: '' } });
+    const once = await blocksToMarkdown(editor, blocks);
+    expect(once).toBe(md);
+    expect(await roundTrip(once)).toBe(md);
+    expect(isLossyImport(md, once)).toBe(false);
+  });
+
+  it('stays bare inside a list, a toggle and an AI answer', async () => {
+    for (const md of [
+      '* Step\n\n  ```\n  make\n  ```\n',
+      ':::toggle Details\n```\nmake\n```\n:::\n',
+      ':::ai{prompt="How?"}\n```\nmake\n```\n:::\n',
+    ]) {
+      const once = await roundTrip(md);
+      expect(once, md).not.toContain('javascript');
+      expect(await roundTrip(once)).toBe(once);
+      expect(isLossyImport(md, once), md).toBe(false);
+    }
+  });
+
+  it('writes a tilde fence as a bare backtick one', async () => {
+    const md = '~~~\nx = 1\n~~~\n';
+    expect(await roundTrip(md)).toBe('```\nx = 1\n```\n');
+    expect(isLossyImport(md, await roundTrip(md))).toBe(false);
+  });
+
+  it('keeps a named language, javascript included', async () => {
+    for (const md of ['```javascript\nx\n```\n', '```ts\nx\n```\n', '```text\nx\n```\n']) {
+      expect(await roundTrip(md)).toBe(md);
+    }
+  });
+
+  it('is what the `/` menu inserts: a block with no language yet', () => {
+    const live = holding([{ type: 'paragraph' }]);
+    live.setTextCursorPosition(live.document[0]);
+    slashMenuItems(live)
+      .find((item) => item.key === 'code_block')
+      ?.onItemClick();
+    expect(live.document[0]).toMatchObject({ type: 'codeBlock', props: { language: '' } });
+  });
+});
+
+/*
+ * The toggle list item (M55.4). BlockNote saved it as a bullet, and it
+ * reopened as one: the toggle, and with it what it folded, gone. On disk it is
+ * a `:::toggle` directive container now, its summary on the opening line.
+ */
+describe('the :::toggle container', () => {
+  const RICH = [
+    'Before.',
+    '',
+    ':::toggle **Open** questions for [[kickoff]] by 📅 2026-08-01',
+    'Who owns the migration?',
+    '',
+    '* One',
+    '',
+    '* Two',
+    ':::',
+    '',
+    'After.',
+    '',
+  ].join('\n');
+
+  it('reads a rich summary and its children as one toggle', async () => {
+    const blocks = await markdownToBlocks(editor, RICH);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'toggleListItem', 'paragraph']);
+    const summary = JSON.stringify(blocks[1].content);
+    expect(summary).toContain('"bold":true');
+    expect(summary).toContain('"type":"wikilink"');
+    expect(summary).toContain('"type":"due"');
+    expect(blocks[1].children.map((c: { type: string }) => c.type)).toEqual([
+      'paragraph',
+      'bulletListItem',
+      'bulletListItem',
+    ]);
+  });
+
+  it('round-trips byte for byte, and the second save is the first', async () => {
+    const once = await roundTrip(RICH);
+    expect(once).toBe(RICH);
+    expect(await roundTrip(once)).toBe(once);
+    expect(isLossyImport(RICH, once)).toBe(false);
+  });
+
+  it('saves a live toggle with no summary, and reopens it as the same block', async () => {
+    const live = holding([
+      { type: 'toggleListItem', children: [{ type: 'paragraph', content: 'In.' }] },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(':::toggle\nIn.\n:::\n');
+    const reopened = await markdownToBlocks(live, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['toggleListItem']);
+    expect(reopened[0].content).toEqual([]);
+    live.replaceBlocks(live.document, reopened);
+    expect(await blocksToMarkdown(live)).toBe(saved);
+  });
+
+  it('nests inside a toggle, a column and an AI answer', async () => {
+    const md = [
+      ':::toggle Outer',
+      'Text.',
+      '',
+      '::::toggle Inner',
+      'Deep.',
+      '::::',
+      ':::',
+      '',
+      ':::columns',
+      '::::column',
+      ':::::toggle In a column',
+      'Left.',
+      ':::::',
+      '::::',
+      '::::column',
+      'Right.',
+      '::::',
+      ':::',
+      '',
+      ':::ai{prompt="Q"}',
+      '::::toggle In an answer',
+      'A.',
+      '::::',
+      ':::',
+      '',
+    ].join('\n');
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['toggleListItem', 'columnList', 'ai']);
+    expect(blocks[0].children[1].type).toBe('toggleListItem');
+    expect(blocks[1].children[0].children[0].type).toBe('toggleListItem');
+    expect(blocks[2].children[0].type).toBe('toggleListItem');
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('keeps a hard break in its summary', async () => {
+    const live = holding([
+      {
+        type: 'toggleListItem',
+        content: 'First line\nsecond line',
+        children: [{ type: 'paragraph', content: 'Child.' }],
+      },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(':::toggle First line\\\nsecond line\nChild.\n:::\n');
+    const [reopened] = await markdownToBlocks(editor, saved);
+    expect(reopened.type).toBe('toggleListItem');
+    expect(reopened.content).toEqual([
+      { type: 'text', text: 'First line\nsecond line', styles: {} },
+    ]);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  it.each([
+    ['# Q4', '\\# Q4'],
+    ['1. First', '1\\. First'],
+    ['> Quoted', '\\> Quoted'],
+  ])('writes a summary starting %j escaped, and reads it back as text', async (text, written) => {
+    const saved = await blocksToMarkdown(
+      holding([
+        { type: 'toggleListItem', content: text, children: [{ type: 'paragraph', content: 'C.' }] },
+      ]),
+    );
+    expect(saved).toBe(`:::toggle ${written}\nC.\n:::\n`);
+    const [reopened] = await markdownToBlocks(editor, saved);
+    expect(reopened.type).toBe('toggleListItem');
+    expect(reopened.content).toEqual([{ type: 'text', text, styles: {} }]);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* A summary that is not one paragraph is a line the toggle could not carry
+     back out, so it stays the text it is, with what it held after it. */
+  it('keeps a summary that is not one paragraph as its raw line', async () => {
+    const md = ':::toggle # A heading\nChild.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks)).toEqual([':::toggle # A heading', 'Child.', ':::']);
+    expect(JSON.stringify(blocks)).not.toContain('toggleListItem');
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('abandons the fold when a toggle never closes, and writes the file back as it was', async () => {
+    const md = ':::toggle What is *left*?\nNever closed.\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks)).toEqual([':::toggle What is *left*?', 'Never closed.']);
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('does not read a toggle inside a code fence', async () => {
+    const sample = '```markdown\n:::toggle x\nAn example.\n:::\n```\n';
+    const blocks = await markdownToBlocks(editor, sample);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(await roundTrip(sample)).toBe(sample);
+  });
+});
+
+/*
+ * The toggle heading (M55.4). It saved as a plain heading. On disk the
+ * heading keeps its own line, a real `#` line any editor shows as a heading,
+ * inside a `:::toggle-heading` container that folds what follows it.
+ */
+describe('the :::toggle-heading container', () => {
+  it.each([1, 2, 3])('round-trips an H%i toggle with its children', async (level) => {
+    const md = `:::toggle-heading\n${'#'.repeat(level)} Plans\n\nUnder the heading.\n:::\n`;
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['heading']);
+    expect(blocks[0].props).toMatchObject({ level, isToggleable: true });
+    expect(textsOf(blocks[0].children)).toEqual(['Under the heading.']);
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(once.split('\n')[1]).toBe(`${'#'.repeat(level)} Plans`);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('lets spliceTitleIntoBlocks rewrite a toggle H1', async () => {
+    const live = holding(
+      await markdownToBlocks(editor, ':::toggle-heading\n# Old\n\nBody.\n:::\n'),
+    );
+    spliceTitleIntoBlocks(live, 'New');
+    expect(await blocksToMarkdown(live)).toBe(':::toggle-heading\n# New\n\nBody.\n:::\n');
+  });
+
+  it('leaves one whose first block is not a heading as the text it is', async () => {
+    const md = ':::toggle-heading\nNot a heading.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks)).toEqual([':::toggle-heading', 'Not a heading.', ':::']);
+    expect(await roundTrip(md)).toBe(md);
+  });
+});
+
+/*
+ * Nested children (M55.4). Tab nests any block under the one above it, and
+ * the serializer flattened every child that was not a list item into its
+ * parent's flow: the nesting gone on the first save. A list keeps its native
+ * nesting; anything else goes in an `:::indent` right after its parent.
+ */
+describe('nested children (:::indent)', () => {
+  it.each([
+    ['a paragraph', { type: 'paragraph', content: 'Parent' }, 'Parent'],
+    ['a heading', { type: 'heading', props: { level: 2 }, content: 'Parent' }, '## Parent'],
+    ['a quote', { type: 'quote', content: 'Parent' }, '> Parent'],
+    [
+      'an image',
+      { type: 'image', props: { name: 'Plan', url: 'attachments/plan.png' } },
+      '![Plan](attachments/plan.png)',
+    ],
+  ])('keeps the children of %s', async (_name, parent, line) => {
+    const live = holding([{ ...parent, children: [{ type: 'paragraph', content: 'Child.' }] }]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe(`${line}\n\n:::indent\nChild.\n:::\n`);
+    const [reopened] = await markdownToBlocks(editor, saved);
+    expect(reopened.type).toBe(parent.type);
+    expect(textsOf(reopened.children)).toEqual(['Child.']);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  it('keeps a list item’s paragraph child, and the next numbered item its place', async () => {
+    const live = holding([
+      {
+        type: 'numberedListItem',
+        content: 'One',
+        children: [{ type: 'paragraph', content: 'More.' }],
+      },
+      { type: 'numberedListItem', content: 'Two' },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe('1. One\n\n:::indent\nMore.\n:::\n\n2. Two\n');
+    const reopened = await markdownToBlocks(editor, saved);
+    expect(reopened.map((b) => b.type)).toEqual(['numberedListItem', 'numberedListItem']);
+    expect(textsOf(reopened[0].children)).toEqual(['More.']);
+    expect(reopened[1].props.start).toBeUndefined();
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  it('leaves a pure list tree native', async () => {
+    const md = '* top\n\n  * nested\n\n    * deeper\n\n* second\n';
+    expect(await roundTrip(md)).toBe(md);
+    expect(await roundTrip(md)).not.toContain(':::');
+  });
+
+  it('reopens a sub-item with a paragraph child nested where it was', async () => {
+    const live = holding([
+      {
+        type: 'bulletListItem',
+        content: 'Top',
+        children: [
+          {
+            type: 'bulletListItem',
+            content: 'Sub',
+            children: [{ type: 'paragraph', content: 'Note.' }],
+          },
+        ],
+      },
+    ]);
+    const saved = await blocksToMarkdown(live);
+    expect(saved).toBe('* Top\n\n:::indent\n* Sub\n\n::::indent\nNote.\n::::\n:::\n');
+    const [top] = await markdownToBlocks(editor, saved);
+    expect(top.children[0].type).toBe('bulletListItem');
+    expect(textsOf(top.children[0].children)).toEqual(['Note.']);
+    expect(await roundTrip(saved)).toBe(saved);
+  });
+
+  /* An Obsidian-style continuation is a paragraph inside the item, which
+     markdown nests natively and the serializer flattens. It saves in an
+     `:::indent` (Q4), every word kept, so the page stays editable. */
+  it.each([
+    [
+      '* Item\n\n  More about the item.\n* Next\n',
+      '* Item\n\n:::indent\nMore about the item.\n:::\n\n* Next\n',
+    ],
+    [
+      '1. One\n\n   More about one.\n2. Two\n',
+      '1. One\n\n:::indent\nMore about one.\n:::\n\n2. Two\n',
+    ],
+  ])('saves the hand-written continuation in %j in an :::indent', async (md, saved) => {
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks[0].children)).toEqual([
+      md.includes('*') ? 'More about the item.' : 'More about one.',
+    ]);
+    const once = await roundTrip(md);
+    expect(once).toBe(saved);
+    expect(isLossyImport(md, once)).toBe(false);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('moves an empty paragraph’s children up a level, every word kept', async () => {
+    const saved = await blocksToMarkdown(
+      holding([{ type: 'paragraph', children: [{ type: 'paragraph', content: 'Orphan.' }] }]),
+    );
+    expect(saved).toBe('Orphan.\n');
+  });
+
+  it('leaves an :::indent with nothing above it as the text it is', async () => {
+    const md = ':::indent\nChild.\n:::\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(textsOf(blocks)).toEqual([':::indent', 'Child.', ':::']);
+    expect(await roundTrip(md)).toBe(md);
+  });
+});
+
+/*
+ * Media (M55.4). An image saved with the alt text BlockNote invents ("BlockNote
+ * image"), which the lossy check counted as words the file never had, so a
+ * page with an image opened read-only; audio and file saved as bare links;
+ * captions and a relative video were dropped. Each is one `![…](…)` line now,
+ * its kind read back from the extension.
+ */
+describe('media lines', () => {
+  it('keeps ![](attachments/a.png) byte for byte, and the page editable', async () => {
+    const md = '![](attachments/a.png)\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual(['image']);
+    expect(blocks[0].props).toMatchObject({ url: 'attachments/a.png', name: '', caption: '' });
+    const once = await roundTrip(md);
+    expect(once).toBe(md);
+    expect(isLossyImport(md, once)).toBe(false);
+  });
+
+  it('keeps the name, and the title as the caption', async () => {
+    const md = 'Before.\n\n![Plan|320](attachments/plan.png "The plan")\n\nAfter.\n';
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks[1].props).toMatchObject({
+      name: 'Plan',
+      url: 'attachments/plan.png',
+      caption: 'The plan',
+      previewWidth: 320,
+    });
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it.each([
+    ['clips/demo.mp4', 'video'],
+    ['clips/standup.m4a', 'audio'],
+    ['docs/contract.pdf', 'file'],
+  ])('reads a relative %s as %s and writes it back unchanged', async (url, type) => {
+    const md = `![](${url} "Caption")\n`;
+    const blocks = await markdownToBlocks(editor, md);
+    expect(blocks.map((b) => b.type)).toEqual([type]);
+    expect(blocks[0].props).toMatchObject({ url, caption: 'Caption' });
+    expect(await roundTrip(md)).toBe(md);
+  });
+
+  it('never writes the text BlockNote invents for media', async () => {
+    for (const type of ['image', 'video', 'audio', 'file']) {
+      for (const url of [
+        '',
+        `attachments/x.${{ image: 'png', video: 'mp4', audio: 'mp3', file: 'pdf' }[type]}`,
+      ]) {
+        const saved = await blocksToMarkdown(holding([{ type, props: { url } }]));
+        expect(saved).not.toMatch(/BlockNote image|Add (image|audio|video|file)/);
+      }
+    }
+  });
+
+  it('writes nothing for a media block with no file', async () => {
+    const saved = await blocksToMarkdown(
+      holding([{ type: 'image' }, { type: 'paragraph', content: 'After.' }]),
+    );
+    expect(saved).toBe('After.\n');
+  });
+
+  it('leaves a media line inside a code fence as code', async () => {
+    const sample = '```markdown\n![](attachments/a.png)\n```\n';
+    const blocks = await markdownToBlocks(editor, sample);
+    expect(blocks.map((b) => b.type)).toEqual(['codeBlock']);
+    expect(blocks[0].content[0].text).toBe('![](attachments/a.png)');
+    expect(await roundTrip(sample)).toBe(sample);
+  });
+
+  /* An image the parser reads itself has its url resolved against the page:
+     MEASURED, `* ![](attachments/a.png)` reopened as
+     `http://localhost:3000/attachments/a.png`. */
+  it.each([
+    ['* ![Plan](attachments/plan.png "Cap")\n', 'image', 'attachments/plan.png'],
+    ['* ![](clips/demo.mp4)\n', 'video', 'clips/demo.mp4'],
+  ])('keeps the relative url and kind of a list-item embed in %j', async (md, type, url) => {
+    const [item] = await markdownToBlocks(editor, md);
+    expect(item.type).toBe('bulletListItem');
+    expect(item.children[0].type).toBe(type);
+    expect(item.children[0].props.url).toBe(url);
+    const once = await roundTrip(md);
+    expect(once).toContain(md.slice(2));
+    expect(isLossyImport(md, once)).toBe(false);
+    expect(await roundTrip(once)).toBe(once);
+  });
+
+  it('leaves an embed inside inline code as the code it is', async () => {
+    const md = 'Write `![](a.png)` for an image.\n';
+    expect(await roundTrip(md)).toBe(md);
   });
 });
 
@@ -1560,5 +2278,54 @@ describe('isLossyImport', () => {
     for (const { md } of CORPUS) {
       expect(isLossyImport(md, await roundTrip(md))).toBe(false);
     }
+  });
+
+  /* A save may add a container the file did not have (M55.4); its name is not
+     a word anyone wrote. Every word inside one still counts. */
+  it('ignores the container names a save adds', () => {
+    expect(isLossyImport('* Item\n\n  More.\n', '* Item\n\n:::indent\nMore.\n:::\n')).toBe(false);
+    expect(isLossyImport('Text.\n', '\\:::toggle-heading Text.\n')).toBe(false);
+    expect(isLossyImport('```\n:::indent\n```\n', '```\n:::\n```\n')).toBe(true);
+  });
+
+  it('still flags a toggle whose summary lost words', () => {
+    expect(isLossyImport(':::toggle Two words\nIn.\n:::\n', ':::toggle Two\nIn.\n:::\n')).toBe(
+      true,
+    );
+  });
+});
+
+/* What the banner over a locked page names (M55.15). It blamed raw HTML
+   whatever the check found. */
+describe('lossyImportCause', () => {
+  it('is null when the text survives', async () => {
+    const md = '# Fine\n\n- [ ] task\n';
+    expect(lossyImportCause(md, await roundTrip(md))).toBeNull();
+  });
+
+  it('names raw HTML, a tag or a comment, when text is dropped', async () => {
+    for (const md of ['<div align="center">centered text</div>\n', 'Hi <!-- a note -->\n']) {
+      expect(lossyImportCause(md, await roundTrip(md)), md).toBe('html');
+    }
+  });
+
+  it('names other dropped text when the file holds no HTML', async () => {
+    const md = 'See [the spec][spec].\n\n[spec]: https://example.com "The spec"\n';
+    expect(lossyImportCause(md, await roundTrip(md))).toBe('dropped');
+  });
+
+  it('does not take an autolink, inline code or a fenced tag for HTML', () => {
+    for (const md of [
+      'Lost words <https://example.com>\n',
+      'Lost words `<div>`\n',
+      'Lost words\n\n```\n<div>\n```\n',
+    ]) {
+      expect(lossyImportCause(md, md.replace('Lost words', '')), md).toBe('dropped');
+    }
+  });
+
+  it('names added text and reordered text', () => {
+    expect(lossyImportCause('```\nx\n```\n', '```javascript\nx\n```\n')).toBe('added');
+    expect(lossyImportCause('ab\n', 'ba\n')).toBe('rewritten');
   });
 });

@@ -136,12 +136,16 @@ pub fn plan(
         }
     }
 
-    // Resolve the sources this pass needs, in a fixed order, so the ordinal a
+    // Resolve the sources this pass needs (up to three: the owner's, the
+    // bundle's and imported material's), in a fixed order, so the ordinal a
     // staged registration takes does not depend on which file happened to be
     // scanned first.
     let mut needed: BTreeSet<Provenance> = BTreeSet::new();
     for item in &ordered {
-        needed.insert(source::provenance_of(&item.scanned.item_key));
+        needed.insert(source::provenance_of(
+            &item.scanned.item_key,
+            &item.scanned.snapshot,
+        ));
     }
     let mut registrations: Vec<(String, serde_json::Value)> = Vec::new();
     let mut resolved: BTreeMap<Provenance, (String, String)> = BTreeMap::new();
@@ -159,7 +163,7 @@ pub fn plan(
     // depends on the receipt ids the assessment itself produces.
     let mut planned: Vec<Planned> = Vec::with_capacity(ordered.len());
     for item in &ordered {
-        let provenance = source::provenance_of(&item.scanned.item_key);
+        let provenance = source::provenance_of(&item.scanned.item_key, &item.scanned.snapshot);
         let (source_id, registration_event) = &resolved[&provenance];
         let assessment = assess::assess_item(
             store_uuid,
@@ -503,6 +507,24 @@ mod tests {
         }
     }
 
+    /// An imported capture: a note whose frontmatter names the system it came
+    /// from, before and after, as M66.7c writes one.
+    fn capture(key: &str, title: &str, bytes: &str, prior: Option<(&str, &str)>) -> Item {
+        let marked = |title: &str| {
+            let mut entry = entry(key, title);
+            entry
+                .properties
+                .insert(source::IMPORT_MARKER.to_string(), serde_json::json!("file"));
+            normalize::snapshot(&entry)
+        };
+        let mut item = item(key, title, bytes, prior);
+        item.scanned.snapshot = marked(title);
+        if let (Some(row), Some((prior_title, _))) = (item.prior.as_mut(), prior) {
+            row.snapshot = marked(prior_title);
+        }
+        item
+    }
+
     #[test]
     fn a_first_pass_registers_the_source_and_records_every_item() {
         let mut rig = rig("det-first");
@@ -561,6 +583,124 @@ mod tests {
             .map(|r| r.source_id.as_str())
             .collect();
         assert_eq!(sources.len(), 2, "and the two items are under both");
+        rig.teardown();
+    }
+
+    #[test]
+    fn an_imported_capture_registers_as_imported_content() {
+        // D15 (i), at the pass that registers it: one pass over an owner
+        // note, a concept and a capture stages three registrations, and the
+        // capture's Observation pins the content-only import source — never
+        // the owner's.
+        let mut rig = rig("det-import");
+        let items = vec![
+            item("records/a.md", "Alpha", "a", None),
+            item("knowledge/metrics/revenue.md", "Revenue", "k", None),
+            capture("inbox/report.md", "Report", "r", None),
+        ];
+        for item in &items {
+            rig.pending(item);
+        }
+        let plan = rig.plan(&items);
+        assert_eq!(plan.members.len(), 3 + 3 * 2);
+        for member in &plan.members[..3] {
+            assert_eq!(member.0, schema::KIND_SOURCE_REGISTERED);
+        }
+        rig.commit(&plan);
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        assert_eq!(state.sources.len(), 3, "three sources, not two");
+
+        let source_of = |key: &str| {
+            let planned = plan
+                .planned
+                .iter()
+                .find(|p| p.assessment.item_key == key)
+                .expect("the item was planned");
+            state.sources[&planned.assessment.receipt.source_id]
+                .registration
+                .clone()
+        };
+        let service = |registration: &schema::SourceRegistration| match registration {
+            schema::SourceRegistration::Builtin { service_id, .. } => Some(service_id.clone()),
+            _ => None,
+        };
+        let imported = source_of("inbox/report.md");
+        assert_eq!(service(&imported).as_deref(), Some(source::IMPORT_SERVICE));
+        assert_eq!(
+            imported.capability(),
+            schema::AuthorityCapability::ContentOnly
+        );
+        let bundle = source_of("knowledge/metrics/revenue.md");
+        assert_eq!(service(&bundle).as_deref(), Some(source::BUNDLE_SERVICE));
+        assert_eq!(
+            source_of("records/a.md").capability(),
+            schema::AuthorityCapability::HumanAssertion,
+            "the owner's note stays the owner's"
+        );
+
+        // Each Observation pins its own source's registration, not a
+        // neighbour's — the ordinals did not collide.
+        assert_eq!(state.observations.len(), 3);
+        let pinned: BTreeSet<&str> = state
+            .observations
+            .values()
+            .map(|o| {
+                assert_eq!(
+                    o.source_registration_event_id,
+                    state.sources[&o.source_id].registration_event_id
+                );
+                o.source_id.as_str()
+            })
+            .collect();
+        assert_eq!(pinned.len(), 3, "one Observation under each source");
+        rig.teardown();
+    }
+
+    #[test]
+    fn a_second_pass_registers_nothing_new() {
+        // The three sources are registered once. A later pass over edits to
+        // all three pins the recorded registrations and stages none.
+        let mut rig = rig("det-import-again");
+        let first = vec![
+            item("records/a.md", "Alpha", "a", None),
+            item("knowledge/metrics/revenue.md", "Revenue", "k", None),
+            capture("inbox/report.md", "Report", "r", None),
+        ];
+        for item in &first {
+            rig.pending(item);
+        }
+        let plan = rig.plan(&first);
+        rig.commit(&plan);
+        let before: BTreeSet<String> = rig.state().sources.keys().cloned().collect();
+
+        let second = vec![
+            item("records/a.md", "Beta", "b", Some(("Alpha", "a"))),
+            item(
+                "knowledge/metrics/revenue.md",
+                "Growth",
+                "g",
+                Some(("Revenue", "k")),
+            ),
+            capture("inbox/report.md", "Summary", "s", Some(("Report", "r"))),
+        ];
+        for item in &second {
+            rig.pending(item);
+        }
+        let plan = rig.plan(&second);
+        assert!(
+            plan.members
+                .iter()
+                .all(|m| m.0 != schema::KIND_SOURCE_REGISTERED),
+            "no registration rides the second pass"
+        );
+        assert_eq!(plan.members.len(), 3 * 2);
+        rig.commit(&plan);
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        let after: BTreeSet<String> = state.sources.keys().cloned().collect();
+        assert_eq!(before, after);
+        assert_eq!(state.ingest_receipts.len(), 6);
         rig.teardown();
     }
 

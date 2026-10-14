@@ -103,6 +103,21 @@ describe('citationName and citationChoices', () => {
     expect(citationName('loose', sources, index, entries)).toBe('No source "loose"');
   });
 
+  it('names an outside link by what its URL carries, after title, definition and page (M69.2)', () => {
+    const LINEAR = 'https://linear.app/acme/issue/ENG-142/fix-login';
+    const linked = [
+      { id: 'issue', resource: LINEAR, title: null },
+      { id: 'titled', resource: LINEAR, title: 'The login bug' },
+      { id: 'defined', resource: LINEAR, title: null },
+      { id: 'unknown', resource: 'https://example.com/fix-login', title: null },
+    ];
+    expect(citationName('issue', linked, index, entries)).toBe('ENG-142 Fix login');
+    expect(citationName('titled', linked, index, entries)).toBe('The login bug');
+    expect(citationName('defined', linked, index, entries)).toBe('As the page puts it');
+    // An unknown host keeps its URL rather than a guess.
+    expect(citationName('unknown', linked, index, entries)).toBe('https://example.com/fix-login');
+  });
+
   /* An id-less source cannot be cited, but it holds its number: leaving it
      out must not renumber the ones after it. */
   it('offers the listed sources, then what the page already uses, in number order', () => {
@@ -197,14 +212,15 @@ describe('the citation chip', () => {
       ['second', '1'],
     ]);
     // Named as the Sources list names it, over the marker the number stands in for.
+    // An outside source's link is its own line, one hover from its name (M69.2).
     expect(chips('ref').map((c) => c.title)).toEqual([
       'The first source\n[^first]',
-      'The second source\n[^second]',
+      'The second source\nhttps://example.com/second\n[^second]',
       'No source "loose"\n[^loose]',
     ]);
     expect(chips('def').map((c) => c.title)).toEqual([
       'The first source\n[^first]:',
-      'The second source\n[^second]:',
+      'The second source\nhttps://example.com/second\n[^second]:',
     ]);
   });
 
@@ -231,6 +247,30 @@ describe('the citation chip', () => {
     // A citation that leads nowhere is still shown — muted, not hidden.
     expect(loose.tagName).toBe('SPAN');
     expect(loose.className).toContain('bg-n-100');
+  });
+
+  it('names an untitled outside link by its URL, and keeps the URL in the tooltip (M69.2)', async () => {
+    const LINEAR = 'https://linear.app/acme/issue/ENG-142/fix-login';
+    fs().set(
+      CONCEPT,
+      `---\ntype: Metric\ntitle: Sample\nsources:\n  - id: issue\n    resource: ${LINEAR}\n---\n\nAlpha.[^issue]\n`,
+    );
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: CONCEPT,
+          filename: 'sample.md',
+          type: 'Metric',
+          properties: { sources: [{ id: 'issue', resource: LINEAR }] },
+        }),
+      ],
+    });
+    render(<NoteBodyEditor path={CONCEPT} />);
+    await waitFor(() => expect(chips('ref')).toHaveLength(1));
+    const chip = document.querySelector<HTMLElement>('[data-citation="ref"]')!;
+    expect(chip.getAttribute('aria-label')).toBe('Source 1: ENG-142 Fix login');
+    expect(chip.getAttribute('title')).toBe(`ENG-142 Fix login\n${LINEAR}\n[^issue]`);
+    expect(chip.getAttribute('href')).toBe(LINEAR);
   });
 
   it('numbers by the page itself where there is no note to read sources from', async () => {

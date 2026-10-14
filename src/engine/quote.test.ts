@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest';
+import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
+import { planEdits, QUOTE_LIMITS, type QuoteEdit } from './quote';
+
+/**
+ * The TS half of edit_note's quote rules (M55.5). Rust replays the same file
+ * in `src-tauri/src/vault/quote.rs`, so a message or a line that drifts in
+ * either twin fails here or there.
+ */
+
+interface QuoteCase {
+  why: string;
+  prefix?: string;
+  body: string;
+  edits: QuoteEdit[];
+  result?: string;
+  lines?: number[];
+  refused?: string;
+}
+
+const cases = QUOTE_CASES.cases as QuoteCase[];
+
+describe('planEdits', () => {
+  it.each(cases.map((c) => [c.why, c] as const))('replays the shared case: %s', (_why, c) => {
+    const plan = planEdits(c.body, c.prefix ?? '', c.edits);
+    if (c.refused !== undefined) {
+      expect(plan).toEqual({ ok: false, message: c.refused });
+    } else {
+      expect(plan).toEqual({ ok: true, text: c.result, lines: c.lines });
+    }
+  });
+
+  it('holds the limits the shared cases name', () => {
+    expect({
+      max_edits: QUOTE_LIMITS.maxEdits,
+      context_chars: QUOTE_LIMITS.contextChars,
+      match_chars: QUOTE_LIMITS.matchChars,
+      max_listed: QUOTE_LIMITS.maxListed,
+    }).toEqual(QUOTE_CASES.limits);
+  });
+
+  it('refuses 101 edits in one call', () => {
+    const edits = Array.from({ length: 101 }, () => ({ old: 'x', new: 'y', occurrence: 1 }));
+    expect(planEdits('x'.repeat(101), '', edits)).toEqual({
+      ok: false,
+      message:
+        'edit_note takes at most 100 edits in one call; this call has 101.\nNothing was written.',
+    });
+  });
+});

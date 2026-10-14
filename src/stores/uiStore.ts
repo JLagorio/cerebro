@@ -281,15 +281,18 @@ interface UiState {
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
   /**
-   * stdio connector approval KEYS — SHA-256 digests of the approved
-   * fingerprints — keyed by vault path (PR #5 security review). Persisted
-   * HERE — outside the vault — on purpose: `.cerebro/connectors.json`
-   * travels with the vault, so an untrusted vault could otherwise name an
-   * arbitrary command and have the agent runtime spawn it. A stdio entry
-   * runs only after a person approved that exact name+command+args+env on
-   * THIS machine. Digests, never the fingerprints themselves: a spec's env
-   * carries credentials, and localStorage must not become a second
-   * plaintext home for them — see engine/connectors.stdioApprovalKey.
+   * Connector approval KEYS — SHA-256 digests of the approved fingerprints,
+   * stdio and (since M54.9) http alike — keyed by vault path (PR #5 security
+   * review). The name, and the `cerebro.stdioApprovals` storage key, predate
+   * the http half. Persisted HERE — outside the vault — on purpose:
+   * `.cerebro/connectors.json` travels with the vault, so an untrusted vault
+   * could otherwise name an arbitrary command and have the agent runtime
+   * spawn it, or a server of its choosing whose tools a run is granted. An
+   * entry reaches a run only after a person approved its exact
+   * name+command+args+env, or name+URL+headers, on THIS machine. Digests,
+   * never the fingerprints themselves: env values and headers carry
+   * credentials, and localStorage must not become a second plaintext home
+   * for them — see engine/connectors.approvalKey.
    */
   stdioApprovals: Record<string, string[]>;
   approveStdio(vault: string, fingerprint: string): void;
@@ -354,6 +357,23 @@ interface UiState {
    */
   skillRuns: Record<string, Record<string, string>>;
   recordSkillRun(vault: string, path: string, fireKey: string): void;
+  /**
+   * Take back the record a job's claim made, for a run that never happened:
+   * the budget gate deferred it (M53.27). Only while the slot still holds
+   * `runKey`, so a slot re-recorded since is kept. The localStorage mirror is
+   * rewritten too. The next launch starts from it, and a record left there
+   * comes back as answered, through the one-time import into an empty table
+   * or through the attempts merge in `hydrateJobLedgers`.
+   * `learnAttempts` is flat across vaults, so `vault` scopes only skillRuns:
+   * another vault holding the same path at the same run key loses that
+   * attempt too, and gets it back from its own table when it next hydrates.
+   */
+  forgetJobRecord(
+    vault: string,
+    ledger: 'attempts' | 'skillRuns',
+    key: string,
+    runKey: string,
+  ): void;
   /**
    * Vault → agent identity → when it last ran from an EVENT trigger, ISO
    * (M17.12). Keyed by the bare identity, never the `#event` slot: it is the
@@ -1008,6 +1028,22 @@ export const useUiStore = create<UiState>((set, get) => ({
   recordSkillRun: (vault, path, fireKey) =>
     set((s) => {
       const scoped = { ...(s.skillRuns[vault] ?? {}), [path]: fireKey };
+      const next = { ...s.skillRuns, [vault]: scoped };
+      storeString(SKILL_RUNS_KEY, JSON.stringify(next));
+      return { skillRuns: next };
+    }),
+  forgetJobRecord: (vault, ledger, key, runKey) =>
+    set((s) => {
+      if (ledger === 'attempts') {
+        if (s.learnAttempts[key] !== runKey) return s;
+        const next = { ...s.learnAttempts };
+        delete next[key];
+        storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
+        return { learnAttempts: next };
+      }
+      const scoped = { ...(s.skillRuns[vault] ?? {}) };
+      if (scoped[key] !== runKey) return s;
+      delete scoped[key];
       const next = { ...s.skillRuns, [vault]: scoped };
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };

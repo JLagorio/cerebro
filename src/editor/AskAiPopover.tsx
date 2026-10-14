@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { applyHunks, describeHunk, isUnchanged, rewriteHunks } from '@/engine/hunks';
 import { argumentHint, listSkills, skillPrompt, type SkillRef } from '@/engine/skills';
 import { readNote } from '@/lib/ipc';
-import { onAgentEvent, runAgent, startMcp, startedOrThrow } from '@/agent/agentIpc';
+import { onAgentEvent, runAgent, startedOrThrow } from '@/agent/agentIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -86,7 +86,6 @@ export function AskAiPopover({
     setResult('');
     void (async () => {
       try {
-        const mcp = await startMcp(vaultPath);
         // Attended, no lane: never gated — startedOrThrow makes a contract
         // break visible instead of a silent no-run.
         const { run: runId } = startedOrThrow(
@@ -106,7 +105,6 @@ export function AskAiPopover({
             // the vault would let it wander, and open_note would navigate the
             // user away from the paragraph they are editing.
             allowedTools: [],
-            mcp,
           }),
         );
         let text = '';

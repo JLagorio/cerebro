@@ -15,6 +15,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
   };
 });
 
+import RETIRED from '../shared/prompt/retired-terms.json';
 import App, { SHELL_TWO_PANEL_MIN } from '@/App';
 import { SHELL_BARE_TWO_PANEL_MIN, SHELL_RAIL_TWO_PANEL_MIN } from '@/app/shellLayout';
 import * as ipc from '@/lib/ipc';
@@ -164,6 +165,17 @@ describe('App boot flow', () => {
     render(<App />);
     expect(await screen.findByRole('button', { name: 'Open demo vault' })).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Sidebar' })).toBeNull();
+  });
+
+  // M54.8 — the welcome card is the first description of the app a new user
+  // reads, so it speaks the model the app has today (AGENTS.md CV-20).
+  it('welcomes a new user with no retired term', async () => {
+    vi.mocked(ipc.getLastVault).mockResolvedValueOnce(null);
+    render(<App />);
+    const card = (await screen.findByRole('heading', { name: 'Open a vault' })).parentElement;
+    const text = (card?.textContent ?? '').toLowerCase();
+    expect(text).toContain('a vault is a folder of markdown files');
+    expect(RETIRED.terms.filter((term) => text.includes(term.toLowerCase()))).toEqual([]);
   });
 
   // Deviation test (Task 23, execution-log note 15b, reported): a
@@ -405,6 +417,22 @@ describe('App boot flow', () => {
         // The same node: unmounting it is what kills the run mid-answer.
         expect(screen.getByTestId('ai-panel')).toBe(assistant);
       }
+      expect(screen.getAllByTestId('ai-panel')).toHaveLength(1);
+    });
+
+    it('a vault switch remounts the assistant, so no turn outlives its vault (M53.10)', async () => {
+      // The one remount the frame allows, and on purpose: unmounting the
+      // assistant ends its turn, and a turn asked in one vault has no
+      // business answering in the next.
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      act(() => useUiStore.getState().setAiPanelOpen(true));
+      const before = await screen.findByTestId('ai-panel');
+
+      act(() => useVaultStore.setState({ vaultPath: '/another-vault' }));
+      const after = await screen.findByTestId('ai-panel');
+      expect(after).not.toBe(before);
+      expect(before.isConnected).toBe(false);
       expect(screen.getAllByTestId('ai-panel')).toHaveLength(1);
     });
 

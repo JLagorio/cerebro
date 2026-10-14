@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLedgerStore } from '@/stores/ledgerStore';
-import type { LedgerStatus } from '@/lib/ipc';
+import type { JobLedgers, LedgerStatus } from '@/lib/ipc';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
 const handlers: Array<(event: unknown) => void> = [];
@@ -11,7 +11,6 @@ const JOB_RUN = 8;
 const JOB_DURABLE = 'durable-job-8';
 vi.mock('./agentIpc', () => ({
   runAgent: vi.fn(async () => ({ run: JOB_RUN, durableId: JOB_DURABLE })),
-  startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
   stopAgent: vi.fn(async () => true),
   // Honours the run filter, like the real fan-out (M17.3): a job hears its
   // own run and nothing else.
@@ -29,9 +28,9 @@ vi.mock('./agentIpc', () => ({
     };
   }),
 }));
-// The runner only needs the prompt string; importing the real panel drags the
-// whole chat surface into a hook test.
-vi.mock('./systemPrompt', () => ({ buildSystemPrompt: () => 'sys' }));
+// The runner only needs the prompt string. A spy, so a test can read the
+// grant each job composes its prompt for (M54.7).
+vi.mock('./systemPrompt', () => ({ buildSystemPrompt: vi.fn(() => 'sys') }));
 // Scheduled runs read their record's body before consuming the fire key.
 // The durable ledgers (M34.2.3) are mocked at the wire so each test controls
 // hydration and the claim verdict without sharing mockIpc's module state.
@@ -40,6 +39,8 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
   return {
     ...actual,
     readNote: vi.fn(async () => '---\ntype: Skill\n---\nplaybook'),
+    // Real by default; a test parks it to hold a start-up open (M53.10).
+    reviewQueue: vi.fn(actual.reviewQueue),
     jobLedgerRead: vi.fn(async () => ({ attempts: {}, skillRuns: {}, triggerRuns: {} })),
     jobLedgerClaim: vi.fn(async () => true),
     jobLedgerUnclaim: vi.fn(async () => true),
@@ -49,11 +50,14 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 });
 
 import * as agentIpc from './agentIpc';
+import { buildSystemPrompt } from './systemPrompt';
 import { useJobRunner } from './useJobRunner';
 import { makeEntry } from '@/engine/testHelpers';
+import { describeTrigger, parseTriggers } from '@/engine/triggers';
+import { mentionedTools } from '@/engine/toolGrant';
 import type { Entry } from '@/engine/types';
-import { loadRunLog } from '@/engine/runLog';
 import * as ipc from '@/lib/ipc';
+import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -143,6 +147,46 @@ function resetLedgerMocks(): void {
 }
 
 /**
+ * One vault's job_ledger table behind the wire mocks, for the tests that
+ * relaunch: what the table holds across the launch is what they are about.
+ * The store's rules (runtime/job_ledger.rs, mirrored by mockIpc): a claim is
+ * fresh unless its slot already holds that run key, an unclaim deletes only
+ * its own run key, and an import never overwrites a slot the table holds.
+ */
+function durableTable(): JobLedgers {
+  const table: JobLedgers = { attempts: {}, skillRuns: {}, triggerRuns: {} };
+  vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
+    attempts: { ...table.attempts },
+    skillRuns: { ...table.skillRuns },
+    triggerRuns: { ...table.triggerRuns },
+  }));
+  vi.mocked(ipc.jobLedgerClaim).mockImplementation(async (_vault, ledger, key, runKey) => {
+    if (table[ledger][key] === runKey) return false;
+    table[ledger][key] = runKey;
+    return true;
+  });
+  vi.mocked(ipc.jobLedgerUnclaim).mockImplementation(async (_vault, ledger, key, runKey) => {
+    if (table[ledger][key] !== runKey) return false;
+    delete table[ledger][key];
+    return true;
+  });
+  vi.mocked(ipc.jobLedgerStamp).mockImplementation(async (_vault, key, at) => {
+    table.triggerRuns[key] = at;
+  });
+  vi.mocked(ipc.jobLedgerImport).mockImplementation(async (_vault, entries) => {
+    let landed = 0;
+    for (const { ledger, key, runKey } of entries) {
+      const slots = table[ledger as keyof JobLedgers];
+      if (key in slots) continue;
+      slots[key] = runKey;
+      landed += 1;
+    }
+    return landed;
+  });
+  return table;
+}
+
+/**
  * Whose events are whose.
  *
  * This describe once covered a preempt handshake: the chat killed this
@@ -197,6 +241,19 @@ describe('useJobRunner stream ownership', () => {
     // And the instructions still follow it — the block leads, it does not
     // replace.
     expect(options.message).toContain('playbook');
+  });
+
+  it("names a schedule's cause: its schedule and the moment it was owed (M56.7)", async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    expect(options.cause).toEqual({
+      kind: 'schedule',
+      detail: 'daily 09:00',
+      due_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/),
+    });
+    // Rust frames why the run started; the message never pastes it.
+    expect(options.message).not.toContain('You were woken because');
   });
 
   it('finish() on the owned stream releases everything', async () => {
@@ -497,7 +554,7 @@ describe('useJobRunner shell gating', () => {
     // The clock is pinned to 10:30 and the schedule says 09:00, so this run
     // is a catch-up — the log entry must know when it was due, and lateness
     // is derived, never stored.
-    window.localStorage.removeItem('cerebro.runLog');
+    useRunLogStore.getState().clear();
     useVaultStore.setState({
       entries: [agentRecord('records/agents/scout.md', 'Scout')],
     });
@@ -505,7 +562,7 @@ describe('useJobRunner shell gating', () => {
     await startJob();
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
 
-    const [entry] = loadRunLog();
+    const [entry] = useRunLogStore.getState().entries;
     expect(entry.dueAt).toBeDefined();
     const due = new Date(entry.dueAt!);
     expect([due.getHours(), due.getMinutes()]).toEqual([9, 0]);
@@ -516,7 +573,7 @@ describe('useJobRunner shell gating', () => {
     // entry, indistinguishable from "nothing was due". The absence of a row
     // reads as an empty state, and this surface is not allowed to say
     // "nothing happened" when it means "we could not tell".
-    window.localStorage.removeItem('cerebro.runLog');
+    useRunLogStore.getState().clear();
     vi.mocked(ipc.readNote).mockImplementationOnce(async () => {
       throw new Error('EACCES');
     });
@@ -527,7 +584,7 @@ describe('useJobRunner shell gating', () => {
     await startJob();
 
     expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
-    const [entry] = loadRunLog();
+    const [entry] = useRunLogStore.getState().entries;
     expect(entry.status).toBe('failed');
     expect(entry.error).toContain('could not read records/agents/scout.md');
     expect(entry.error).toContain('cannot say what it found');
@@ -578,6 +635,141 @@ describe('useJobRunner shell gating', () => {
       connectors: true,
       attended: false,
     });
+  });
+});
+
+/**
+ * M54.7 — a job's prompts are composed for what the run holds, and nobody is
+ * watching it. A scheduled skill runs under its own `allowed-tools:` too, as
+ * an agent always has.
+ */
+describe('useJobRunner composes each job for its grant', () => {
+  const scheduled = (type: 'Agent' | 'Skill', properties: Record<string, unknown>) =>
+    makeEntry({
+      path: `records/${type === 'Agent' ? 'agents' : 'skills'}/scout.md`,
+      filename: 'scout.md',
+      folder: `records/${type === 'Agent' ? 'agents' : 'skills'}`,
+      title: 'Scout',
+      type,
+      properties: { schedule: 'daily 09:00', ...properties } as never,
+    });
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(buildSystemPrompt).mockClear();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Agent\n---\nplaybook');
+    resetLedgerMocks();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+      entries: [],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      runs: [],
+      agentShellAccess: true,
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  /** Run the one due job and hand back its grant and its start. */
+  async function runOne() {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(buildSystemPrompt)).toHaveBeenCalledTimes(1);
+    return {
+      grant: vi.mocked(buildSystemPrompt).mock.calls[0][1].grant,
+      options: vi.mocked(agentIpc.runAgent).mock.calls[0][1],
+    };
+  }
+
+  it('composes an agent job unattended, for the tools its record narrows it to', async () => {
+    useVaultStore.setState({
+      entries: [scheduled('Agent', { 'allowed-tools': ['search_notes'] })],
+    });
+    const { grant, options } = await runOne();
+    expect(grant.attended).toBe(false);
+    expect([...grant.tools]).toEqual(['search_notes']);
+    expect(options.allowedTools).toEqual(['search_notes']);
+    // Neither closing line reaches a run that cannot act on it.
+    expect(options.message).not.toContain('update_frontmatter');
+    expect(options.message).not.toContain('write_concept');
+    expect(mentionedTools(options.message)).toEqual([]);
+  });
+
+  it('asks an unnarrowed agent for its notes and its learning, as before', async () => {
+    useVaultStore.setState({ entries: [scheduled('Agent', {})] });
+    const { grant, options } = await runOne();
+    expect(grant.attended).toBe(false);
+    expect(grant.tools.has('update_frontmatter')).toBe(true);
+    expect(options.allowedTools).toBeNull();
+    expect(options.message).toContain('update_frontmatter');
+    expect(options.message).toContain('write_concept');
+  });
+
+  it('withdraws the shell from a read-scoped agent’s grant, as Rust withdraws it', async () => {
+    useVaultStore.setState({
+      entries: [scheduled('Agent', { tools: 'shell', 'read-scope': ['sources/'] })],
+    });
+    const { grant, options } = await runOne();
+    expect(options.shell).toBe(true);
+    expect(grant.shell).toBe(false);
+  });
+
+  it('runs a scheduled skill under its own allowed-tools', async () => {
+    useVaultStore.setState({
+      entries: [scheduled('Skill', { 'allowed-tools': ['search_notes'] })],
+    });
+    const { grant, options } = await runOne();
+    expect(options.allowedTools).toEqual(['search_notes']);
+    expect([...grant.tools]).toEqual(['search_notes']);
+    expect(grant).toMatchObject({ shell: false, attended: false });
+  });
+
+  it('leaves a scheduled skill that declares nothing unnarrowed', async () => {
+    useVaultStore.setState({ entries: [scheduled('Skill', {})] });
+    const { options } = await runOne();
+    expect(options.allowedTools).toBeNull();
+  });
+
+  it('hands an agent job the connector tools its record denies (M54.9)', async () => {
+    useVaultStore.setState({
+      entries: [
+        scheduled('Agent', {
+          connectors: ['gmail'],
+          'disallowed-tools': ['mcp__gmail__trash_thread'],
+        }),
+      ],
+    });
+    const { options } = await runOne();
+    expect(options).toMatchObject({
+      attended: false,
+      connectorNames: ['gmail'],
+      disallowedTools: ['mcp__gmail__trash_thread'],
+    });
+  });
+
+  it('gives a scheduled skill no connector to reach and nothing to deny', async () => {
+    // A skill's record names no connectors, and an unattended run that names
+    // none reaches none (M54.9): Rust reads the null this sends as that.
+    useVaultStore.setState({
+      entries: [scheduled('Skill', { 'disallowed-tools': ['mcp__gmail__trash_thread'] })],
+    });
+    const { options } = await runOne();
+    expect(options).toMatchObject({ attended: false, connectorNames: null, disallowedTools: null });
   });
 });
 
@@ -688,10 +880,10 @@ describe('useJobRunner durable ledgers', () => {
 
   it('a deferred run surrenders its fire key and logs one deferred row (M34.2.4)', async () => {
     // The ambient gate said "not now". The fire was never answered, so the
-    // claim is surrendered — a consumed key would make the deferral eat the
-    // whole period — and the log row is DEFERRED, not failed: nothing went
-    // wrong.
-    window.localStorage.removeItem('cerebro.runLog');
+    // claim is surrendered, durable and local (M53.27) — a consumed key would
+    // make the deferral eat the whole period — and the log row is DEFERRED,
+    // not failed: nothing went wrong.
+    useRunLogStore.getState().clear();
     vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
       deferred: ['daily_token_ceiling'],
     }));
@@ -704,13 +896,39 @@ describe('useJobRunner durable ledgers', () => {
       'records/skills/digest.md',
       FIRE_KEY,
     );
-    const [entry] = loadRunLog();
+    expect(useUiStore.getState().skillRuns['/vault']).toEqual({});
+    const [entry] = useRunLogStore.getState().entries;
     expect(entry.status).toBe('deferred');
     expect(entry.error).toContain('daily_token_ceiling');
-    // The runner is free again, and the local record suppresses a sixty-
-    // deferrals-an-hour retry loop for the rest of the session.
+    // The runner is free again, and the fire is held for the rest of the
+    // session rather than re-asked at every settle (an hour of settles is
+    // asserted on the recheck lane below).
     expect(useUiStore.getState().runs).toEqual([]);
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+  });
+
+  it('a deferred fire is not imported back as answered, so the next launch asks again (M53.27)', async () => {
+    // When the table holds nothing else, a launch first imports the
+    // localStorage era. The deferred fire's local record, left behind, went
+    // in as answered, and the deferral ate the fire it refused after all.
+    const table = durableTable();
+    vi.mocked(agentIpc.runAgent).mockImplementationOnce(async () => ({
+      deferred: ['daily_token_ceiling'],
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(table.skillRuns).toEqual({});
+    expect(useUiStore.getState().skillRuns['/vault']).toEqual({});
+
+    // A relaunch: the store outlives the unmount, as its localStorage mirror
+    // outlives the app.
+    cleanup();
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(ipc.jobLedgerImport)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(table.skillRuns).toEqual({ 'records/skills/digest.md': FIRE_KEY });
   });
 
   it('every unattended job names its kind as its budget lane (M34.2.4)', async () => {
@@ -743,6 +961,8 @@ describe('useJobRunner durable ledgers', () => {
  * M49.2: the stale and schema recheck lanes exist to rewrite `knowledge/`,
  * and every one of those writes refuses while the vault is not recording
  * (M49.1). They wait instead of spending a paid run on a certain refusal.
+ * The budget gate can make a recheck wait too, and the last test here is
+ * what a deferral leaves behind (M53.27).
  */
 describe('useJobRunner while the vault is not recording', () => {
   const staleConcept = makeEntry({
@@ -759,6 +979,11 @@ describe('useJobRunner while the vault is not recording', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
     vi.mocked(agentIpc.runAgent).mockClear();
+    // Implementation too: the deferral test scripts a deferred answer.
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
     resetLedgerMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
@@ -770,6 +995,7 @@ describe('useJobRunner while the vault is not recording', () => {
       autoLearn: true,
       learnAttempts: {},
       skillRuns: {},
+      triggerRuns: {},
       runs: [],
       agentShellAccess: false,
       agentConnectors: false,
@@ -786,6 +1012,12 @@ describe('useJobRunner while the vault is not recording', () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(agentIpc.runAgent).toHaveBeenCalledTimes(1);
+    // A recheck lane is Cerebro's upkeep, with the lane's reason (M56.7).
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].cause).toEqual({
+      kind: 'maintenance',
+      subject: 'knowledge/systems/old.md',
+      detail: 'a concept passed its recheck date',
+    });
   });
 
   it.each(['lost-lock', 'refused', 'fail-stopped', 'other-vault', 'inactive'] as const)(
@@ -811,13 +1043,90 @@ describe('useJobRunner while the vault is not recording', () => {
     await startJob();
     expect(agentIpc.runAgent).not.toHaveBeenCalled();
   });
+
+  it('a deferred recheck leaves no record, is asked once a session, and runs after a relaunch (M53.27)', async () => {
+    // The gate defers the recheck, so the claim gives back its records,
+    // durable and local. The local one used to stay, and the next launch
+    // merged it back over the table: the recheck stayed suppressed until its
+    // date moved, and moving that date is the recheck's own job.
+    const table = durableTable();
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      deferred: ['daily_token_ceiling'],
+    }));
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(ipc.jobLedgerUnclaim)).toHaveBeenCalledWith(
+      '/vault',
+      'attempts',
+      'knowledge/systems/old.md',
+      'stale:2026-07-01',
+    );
+    expect(table.attempts).toEqual({});
+    expect(useUiStore.getState().learnAttempts).toEqual({});
+
+    // Held for the rest of the session: the gate would defer every ask, and
+    // an hour of settles asks it once.
+    for (let settle = 0; settle < 20; settle += 1) await startJob();
+    await advance(60 * MINUTE, 5 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+
+    // The next launch asks again, and this time the gate lets it run.
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
+    cleanup();
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(table.attempts).toEqual({ 'knowledge/systems/old.md': 'stale:2026-07-01' });
+  });
+
+  it('a recheck whose start-up spans a switch surrenders its attempt claim (M53.10)', async () => {
+    // The attempt is claimed first, then the start-up waits on the review
+    // queue, and the window moves to another vault meanwhile. The run never
+    // happens, so the claim goes back, durable and local: kept, it would hold
+    // the recheck off until its date moved, and moving that date is the
+    // recheck's own job.
+    const table = durableTable();
+    let answer: (cards: Awaited<ReturnType<typeof ipc.reviewQueue>>) => void = () => undefined;
+    vi.mocked(ipc.reviewQueue).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(table.attempts).toEqual({ 'knowledge/systems/old.md': 'stale:2026-07-01' });
+    expect(useUiStore.getState().learnAttempts).toEqual({
+      'knowledge/systems/old.md': 'stale:2026-07-01',
+    });
+
+    act(() => useVaultStore.setState({ vaultPath: '/other' }));
+    await act(async () => {
+      answer([]);
+      await Promise.resolve();
+    });
+    expect(useUiStore.getState().runs).toEqual([]);
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(vi.mocked(ipc.jobLedgerUnclaim)).toHaveBeenCalledWith(
+      '/vault',
+      'attempts',
+      'knowledge/systems/old.md',
+      'stale:2026-07-01',
+    );
+    expect(table.attempts).toEqual({});
+    expect(useUiStore.getState().learnAttempts).toEqual({});
+  });
 });
 
 /**
  * Event runs and schedules in their own ledger slots (AUTOMATION-2), driven
  * through the real runner: the derivation, the claim, and the cooldown stamp.
- * The watcher has `schedule: daily 06:00`, which is also what keeps the
- * minute tick — and so the clock the cooldown is measured on — running.
+ * The watcher has `schedule: daily 06:00` beside its `when:`. Either one keeps
+ * the minute tick, and so the clock the cooldown is measured on, running
+ * (M53.26); the next describe's watcher has the `when:` alone.
  */
 describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
   const IDENTITY = 'records/agents/watcher.md';
@@ -829,8 +1138,16 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
     type: 'Agent',
     properties: { schedule: 'daily 06:00', when: [{ event: 'changed', in: 'inbox' }] },
   });
+  // Each version has new bytes, so its hash moves with its stamp (M55.2).
   const noteAt = (modifiedAt: string) =>
-    makeEntry({ path: 'inbox/a.md', filename: 'a.md', folder: 'inbox', title: 'A', modifiedAt });
+    makeEntry({
+      path: 'inbox/a.md',
+      filename: 'a.md',
+      folder: 'inbox',
+      title: 'A',
+      modifiedAt,
+      hash: `h:${modifiedAt}`,
+    });
   const eventKey = (modifiedAt: string) => `event:changed:inbox/a.md@${modifiedAt}`;
 
   /** A scan that finds inbox/a.md at a new version — a new event. */
@@ -890,6 +1207,15 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
     edit('2026-07-31T10:30:00Z');
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    // Why it woke rides the request, for Rust to quote as data (M56.7): the
+    // changed path and the trigger's own words — never the prose.
+    const [, options] = vi.mocked(agentIpc.runAgent).mock.calls[0];
+    const words = describeTrigger(parseTriggers(watcher.properties.when)[0])
+      .replace(/^When /, '')
+      .replace(/\.$/, '');
+    expect(options.cause).toEqual({ kind: 'event', subject: 'inbox/a.md', detail: words });
+    expect(options.message).not.toContain('You were woken because');
+    expect(options.message).not.toContain('inbox/a.md');
     // Claimed in the event lane's own slot; the schedule's still holds 06:00.
     expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenCalledWith(
       '/vault',
@@ -1000,7 +1326,7 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
     // on offer. The failure memory was keyed by path, so each lane's failure
     // overwrote the other's and the two alternated — a read, a failed run-log
     // row and a rescan every settle, for as long as the app stayed open.
-    window.localStorage.removeItem('cerebro.runLog');
+    useRunLogStore.getState().clear();
     vi.mocked(ipc.readNote).mockImplementation(async () => {
       throw new Error('EIO');
     });
@@ -1015,7 +1341,7 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
     for (let settle = 0; settle < 10; settle += 1) await startJob();
 
     expect(vi.mocked(ipc.readNote)).toHaveBeenCalledTimes(2);
-    expect(loadRunLog().map((row) => [row.trigger, row.status])).toEqual([
+    expect(useRunLogStore.getState().entries.map((row) => [row.trigger, row.status])).toEqual([
       ['event', 'failed'],
       ['schedule', 'failed'],
     ]);
@@ -1030,12 +1356,12 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
   it('a gate deferral of both lanes asks once per lane, never alternating between them', async () => {
     // Both lanes due on one record — today's 06:00 unanswered, an event on
     // offer — and the budget gate defers every run. Each deferral surrenders
-    // its durable claim and keeps its local record as this session's
-    // suppression. Sharing one slot, each lane's record overwrote the
-    // other's, so the two took turns asking the gate every settle: a
-    // decision row and a run-log row each time (measured: 922 asks in this
-    // hour).
-    window.localStorage.removeItem('cerebro.runLog');
+    // its claim, durable and local, and is held for the rest of the session
+    // in its own slot (M53.27). Sharing one slot, each lane's record
+    // overwrote the other's, so the two took turns asking the gate every
+    // settle: a decision row and a run-log row each time (measured: 922 asks
+    // in this hour).
+    useRunLogStore.getState().clear();
     vi.mocked(ipc.jobLedgerRead).mockImplementation(async () => ({
       attempts: {},
       skillRuns: {},
@@ -1051,7 +1377,7 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
     await advance(60 * MINUTE, 5 * MINUTE);
 
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
-    expect(loadRunLog().map((row) => [row.trigger, row.status])).toEqual([
+    expect(useRunLogStore.getState().entries.map((row) => [row.trigger, row.status])).toEqual([
       ['event', 'deferred'],
       ['schedule', 'deferred'],
     ]);
@@ -1061,8 +1387,128 @@ describe('useJobRunner event runs beside a schedule (AUTOMATION-2)', () => {
       ['/vault', 'skillRuns', IDENTITY, '2026-07-31 06:00'],
       ['/vault', 'skillRuns', `${IDENTITY}#event`, eventKey('2026-07-31T10:30:00Z')],
     ]);
+    // Nor does either leave a local record for the next launch to read back.
+    expect(useUiStore.getState().skillRuns['/vault']).toEqual({});
     // A deferred run never spawned, so neither starts the cooldown.
     expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * An agent with a `when:` and no `schedule:` (M53.26). `now` moves only on
+ * the minute tick, and the tick used to start only for a parseable
+ * `schedule:`. So a trigger-only agent's first event run stamped its
+ * cooldown after a `now` frozen at mount, the window never closed, and the
+ * agent ran once a session instead of up to four times an hour.
+ */
+describe('useJobRunner in a trigger-only vault (AUTOMATION-2)', () => {
+  const IDENTITY = 'records/agents/watcher.md';
+  const agentWith = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: IDENTITY,
+      filename: 'watcher.md',
+      folder: 'records/agents',
+      title: 'Watcher',
+      type: 'Agent',
+      properties,
+    });
+  const watcher = agentWith({ when: [{ event: 'changed', in: 'inbox' }] });
+  // Each version has new bytes, so its hash moves with its stamp (M55.2).
+  const noteAt = (modifiedAt: string) =>
+    makeEntry({
+      path: 'inbox/a.md',
+      filename: 'a.md',
+      folder: 'inbox',
+      title: 'A',
+      modifiedAt,
+      hash: `h:${modifiedAt}`,
+    });
+
+  /** A scan that finds inbox/a.md at a new version — a new event. */
+  function edit(modifiedAt: string): void {
+    act(() => useVaultStore.setState({ entries: [watcher, noteAt(modifiedAt)] }));
+  }
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.runAgent).mockImplementation(async () => ({
+      run: JOB_RUN,
+      durableId: JOB_DURABLE,
+    }));
+    vi.mocked(ipc.readNote).mockClear();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Agent\n---\nwatch');
+    // Empty ledgers: nothing ever ran, and no cooldown is open at launch.
+    resetLedgerMocks();
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entriesVault: '/vault',
+      entries: [watcher, noteAt('2026-07-31T08:00:00Z')],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      learnAttempts: {},
+      skillRuns: {},
+      triggerRuns: {},
+      runs: [],
+      agentShellAccess: false,
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('the cooldown runs out, so a new event waits out the window and then fires', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    edit('2026-07-31T10:30:00Z');
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+
+    // The run stamped 10:30:08. Five minutes on, a new version of the note
+    // waits to the edge of the window…
+    await advance(5 * MINUTE);
+    edit('2026-07-31T10:35:00Z');
+    await advance(9 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+
+    // …and runs past it. With no tick, `now` stayed at 10:30:00, before the
+    // stamp, and held it for the rest of the session.
+    await advance(2 * MINUTE);
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(ipc.jobLedgerClaim)).toHaveBeenLastCalledWith(
+      '/vault',
+      'skillRuns',
+      `${IDENTITY}#event`,
+      'event:changed:inbox/a.md@2026-07-31T10:35:00Z',
+    );
+  });
+
+  it('a when: alone keeps the minute tick', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    // Nothing is due, so no settle timer is pending: the one timer is the tick.
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it.each([
+    ['an agent with neither schedule: nor when:', agentWith({})],
+    // A typo for `changed`: it parses to no trigger, so the queue never fires
+    // it, and nothing waits on the clock.
+    ['an agent whose when: names no event', agentWith({ when: 'edited' })],
+  ])('%s keeps no interval', async (_, agent) => {
+    useVaultStore.setState({ entries: [agent, noteAt('2026-07-31T08:00:00Z')] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
@@ -1091,6 +1537,7 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
       title: path,
       createdAt,
       modifiedAt,
+      hash: `h:${modifiedAt}`,
     });
   const aWatcher = watcherIn('a-watcher');
   const vaultA = [aWatcher, note('inbox/a1.md', '2026-07-01T09:00:00Z')];
@@ -1182,25 +1629,18 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
   it('an event still on offer when the vault was left is not offered again on the way back', async () => {
     // A's watcher woke a minute ago (hydrated below), so an edit now waits
     // out its cooldown: on offer, not run. Leaving A must drop that event —
-    // back in A, it describes a vault nobody was watching in between. Its
-    // answered 06:00 schedule keeps A's clock ticking.
-    const ticking = makeEntry({
-      ...aWatcher,
-      properties: { when: ['created', 'changed'], schedule: 'daily 06:00' },
-    });
-    vi.mocked(ipc.jobLedgerRead).mockImplementation(async (vault) =>
-      vault === '/a'
-        ? {
-            attempts: {},
-            skillRuns: { [ticking.path]: '2026-07-31 06:00' },
-            triggerRuns: { [ticking.path]: new Date(2026, 6, 31, 10, 29).toISOString() },
-          }
-        : { attempts: {}, skillRuns: {}, triggerRuns: {} },
-    );
-    useVaultStore.setState({ entries: [ticking, note('inbox/a1.md', '2026-07-01T09:00:00Z')] });
+    // back in A, it describes a vault nobody was watching in between. The
+    // watchers' `when:` keeps the clock ticking (M53.26), so the cooldown does
+    // run out, and a re-offered event would run.
+    vi.mocked(ipc.jobLedgerRead).mockImplementation(async (vault) => ({
+      attempts: {},
+      skillRuns: {},
+      triggerRuns:
+        vault === '/a' ? { [aWatcher.path]: new Date(2026, 6, 31, 10, 29).toISOString() } : {},
+    }));
     renderHook(() => useJobRunner());
     await startJob();
-    const edited = [ticking, note('inbox/a1.md', '2026-07-31T10:30:00Z')];
+    const edited = [aWatcher, note('inbox/a1.md', '2026-07-31T10:30:00Z')];
     act(() => useVaultStore.setState({ entries: edited }));
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
@@ -1246,38 +1686,98 @@ describe('useJobRunner across a vault switch (AUTOMATION-2b)', () => {
     expect(vi.mocked(ipc.readNote)).not.toHaveBeenCalled();
   });
 
-  it('a job in a vault switched to runs on an endpoint pointed at that vault', async () => {
-    // `startMcp` is what points the one loopback server at a vault (mcp.rs
-    // `ensure`), and every tool call resolves against that pointer. Cached
-    // from the first job for the app's lifetime, it left a job in a vault
-    // switched to reading and writing the vault the first job ran in.
-    const digest = makeEntry({
-      path: 'records/skills/digest.md',
-      filename: 'digest.md',
-      folder: 'records/skills',
-      title: 'Digest',
-      type: 'Skill',
-      properties: { schedule: 'daily 09:00' },
-    });
+  /** A daily digest, due at 09:00 — answered in neither vault's ledger. */
+  const digest = makeEntry({
+    path: 'records/skills/digest.md',
+    filename: 'digest.md',
+    folder: 'records/skills',
+    title: 'Digest',
+    type: 'Skill',
+    properties: { schedule: 'daily 09:00' },
+  });
+  const DIGEST_FIRE = '2026-07-31 09:00';
+
+  it('a job in a vault switched to runs in that vault', async () => {
+    // Each run's bearer carries the vault it was started in (mcp.rs
+    // `RunGrant::vault`). The job runner used to point the one loopback
+    // server at its vault first, through a shared pointer every tool call
+    // read; now it hands `runAgent` the vault, and that is all.
     const wire: string[] = [];
-    vi.mocked(agentIpc.startMcp).mockImplementation(async (vault) => {
-      wire.push(`point ${vault}`);
-      return { url: 'mock', token: 't' };
-    });
     vi.mocked(agentIpc.runAgent).mockImplementation(async (vault) => {
       wire.push(`run ${vault}`);
       return { run: JOB_RUN, durableId: JOB_DURABLE };
     });
-    try {
-      useVaultStore.setState({ entries: [digest] });
-      renderHook(() => useJobRunner());
-      await startJob();
-      act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
-      // Due in B as well: fire keys are calendar values, and B's ledger is empty.
-      await open('/b', [digest]);
-      expect(wire).toEqual(['point /a', 'run /a', 'point /b', 'run /b']);
-    } finally {
-      vi.mocked(agentIpc.startMcp).mockReset();
-    }
+    useVaultStore.setState({ entries: [digest] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+    // Due in B as well: fire keys are calendar values, and B's ledger is empty.
+    await open('/b', [digest]);
+    expect(wire).toEqual(['run /a', 'run /b']);
+  });
+
+  it('a job whose start-up spans a vault switch claims nothing and spawns nothing in the old vault', async () => {
+    // Parked on its record's read when the window moves to B (M53.10). On
+    // resume it must neither consume A's fire key nor spawn a run in A, a
+    // vault nobody is looking at any more.
+    let releaseRead: (body: string) => void = () => undefined;
+    vi.mocked(ipc.readNote).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseRead = resolve;
+        }),
+    );
+    useVaultStore.setState({ entries: [digest] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(useUiStore.getState().runs[0]?.path).toBe(digest.path);
+
+    act(() => useVaultStore.setState({ vaultPath: '/b' }));
+    await act(async () => {
+      releaseRead('---\ntype: Skill\n---\nplaybook');
+      await Promise.resolve();
+    });
+    // The start-up resumed and ended: its registry entry is gone.
+    expect(useUiStore.getState().runs).toEqual([]);
+    expect(vi.mocked(ipc.jobLedgerClaim)).not.toHaveBeenCalled();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(useUiStore.getState().skillRuns['/a'] ?? {}).toEqual({});
+  });
+
+  it('a run that spawned as the vault switched is stopped and its fire key surrendered', async () => {
+    // Opening B stops A's runs in Rust (`start_watcher`), but a spawn that
+    // lands after that sweep is still A's. The runner stops it by id and
+    // gives its claim back, durable and local: it never got to run.
+    let spawned: (start: Awaited<ReturnType<typeof agentIpc.runAgent>>) => void = () => undefined;
+    vi.mocked(agentIpc.runAgent).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          spawned = resolve;
+        }),
+    );
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ entries: [digest] });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith('/a', expect.anything());
+    expect(useUiStore.getState().skillRuns['/a']).toEqual({ [digest.path]: DIGEST_FIRE });
+
+    act(() => useVaultStore.setState({ vaultPath: '/b' }));
+    await act(async () => {
+      spawned({ run: JOB_RUN, durableId: JOB_DURABLE });
+      await Promise.resolve();
+    });
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalledWith(JOB_RUN);
+    expect(vi.mocked(ipc.jobLedgerUnclaim)).toHaveBeenCalledWith(
+      '/a',
+      'skillRuns',
+      digest.path,
+      DIGEST_FIRE,
+    );
+    expect(useUiStore.getState().skillRuns['/a']).toEqual({});
+    expect(useUiStore.getState().runs).toEqual([]);
+    // No cooldown and no subscription: the run is not this window's to follow.
+    expect(vi.mocked(ipc.jobLedgerStamp)).not.toHaveBeenCalled();
+    expect(handlers).toHaveLength(0);
   });
 });

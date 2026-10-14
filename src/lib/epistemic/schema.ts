@@ -2132,7 +2132,13 @@ export function validateOverridePointer(path: string): void {
   }
 }
 
-/** A knowledge-relative projection path: relative, markdown, non-escaping. */
+/**
+ * A knowledge-relative projection path: relative, markdown, non-escaping,
+ * spelled one way (no `.` or empty segment), and naming a file — `.md`
+ * alone is a dotfile with no extension. `.archive/x.md` and `.hidden.md`
+ * stay legal. The Rust `validate_projection_path` port. The claim a
+ * `belief.created` makes is held to more (`validateClaimablePath`).
+ */
 export function validateProjectionPath(path: string): void {
   if (path.length === 0 || !path.endsWith('.md')) {
     throw new RefusedError(`projection path ${path} must be a .md file`);
@@ -2140,9 +2146,83 @@ export function validateProjectionPath(path: string): void {
   if (path.startsWith('/') || path.includes('\\')) {
     throw new RefusedError(`projection path ${path} must be knowledge-relative`);
   }
-  if (path.split('/').some((seg) => seg.length === 0 || seg === '..')) {
-    throw new RefusedError(`projection path ${path} must not escape or double-slash`);
+  const segments = path.split('/');
+  if (segments.some((seg) => seg.length === 0 || seg === '.' || seg === '..')) {
+    throw new RefusedError(
+      `projection path ${path} must not escape, double-slash or carry a '.' segment`,
+    );
   }
+  if (segments[segments.length - 1] === '.md') {
+    throw new RefusedError(`projection path ${path} names no file`);
+  }
+}
+
+/**
+ * NAME_MAX on APFS and ext4. The twin of `MAX_SEGMENT_BYTES` in
+ * `ledger/schema/projection.rs`.
+ */
+const MAX_SEGMENT_BYTES = 255;
+
+/**
+ * The twin of `MAX_CLAIM_LEAF_BYTES`: 255 less the projection writer's
+ * `.cerebro-tmp` temp suffix.
+ */
+const MAX_CLAIM_LEAF_BYTES = 243;
+
+/**
+ * The first C0, DEL or C1 control code point in `path` — what Rust's
+ * `char::is_control` matches — or null.
+ */
+function controlCodePoint(path: string): number | null {
+  for (const char of path) {
+    const code = char.codePointAt(0);
+    if (code !== undefined && (code <= 0x1f || (code >= 0x7f && code <= 0x9f))) return code;
+  }
+  return null;
+}
+
+/**
+ * A path a created Belief may claim (M53.29) — the Rust
+ * `validate_claimable_path` port: a projection path the projection writer
+ * can create. No control character, no folder name over 255 bytes, no leaf
+ * over 243 — UTF-8 bytes, which is what Rust's `str::len` counts: 82 CJK
+ * characters are 82 code units here and 246 bytes there. Only a claim is
+ * held to this; whether two claims nest is the reducer's to judge.
+ */
+export function validateClaimablePath(path: string): void {
+  validateProjectionPath(path);
+  const control = controlCodePoint(path);
+  if (control !== null) {
+    const hex = control.toString(16).toUpperCase().padStart(4, '0');
+    throw new RefusedError(`projection path ${path} carries the control character U+${hex}`);
+  }
+  const segments = path.split('/');
+  const leaf = segments.pop() ?? path;
+  if (utf8Length(leaf) > MAX_CLAIM_LEAF_BYTES) {
+    throw new RefusedError(
+      `projection path ${path} names a file over ${MAX_CLAIM_LEAF_BYTES} bytes`,
+    );
+  }
+  if (segments.some((folder) => utf8Length(folder) > MAX_SEGMENT_BYTES)) {
+    throw new RefusedError(
+      `projection path ${path} has a folder name over ${MAX_SEGMENT_BYTES} bytes`,
+    );
+  }
+}
+
+/**
+ * The projection path a created Belief's subject claims: its first `.md`
+ * alias, or null. Only the claim is validated; a later `.md` alias is a
+ * resolution hint like any other.
+ */
+export function projectionClaim(aliases: readonly string[]): string | null {
+  return aliases.find((alias) => alias.endsWith('.md')) ?? null;
+}
+
+/** The Rust `validate_projection_claim` port: a claim, when made, must be claimable. */
+export function validateProjectionClaim(aliases: readonly string[]): void {
+  const claim = projectionClaim(aliases);
+  if (claim !== null) validateClaimablePath(claim);
 }
 
 /** A chain head hash: a frame hash (64 hex) or the store id anchor (32). */
@@ -2297,6 +2377,7 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
         throw new RefusedError('belief.created subject must be resolved');
       }
       validateSubject(subject);
+      validateProjectionClaim(subject.aliases as string[]);
       validateBasis(body.basis as JsonObject);
       break;
     }

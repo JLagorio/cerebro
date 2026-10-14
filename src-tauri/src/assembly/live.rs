@@ -28,6 +28,7 @@ use tauri::AppHandle;
 use crate::agent::meter::{Meter, Mode, RunEnd};
 use crate::agent::{AgentRequest, AgentState};
 use crate::mcp::McpState;
+use crate::runtime::cause::{CauseKind, RunCause};
 
 use super::ask::{Spawn, ACTOR};
 
@@ -50,10 +51,8 @@ pub struct Live<'a> {
 
 impl Spawn for Live<'_> {
     fn mint_token(&self) -> Result<String, String> {
-        // The endpoint must already be up: `ensure` retargets a running server
-        // at this vault and errors if none is running, rather than starting
-        // one behind the user's back.
-        self.mcp.ensure(self.app, self.vault)?;
+        // A bearer needs the endpoint up; `ensure` starts it if it is not.
+        self.mcp.ensure(self.app)?;
         // Scoped to nothing. A synthesis run answers; it does not write.
         // M31.1b: the grant carries the SAME narrowing the argv declares —
         // one list, so the boundary and the advice cannot disagree.
@@ -68,6 +67,8 @@ impl Spawn for Live<'_> {
             None,
             Some(declared_tools()),
             self.run_id.clone(),
+            // M53.10: bound to this vault, whatever is opened while it runs.
+            self.vault,
         )
     }
 
@@ -76,7 +77,7 @@ impl Spawn for Live<'_> {
     }
 
     fn run(&self, token: &str, prompt: &str) -> Result<(), String> {
-        let url = self.mcp.ensure(self.app, self.vault)?.url;
+        let url = self.mcp.ensure(self.app)?.url;
         let (tx, rx) = sync_channel::<RunEnd>(1);
         crate::agent::stream(
             self.app.clone(),
@@ -102,6 +103,9 @@ impl Spawn for Live<'_> {
                 actor: Some(super::ask::ACTOR.to_string()),
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                // Written with the row this meter opens (M56.7). No WHY block:
+                // the synthesis prompt is a versioned contract.
+                cause: Some(RunCause::of(CauseKind::Assembly)),
             }),
             Some(tx),
         )?;
@@ -154,6 +158,10 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         // else. That was always the design (prompt::RULES); until now it was
         // a sentence. The same list `mint_token` grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // Connectors are off, so there is nothing to deny (M54.9).
+        disallowed_tools: None,
+        // The meter records `assembly` itself (M56.7).
+        cause: None,
         // No lane: an attended synthesis run is metered, never gated
         // (M34.2.4's lane field is the unattended path to the dispatcher).
         lane: None,

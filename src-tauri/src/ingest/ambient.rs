@@ -152,7 +152,7 @@ pub fn start(app: &AppHandle, state: &AmbientState, vault: &Path, config_dir: &P
                 // is a condition to report, and a supervisor that exited on
                 // the first bad tick would stop working for the rest of the
                 // session without saying so.
-                eprintln!("ambient ingest: {detail}");
+                log::warn!("ambient ingest: {detail}");
             }
             if !sleep_until(&stop, Duration::from_secs(INTERVAL_SECONDS)) {
                 return;
@@ -206,11 +206,11 @@ fn sleep_until(stop: &AtomicBool, total: Duration) -> bool {
 fn sweep_abandoned(conn: &rusqlite::Connection, now: chrono::DateTime<chrono::Utc>) {
     match crate::runtime::dispatch::recover_expired_leases(conn, now) {
         Ok(0) => {}
-        Ok(recovered) => eprintln!(
+        Ok(recovered) => log::warn!(
             "ambient ingest: recovered {recovered} abandoned run(s) — their work is queued again \
              and today's spend is recorded as unknown, which is not zero"
         ),
-        Err(detail) => eprintln!("ambient ingest: expired leases could not be swept: {detail}"),
+        Err(detail) => log::warn!("ambient ingest: expired leases could not be swept: {detail}"),
     }
 }
 
@@ -281,7 +281,7 @@ fn tick_once(app: &AppHandle, vault: &Path, config_dir: &Path) -> Result<(), Str
     if let super::driver::Tick::Skipped(reason) = tick {
         // Not an error and not silent: two of the three reasons mean a person
         // has something to decide.
-        eprintln!("ambient ingest: skipped ({reason:?})");
+        log::info!("ambient ingest: skipped ({reason:?})");
     }
     // The maintenance pass rides the SAME switch and the same tick, AFTER
     // ingest. Two reasons for the order: reading what changed is what makes
@@ -367,24 +367,24 @@ fn deterministic(
     schedule_freshness(vault, store_uuid, &state, chrono::Utc::now());
 
     if let Err(detail) = record_attention(conn, vault_id, store_uuid, &chain_head, &state) {
-        eprintln!("attention signals: {detail}");
+        log::warn!("attention signals: {detail}");
     }
     if let Err(detail) = converge(conn, vault_id, store_uuid, &read.frames) {
-        eprintln!("convergence: {detail}");
+        log::warn!("convergence: {detail}");
     }
     // The Source Monitor reads files rather than the ledger, so it neither
     // needs the fold above nor invalidates it.
     match crate::monitor::pass::run(conn, vault, vault_id, chrono::Utc::now()) {
         Ok((observed, unreadable)) => {
             if !observed.changed.is_empty() || !observed.due.is_empty() || unreadable > 0 {
-                eprintln!(
+                log::info!(
                     "source monitor: {} changed, {} due for refetch, {unreadable} unreadable",
                     observed.changed.len(),
                     observed.due.len()
                 );
             }
         }
-        Err(detail) => eprintln!("source monitor: {detail}"),
+        Err(detail) => log::warn!("source monitor: {detail}"),
     }
     Ok(())
 }
@@ -457,13 +457,14 @@ fn detect_conflicts(vault: &Path, store_uuid: &str, state: &crate::ledger::reduc
     let appender = crate::conflict::emit::ShadowAppend::new(vault);
     let emitted = crate::conflict::emit::emit(state, store_uuid, &candidates, &appender);
     if emitted.appended > 0 {
-        eprintln!(
+        log::info!(
             "conflict detection: {} new comparison(s), {} already known",
-            emitted.appended, emitted.already_known
+            emitted.appended,
+            emitted.already_known
         );
     }
     for (comparison, detail) in &emitted.failed {
-        eprintln!("conflict detection: {comparison} could not be recorded — {detail}");
+        log::warn!("conflict detection: {comparison} could not be recorded — {detail}");
     }
 }
 
@@ -490,14 +491,16 @@ fn classify_conflicts(
     let classified_at = as_of.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let emitted = crate::conflict::resolve::emit(state, store_uuid, &classified_at, &committer);
     if emitted.resolved > 0 || emitted.opened > 0 {
-        eprintln!(
+        log::info!(
             "conflict gauntlet: {} resolved apart, {} contradiction edge(s) opened, {} waiting \
              on review",
-            emitted.resolved, emitted.opened, emitted.needs_semantics
+            emitted.resolved,
+            emitted.opened,
+            emitted.needs_semantics
         );
     }
     for (comparison, detail) in &emitted.failed {
-        eprintln!("conflict gauntlet: {comparison} could not be classified — {detail}");
+        log::warn!("conflict gauntlet: {comparison} could not be classified — {detail}");
     }
 }
 
@@ -535,13 +538,14 @@ fn backfill_declarations(
         &appender,
     );
     if ran.classified > 0 {
-        eprintln!(
+        log::info!(
             "contradiction backfill: {} declaration(s) classified, {} already done",
-            ran.classified, ran.already_done
+            ran.classified,
+            ran.already_done
         );
     }
     for (subject, detail) in &ran.failed {
-        eprintln!("contradiction backfill: {subject} — {detail}");
+        log::warn!("contradiction backfill: {subject} — {detail}");
     }
 }
 
@@ -565,20 +569,21 @@ fn schedule_freshness(
     let rules = match crate::dynamics::freshness::load() {
         Ok(rules) => rules,
         Err(detail) => {
-            eprintln!("freshness rules: {detail}");
+            log::warn!("freshness rules: {detail}");
             return;
         }
     };
     let appender = crate::conflict::emit::ShadowAppend::new(vault);
     let emitted = crate::dynamics::schedule::emit(state, store_uuid, &rules, as_of, &appender);
     if emitted.appended > 0 {
-        eprintln!(
+        log::info!(
             "freshness: {} crossing(s) recorded, {} already known",
-            emitted.appended, emitted.already_known
+            emitted.appended,
+            emitted.already_known
         );
     }
     for (dedupe_key, detail) in &emitted.failed {
-        eprintln!("freshness: {dedupe_key} could not be recorded — {detail}");
+        log::warn!("freshness: {dedupe_key} could not be recorded — {detail}");
     }
 }
 
@@ -587,10 +592,11 @@ fn schedule_freshness(
 /// Reported and never fatal, like the ingest half: a pass that could not run
 /// is a condition to say out loud, and a supervisor that exited on it would
 /// stop maintaining for the rest of the session without telling anyone.
-#[allow(clippy::too_many_arguments)] // A supervisor seam: every one is a
-                                     // distinct identity the pass needs, and
-                                     // bundling them into a struct nothing
-                                     // else builds would hide that.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a supervisor seam: every one is a distinct identity the pass needs, and \
+              bundling them into a struct nothing else builds would hide that"
+)]
 fn maintain(
     app: &AppHandle,
     conn: &rusqlite::Connection,
@@ -638,15 +644,15 @@ fn maintain(
         chrono::Utc::now(),
     )? {
         crate::maintain::schedule::Scheduled::Deferred(reasons) => {
-            eprintln!("maintenance: deferred ({reasons:?})");
+            log::info!("maintenance: deferred ({reasons:?})");
         }
         crate::maintain::schedule::Scheduled::NothingNew => {}
         crate::maintain::schedule::Scheduled::SkippedNoProposalSurface => {
-            eprintln!("maintenance: skipped (agent_proposals_enabled=false)");
+            log::info!("maintenance: skipped (agent_proposals_enabled=false)");
             record_proposal_surface_skip(conn, store_uuid);
         }
         crate::maintain::schedule::Scheduled::Ran { said, .. } => {
-            eprintln!("maintenance: said {said} finding(s)");
+            log::info!("maintenance: said {said} finding(s)");
         }
     }
     Ok(())
@@ -800,6 +806,7 @@ mod tests {
                 output_tokens: 1_000,
             },
             &["a.md".to_string()],
+            None,
             None,
             at("2026-08-09T10:00:00Z"),
         )

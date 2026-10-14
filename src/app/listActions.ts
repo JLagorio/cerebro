@@ -19,10 +19,14 @@
  * `views/*.yml` rewrites that file rather than migrating it to a `.list.yml`,
  * because silently relocating someone's file on a toolbar click is not a
  * migration, it is a surprise — and it would break any external reference to it.
+ *
+ * Two page creators live at the end: a page inside a container (M47.5), and
+ * the page a link typed in the editor names (M55.7).
  */
 
 import { newCollectionDefinition, serializeCollection } from '@/engine/collections';
 import { nextViewId, replaceView, serializeList } from '@/engine/views';
+import { freshStem } from '@/engine/wikilink';
 import type {
   CollectionDefinition,
   CollectionFile,
@@ -311,6 +315,40 @@ export async function createPageIn(folder: string, title = 'Untitled'): Promise<
     return await createItem({ folder, slug, frontmatter: {}, body: `# ${title}\n` });
   } catch {
     toast("Couldn't create the page");
+    return null;
+  }
+}
+
+/**
+ * Where a page made from the editor's `[[` or `@` menu lands (M55.7): the
+ * vault root, where the sidebar's New page puts a page. The owner's default
+ * (M55 Q15). Beside the open page would need exceptions for knowledge/,
+ * templates/ and multi-page doc folders, and as a sub-page it waits on
+ * M55.13's nesting; either changes only this constant and its caller.
+ */
+export const LINKED_PAGE_FOLDER = '';
+
+/**
+ * Make the page a link typed in the editor names (M55.7): `# <title>` in
+ * LINKED_PAGE_FOLDER, under a stem no link answers to yet (`freshStem`), so
+ * the new link reaches this page and no older one.
+ *
+ * Answers the path the backend wrote, which the caller links by: the backend
+ * still steps past a name taken since the last scan. A failure toasts and
+ * answers null, so the human action behind it never throws (CV-03).
+ */
+export async function createLinkedPage(title: string): Promise<string | null> {
+  const { entries, createItem } = useVaultStore.getState();
+  const slug = freshStem(title, entries);
+  try {
+    return await createItem({
+      folder: LINKED_PAGE_FOLDER,
+      slug,
+      frontmatter: {},
+      body: `# ${title}\n`,
+    });
+  } catch {
+    useUiStore.getState().toast("Couldn't create the page");
     return null;
   }
 }

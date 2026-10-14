@@ -10,7 +10,6 @@ vi.mock('@/agent/agentIpc', () => ({
     if ('deferred' in start) throw new Error(`run deferred: ${start.deferred.join(', ')}`);
     return start;
   },
-  startMcp: vi.fn(async () => ({ url: 'mock', token: 't' })),
   onAgentEvent: vi.fn((handler: (event: unknown) => void) => {
     handlers.push(handler);
     return () => {

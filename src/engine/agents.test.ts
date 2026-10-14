@@ -116,6 +116,18 @@ describe('agent scope', () => {
       'get_note',
     ]);
   });
+
+  it('reads `disallowed-tools:` with the same grammar, absent apart from empty (M54.9)', () => {
+    expect(agentRef(agent({})).disallowedTools).toBeNull();
+    expect(
+      agentRef(agent({ 'disallowed-tools': ['mcp__gmail__trash_thread', ' mcp__slack '] }))
+        .disallowedTools,
+    ).toEqual(['mcp__gmail__trash_thread', 'mcp__slack']);
+    expect(agentRef(agent({ 'disallowed-tools': 'mcp__gmail' })).disallowedTools).toEqual([
+      'mcp__gmail',
+    ]);
+    expect(agentRef(agent({ 'disallowed-tools': [] })).disallowedTools).toEqual([]);
+  });
 });
 
 describe('an agent’s identity survives a rename', () => {

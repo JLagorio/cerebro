@@ -1,7 +1,8 @@
-import { splitFrontmatter } from '@/lib/mockParse';
+import { splitFrontmatter } from './frontmatter';
 import { slugify } from '@/lib/slug';
 import { declaredSlug, recordIdentity } from './identity';
 import { libraryKind, SKILL_TYPE } from './library';
+import { holds, type PromptGrant } from './toolGrant';
 import type { Entry } from './types';
 
 /**
@@ -17,7 +18,8 @@ import type { Entry } from './types';
  * - the user types `/name` in the panel — the app expands it (see
  *   matchSkillInvocation/skillPrompt) and the transcript shows what was typed;
  * - the agent recognizes a request that matches a skill's description and
- *   reads the note itself with get_note. Same file either way.
+ *   reads the note itself with get_note, on a run that holds it (M54.7).
+ *   Same file either way.
  */
 
 // The name moved to engine/library when skills stopped being a record type
@@ -405,8 +407,13 @@ const CATALOG_BUDGET = 1_400;
  * The system-prompt catalog: what exists and how to reach it, in one line per
  * skill. Null when the vault defines none — a paragraph explaining an empty
  * feature is noise in every conversation.
+ *
+ * How to reach a skill names a tool, so it follows the run's grant (M54.7):
+ * reading one's note is offered only to a run that holds get_note, and
+ * searching for the unlisted ones only to a run that holds search_notes. A
+ * run that holds both reads what every run read before.
  */
-export function skillIndex(skills: SkillRef[]): string | null {
+export function skillIndex(skills: SkillRef[], grant: PromptGrant): string | null {
   if (skills.length === 0) return null;
   const shown: string[] = [];
   let used = 0;
@@ -424,12 +431,17 @@ export function skillIndex(skills: SkillRef[]): string | null {
   const omitted = skills.length - shown.length;
   return (
     'This vault defines skills: records of type Skill whose body is a reusable instruction set. ' +
-    "The user runs one by typing /name in this panel. When a request matches a skill's purpose, " +
-    `read its note with get_note and follow it. Skills: ${shown.join('; ')}.` +
+    'The user runs one by typing /name in this panel.' +
+    (holds(grant, 'get_note')
+      ? " When a request matches a skill's purpose, read its note with get_note and follow it."
+      : '') +
+    ` Skills: ${shown.join('; ')}.` +
     // Said, not hidden. A silently truncated catalogue reads as the complete
     // set, and the agent will tell the user a skill does not exist.
     (omitted > 0
-      ? ` ${omitted} more ${omitted === 1 ? 'skill is' : 'skills are'} defined but not listed here — search_notes for type Skill to find them.`
+      ? ` ${omitted} more ${omitted === 1 ? 'skill is' : 'skills are'} defined but not listed here${
+          holds(grant, 'search_notes') ? ' — search_notes for type Skill to find them.' : '.'
+        }`
       : '')
   );
 }

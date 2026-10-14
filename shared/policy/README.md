@@ -26,13 +26,15 @@ preemptively.)
 | `freshness.v1.json` + `.sha256` | When a claim goes stale, by predicate class (M27.1) — `time_basis`, `staleness`, and whether an attestation may anchor. Loaded by `src-tauri/src/dynamics/freshness.rs`. `rule_version` is stamped into every `freshness.transitioned` event. |
 | `coverage-fold.v1.json` + `.sha256` | The Coverage dimension precedence and summary fold (M27.2). Loaded by `src-tauri/src/dynamics/coverage.rs`; `fold_rule_version` is carried on every folded answer. |
 | `staleness.v1.json` | When a concept is stale (M49.8): inclusive of its `stale_after` date, and a value that is not exactly a YYYY-MM-DD date (a non-string included) reads as stale — an unknown horizon is surfaced, never treated as "never". Read by `knowledge::is_stale` (Rust) and `staleFrom` (src/engine/okf.ts); both replay its `cases`, so the two evaluators cannot drift, and Rust also checks that `validate_stale_after` refuses every malformed case. |
+| `links.v1.json` | Where the webview may go (M53.12): its entry document (`tauri://localhost` at one of `entry.paths`, or the devUrl under `tauri dev`, with no credentials and no query) loads, an `external_schemes` address leaves for the system browser, and everything else is refused. A path or query on the app's own origin is refused too, because tauri's asset fallback serves `index.html` for any path it cannot find (tauri-2.11.5 manager/mod.rs:405-425), so following one reloads the app and drops unsaved state. Read by `shell::links` (Rust), which routes every navigation and every new-window request through it, and by `isWebUrl` (src/mermaid/flowchart/linkTargets.ts) for the scheme list; both replay its `cases`, and Rust also checks the artifact is closed and canonical. |
 | `lanes.v1.json` + `.sha256` | The four attention lanes (M27.6): lane order, the reason codes each lane may emit and their within-lane order, the reliance vocabulary, whether the debt lane requires reliance, and (M27.7) which lanes are PROTECTED under §33. Loaded by `src-tauri/src/attention/lanes.rs`, which refuses to start if the artifact and the code disagree about EITHER set — a lane or reason declared with no code behind it renders as permanently empty, which reads as "nothing here" — and refuses an artifact that protects nothing, because a firewall with no protected class is a comment. M27.9 added the three §78/§80 hygiene reasons to the debt lane — `dynamics::hygiene` had computed them since M27.2 with no caller, which is the same as not computing them. M49.10 (K31) stopped emitting `coverage_unassessed` as a lane item: no coverage assessor has shipped, so it pinned every belief in the protected blindness lane. It stays declared for the day an assessor leaves only some beliefs unassessed; until then the lanes COUNT unassessed beliefs (`Lanes::unassessed`) and the view says so — in the empty blindness lane's line, or in `incomplete` when the lane holds assessed items — so an empty lane never reads as "no coverage gaps". |
 | `critical-attention.v1.json` + `.sha256` | §8's bypass (M27.7): the deliberately small, complete inventory of deterministic signals that must not wait in a lane. Each trigger declares its required typed fields, the comparison operators and durations, and the copy key; the artifact declares the replacement relation and its DIRECTION. Interpreted by `src-tauri/src/attention/critical.rs` and `src/lib/attention/critical.ts` — two interpreters, one artifact, and no rule written in either language. **Adding a trigger is an artifact change plus a vector change, never hidden code.** |
 | `goldens-critical/*.json` | The bypass's parity mechanism, replayed by `cargo test` and `pnpm test:run` from the same bytes. Every shipped trigger has five: positive, boundary, replaced, wrong-environment, malformed — and BOTH suites assert that all five exist for every trigger, so a new trigger without vectors fails the build rather than shipping unchecked. |
 | `trigger-registry.v1.json` + `.sha256` | The M28 deferral registry's evaluable half: the fourteen R1–R14 entries, each gate key's required evaluation variant, scope, and parent rule, the metric name/unit tables, and the measurable protocols' floors. (R15–R17, registered 2026-08-14 by M31.8, deliberately postdate v1 — see the trigger-registry judgment calls below.) Interpreted by `src-tauri/src/trigger/registry.rs` and `src/lib/trigger/registry.ts` — two interpreters, one artifact. A combination the artifact does not name resolves to nothing, which IS the refusal. R14's `registered_connectors` is the one deliberately empty list: no connector qualifies yet, and a fake registration to satisfy a validator would be worse. |
 | `goldens-trigger/*.json` | The trigger registry's parity mechanism (M28.0), replayed by `cargo test` and `pnpm test:run` from the same bytes. Each golden is a full `TriggerEvaluation` record (sometimes with its parent) and the outcome both validators must land on: `accepted`, or a refusal named by its CLOSED code — codes are the contract, prose is not. Both suites also assert every refusal code has at least one golden, so a code with no fixture fails the build. Accepted goldens carry ids that genuinely recompute (`sha256(domain\0gate\0scope\0rule_version\0snapshot_hash)`). |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators), `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against), `ancestry` (the support graph M26.3's preventive walk runs over), and `table` (a FROZEN table to replay against — `"v1"` or `"v2"` — for a refusal the shipped table can no longer produce; M27.4 made every shipped capability available, so `capability_unavailable` lives on against v2 rather than losing its shared fixture). Declaring either state field requires `rust_only: true` — both read reducer state that is out of the mock's scope by declaration, so the TS runner skips the *verdict replay* loudly rather than the directory quietly missing the case. It still asserts the artifact half of every such file: that the op declares the code possible, and that the code declares a destiny. |
-| `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs` into `write_concept`'s tool description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
+| `concept-types.v1.json` + `.sha256` | The words the agent may type a concept with (M33a.1), and a one-line hint for each. Loaded by `src-tauri/src/knowledge.rs`; the tool manifest's one token, `{{concept_types}}`, renders it into `write_concept`'s type description. Rust-only for now: the read side (`okf.ts`) resolves a concept's type against the vault's own catalog and tolerates unknown values by OKF §4.1, so there is no twin to disagree with. |
+| `tools.v1.json` + `.sha256` | **The tool manifest** (M54.1): one row per hand-written MCP tool in served order — title, kind, idempotence, door, grant axis and target argument, picker summary and toolset, renderer, icon, search hint, description and input schema — the facts every generated `propose_<op>` tool shares, the picker's toolsets, and the CLI's own built-ins in argv order. Read by `src-tauri/src/policy/tools.rs`: `mcp.rs` serves `tools/list` from it with annotations, and derives the scope and read targets, the open-page announcements and the read-to-replace guard; `agent/mod.rs` derives the CLI allow and deny lists. TS reads the same file through `src/lib/policy/tools.ts` (M54.2), refusal for refusal, and derives the picker's toolsets, summaries and writes flags, the transcript's icons and write cards, the turn checkpoint's trigger and the run log's paths from it. Both sides hash against `tools.v1.sha256`, and both replay `src-tauri/fixtures/tool-cases.json`, its shared case file. |
 
 **Three of these are Rust-only, and that is not an exemption from the house
 rule.** `freshness`, `coverage-fold` and `lanes` are read by no TypeScript
@@ -43,9 +45,32 @@ side, it loads the same file; it does not reimplement the rule.
 The whole directory is `.prettierignore`d: the bytes are hashed, and a
 formatter that reflowed them would break the anchor.
 
+## Twin registry
+
+A rule both languages hold outside a hashed artifact is held by one shared
+case file, which cargo and vitest both replay. The registry starts with
+M69.1's; the twins that predate it (`source-slugs.json`, `note-targets.json`,
+`tool-cases.json` and others under `src-tauri/fixtures/`) are not listed yet.
+
+| Twin | Rust replay | TS replay | Held by | Since |
+| --- | --- | --- | --- | --- |
+| connector approvals (`src-tauri/fixtures/connector-approvals.json`) | `src-tauri/src/connectors.rs` | `src/engine/connectors.test.ts` | `replays_the_shared_connector_approvals` / `replays the shared connector approvals` | M69.1 |
+| edit_note's quote rules (`src-tauri/fixtures/quote-cases.json`) | `src-tauri/src/vault/quote.rs` | `src/engine/quote.test.ts` | `replays_the_shared_quote_cases` / `replays the shared case` | M55.5 |
+
+**The D3 ruling (owner, 2026-10-12), recorded once here.** Rust may twin a
+TS vault semantic (what a wikilink means, how a quote matches, a filter, a
+field kind, a date) as long as the twins are framed as vault semantics and
+held together by one shared case file both suites replay, never by review
+alone. `src-tauri/src/vault/link.rs` (wikilink targets, against
+`src/engine/wikilink.ts`) is the precedent, and M55.8's
+`wikilink-targets.json` is its case file; `src-tauri/src/vault/quote.rs` with
+`quote-cases.json` (M55.5) follows it. A twin's grammar starts narrow and grows only with new cases. Where
+offsets differ (Rust bytes, TS UTF-16 units), the cases pin what both can
+say alike: lines and code-point contexts.
+
 ## Regenerating
 
-Both are deliberate acts, so both are `#[ignore]`d tests rather than something
+Each is a deliberate act, so each is an `#[ignore]`d test rather than something
 the suite does on its own:
 
 ```sh
@@ -65,6 +90,8 @@ cargo test --lib attention::critical::tests::write_critical_digest -- --ignored
 cargo test --lib trigger::registry::tests::write_trigger_registry_digest -- --ignored
 # after an edit to concept-types.v1.json
 cargo test --lib knowledge::tests::write_concept_types_digest -- --ignored
+# after an edit to tools.v1.json
+cargo test --lib policy::tools::tests::write_tools_digest -- --ignored
 ```
 
 A new snapshot must also be added to `RESOLVABLE_ARTIFACTS` in
@@ -88,6 +115,9 @@ two artifacts that mean the same thing must not be able to differ.
 refusals is policy ("does an unavailable capability outrank an understated
 risk?"), so it lives in the artifact rather than in whichever `if` happens to
 come first in each language.
+
+`tools.v1.json` holds two more orders of that kind: its `tools` are in served
+order and its `cli_tools` in argv order, so neither is sorted.
 
 ## Judgment calls recorded here
 
@@ -307,6 +337,46 @@ come first in each language.
   (`semantic: completed`) claiming the same version, and telling those apart
   is the version's only job.
 
+## Grant refusals (M54.10)
+
+- **The four grant codes are transport codes, not a fifth registry.**
+  `write_outside_scope`, `tool_outside_grant`, `read_outside_scope` and
+  `target_outside_corpus` fail at the server's door, against the run's bearer,
+  before any tool body runs or any proposal exists: where `run_actor_mismatch`
+  and `malformed_arguments` already fail. So no op may list them, and load
+  already enforces that.
+- **Their destiny is operational.** A refused call bounds one run; it claims
+  nothing about the world. Each row carries its run's id, and a run gets one
+  row per code, tool and target, so a model that repeats a refused call writes
+  one row. `Rejection::new` refuses a transport code, so no proposal can carry
+  one into the ledger.
+- **`target_outside_corpus` is the note doors' own judgement, asked early.**
+  `vault::write` still refuses in the mechanism, in the same words. A path
+  into `knowledge/` meets the bundle guard first, as it always has, and that
+  guard records `malformed_arguments`.
+- **The CLI's own permission denials stay `capability_unavailable`**
+  (`agent.permission`, M54.9): the CLI refused, for reasons Cerebro does not
+  own.
+
+## Stale content (M55.3)
+
+- **`stale_content` is a transport code.** An agent's note write that names
+  `expect_hash` (get_note's Hash line) and finds other bytes fails at the
+  write door, under the note's lock, before a byte is written. It bounds one
+  call and claims nothing about the world, so it is operational, no op lists
+  it, and `Rejection::new` keeps it out of the ledger, like M54.10's codes.
+- **It is neither of the other two stale codes.** `stale_target_version` is
+  the ledger's `expected_version` check on a proposal, and `stale_view` is a
+  person's verify against a projection that moved. Neither is borrowed for a
+  note's bytes, nor this one for theirs.
+- **It is not retryable in-session.** The same call fails the same way: the
+  agent must read the note again and decide whether its change still
+  applies, so the refusal carries no current hash.
+- **A hashed write is also a read.** The hash proves the run read the note,
+  so `call_tool` holds the target to the read scope too, under
+  `read_outside_scope`, and a write-only run cannot use the hash to probe a
+  note it may not read. Human saves never compare: the last write wins.
+
 ## The live agent surface (M26.3c)
 
 - **`agent_facing` defaults to TRUE, and the artifact says only where it is
@@ -318,8 +388,8 @@ come first in each language.
   applied mutation including one a human just approved, with no second card.
 - **The live tool names are generated from this file.** `mcp.rs` builds one
   `propose_<op>` per agent-facing op; nothing types the list a second time.
-  The `propose_` prefix keeps the namespace injective against the twelve
-  hand-written tools — `cache_source` is both a tool and an op — and
+  The `propose_` prefix keeps the namespace injective against the tool
+  manifest's hand-written rows — `cache_source` is both a tool and an op — and
   `the_live_proposal_inventory_is_the_policy_inventory` proves the served
   surface and this artifact agree in both directions.
 - **Registration is gated on the safety machinery being BOUND here.** The
@@ -327,6 +397,72 @@ come first in each language.
   the walk and `create_belief` still requires `candidate_receipt_current` and
   declares its four receipt codes. Editing either of those out of this file
   does not quietly widen the surface; it closes it.
+
+## The tool manifest (M54.1)
+
+- **Order is meaning, so nothing in it is sorted.** `tools` is the order
+  `tools/list` serves, and `cli_tools` the order the argv names them. A shell
+  run's `--allowedTools` and an internal run's `--disallowedTools` took the
+  manifest's order when they moved here and kept their sets; the shell-less
+  deny list, `Write,Edit,MultiEdit,NotebookEdit,Bash`, kept its bytes.
+- **The generated tools stay policy.v3's.** Their names, descriptions and
+  schemas are built from the table's agent-facing ops; the `generated` block
+  only annotates them, so an op added to the table is still offered the moment
+  it lands.
+- **`propose_organize` is the one prefix exception.** It predates the
+  generated namespace (M9.5), and `proposal_op_of` asks the table rather than
+  trusting the prefix, so it never reaches the mutation boundary. Any other
+  hand-written `propose_` name fails the load.
+- **`read_only` lives only on door `none`.** `readOnlyHint` lets the CLI run
+  calls in parallel, so the hint is kept for tools that write nothing at all;
+  a door that writes may not allow it, and a tool that only moves the UI or
+  starts a run is `additive`, not read-only.
+- **Note writers are always write-scoped.** Door `note` allows only the write
+  and read_write axes, and both need a target argument that the schema
+  requires (a note or folder on the write axis, a note on read_write), so a
+  tool that edits notes cannot load unscoped. Every other tool is a read the
+  read scope binds, or says in `exempt` why no folder axis binds it.
+- **`edit_note` is read-gated as well as write-scoped (M55.5).** Its refusals
+  quote the note back (a listing of each place a quote appears), and even its
+  success says what matched, so a run that may write a note but not read it
+  could use it as a read oracle. Its row's axis is `read_write`: the grant
+  holds the note to the write scope and the read scope before the tool runs,
+  with or without `expect_hash`. No new refusal code: the grant's are
+  M54.10's, a stale hash is M55.3's `stale_content`, and a quote that does not
+  resolve is plain `isError` text like `no note at <path>`.
+- **Picker copy lives here.** Toolset labels and hints and each row's summary
+  are the picker's words, and `src/engine/tools.ts` reads them from here
+  (M54.2). A copy edit is an artifact edit with a digest regeneration.
+- **Two loaders, one refusal list.** `tools.rs` and `src/lib/policy/tools.ts`
+  refuse the same manifests in the same words, and each holds one negative
+  control per refusal. TS checks by hand the shape serde checks in Rust: an
+  unknown field fails, and an absent `Option` field reads as null.
+- **The `_meta` keys are CLI behaviour, read from 2.1.250.**
+  `anthropic/searchHint` is served on every tool and `anthropic/alwaysLoad`
+  only where a row sets it; a key the CLI does not know is ignored, never
+  fatal.
+- **Six tools load early, and no others (M54.5).** The CLI defers every MCP
+  tool behind its tool search, so a run spent a turn finding
+  `get_vault_context` before it could call it. An early tool's schema rides
+  every turn of every run that lists it, so `always_load` is set only where
+  it earns that: on the read core
+  (`get_vault_context`, `search_notes`, `get_note`, `knowledge_about`), which
+  nearly every run reaches for first, and on the two held tools
+  (`report_window_outcome`, `submit_answer`), which `tools/list` shows only to
+  the run holding their window or question (M54.4), so no other run pays for
+  them and a synthesis run skips the search. Every other tool stays deferred:
+  a write or a UI move comes later in a turn, if at all. Only a read-only row
+  or a held tool may load early, and
+  `agent::tests::only_the_read_core_and_held_tools_load_without_a_search` pins
+  the six.
+- **Every CLI row is denied to internal runs.** An internal run executes
+  vault-authored content on cerebro's own schedule, so it holds none of the
+  CLI's own tools; the other flags decide what a user-authored run is denied
+  without shell or under a read limit, and a row a shell grant adds that
+  neither withdraws fails the load.
+- **`concept_types` is the one token.** A `{{name}}` in a description or
+  schema must be declared in `tokens`, and a declared token must be used;
+  `mcp.rs` renders each one when it serves the row.
 
 ## What is deliberately NOT here yet
 

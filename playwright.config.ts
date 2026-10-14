@@ -21,7 +21,13 @@ export default defineConfig({
    * has only been measured here.
    */
   workers: process.env.CI ? 1 : undefined,
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    { name: 'chromium', use: { browserName: 'chromium' } },
+    // The packaged app is WKWebView. The carrier spec runs there too (M55.4,
+    // Q6): what a block writes to disk is the one claim jsdom and Chromium
+    // can both pass while the shipped engine fails it.
+    { name: 'webkit', use: { browserName: 'webkit' }, testMatch: 'editor-carriers.spec.ts' },
+  ],
   use: {
     baseURL,
     headless: true,
@@ -34,7 +40,10 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
+    // Reuse is OPT-IN (M32.7): a busy port now fails loudly instead of
+    // silently testing another worktree's branch. Set CEREBRO_E2E_REUSE=1
+    // to attach to a dev server you know is yours.
+    reuseExistingServer: !process.env.CI && process.env.CEREBRO_E2E_REUSE === '1',
     timeout: 30_000,
   },
 });

@@ -25,6 +25,7 @@ use super::belief::{BeliefBasis, PatchOp, RelationAction, RelationKind};
 use super::entity_merge::EntityReassignmentPlan;
 use super::lifecycle::{QualificationProfileRef, TombstoneReason};
 use super::observation::ObservationRecorded;
+use super::projection::validate_projection_claim;
 use super::resolution::ResolverTier;
 use super::subject::SubjectRef;
 use super::value::TypedValue;
@@ -217,9 +218,9 @@ impl EquivalenceReceipt {
 }
 
 /// One output of a split. It is a whole new Belief, so it carries what
-/// `belief.created` carries — minus the basis, which is DERIVED from the
-/// evidence assignment rather than declared, so no output can claim support
-/// the split did not give it.
+/// `belief.created` carries — its projection claim included — minus the
+/// basis, which is DERIVED from the evidence assignment rather than
+/// declared, so no output can claim support the split did not give it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SplitOutput {
@@ -232,10 +233,13 @@ pub struct SplitOutput {
 impl SplitOutput {
     pub fn validate(&self) -> Result<(), String> {
         id("split output belief_id", &self.belief_id)?;
-        if !matches!(self.subject, SubjectRef::Resolved { .. }) {
+        let SubjectRef::Resolved { aliases, .. } = &self.subject else {
             return Err("a split output's subject must be resolved".into());
-        }
+        };
         self.subject.validate()?;
+        // Refused here, at submission, where nothing has been appended; the
+        // `belief.created` the output expands to would refuse it at append.
+        validate_projection_claim(aliases)?;
         if !self.fields.is_object() {
             return Err("split output fields must be a JSON object".into());
         }
@@ -611,10 +615,13 @@ impl ProposalOp {
                 ..
             } => {
                 id("belief_id", belief_id)?;
-                if !matches!(subject, SubjectRef::Resolved { .. }) {
+                let SubjectRef::Resolved { aliases, .. } = subject else {
                     return Err("a created Belief's subject must be resolved".into());
-                }
+                };
                 subject.validate()?;
+                // The path the created Belief projects to. Refused here it is
+                // `schema_invalid` at submission and nothing is appended.
+                validate_projection_claim(aliases)?;
                 if !fields.is_object() {
                     return Err("belief fields must be a JSON object".into());
                 }
@@ -1076,6 +1083,69 @@ mod tests {
                 .unwrap_err()
                 .contains("more than one output")
         );
+    }
+
+    #[test]
+    fn a_created_or_split_belief_claims_only_a_writable_projection_path() {
+        let subject = |claim: &str| SubjectRef::Resolved {
+            entity_id: A.into(),
+            aliases: vec![claim.into()],
+        };
+        let create = |claim: &str| ProposalOp::CreateBelief {
+            belief_id: B.into(),
+            subject: subject(claim),
+            content: "c".into(),
+            fields: serde_json::json!({}),
+            basis: BeliefBasis::Unsupported {
+                reason: "test".into(),
+            },
+            distinctness_reason: "nothing matched".into(),
+        };
+        assert!(create("concepts/acme.md").validate().is_ok());
+        // The shape rule, and what the projection writer could not create.
+        let long_leaf = format!("concepts/{}.md", "a".repeat(241));
+        for bad in ["../x.md", "concepts/a\0b.md", &long_leaf] {
+            assert!(
+                create(bad)
+                    .validate()
+                    .unwrap_err()
+                    .contains("projection path"),
+                "{bad:?}"
+            );
+        }
+
+        let c = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+        let d = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4";
+        let split = |claim: &str| ProposalOp::SplitBelief {
+            belief_id: A.into(),
+            primary_output_id: c.into(),
+            outputs: vec![
+                SplitOutput {
+                    belief_id: c.into(),
+                    subject: subject("concepts/c.md"),
+                    content: "c".into(),
+                    fields: serde_json::json!({}),
+                },
+                SplitOutput {
+                    belief_id: d.into(),
+                    subject: subject(claim),
+                    content: "d".into(),
+                    fields: serde_json::json!({}),
+                },
+            ],
+            evidence_assignment: vec![],
+        };
+        assert!(split("concepts/d.md").validate().is_ok());
+        // One bad output refuses the whole split.
+        for bad in ["../x.md", "concepts/a\0b.md", &long_leaf] {
+            assert!(
+                split(bad)
+                    .validate()
+                    .unwrap_err()
+                    .contains("projection path"),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

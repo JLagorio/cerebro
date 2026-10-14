@@ -1,3 +1,4 @@
+import { linkLabel } from '@/engine/linkLabels';
 import type { Source } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 
@@ -163,10 +164,11 @@ export function citationNumber(
 /**
  * What a citation is called, the ONE rule for the chip's tooltip and the `[^`
  * menu (M52.1): what the Sources list calls it, then what the page's own
- * definition says, then the title of the vault page it points at, then the
- * resource itself. An id that is none of those is named as missing — a claim
- * that cites nothing is what a reviewer most needs to see, so it is never
- * given an empty name.
+ * definition says, then the title of the vault page it points at, then, for
+ * an external link, the name its URL carries (`linkLabel`, M69.2: "ENG-142
+ * Fix login" rather than the raw link), then the resource itself. An id that
+ * is none of those is named as missing — a claim that cites nothing is what a
+ * reviewer most needs to see, so it is never given an empty name.
  */
 export function citationName(
   id: string,
@@ -185,6 +187,7 @@ export function citationName(
     source?.title ??
     (says !== '' ? says : null) ??
     page?.title ??
+    (target !== null && 'external' in target ? linkLabel(target.external)?.text : undefined) ??
     source?.resource ??
     `No source "${id}"`
   );

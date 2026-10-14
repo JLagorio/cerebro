@@ -1,0 +1,436 @@
+{
+  "format": 1,
+  "about": "Which http connector entries reach a run, and what a person approves for each (M69.1). An entry merges as type, url, headers (sorted), oauth (sorted) and timeout, and nothing else it holds. oauth passes only clientId (1-256 printable ASCII), callbackPort (a whole number 1-65535), authServerMetadataUrl (https://, a host of letters, digits, . and - with an optional :port, then printable ASCII but space, at most 2048) and scopes (one string, 1-1024 printable ASCII); any other key, or an oauth that is not an object, is malformed, and an empty one is none. timeout is absent or a whole number of milliseconds from 1000 to 600000. A malformed entry has no key and is never merged, since one invalid field makes Claude Code refuse the whole --mcp-config. The key is the sha256 hex of JSON [name, \"http\", url, headerPairs], with a fifth element of oauth pairs sorted by key when oauth is present; timeout is never in it. Replayed by replays_the_shared_connector_approvals in src-tauri/src/connectors.rs and by src/engine/connectors.test.ts. The Linear and Notion cases are the presets as shipped; every other name and URL is synthetic. `why` is for the reader.",
+  "cases": [
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "headers": {
+          "X-Team": "core"
+        },
+        "enabled": true
+      },
+      "key": "3080debab0be20672711ca9792f9f54f5cae18f44c46d50b0c843020bd3d365e",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "headers": {
+          "X-Team": "core"
+        }
+      },
+      "why": "No oauth: the key is the M54.9 one, byte for byte, so every approval made before M69.1 stands."
+    },
+    {
+      "name": "linear",
+      "entry": {
+        "transport": "http",
+        "url": "https://mcp.linear.app/mcp",
+        "oauth": {
+          "scopes": "read write"
+        },
+        "enabled": true
+      },
+      "key": "3a375fef16b0308c7f7b33c59853ff9ea279d02d8e3df6dd570796b8d2d93d99",
+      "merged": {
+        "type": "http",
+        "url": "https://mcp.linear.app/mcp",
+        "oauth": {
+          "scopes": "read write"
+        }
+      },
+      "why": "The Linear preset (CONNECTOR_PRESETS): its scopes reach the run and are part of what is approved."
+    },
+    {
+      "name": "notion",
+      "entry": {
+        "transport": "http",
+        "url": "https://mcp.notion.com/mcp",
+        "enabled": true
+      },
+      "key": "05366e62c303b7598c7c31f61b3988aa5b233c2068cb81a92db6f72587cf2953",
+      "merged": {
+        "type": "http",
+        "url": "https://mcp.notion.com/mcp"
+      },
+      "why": "The Notion preset (CONNECTOR_PRESETS): no oauth block, so the M54.9 key."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "scopes": "read write",
+          "clientId": "toy-client",
+          "authServerMetadataUrl": "https://auth.example.test/.well-known/oauth-authorization-server",
+          "callbackPort": 8765
+        }
+      },
+      "key": "f2a728c9834de93e3f0be8371e145319560681b5a410b71042515d82219fcb6e",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "oauth": {
+          "authServerMetadataUrl": "https://auth.example.test/.well-known/oauth-authorization-server",
+          "callbackPort": 8765,
+          "clientId": "toy-client",
+          "scopes": "read write"
+        }
+      },
+      "why": "All four keys pass, sorted by key in the fifth element of the fingerprint and in the merged entry."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "scopes": "read"
+        }
+      },
+      "key": "ae3b7c04cf24cc07eb426d40b6016480ca2dc94dfbc8a750d97cb5fcedf66d41",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "oauth": {
+          "scopes": "read"
+        }
+      },
+      "why": "A scopes edit is a new key, so it needs a fresh Approve."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {}
+      },
+      "key": "e8093358750370172bd80d1d9d9ffd24efeea477794e03db62a50eea606b2e36",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp"
+      },
+      "why": "An empty oauth block passes nothing, so it is the same entry as none."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "scopes": ["read", "write"]
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "scopes is one string to Claude Code, never an array."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "scopes": ""
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "Empty scopes: Claude Code wants at least one character."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "scopes": "read\u0007"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "A control character in scopes."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "authServerMetadataUrl": "http://auth.example.test/meta"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "Claude Code takes only an https metadata URL."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "authServerMetadataUrl": "HTTPS://auth.example.test/meta"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "Claude Code checks the https:// prefix as written."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "authServerMetadataUrl": "https://"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "An https:// with nothing after it."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "authServerMetadataUrl": "https://auth.example.test:8443/meta data"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "A space in the metadata URL."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "authServerMetadataUrl": "https://auth.example.test:8443/meta?x=1"
+        }
+      },
+      "key": "61140dcaf4cfc6a5385c91998fedf70932f7d07db6993d05c3d47e4819bfa9d5",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "oauth": {
+          "authServerMetadataUrl": "https://auth.example.test:8443/meta?x=1"
+        }
+      },
+      "why": "A port and a query are fine."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "callbackPort": 0
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "callbackPort 0 is not a port."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "callbackPort": 70000
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "callbackPort past 65535."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "callbackPort": 4321.0
+        }
+      },
+      "key": "fbd9d74c542da6a609cff8c9a97994aa1e95ded7540fe77e837f5ee271651696",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "oauth": {
+          "callbackPort": 4321
+        }
+      },
+      "why": "callbackPort written 4321.0 is the whole number 4321, as JavaScript reads it, and merges as 4321."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "callbackPort": "8765"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "callbackPort as a string."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "clientId": ""
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "An empty clientId."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "xaa": true
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "xaa is for Claude Code alone, and Cerebro does not pass it."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": {
+          "clientId": "toy-client",
+          "clientSecret": "shh"
+        }
+      },
+      "key": null,
+      "merged": null,
+      "why": "No secret belongs in a vault file, and Claude Code takes none."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "oauth": "read write"
+      },
+      "key": null,
+      "merged": null,
+      "why": "oauth is an object."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "timeout": 999
+      },
+      "key": null,
+      "merged": null,
+      "why": "A timeout under 1000 ms."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "timeout": 600001
+      },
+      "key": null,
+      "merged": null,
+      "why": "A timeout over ten minutes."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "timeout": "30000"
+      },
+      "key": null,
+      "merged": null,
+      "why": "A timeout as a string."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "timeout": 30000
+      },
+      "key": "e8093358750370172bd80d1d9d9ffd24efeea477794e03db62a50eea606b2e36",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "timeout": 30000
+      },
+      "why": "A timeout reaches the run and stays out of the key: it bounds a call and cannot redirect one."
+    },
+    {
+      "name": "toy",
+      "entry": {
+        "transport": "http",
+        "url": "https://toy.example.test/mcp",
+        "enabled": true,
+        "headers": {
+          "X-Team": "core"
+        },
+        "headersHelper": "print-token",
+        "tools": ["search"],
+        "toolPermissions": {
+          "search": "allow"
+        },
+        "alwaysLoad": true,
+        "discoveryCache": false,
+        "role": "primary"
+      },
+      "key": "3080debab0be20672711ca9792f9f54f5cae18f44c46d50b0c843020bd3d365e",
+      "merged": {
+        "type": "http",
+        "url": "https://toy.example.test/mcp",
+        "headers": {
+          "X-Team": "core"
+        }
+      },
+      "why": "Nothing else an entry holds reaches the run: headersHelper runs a command, tools and toolPermissions would pre-approve tools past the grant, and alwaysLoad, discoveryCache and role are for Cerebro to set."
+    }
+  ]
+}

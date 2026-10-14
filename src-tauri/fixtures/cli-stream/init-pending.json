@@ -1,0 +1,12 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "session_id": "00000000-0000-4000-8000-000000000006",
+  "mcp_servers": [
+    {
+      "name": "cerebro",
+      "status": "pending"
+    }
+  ],
+  "claude_code_version": "2.1.250"
+}

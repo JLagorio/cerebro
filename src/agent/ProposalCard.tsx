@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import type { OrganizeProposal } from '@/agent/types';
 import { humanize } from '@/detail/FieldEditor';
+import { announceExternalWrites, flushOpenPages } from '@/editor/openPages';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -15,28 +17,75 @@ import { useVaultStore } from '@/stores/vaultStore';
  */
 export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+  const setTitle = useVaultStore((s) => s.setTitle);
+  const rescan = useVaultStore((s) => s.rescan);
   const dismissProposal = useUiStore((s) => s.dismissProposal);
-  const toast = useUiStore((s) => s.toast);
+  const [applying, setApplying] = useState(false);
+
+  // The H1 this filing proposes, on one line as the row below shows it: a
+  // newline in the agent's title would write body lines the card never
+  // displayed. Blank proposes nothing, so it is not listed. `typeof`, since
+  // the title is the agent's JSON and a number would throw mid-render.
+  const title =
+    typeof proposal.title === 'string' ? proposal.title.replace(/\s+/g, ' ').trim() : '';
 
   const changes: [string, string][] = [];
   if (proposal.type !== undefined) changes.push(['Type', proposal.type]);
-  if (proposal.title !== undefined) changes.push(['Title', proposal.title]);
+  if (title !== '') changes.push(['Title', title]);
   for (const [key, value] of Object.entries(proposal.properties ?? {})) {
     if (value === null || value === undefined) continue;
     changes.push([humanize(key), Array.isArray(value) ? value.join(', ') : String(value)]);
   }
 
-  const accept = () => {
+  /**
+   * Writes the whole filing: the frontmatter, then the title as the H1 (M53.18).
+   * Each store write answers whether it landed and toasts its own failure, so
+   * the card adds no message: a write that did not land stops here and leaves
+   * the card up to retry.
+   *
+   * The capture is open in the editor beside this card (InboxPage), and the H1
+   * is in the body that editor saves. So the open pages' pending saves land
+   * first, and the writes are announced once they have landed, the way the
+   * agent's are (`openPages.ts`). Announced after, never wrapped: a catch-up
+   * can be dropped for one already queued (`coalesced`), so it is only ever
+   * the store's rescan, never the write itself.
+   */
+  const write = async (): Promise<boolean> => {
+    // A save still on its debounce would otherwise land after the H1 below
+    // and write the old one back.
+    await flushOpenPages();
     const patch: Record<string, unknown> = { ...(proposal.properties ?? {}) };
     if (proposal.type !== undefined) patch.type = proposal.type;
-    void (async () => {
-      try {
-        await patchFrontmatter(proposal.path, patch);
-        dismissProposal(proposal.path);
-      } catch (err) {
-        toast(`Couldn't apply: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    })();
+    // A title-only proposal has no frontmatter to write.
+    const patched = Object.keys(patch).length > 0;
+    if (patched && !(await patchFrontmatter(proposal.path, patch))) return false;
+    // setTitle answers false for a blank or unchanged title as well as a
+    // failed one, so only a real rename goes to it, compared against the
+    // entry exactly as setTitle is about to read it.
+    const current = useVaultStore.getState().entries.find((e) => e.path === proposal.path);
+    const renamed = title !== '' && title !== current?.title;
+    if (renamed && !(await setTitle(proposal.path, title))) return false;
+    if (patched || renamed) {
+      // A rename changed the body, so the page showing the capture hears it
+      // by path, reloading if clean and asking if not: its modifiedAt cannot
+      // carry a write in the same second as its own last save. Frontmatter
+      // alone names no page, as the agent's update_frontmatter names none (a
+      // page's save keeps it from disk), but still catches the vault up: a
+      // save the flush landed started a scan before the write, and that scan
+      // would land over the entry patchFrontmatter just wrote.
+      void announceExternalWrites(renamed ? [proposal.path] : [], rescan);
+    }
+    return true;
+  };
+
+  const accept = async () => {
+    if (applying) return;
+    setApplying(true);
+    try {
+      if (await write()) dismissProposal(proposal.path);
+    } finally {
+      setApplying(false);
+    }
   };
 
   return (
@@ -62,7 +111,13 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
         </dl>
       )}
       <div className="flex gap-2">
-        <Button variant="primary" size="sm" icon="check" onClick={accept}>
+        <Button
+          variant="primary"
+          size="sm"
+          icon="check"
+          disabled={applying}
+          onClick={() => void accept()}
+        >
           Apply
         </Button>
         <Button variant="secondary" size="sm" onClick={() => dismissProposal(proposal.path)}>

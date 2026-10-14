@@ -1,9 +1,9 @@
 /**
  * Times, said in words (M33b.3).
  *
- * Two formatters, extracted here because two surfaces now need them and a
- * second copy of "how do we write a time" is how two screens end up
- * disagreeing about the same moment.
+ * One home for "how do we write a time": a second copy is how two screens end
+ * up disagreeing about the same moment. Since M56.7 that includes lateness,
+ * which the run log and the fleet both say.
  *
  * **Neither one invents a time it was not given.** An absent timestamp is not
  * this module's problem — a caller with nothing to format says "never ran" in
@@ -81,4 +81,28 @@ export function relativeWhen(iso: string, now: Date): string {
   if (days === 1) return 'yesterday';
   if (days < 30) return `${days} days ago`;
   return iso.slice(0, 10);
+}
+
+/**
+ * A run fired well after its due moment says how late (M34.2) — the visible
+ * consequence of app-lifetime scheduling, and deliberately NOT a failure: a
+ * laptop closed over the weekend owes one honest catch-up, not an apology.
+ * The threshold is the runner's own cadence (60s tick + settle) with margin;
+ * a run landing inside it was simply the next tick, not a missed window.
+ */
+const LATE_AFTER_MS = 5 * 60_000;
+
+/**
+ * How late a run started, in words (`45m`, `30h`, `3d`), or null when it was
+ * on time or either stamp will not parse. One rule for the run log and the
+ * fleet (M56.7).
+ */
+export function lateBy(dueIso: string, atIso: string): string | null {
+  const gap = Date.parse(atIso) - Date.parse(dueIso);
+  if (Number.isNaN(gap) || gap < LATE_AFTER_MS) return null;
+  const minutes = Math.round(gap / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }

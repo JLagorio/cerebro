@@ -193,7 +193,11 @@ pub(crate) fn parse_z(stamp: &str) -> Result<chrono::DateTime<chrono::Utc>, Stri
 /// the one field the id does not cover. With it, the first observation of
 /// the fact stands, the rerun replays byte-identically, and any OTHER
 /// divergence under the same id still refuses in the store.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is part of the snapshot or evaluation row it writes: the question, its \
+              answer, and the instant the caller asked"
+)]
 fn persist(
     conn: &Connection,
     registry: &Registry,

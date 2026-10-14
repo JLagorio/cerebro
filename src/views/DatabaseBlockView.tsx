@@ -6,12 +6,13 @@ import { Popover } from '@/components/ui/Popover';
 import { createDatabase, setTypeViews } from '@/app/typeActions';
 import { columnUniverse } from '@/engine/columns';
 import { foldKey, pointerOccurrence, resolveDatabaseRef } from '@/engine/databaseBlock';
+import { resolveDateField } from '@/engine/schedule';
 import { resolveSurface } from '@/engine/surface';
 import { listTypes, typeStyle, typeViews } from '@/engine/typeCatalog';
 import type { ColumnSpec, Entry, Schema, ViewDefinition } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { useQuickAdd } from './QuickAdd';
+import { useCreateOnDay, useQuickAdd } from './QuickAdd';
 import { ViewCanvas } from './ViewCanvas';
 
 /** What a block writes back when its pointer changes. */
@@ -60,6 +61,9 @@ export function ConnectedDatabaseBlock({
   // the milestone; without this the table's empty state promised a create row
   // that was never rendered.
   const quickAdd = useQuickAdd(database, null);
+  // And the same day "+" (M53.16). `resolveDatabaseRef` matches names
+  // exactly, so the pointer's `database` IS the type the record is created as.
+  const createOnDay = useCreateOnDay(database);
   const navigate = useNavStore((s) => s.navigate);
   return (
     <DatabaseBlockView
@@ -70,6 +74,7 @@ export function ConnectedDatabaseBlock({
       entries={entries}
       onChange={onChange}
       onCreate={database === '' ? undefined : quickAdd}
+      onCreateOn={database === '' ? undefined : createOnDay}
       onOpenFullPage={(name, id) => navigate({ kind: 'type', name, view: id })}
     />
   );
@@ -95,6 +100,7 @@ export function DatabaseBlockView({
   entries,
   onChange,
   onCreate,
+  onCreateOn,
   onOpenFullPage,
 }: {
   database: string;
@@ -121,6 +127,13 @@ export function DatabaseBlockView({
    * when there is a below.
    */
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  /**
+   * Creates a record of this database dated to a calendar day (M53.16) —
+   * `useCreateOnDay`, which writes the date in the shape `field` declares.
+   * The block names the field: the one its view is keyed on, resolved the way
+   * the calendar resolves it. Absent means a calendar shows no day "+".
+   */
+  onCreateOn?: (title: string, day: string, field: string) => Promise<boolean>;
   /**
    * Opens the database's own full-page screen — the tabbed surface carrying
    * every one of its views (M47.5).
@@ -163,6 +176,10 @@ export function DatabaseBlockView({
           ),
     [surface, database, schema],
   );
+  // The field a calendar view places records by, which is the field a day's
+  // "+" has to date. Same inputs as `CalendarView`'s own resolution, so the
+  // record lands on the grid it was created from.
+  const dateField = surface === null ? null : resolveDateField(surface.presentation, fields);
 
   // The unset block: `/database` before anything is chosen, or its empty
   // fence read back from disk (markdown.ts). A fence that names something
@@ -276,6 +293,11 @@ export function DatabaseBlockView({
             createType={resolved.database}
             filtered={shown?.filters != null}
             onCreate={onCreate}
+            onCreateOn={
+              onCreateOn === undefined || dateField === null
+                ? undefined
+                : (title, day) => onCreateOn(title, day, dateField)
+            }
             // Schema by use (M47.4). The table's "+" already declares a real
             // property on the database — `AddColumnButton` has called
             // `addFieldToType` since M12 — it was simply never reachable from

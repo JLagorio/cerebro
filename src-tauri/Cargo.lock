@@ -291,6 +291,8 @@ dependencies = [
  "chrono-tz",
  "iana-time-zone",
  "indexmap 2.14.0",
+ "libc",
+ "log",
  "notify",
  "rand",
  "rusqlite",

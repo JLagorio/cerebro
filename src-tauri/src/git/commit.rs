@@ -124,13 +124,17 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::PathBuf;
 
     /// A scratch directory for a test that will `git init`, stage and commit
     /// in it — and a hard refusal to hand back anything but a path under the
     /// system temp dir.
+    ///
+    /// Shared with the history and pulse tests (M53.15), so every git test
+    /// that builds a repository goes through this one guard. The label must
+    /// be unique across the crate: tests share a process id.
     ///
     /// TWICE these tests have written to the cerebro checkout instead: once
     /// taking out the M14 branch, once the M16 board branch, each time as a
@@ -152,7 +156,7 @@ mod tests {
     /// from the worktree root rather than from `src-tauri/` as AGENTS.md
     /// documents. Git hooks also run with a sanitized environment, so
     /// `TMPDIR` may be absent there in a way it never is in a shell.
-    fn scratch_repo_dir(label: &str) -> PathBuf {
+    pub(crate) fn scratch_repo_dir(label: &str) -> PathBuf {
         // Canonicalize BEFORE joining: on macOS `temp_dir()` hands back
         // /var/folders/… which is a symlink to /private/var/folders/…, so
         // comparing a path built from one against the resolved form of the
@@ -172,7 +176,7 @@ mod tests {
 
     /// Second belt: after `git init`, git must agree the repo root is our
     /// scratch dir and nothing above it.
-    fn assert_isolated(dir: &Path) {
+    pub(crate) fn assert_isolated(dir: &Path) {
         let top = command::run_str(dir, &["rev-parse", "--show-toplevel"])
             .expect("the scratch repo must answer rev-parse --show-toplevel");
         let got = std::fs::canonicalize(top.trim()).expect("that toplevel must exist on disk");
@@ -182,6 +186,26 @@ mod tests {
             "REFUSING to stage or commit: git reports the repo root as {got:?}, but this \
              test's scratch repo is {want:?}."
         );
+    }
+
+    /// A scratch repository whose current branch ref holds `junk`, the way a
+    /// crash mid-write can leave it (M53.15). Nothing is committed: git
+    /// reports the broken ref before it looks for a single commit.
+    pub(crate) fn broken_branch_repo(label: &str, junk: &str) -> PathBuf {
+        let dir = scratch_repo_dir(label);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A loose ref file belongs to the files backend. Pin it, so a reftable
+        // default (from config, or a later git) cannot leave no file to break;
+        // a git without reftable ignores the key.
+        command::run_str(&dir, &["-c", "init.defaultRefFormat=files", "init"]).unwrap();
+        // Before touching anything under .git — see assert_isolated.
+        assert_isolated(&dir);
+        let branch = command::run_str(&dir, &["symbolic-ref", "HEAD"]).unwrap();
+        let ref_file = dir.join(".git").join(branch.trim());
+        std::fs::create_dir_all(ref_file.parent().unwrap())
+            .and_then(|()| std::fs::write(&ref_file, junk))
+            .unwrap_or_else(|e| panic!("could not break the branch ref at {ref_file:?}: {e}"));
+        dir
     }
 
     #[test]

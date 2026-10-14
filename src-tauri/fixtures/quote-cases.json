@@ -1,0 +1,315 @@
+{
+  "format": 1,
+  "about": "edit_note's quote rules (M55.5), held by both twins: src-tauri/src/vault/quote.rs (replays_the_shared_quote_cases) and src/engine/quote.ts (src/engine/quote.test.ts). `body` is the note body exactly as get_note prints it after its --- line; `prefix` is every byte before it (BOM, fences and YAML), never matched or changed. Matching is exact and counts overlapping matches. A case lands as `result`, with `lines` the 1-based line where each edit's new text starts, in the order given, or is `refused` with the exact message. Rust offsets are bytes and TS offsets UTF-16 units, so only lines and code-point contexts are pinned. Non-ASCII and control characters are written as \\u escapes.",
+  "limits": {
+    "max_edits": 100,
+    "context_chars": 40,
+    "match_chars": 80,
+    "max_listed": 20
+  },
+  "cases": [
+    {
+      "why": "A unique quote is replaced, and nothing else changes.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "after the freeze",
+          "new": "after the Wednesday freeze"
+        }
+      ],
+      "result": "# How we schedule\n\nWe ship on Thursdays, after the Wednesday freeze.\nThursdays are quiet.\n",
+      "lines": [3]
+    },
+    {
+      "why": "A quote may span lines; the new text starts on the line the old one did.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "freeze.\nThursdays are quiet.",
+          "new": "freeze.\n\nFridays are busy."
+        }
+      ],
+      "result": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\n\nFridays are busy.\n",
+      "lines": [3]
+    },
+    {
+      "why": "An empty `new` deletes the passage.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": ", after the freeze",
+          "new": ""
+        }
+      ],
+      "result": "# How we schedule\n\nWe ship on Thursdays.\nThursdays are quiet.\n",
+      "lines": [3]
+    },
+    {
+      "why": "Edits given out of order land by position, and each reports its own line.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "quiet",
+          "new": "calm"
+        },
+        {
+          "old": "# How",
+          "new": "# When"
+        }
+      ],
+      "result": "# When we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are calm.\n",
+      "lines": [4, 1]
+    },
+    {
+      "why": "Adjacent passages are two edits, not an overlap.",
+      "body": "abcdef\n",
+      "edits": [
+        {
+          "old": "abc",
+          "new": "ABC"
+        },
+        {
+          "old": "def",
+          "new": "DEF"
+        }
+      ],
+      "result": "ABCDEF\n",
+      "lines": [1, 1]
+    },
+    {
+      "why": "A quote that appears twice is refused, listing both with line and context.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "Thursdays",
+          "new": "Fridays"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 3: \"# How we schedule\\n\\nWe ship on Thursdays, after the freeze.\\nThursdays are quiet.\u2026\"\n  2. line 4: \"\u2026We ship on Thursdays, after the freeze.\\nThursdays are quiet.\\n\"\nNothing was written."
+    },
+    {
+      "why": "`occurrence` picks one appearance, counting from 1.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "Thursdays",
+          "new": "Fridays",
+          "occurrence": 2
+        }
+      ],
+      "result": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nFridays are quiet.\n",
+      "lines": [4]
+    },
+    {
+      "why": "An `occurrence` past the count is refused with the listing.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "Thursdays",
+          "new": "Fridays",
+          "occurrence": 3
+        }
+      ],
+      "refused": "Edit 1: `occurrence` is 3, but the quoted text appears 2 times:\n  1. line 3: \"# How we schedule\\n\\nWe ship on Thursdays, after the freeze.\\nThursdays are quiet.\u2026\"\n  2. line 4: \"\u2026We ship on Thursdays, after the freeze.\\nThursdays are quiet.\\n\"\nNothing was written."
+    },
+    {
+      "why": "Past a single appearance, the count reads \"1 time\".",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "quiet",
+          "new": "calm",
+          "occurrence": 2
+        }
+      ],
+      "refused": "Edit 1: `occurrence` is 2, but the quoted text appears 1 time:\n  1. line 4: \"\u2026rsdays, after the freeze.\\nThursdays are quiet.\\n\"\nNothing was written."
+    },
+    {
+      "why": "An `occurrence` of 0 is refused before matching.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "Thursdays",
+          "new": "Fridays",
+          "occurrence": 0
+        }
+      ],
+      "refused": "Edit 1: `occurrence` counts from 1.\nNothing was written."
+    },
+    {
+      "why": "Matches overlap: `aa` appears twice in `aaa`.",
+      "body": "aaa\n",
+      "edits": [
+        {
+          "old": "aa",
+          "new": "b"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 1: \"aaa\\n\"\n  2. line 1: \"aaa\\n\"\nNothing was written."
+    },
+    {
+      "why": "A quote that matches nowhere is refused.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "on Wednesdays",
+          "new": "on Fridays"
+        }
+      ],
+      "refused": "Edit 1: the quoted text is not in the note's body. Quote it exactly as get_note shows it, spacing, line breaks and markdown included, or read the note again if it may have changed.\nNothing was written."
+    },
+    {
+      "why": "A quote found only in the frontmatter says so; the frontmatter is never matched.",
+      "prefix": "---\nstatus: todo\n---\n",
+      "body": "\n# Plan\n\nDo the thing.\n",
+      "edits": [
+        {
+          "old": "status: todo",
+          "new": "status: done"
+        }
+      ],
+      "refused": "Edit 1: the quoted text is in the frontmatter, which edit_note never changes. Use update_frontmatter for properties.\nNothing was written."
+    },
+    {
+      "why": "An empty `old` is refused.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "",
+          "new": "More."
+        }
+      ],
+      "refused": "Edit 1: `old` is empty \u2014 quote the text to replace.\nNothing was written."
+    },
+    {
+      "why": "A `new` equal to `old` is refused.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "quiet",
+          "new": "quiet"
+        }
+      ],
+      "refused": "Edit 1: `new` is the same as `old`, so it changes nothing.\nNothing was written."
+    },
+    {
+      "why": "Overlapping passages are refused, naming the pair and the line where they meet.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "Thursdays, after",
+          "new": "Fridays, before"
+        },
+        {
+          "old": "after the freeze",
+          "new": "once frozen"
+        }
+      ],
+      "refused": "Edits 1 and 2 overlap at line 3; each edit must replace a passage of its own.\nNothing was written."
+    },
+    {
+      "why": "Every failing edit is reported together, in order.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [
+        {
+          "old": "nowhere",
+          "new": "x"
+        },
+        {
+          "old": "quiet",
+          "new": "loud"
+        },
+        {
+          "old": "Thursdays",
+          "new": "Fridays"
+        }
+      ],
+      "refused": "Edit 1: the quoted text is not in the note's body. Quote it exactly as get_note shows it, spacing, line breaks and markdown included, or read the note again if it may have changed.\nEdit 3: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 3: \"# How we schedule\\n\\nWe ship on Thursdays, after the freeze.\\nThursdays are quiet.\u2026\"\n  2. line 4: \"\u2026We ship on Thursdays, after the freeze.\\nThursdays are quiet.\\n\"\nNothing was written."
+    },
+    {
+      "why": "Twenty matches are listed, then the exact count of the rest.",
+      "body": "- item 1: todo\n- item 2: todo\n- item 3: todo\n- item 4: todo\n- item 5: todo\n- item 6: todo\n- item 7: todo\n- item 8: todo\n- item 9: todo\n- item 10: todo\n- item 11: todo\n- item 12: todo\n- item 13: todo\n- item 14: todo\n- item 15: todo\n- item 16: todo\n- item 17: todo\n- item 18: todo\n- item 19: todo\n- item 20: todo\n- item 21: todo\n- item 22: todo\n- item 23: todo\n- item 24: todo\n- item 25: todo\n",
+      "edits": [
+        {
+          "old": "todo",
+          "new": "done"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 25 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 1: \"- item 1: todo\\n- item 2: todo\\n- item 3: todo\\n- item 4:\u2026\"\n  2. line 2: \"- item 1: todo\\n- item 2: todo\\n- item 3: todo\\n- item 4: todo\\n- item 5:\u2026\"\n  3. line 3: \"- item 1: todo\\n- item 2: todo\\n- item 3: todo\\n- item 4: todo\\n- item 5: todo\\n- item 6:\u2026\"\n  4. line 4: \"\u2026- item 2: todo\\n- item 3: todo\\n- item 4: todo\\n- item 5: todo\\n- item 6: todo\\n- item 7:\u2026\"\n  5. line 5: \"\u2026- item 3: todo\\n- item 4: todo\\n- item 5: todo\\n- item 6: todo\\n- item 7: todo\\n- item 8:\u2026\"\n  6. line 6: \"\u2026- item 4: todo\\n- item 5: todo\\n- item 6: todo\\n- item 7: todo\\n- item 8: todo\\n- item 9:\u2026\"\n  7. line 7: \"\u2026- item 5: todo\\n- item 6: todo\\n- item 7: todo\\n- item 8: todo\\n- item 9: todo\\n- item 10\u2026\"\n  8. line 8: \"\u2026- item 6: todo\\n- item 7: todo\\n- item 8: todo\\n- item 9: todo\\n- item 10: todo\\n- item 1\u2026\"\n  9. line 9: \"\u2026- item 7: todo\\n- item 8: todo\\n- item 9: todo\\n- item 10: todo\\n- item 11: todo\\n- item \u2026\"\n  10. line 10: \"\u2026 item 8: todo\\n- item 9: todo\\n- item 10: todo\\n- item 11: todo\\n- item 12: todo\\n- item \u2026\"\n  11. line 11: \"\u2026item 9: todo\\n- item 10: todo\\n- item 11: todo\\n- item 12: todo\\n- item 13: todo\\n- item \u2026\"\n  12. line 12: \"\u2026tem 10: todo\\n- item 11: todo\\n- item 12: todo\\n- item 13: todo\\n- item 14: todo\\n- item \u2026\"\n  13. line 13: \"\u2026tem 11: todo\\n- item 12: todo\\n- item 13: todo\\n- item 14: todo\\n- item 15: todo\\n- item \u2026\"\n  14. line 14: \"\u2026tem 12: todo\\n- item 13: todo\\n- item 14: todo\\n- item 15: todo\\n- item 16: todo\\n- item \u2026\"\n  15. line 15: \"\u2026tem 13: todo\\n- item 14: todo\\n- item 15: todo\\n- item 16: todo\\n- item 17: todo\\n- item \u2026\"\n  16. line 16: \"\u2026tem 14: todo\\n- item 15: todo\\n- item 16: todo\\n- item 17: todo\\n- item 18: todo\\n- item \u2026\"\n  17. line 17: \"\u2026tem 15: todo\\n- item 16: todo\\n- item 17: todo\\n- item 18: todo\\n- item 19: todo\\n- item \u2026\"\n  18. line 18: \"\u2026tem 16: todo\\n- item 17: todo\\n- item 18: todo\\n- item 19: todo\\n- item 20: todo\\n- item \u2026\"\n  19. line 19: \"\u2026tem 17: todo\\n- item 18: todo\\n- item 19: todo\\n- item 20: todo\\n- item 21: todo\\n- item \u2026\"\n  20. line 20: \"\u2026tem 18: todo\\n- item 19: todo\\n- item 20: todo\\n- item 21: todo\\n- item 22: todo\\n- item \u2026\"\n  \u2026 and 5 more\nNothing was written."
+    },
+    {
+      "why": "An emoji at a cut is counted as one code point and never split.",
+      "body": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00needle\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\nneedle\n",
+      "edits": [
+        {
+          "old": "needle",
+          "new": "pin"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 1: \"\u2026\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00needle\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\u2026\"\n  2. line 2: \"\u2026\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\ud83d\ude80\\nneedle\\n\"\nNothing was written."
+    },
+    {
+      "why": "A CRLF body matches a quote that carries its \\r\\n.",
+      "body": "# T\r\n\r\nOne line.\r\nTwo lines.\r\n",
+      "edits": [
+        {
+          "old": "One line.\r\nTwo",
+          "new": "First line.\r\nSecond"
+        }
+      ],
+      "result": "# T\r\n\r\nFirst line.\r\nSecond lines.\r\n",
+      "lines": [3]
+    },
+    {
+      "why": "A CRLF body does not match a bare \\n quote: matching is exact.",
+      "body": "# T\r\n\r\nOne line.\r\nTwo lines.\r\n",
+      "edits": [
+        {
+          "old": "One line.\nTwo",
+          "new": "First line.\nSecond"
+        }
+      ],
+      "refused": "Edit 1: the quoted text is not in the note's body. Quote it exactly as get_note shows it, spacing, line breaks and markdown included, or read the note again if it may have changed.\nNothing was written."
+    },
+    {
+      "why": "A listed match over 80 code points shows 80 of it, then the context after.",
+      "body": "Start AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA middle AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end.\n",
+      "edits": [
+        {
+          "old": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "new": "B"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 1: \"Start AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA middle AAAAAAAAAAAAAAAAAAAAAA\u2026\"\n  2. line 1: \"\u2026AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA middle AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA end.\\n\"\nNothing was written."
+    },
+    {
+      "why": "A tab and a double quote in a context are JSON-escaped.",
+      "body": "Say\t\"hi\" to Ann.\nSay\t\"hi\" to Bo.\n",
+      "edits": [
+        {
+          "old": "hi",
+          "new": "hello"
+        }
+      ],
+      "refused": "Edit 1: the quoted text appears 2 times. Pass `occurrence` (counting from 1) or quote a longer passage:\n  1. line 1: \"Say\\t\\\"hi\\\" to Ann.\\nSay\\t\\\"hi\\\" to Bo.\\n\"\n  2. line 2: \"Say\\t\\\"hi\\\" to Ann.\\nSay\\t\\\"hi\\\" to Bo.\\n\"\nNothing was written."
+    },
+    {
+      "why": "A body that starts with a newline counts that line.",
+      "body": "\nFirst.\nSecond.\n",
+      "edits": [
+        {
+          "old": "Second.",
+          "new": "Last."
+        }
+      ],
+      "result": "\nFirst.\nLast.\n",
+      "lines": [3]
+    },
+    {
+      "why": "An edit list with nothing in it is refused.",
+      "body": "# How we schedule\n\nWe ship on Thursdays, after the freeze.\nThursdays are quiet.\n",
+      "edits": [],
+      "refused": "edit_note needs at least one edit.\nNothing was written."
+    }
+  ]
+}

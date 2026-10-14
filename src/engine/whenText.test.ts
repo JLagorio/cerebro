@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localStamp, relativeWhen } from './whenText';
+import { lateBy, localStamp, relativeWhen } from './whenText';
 
 /**
  * The three cases that are not arithmetic (M33b.3): a stamp nothing can
@@ -40,5 +40,25 @@ describe('localStamp', () => {
   it('reads the clock the person is on, which is the clock a schedule is written in', () => {
     const at = new Date(2026, 6, 28, 9, 5);
     expect(localStamp(at)).toBe('2026-07-28 09:05');
+  });
+});
+
+describe('lateBy', () => {
+  const due = '2026-07-28T08:30:00Z';
+
+  it("is null inside the runner's own cadence", () => {
+    expect(lateBy(due, '2026-07-28T08:34:59Z')).toBeNull();
+    expect(lateBy(due, due)).toBeNull();
+  });
+
+  it('says minutes, then hours, then days', () => {
+    expect(lateBy(due, '2026-07-28T09:15:00Z')).toBe('45m');
+    expect(lateBy(due, '2026-07-29T14:30:00Z')).toBe('30h');
+    expect(lateBy(due, '2026-07-31T08:30:00Z')).toBe('3d');
+  });
+
+  it('is null for a stamp that will not parse, never a guess', () => {
+    expect(lateBy('tomorrow', '2026-07-28T09:15:00Z')).toBeNull();
+    expect(lateBy(due, 'later')).toBeNull();
   });
 });

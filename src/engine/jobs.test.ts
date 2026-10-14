@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { VaultEvent } from './events';
-import { jobQueue, TRIGGER_COOLDOWN_MS, type AgentJob } from './jobs';
-import { lastFireKey, parseSchedule } from './skills';
+import SCHEMA_RS from '../../src-tauri/src/runtime/schema.rs?raw';
+import { causeOfJob, jobQueue, TRIGGER_COOLDOWN_MS, type AgentJob } from './jobs';
+import { fireKeyDate, lastFireKey, parseSchedule } from './skills';
 import { listConcepts } from './okf';
 import { makeEntry } from './testHelpers';
 
@@ -285,97 +286,33 @@ describe('jobQueue', () => {
     expect(jobs.map((j) => j.kind)).toEqual(['scheduled', 'agent']);
   });
 
-  it('derives a refresh for a stale cached source only while connectors are on', () => {
-    const source = makeEntry({
-      path: 'sources/issues/ops-121.md',
-      title: 'OPS-121',
-      type: 'Source',
-      snippet: 'cached ticket',
-      properties: { stale_after: '2026-07-01' },
-      modifiedAt: '2026-06-01T00:00:00Z',
-    });
-    const fresh = makeEntry({
-      path: 'sources/issues/ops-200.md',
-      title: 'OPS-200',
-      type: 'Source',
-      snippet: 'cached ticket',
-      properties: { stale_after: '2026-12-01' },
-    });
-    const on = jobQueue([source, fresh], [], { ...EMPTY, now, connectors: true });
-    expect(on.map((j) => [j.kind, j.path])).toEqual([['refresh', 'sources/issues/ops-121.md']]);
-    expect(on[0].ledger).toBe('attempts');
-    // Without a connector there is nothing to re-fetch with — no job.
-    expect(jobQueue([source], [], { ...EMPTY, now })).toEqual([]);
-    // The shared attempts ledger stops the spin after one try.
-    expect(
-      jobQueue([source], [], {
-        ...EMPTY,
-        attempts: { 'sources/issues/ops-121.md': '2026-06-01T00:00:00Z' },
-        now,
-        connectors: true,
-      }),
-    ).toEqual([]);
-  });
-
-  it('a refresh-due source is ONE job even when it is also behind — the re-fetch is never starved', () => {
-    // The source is cited by a concept with an older stamp, so without the
-    // exclusion it would ALSO derive a behind job (rank 3) sharing the same
-    // attempts key — running first and suppressing the re-fetch forever.
-    const source = makeEntry({
-      path: 'sources/issues/ops-121.md',
-      title: 'OPS-121',
-      type: 'Source',
-      snippet: 'cached ticket',
-      properties: { stale_after: '2026-07-01' },
-      modifiedAt: '2026-07-20T00:00:00Z',
-    });
-    const entries = [
-      source,
-      makeEntry({
-        path: 'knowledge/systems/cites-source.md',
-        title: 'Cites source',
-        properties: {
-          sources: [{ id: 's', resource: 'sources/issues/ops-121.md' }],
-          generated: { by: 'claude-code', at: '2026-07-10T00:00:00Z' },
-        },
-      }),
-    ];
-    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
-      ...EMPTY,
-      now,
-      connectors: true,
-    });
-    expect(jobs.map((j) => j.kind)).toEqual(['refresh']);
-    // With connectors OFF there is no refresh to derive, and catching up on
-    // the edit is the content diff's job now — so there is nothing here.
-    const off = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
-    expect(off.map((j) => j.kind)).toEqual([]);
-  });
-
-  it('refresh outranks a stale concept recheck — the copy is replaced before it is re-read', () => {
+  it('derives no refresh for a stale cached source — a refresh run holds no connector (M54.9)', () => {
+    // A refresh runs unattended with no record to name `connectors:`, and an
+    // unattended run reaches only the connectors its record names. A job
+    // here would spend a budgeted run that can only say it has no connector,
+    // once per stale source, so the stale copy waits and the concept that
+    // cites it is still rechecked.
     const entries = [
       makeEntry({
         path: 'sources/issues/ops-121.md',
         title: 'OPS-121',
         type: 'Source',
-        snippet: 'x',
+        snippet: 'cached ticket',
         properties: { stale_after: '2026-07-01' },
+        modifiedAt: '2026-06-01T00:00:00Z',
       }),
       makeEntry({
         path: 'knowledge/systems/old.md',
         title: 'Old',
         properties: {
+          sources: [{ id: 's', resource: 'sources/issues/ops-121.md' }],
           generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' },
           stale_after: '2026-07-01',
         },
       }),
     ];
-    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
-      ...EMPTY,
-      now,
-      connectors: true,
-    });
-    expect(jobs.map((j) => j.kind)).toEqual(['refresh', 'stale']);
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(jobs.map((j) => [j.kind, j.path])).toEqual([['stale', 'knowledge/systems/old.md']]);
   });
 
   it('a type-doc edit after a concept was written queues a schema recheck — lazily, never in bulk', () => {
@@ -761,5 +698,91 @@ describe('jobQueue — a schedule and a trigger on one agent (AUTOMATION-2)', ()
       ['slug:risk-watch#event', 'event:changed:inbox/a.md@2026-07-31T09:00:00Z', 'slug:risk-watch'],
       ['slug:risk-watch', '2026-07-31 06:00', null],
     ]);
+  });
+});
+
+describe('causeOfJob (M56.7)', () => {
+  const job = (over: Partial<AgentJob>): AgentJob => ({
+    kind: 'agent',
+    path: 'records/agents/scout.md',
+    key: 'records/agents/scout.md',
+    title: 'Scout',
+    runKey: '2026-07-28 08:30',
+    ledger: 'skillRuns',
+    cooldownKey: null,
+    ...over,
+  });
+
+  it("a schedule names the record's schedule and the fire's due moment", () => {
+    expect(causeOfJob(job({}), null, 'weekdays 08:30')).toEqual({
+      kind: 'schedule',
+      detail: 'weekdays 08:30',
+      due_at: fireKeyDate('2026-07-28 08:30')?.toISOString(),
+    });
+    expect(causeOfJob(job({ kind: 'scheduled' }), null, null)).toEqual({
+      kind: 'schedule',
+      due_at: fireKeyDate('2026-07-28 08:30')?.toISOString(),
+    });
+  });
+
+  it("an event names the changed path and the trigger's words", () => {
+    const runKey = 'event:modified:records/risks/r1.md@2026-07-28T10:00:00Z';
+    expect(
+      causeOfJob(
+        job({ runKey, key: 'records/agents/scout.md#event' }),
+        { subject: 'records/risks/r1.md', because: 'a note in records/risks changes' },
+        'daily 09:00',
+      ),
+    ).toEqual({
+      kind: 'event',
+      subject: 'records/risks/r1.md',
+      detail: 'a note in records/risks changes',
+    });
+    // The event itself is gone from the runner's list: the path is read back
+    // from the run key, and no words are invented.
+    expect(causeOfJob(job({ runKey }), null, null)).toEqual({
+      kind: 'event',
+      subject: 'records/risks/r1.md',
+    });
+  });
+
+  it('the recheck lanes are maintenance, with the lane as the reason', () => {
+    const lane = (kind: AgentJob['kind']) =>
+      causeOfJob(
+        job({ kind, path: 'knowledge/acme.md', runKey: 'stale:2026-07-01', ledger: 'attempts' }),
+        null,
+        null,
+      );
+    expect(lane('refresh')).toEqual({
+      kind: 'maintenance',
+      subject: 'knowledge/acme.md',
+      detail: 'a cached source passed its refresh date',
+    });
+    expect(lane('stale')).toEqual({
+      kind: 'maintenance',
+      subject: 'knowledge/acme.md',
+      detail: 'a concept passed its recheck date',
+    });
+    expect(lane('schema')).toEqual({
+      kind: 'maintenance',
+      subject: 'knowledge/acme.md',
+      detail: 'the schema a concept describes changed',
+    });
+  });
+
+  it('the runner names only kinds the runs CHECK holds', () => {
+    const opens = "json_extract(cause, '$.kind') IN (";
+    const at = SCHEMA_RS.indexOf(opens);
+    expect(at).toBeGreaterThan(-1);
+    const rest = SCHEMA_RS.slice(at + opens.length);
+    const held = rest
+      .slice(0, rest.indexOf(')'))
+      .split(',')
+      .map((name) => name.trim().replace(/'/g, ''));
+    expect(held.length).toBe(10);
+    const kinds: AgentJob['kind'][] = ['scheduled', 'agent', 'refresh', 'stale', 'schema'];
+    const named = new Set(kinds.map((kind) => causeOfJob(job({ kind }), null, null).kind));
+    named.add(causeOfJob(job({ runKey: 'event:created:a.md@x' }), null, null).kind);
+    for (const kind of named) expect(held).toContain(kind);
   });
 });

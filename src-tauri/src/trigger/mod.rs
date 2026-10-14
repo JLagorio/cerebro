@@ -76,6 +76,10 @@ mod tests {
                 "mcp::",
                 "crate::agent",
                 "Command::new",
+                // Every child starts through the spawn helper (M53.21), so
+                // a spawn here would name it rather than Command::new.
+                "crate::spawn",
+                "spawn::",
                 ".spawn(",
                 "propose_",
                 "AppConfig",

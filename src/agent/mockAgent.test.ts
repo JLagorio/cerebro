@@ -231,6 +231,165 @@ describe('runMockAgent', () => {
     });
   });
 
+  // M53.6 — a script that writes, so an e2e has an agent write landing
+  // mid-turn on a page someone has open.
+  describe('the append script', () => {
+    const PAGE = 'delivery/how-we-schedule.md';
+    const ASK = `append "Agent line one." to ${PAGE}`;
+
+    /** Run it, recording the order of the append, its announcement and the tool's result. */
+    function runAppend(onAppend?: (path: string, content: string) => Promise<void>) {
+      const order: string[] = [];
+      const events: AgentStreamEvent[] = [];
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          ASK,
+          (event) => {
+            events.push(event);
+            if (event.kind === 'ToolDone') order.push(event.is_error ? 'tool-error' : 'tool-done');
+            if (event.kind === 'Done') resolve();
+          },
+          {
+            delayMs: 0,
+            onUiAction: (action) => {
+              actions.push(action);
+              order.push(action.action);
+            },
+            onAppend:
+              onAppend === undefined
+                ? undefined
+                : async (path, content) => {
+                    order.push('append');
+                    await onAppend(path, content);
+                  },
+          },
+        );
+      });
+      return done.then(() => ({ order, events, actions }));
+    }
+
+    it('appends, announces the path it wrote, then reports the tool done', async () => {
+      const onAppend = vi.fn(async () => undefined);
+      const { order, events, actions } = await runAppend(onAppend);
+      expect(toolNames(events)).toEqual(['append_to_note']);
+      expect(onAppend).toHaveBeenCalledWith(PAGE, 'Agent line one.');
+      expect(order).toEqual(['append', 'vault_changed', 'tool-done']);
+      expect(actions).toEqual([{ action: 'vault_changed', paths: [PAGE] }]);
+      expect(replyOf(events)).toBe(`I appended that to ${PAGE}.`);
+    });
+
+    it('a refused append is an error result, announces nothing, and claims no write', async () => {
+      const { order, events, actions } = await runAppend(async () => {
+        throw new Error('knowledge/ is written only through write_concept');
+      });
+      expect(order).toEqual(['append', 'tool-error']);
+      expect(actions).toEqual([]);
+      const done = events.find((e) => e.kind === 'ToolDone');
+      expect(done).toMatchObject({ is_error: true, output: expect.stringContaining('knowledge/') });
+      expect(replyOf(events)).toContain('I could not append');
+    });
+
+    it('refuses when nothing can carry out the append', async () => {
+      const { order, actions } = await runAppend(undefined);
+      expect(order).toEqual(['tool-error']);
+      expect(actions).toEqual([]);
+    });
+
+    it('is only the script for exactly that shape', async () => {
+      const { events } = await drain(`please append "x" to ${PAGE} and more`);
+      expect(toolNames(events)).not.toContain('append_to_note');
+    });
+  });
+
+  // M55.5 — the other script that writes: an edit_note through `onEdit`.
+  describe('the edit script', () => {
+    const PAGE = 'delivery/how-we-schedule.md';
+    const REPORT = `Edited ${PAGE}: 1 edit; nothing outside the quoted text changed.`;
+
+    /** Run `ask`, recording the order of the edit, its announcement and the tool's result. */
+    function runEdit(ask: string, onEdit?: (path: string, edits: unknown[]) => Promise<string>) {
+      const order: string[] = [];
+      const events: AgentStreamEvent[] = [];
+      const actions: UiAction[] = [];
+      const done = new Promise<void>((resolve) => {
+        runMockAgent(
+          ask,
+          (event) => {
+            events.push(event);
+            if (event.kind === 'ToolDone') order.push(event.is_error ? 'tool-error' : 'tool-done');
+            if (event.kind === 'Done') resolve();
+          },
+          {
+            delayMs: 0,
+            onUiAction: (action) => {
+              actions.push(action);
+              order.push(action.action);
+            },
+            onEdit:
+              onEdit === undefined
+                ? undefined
+                : async (path, edits) => {
+                    order.push('edit');
+                    return onEdit(path, edits);
+                  },
+          },
+        );
+      });
+      return done.then(() => ({ order, events, actions }));
+    }
+
+    it('edits, announces the path it wrote, then reports the tool done with its report', async () => {
+      const onEdit = vi.fn(async () => REPORT);
+      const { order, events, actions } = await runEdit(
+        `edit "after the freeze" to "after the Wednesday freeze" in ${PAGE}`,
+        onEdit,
+      );
+      expect(toolNames(events)).toEqual(['edit_note']);
+      expect(JSON.parse(toolInputs(events)[0])).toEqual({
+        path: PAGE,
+        edits: [{ old: 'after the freeze', new: 'after the Wednesday freeze' }],
+      });
+      expect(onEdit).toHaveBeenCalledWith(PAGE, [
+        { old: 'after the freeze', new: 'after the Wednesday freeze' },
+      ]);
+      expect(order).toEqual(['edit', 'vault_changed', 'tool-done']);
+      expect(actions).toEqual([{ action: 'vault_changed', paths: [PAGE] }]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({ output: REPORT });
+      expect(replyOf(events)).toBe(`I edited ${PAGE}.`);
+    });
+
+    it('reads \\n inside the quotes as a line break, and takes an empty new', async () => {
+      const onEdit = vi.fn(async () => REPORT);
+      await runEdit(`edit "freeze.\\nThursdays" to "" in ${PAGE}`, onEdit);
+      expect(onEdit).toHaveBeenCalledWith(PAGE, [{ old: 'freeze.\nThursdays', new: '' }]);
+    });
+
+    it('a refused edit is an error result, announces nothing, and says why', async () => {
+      const refusal = 'Edit 1: the quoted text appears 2 times.';
+      const { order, events, actions } = await runEdit(
+        `edit "Thursdays" to "Fridays" in ${PAGE}`,
+        async () => {
+          throw new Error(refusal);
+        },
+      );
+      expect(order).toEqual(['edit', 'tool-error']);
+      expect(actions).toEqual([]);
+      expect(events.find((e) => e.kind === 'ToolDone')).toMatchObject({
+        is_error: true,
+        output: refusal,
+      });
+      expect(replyOf(events)).toBe(`I could not edit ${PAGE}: ${refusal}`);
+    });
+
+    it('refuses when nothing can carry out the edit', async () => {
+      const { order, events, actions } = await runEdit(`edit "a" to "b" in ${PAGE}`);
+      expect(order).toEqual(['tool-error']);
+      expect(actions).toEqual([]);
+      expect(replyOf(events)).toBe(`I could not edit ${PAGE}: edit_note is not available here`);
+    });
+  });
+
   it('cancelling before the run finishes suppresses the proposal', async () => {
     const onUiAction = vi.fn();
     const run = runMockAgent('inbox', () => undefined, { delayMs: 5, onUiAction });

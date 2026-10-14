@@ -13,6 +13,7 @@ import { project } from './project';
 import {
   decodeBody,
   deriveAuthority,
+  projectionClaim,
   RefusedError,
   SchemaError,
   validateBody,
@@ -2502,25 +2503,48 @@ function validateBasisLinks(state: EpistemicState, basis: JsonObject): void {
   }
 }
 
+/**
+ * The claim `path` would sit inside, or one that sits inside it (M53.29) —
+ * the Rust `nesting_claim` port. A file and a folder cannot share a name.
+ */
+function nestingClaim(claims: Map<string, string>, path: string): string | null {
+  for (let slash = path.indexOf('/'); slash !== -1; slash = path.indexOf('/', slash + 1)) {
+    const enclosing = path.slice(0, slash);
+    if (claims.has(enclosing)) return enclosing;
+  }
+  const folder = `${path}/`;
+  for (const other of claims.keys()) {
+    if (other.startsWith(folder)) return other;
+  }
+  return null;
+}
+
 function applyBeliefCreated(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
   const beliefId = body.belief_id as string;
   if (state.beliefs.has(beliefId)) throw new RefusedError('belief already exists');
   validateBasisLinks(state, body.basis as JsonObject);
   const subject = body.subject as JsonObject;
   const entityId = subject.entity_id as string;
-  if (!state.entities.has(entityId)) {
-    state.entities.set(entityId, frame.event_id);
-    createVersion(state, 'entity', entityId, frame.event_id);
-  }
   // The projection-path claim: the first `.md` subject alias names the
-  // knowledge-relative file this Belief projects to. One Belief per path.
-  const path = (subject.aliases as string[]).find((a) => a.endsWith('.md')) ?? null;
+  // knowledge-relative file this Belief projects to, and the schema has
+  // already judged it claimable. One Belief per path, and no claim inside
+  // another's file: `a.md/b.md` beside `a.md` could never both be written.
+  // Judged before the entity registers, so a refused claim leaves no trace.
+  const path = projectionClaim(subject.aliases as string[]);
   if (path !== null) {
     if (state.projectionPaths.has(path)) {
       throw new RefusedError(`projection path ${path} is already claimed`);
     }
-    state.projectionPaths.set(path, beliefId);
+    const nested = nestingClaim(state.projectionPaths, path);
+    if (nested !== null) {
+      throw new RefusedError(`projection path ${path} and ${nested} cannot both be files`);
+    }
   }
+  if (!state.entities.has(entityId)) {
+    state.entities.set(entityId, frame.event_id);
+    createVersion(state, 'entity', entityId, frame.event_id);
+  }
+  if (path !== null) state.projectionPaths.set(path, beliefId);
   state.entityRegistrations.set(frame.event_id, [entityId, subject.aliases as string[]]);
   state.beliefs.set(beliefId, {
     beliefId,

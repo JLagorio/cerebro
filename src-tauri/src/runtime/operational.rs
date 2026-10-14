@@ -2,15 +2,18 @@
 //! epistemic history (M24.2).
 //!
 //! What lands here: malformed tool arguments, schema mistakes, capability
-//! gaps, CAS races during internal retries. What never lands here: a
-//! meaningful policy rejection. The routing decision is not made at the call
-//! site — [`OperationalRefusal`] can only be constructed with a code whose
-//! declared destiny in `policy.v1.json` is `operational`, so a
-//! ledger-destined refusal cannot reach this table by mistake.
+//! gaps, CAS races during internal retries, and the calls a run's grant or
+//! the note corpus refused before any tool body ran, each carrying its run's
+//! id (M54.10). What never lands here: a meaningful policy rejection. The
+//! routing decision is not made at the call site — [`OperationalRefusal`]
+//! can only be constructed with a code whose declared destiny in
+//! `policy.v3.json` is `operational`, so a ledger-destined refusal cannot
+//! reach this table by mistake.
 //!
 //! Writing here MUST NOT be able to fail a user action. A refusal that could
 //! not be recorded is still a refusal; the caller gets its answer either
-//! way, and the failure to log is itself only worth a line on stderr.
+//! way, and the failure to log is itself only worth a line in the diagnostic
+//! log.
 
 use rusqlite::Connection;
 
@@ -75,7 +78,7 @@ pub fn record(
 /// write a log line must never turn into a second failure for the user.
 pub fn record_or_warn(conn: &Connection, refusal: &OperationalRefusal, entry: &LogEntry) {
     if let Err(e) = record(conn, refusal, entry) {
-        eprintln!(
+        log::warn!(
             "operational_log: could not record {} from {}: {e}",
             refusal.code.as_str(),
             refusal.surface

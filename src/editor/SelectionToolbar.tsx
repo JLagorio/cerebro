@@ -1,9 +1,15 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import {
+  BlockColorsItem,
+  DragHandleMenu,
   FormattingToolbar,
   FormattingToolbarController,
   getFormattingToolbarItems,
+  RemoveBlockItem,
+  TableColumnHeaderItem,
+  TableRowHeaderItem,
   useComponentsContext,
+  useDictionary,
 } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
@@ -75,6 +81,69 @@ export const PRESETS: Preset[] = [
 ];
 
 /**
+ * The editor actions a save would drop, by key, each with why (M55.4, M55.15).
+ *
+ * Every control the editor offers keeps what it does through a save, or it is
+ * not offered: the rule the `/` menu follows (`DROPPED_SLASH_KEYS`), applied
+ * to the formatting toolbar and the block menu. Each of these was measured
+ * (`markdown.test.ts`): a page reopened without what it did, and nothing said
+ * so. The toolbar's keys are BlockNote's (`getFormattingToolbarItems`); the
+ * block menu's are ours (`blockMenuItems`), since BlockNote names none there.
+ *
+ * Bold, italic, strike, links, nesting, captions, names and the block type
+ * all round-trip, so they stay. The table controls below are also off in the
+ * editor's settings (`TABLE_SETTINGS`), which hides the table handles' own
+ * copies of them.
+ */
+export const UNCARRIED_ACTIONS: Readonly<Record<string, string>> = {
+  filePreviewButton: "a media block's hidden preview: markdown has no attribute for it",
+  underlineStyleButton: 'underline: markdown has none',
+  colorStyleButton: 'text and highlight colour: markdown has none',
+  textAlignLeftButton: 'alignment: markdown has none, so left is all a page can be',
+  textAlignCenterButton: 'alignment: markdown has none',
+  textAlignRightButton: 'alignment: markdown has none',
+  tableCellMergeButton: 'merged cells: a markdown table cell spans one column',
+  blockColorsItem: 'block colour: markdown has none',
+  tableRowHeaderItem:
+    'the header row toggle: a markdown table always has one, so off comes back on',
+  tableColumnHeaderItem: 'a header column: a markdown table has none',
+};
+
+/** Whether the editor offers a keyed toolbar or menu item at all. */
+const offered = (item: ReactElement): boolean =>
+  item.key === null || !Object.hasOwn(UNCARRIED_ACTIONS, item.key);
+
+/** BlockNote's formatting toolbar items, less the ones a save would drop. */
+export function formattingToolbarItems(): ReactElement[] {
+  return getFormattingToolbarItems().filter(offered);
+}
+
+type Dictionary = ReturnType<typeof useDictionary>;
+
+/**
+ * BlockNote's block menu (its `DragHandleMenu` default), keyed so the actions
+ * a save would drop can leave it: today that leaves Delete.
+ */
+export function blockMenuItems(dict: Dictionary): ReactElement[] {
+  return [
+    <RemoveBlockItem key="removeBlockItem">{dict.drag_handle.delete_menuitem}</RemoveBlockItem>,
+    <BlockColorsItem key="blockColorsItem">{dict.drag_handle.colors_menuitem}</BlockColorsItem>,
+    <TableRowHeaderItem key="tableRowHeaderItem">
+      {dict.drag_handle.header_row_menuitem}
+    </TableRowHeaderItem>,
+    <TableColumnHeaderItem key="tableColumnHeaderItem">
+      {dict.drag_handle.header_column_menuitem}
+    </TableColumnHeaderItem>,
+  ].filter(offered);
+}
+
+/** The menu the block grip opens, holding only what a save keeps. */
+export function CarriedBlockMenu() {
+  const dict = useDictionary();
+  return <DragHandleMenu>{blockMenuItems(dict)}</DragHandleMenu>;
+}
+
+/**
  * The formatting toolbar, with AI at its head.
  *
  * `ask` receives the preset the user chose, or undefined for "open the box and
@@ -88,10 +157,11 @@ export function AiFormattingToolbar({ onAsk }: { onAsk: (preset?: Preset) => voi
       formattingToolbar={() => (
         <FormattingToolbar>
           <AiToolbarButtons key="cerebro-ai" onAsk={onAsk} />
-          {/* Everything BlockNote would have rendered on its own. Listed after
-              the AI group rather than replaced: this is an addition to the
-              editor's toolbar, not a fork of it. */}
-          {getFormattingToolbarItems()}
+          {/* What BlockNote would have rendered on its own, less what a save
+              would drop (`formattingToolbarItems`). Listed after the AI group
+              rather than replaced: this is an addition to the editor's
+              toolbar, not a fork of it. */}
+          {formattingToolbarItems()}
         </FormattingToolbar>
       )}
     />

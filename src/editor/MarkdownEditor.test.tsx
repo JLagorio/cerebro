@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { DefaultSuggestionItem } from '@blocknote/core/extensions';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
-import { MarkdownEditor, type CerebroEditor } from './MarkdownEditor';
+import {
+  DROPPED_SLASH_KEYS,
+  MarkdownEditor,
+  TABLE_SETTINGS,
+  type CerebroEditor,
+  type EditorReadyInfo,
+} from './MarkdownEditor';
 
-type ReadyInfo = { editor: CerebroEditor; lossyImport: boolean };
+type ReadyInfo = Pick<EditorReadyInfo, 'editor' | 'lossyCause'>;
 
 async function renderReady(props: {
   markdown: string;
@@ -65,6 +72,65 @@ describe('MarkdownEditor', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange.mock.calls[0][0]).toContain('two');
+  });
+
+  /* A turn flushes the open page before its child starts (M53.6), and it can
+     only wait for what the flush hands back: the save itself, not the emit
+     that starts it. */
+  it('flushPendingSave resolves once the save it started has landed', async () => {
+    let land = () => {};
+    const onChange = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <MarkdownEditor
+        markdown={'# Doc\n'}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor, flushPendingSave } = onReady.mock.calls[0][0];
+    appendParagraph(editor, 'typed before asking');
+    let flushed = false;
+    void flushPendingSave().then(() => (flushed = true));
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce());
+    expect(onChange.mock.calls[0]).toEqual(['# Doc\n\ntyped before asking\n']);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(flushed).toBe(false);
+    land();
+    await waitFor(() => expect(flushed).toBe(true));
+  });
+
+  it('flushPendingSave with nothing pending waits for the save already in flight', async () => {
+    let land = () => {};
+    const onChange = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          land = resolve;
+        }),
+    );
+    const onReady = vi.fn<(info: EditorReadyInfo) => void>();
+    render(
+      <MarkdownEditor markdown={'# Doc\n'} onChange={onChange} onReady={onReady} debounceMs={20} />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor, flushPendingSave } = onReady.mock.calls[0][0];
+    appendParagraph(editor, 'typed a moment ago');
+    // The debounce has fired and its save is on its way to disk.
+    await waitFor(() => expect(onChange).toHaveBeenCalledOnce());
+    let flushed = false;
+    void flushPendingSave().then(() => (flushed = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(flushed).toBe(false);
+    expect(onChange).toHaveBeenCalledOnce();
+    land();
+    await waitFor(() => expect(flushed).toBe(true));
   });
 
   it('flushes a pending edit on unmount', async () => {
@@ -329,12 +395,213 @@ describe('MarkdownEditor', () => {
 
   it('reports a lossy import for raw HTML content', async () => {
     const info = await renderReady({ markdown: '<div align="center">centered</div>\n' });
-    expect(info.lossyImport).toBe(true);
+    expect(info.lossyCause).toBe('html');
   });
 
   it('reports a clean import for normal markdown', async () => {
     const info = await renderReady({ markdown: '# Fine\n\n- [ ] task\n' });
-    expect(info.lossyImport).toBe(false);
+    expect(info.lossyCause).toBeNull();
+  });
+
+  /* An image used to save with the alt text BlockNote invents, which the
+     lossy check read as words the file never had: every page with an image
+     opened read-only (M55.4). */
+  it('reports a clean import for a page with an image, a toggle and a nested child', async () => {
+    const info = await renderReady({
+      markdown:
+        '![](attachments/a.png)\n\n:::toggle Details\nInside.\n:::\n\nParent.\n\n:::indent\nChild.\n:::\n',
+    });
+    expect(info.editor.document.map((b) => b.type)).toEqual([
+      'image',
+      'toggleListItem',
+      'paragraph',
+    ]);
+    expect(info.editor.document[2].children.map((b) => b.type)).toEqual(['paragraph']);
+    expect(info.lossyCause).toBeNull();
+  });
+
+  /* The unmount flush renders nothing, so a carrier that needed rendering
+     would be written as nothing there (M51.5, M53.9). */
+  it('flushes a toggle and an image on unmount as their carriers', async () => {
+    const markdown =
+      ':::toggle Ask [[maya-chen]] first\nInside.\n:::\n\n![Plan](attachments/plan.png "The plan")\n';
+    const onChange = vi.fn();
+    const onReady = vi.fn<(info: ReadyInfo) => void>();
+    const { unmount } = render(
+      <MarkdownEditor
+        markdown={markdown}
+        onChange={onChange}
+        onReady={onReady}
+        debounceMs={60_000}
+      />,
+    );
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const { editor } = onReady.mock.calls[0][0];
+    expect(editor.document.map((b) => b.type).slice(0, 2)).toEqual(['toggleListItem', 'image']);
+    appendParagraph(editor, 'last words');
+    unmount();
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls[0][0]).toBe(`${markdown}\nlast words\n`);
+  });
+});
+
+/**
+ * The `/` menu offers only blocks a save keeps (M53.31): since M55.4 gave
+ * toggles, toggle headings, audio and file their carriers, that is every
+ * block BlockNote has. Opened the way a keyboard opens it, the `/` offered to
+ * the editor's text-input handlers.
+ */
+describe('the / menu', () => {
+  beforeEach(() => {
+    // The menu measures where its trigger is; jsdom has no layout, and its
+    // rect has no `toJSON` for BlockNote to call.
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      ...{ x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 },
+      toJSON: () => ({}),
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const type = (editor: CerebroEditor, text: string) =>
+    act(() => {
+      const view = editor.prosemirrorView;
+      for (const ch of text) {
+        const { from, to } = view.state.selection;
+        const handled = view.someProp('handleTextInput', (f) =>
+          f(view, from, to, ch, () => view.state.tr.insertText(ch, from, to)),
+        );
+        if (handled !== true) view.dispatch(view.state.tr.insertText(ch, from, to));
+      }
+    });
+
+  const options = () => [...document.querySelectorAll('#bn-suggestion-menu [role=option]')];
+  const offered = () =>
+    options().map((el) => el.querySelector('.bn-mt-suggestion-menu-item-title')?.textContent ?? '');
+
+  /** A page holding `Plain.` with the `/` menu open at its end. */
+  const openMenu = async (): Promise<CerebroEditor> => {
+    const { editor } = await renderReady({ markdown: 'Plain.\n' });
+    // Ready fires as the view mounts, before its menus have registered their
+    // triggers; the text rendering is the view having committed.
+    await waitFor(() => expect(document.querySelector('.bn-editor')?.textContent).toBe('Plain.'));
+    editor.setTextCursorPosition(editor.document[0], 'end');
+    await type(editor, ' /');
+    await waitFor(() => expect(offered()).toContain('Callout'));
+    return editor;
+  };
+
+  it('offers toggles, audio, file, image, table and Cerebro’s blocks', async () => {
+    const editor = await openMenu();
+    const title = (key: DefaultSuggestionItem['key']) => editor.dictionary.slash_menu[key].title;
+    expect(DROPPED_SLASH_KEYS.size).toBe(0);
+    expect(offered()).toEqual(
+      expect.arrayContaining([
+        title('toggle_list'),
+        title('toggle_heading'),
+        title('toggle_heading_2'),
+        title('toggle_heading_3'),
+        title('audio'),
+        title('file'),
+        title('image'),
+        title('table'),
+        'AI block',
+        'Callout',
+        'Mermaid diagram',
+        'Database',
+        '2 columns',
+        '2 columns · Turn into',
+      ]),
+    );
+  });
+
+  it('inserts a table with a header row', async () => {
+    const editor = await openMenu();
+    const table = options()[offered().indexOf(editor.dictionary.slash_menu.table.title)];
+    fireEvent.click(table);
+    await waitFor(() => expect(editor.document.some((b) => b.type === 'table')).toBe(true));
+    const inserted = editor.document.find((b) => b.type === 'table')!;
+    expect((inserted.content as { headerRows?: number }).headerRows).toBe(1);
+  });
+});
+
+/**
+ * The formatting toolbar and the block menu offer only what a save keeps
+ * (M55.15). Underline, colour and alignment sat on the toolbar, and a page
+ * reopened without them; `markdown.test.ts` measures each one.
+ */
+describe('the toolbar and block menu', () => {
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+      ...{ x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 },
+      toJSON: () => ({}),
+    });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  /** The internal TipTap editor, for a text selection a person would drag. */
+  type WithTiptap = {
+    _tiptapEditor: {
+      commands: { setTextSelection: (range: { from: number; to: number }) => void };
+    };
+  };
+
+  it('opens on a selection without underline, colour or alignment', async () => {
+    const { editor } = await renderReady({ markdown: 'Some words here.\n' });
+    await waitFor(() =>
+      expect(document.querySelector('.bn-editor')?.textContent).toBe('Some words here.'),
+    );
+    act(() => {
+      editor.focus();
+      (editor as unknown as WithTiptap)._tiptapEditor.commands.setTextSelection({ from: 3, to: 9 });
+    });
+    const bar = await waitFor(() => {
+      const found = document.querySelector('.bn-formatting-toolbar');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    const labels = [...bar.querySelectorAll('button')].map(
+      (b) => b.getAttribute('aria-label') ?? b.textContent ?? '',
+    );
+    const t = editor.dictionary.formatting_toolbar;
+    expect(labels).toEqual(expect.arrayContaining([t.bold.tooltip, t.italic.tooltip]));
+    for (const gone of [
+      t.underline.tooltip,
+      t.colors.tooltip,
+      t.align_left.tooltip,
+      t.align_center.tooltip,
+      t.align_right.tooltip,
+    ]) {
+      expect(labels).not.toContain(gone);
+    }
+  });
+
+  it('turns off the table controls a markdown table cannot carry', async () => {
+    const { editor } = await renderReady({ markdown: '| a |\n| - |\n| b |\n' });
+    expect(editor.settings.tables).toEqual(TABLE_SETTINGS);
+    expect(Object.values(TABLE_SETTINGS)).toEqual([false, false, false, false]);
+  });
+});
+
+/* A bare fence reopened as `javascript` and the page opened read-only for the
+   word (M55.15); the cause reaches the host so its banner can name it. */
+describe('lossy imports', () => {
+  afterEach(cleanup);
+
+  it('opens a bare code fence as a block with no language, and clean', async () => {
+    const info = await renderReady({ markdown: '```\nnpm install\n```\n' });
+    expect(info.editor.document[0]).toMatchObject({ type: 'codeBlock', props: { language: '' } });
+    expect(info.lossyCause).toBeNull();
+  });
+
+  it('names a cause that is not raw HTML', async () => {
+    const info = await renderReady({ markdown: 'See [a][r].\n\n[r]: https://example.com\n' });
+    expect(info.lossyCause).toBe('dropped');
   });
 });
 

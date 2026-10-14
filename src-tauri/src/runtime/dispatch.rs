@@ -106,6 +106,7 @@ use rusqlite::Connection;
 use crate::agent::usage::{RunFacts, Usage};
 
 use super::budget::{self, Day, Decision, GateReason, Reservation};
+use super::cause::{is_cli_session_id, RunCause};
 use super::scheduler::SchedulerState;
 use super::status;
 
@@ -177,8 +178,14 @@ fn stamp(at: DateTime<Utc>) -> String {
 /// `actor` (M33.1) names the construct taking the lease, and is an argument
 /// rather than something derived from `lane` because the two are not the same
 /// axis: ingest claims under five of the seven lanes, and a lane→construct
-/// guess would attribute work to whoever happened to share a queue.
-#[allow(clippy::too_many_arguments)]
+/// guess would attribute work to whoever happened to share a queue. `cause`
+/// (M56.7) is why the run started, written with the row it opens: a
+/// construct's kind, or what `run_agent` admitted; `None` stores NULL, read
+/// as "why not recorded".
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per column of the gate decision, run, lease and item rows it writes"
+)]
 pub fn claim(
     conn: &Connection,
     vault_id: &str,
@@ -187,6 +194,7 @@ pub fn claim(
     reservation: Reservation,
     items: &[String],
     actor: Option<&str>,
+    cause: Option<&RunCause>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // The process-level status is checked before the transaction: a failed
@@ -206,6 +214,7 @@ pub fn claim(
         reservation,
         items,
         actor,
+        cause,
         now,
     );
     match outcome {
@@ -222,7 +231,10 @@ pub fn claim(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the transaction body of claim, taking exactly its arguments"
+)]
 fn claim_inner(
     conn: &Connection,
     vault_id: &str,
@@ -231,6 +243,7 @@ fn claim_inner(
     reservation: Reservation,
     items: &[String],
     actor: Option<&str>,
+    cause: Option<&RunCause>,
     now: DateTime<Utc>,
 ) -> Result<Dispatched, String> {
     // What is actually still claimable, BEFORE anything is written.
@@ -280,9 +293,9 @@ fn claim_inner(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, lease_expires_at, proposals_submitted, \
-         applied, rejected, actor, counters_booked) \
+         applied, rejected, actor, counters_booked, cause) \
          VALUES (?1, ?2, ?3, 'ambient', ?4, ?5, 'running', 'pending', 0, 0, 0, 0, ?6, ?7, ?8, \
-                 0, 0, 0, ?9, 1)",
+                 0, 0, 0, ?9, 1, ?10)",
         rusqlite::params![
             run_id,
             vault_id,
@@ -293,6 +306,7 @@ fn claim_inner(
             reservation.output_tokens as i64,
             lease_expires_at,
             actor,
+            cause.map(RunCause::to_column),
         ],
     )
     .map_err(|e| format!("runs: {e}"))?;
@@ -755,6 +769,14 @@ pub fn refuse_if_chain_spent(
 /// ambient lease sweep's outcome, without a lease: an attended run holds no
 /// reservation and has no deadline, so what marks it orphaned is only that
 /// the process that could finish it is gone.
+///
+/// `cause` (M56.7) is written with the row: `attended` for a panel turn,
+/// `handoff` for a run another run started, `assembly` for the synthesis
+/// construct.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per column of the attended run row it opens"
+)]
 pub fn begin_attended(
     conn: &Connection,
     run_id: &str,
@@ -762,22 +784,24 @@ pub fn begin_attended(
     store_uuid: Option<&str>,
     actor: Option<&str>,
     parent_run_id: Option<&str>,
+    cause: Option<&RunCause>,
     started_at: DateTime<Utc>,
 ) -> Result<(), String> {
     conn.execute(
         "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, outcome, \
          usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
-         actor, parent_run_id, counters_booked) \
+         actor, parent_run_id, counters_booked, cause) \
          VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, 'running', 'pending', 0, 0, 0, 0, 0, 0, \
-                 0, 0, 0, ?5, ?6, 1)",
+                 0, 0, 0, ?5, ?6, 1, ?7)",
         rusqlite::params![
             run_id,
             vault_id,
             store_uuid,
             stamp(started_at),
             actor,
-            parent_run_id
+            parent_run_id,
+            cause.map(RunCause::to_column),
         ],
     )
     .map_err(|e| format!("runs (attended, open): {e}"))?;
@@ -859,10 +883,15 @@ pub fn recover_orphaned_attended(
 /// row, or an ambient one, is refused rather than overwritten.
 ///
 /// With no row to finalize — the open failed, or a caller that never opened
-/// one — the row is inserted whole, with `counters_booked = 0`: no row
-/// stood while the run wrote, so no booking reached it, and its zeros read
-/// as NOT RECORDED rather than as a measurement.
-#[allow(clippy::too_many_arguments)]
+/// one — the row is inserted whole, its `cause` included, with
+/// `counters_booked = 0`: no row stood while the run wrote, so no booking
+/// reached it, and its zeros read as NOT RECORDED rather than as a
+/// measurement. The conflict update never touches `cause`: why a run
+/// started is written once, with its row (M56.7).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per column of the attended run row it writes"
+)]
 pub fn meter_attended(
     conn: &Connection,
     run_id: &str,
@@ -873,6 +902,7 @@ pub fn meter_attended(
     facts: Option<&RunFacts>,
     actor: Option<&str>,
     parent_run_id: Option<&str>,
+    cause: Option<&RunCause>,
     started_at: DateTime<Utc>,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -884,9 +914,9 @@ pub fn meter_attended(
             "INSERT INTO runs (run_id, vault_id, store_uuid, mode, lane, started_at, ended_at, \
          outcome, usage_state, input_tokens, output_tokens, cache_read, cache_write, \
          reserved_total_tokens, reserved_output_tokens, proposals_submitted, applied, rejected, \
-         actor, parent_run_id, counters_booked) \
+         actor, parent_run_id, counters_booked, cause) \
          VALUES (?1, ?2, ?3, 'attended', 'agent', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, 0, 0, \
-                 0, ?12, ?13, 0) \
+                 0, ?12, ?13, 0, ?14) \
          ON CONFLICT (run_id) DO UPDATE SET ended_at = excluded.ended_at, \
          outcome = excluded.outcome, usage_state = excluded.usage_state, \
          input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens, \
@@ -907,6 +937,7 @@ pub fn meter_attended(
                 counted.cache_write as i64,
                 actor,
                 parent_run_id,
+                cause.map(RunCause::to_column),
             ],
         )
         .map_err(|e| format!("runs (attended): {e}"))?;
@@ -921,6 +952,26 @@ pub fn meter_attended(
         write_facts(conn, run_id, facts)?;
         route_denials(conn, run_id, store_uuid, facts);
     }
+    Ok(())
+}
+
+/// Record the Claude Code session a run ran as (M56.7), from its stream.
+///
+/// An id that is not session-shaped (`cause::is_cli_session_id`) is refused
+/// before it reaches the column's CHECK. Otherwise the row takes it, whatever
+/// it held: the stream's own id is the one a transcript is filed under.
+pub fn record_cli_session(conn: &Connection, run_id: &str, id: &str) -> Result<(), String> {
+    if !is_cli_session_id(id) {
+        return Err(format!(
+            "run {run_id}: {id:?} is not a Claude Code session id — 8 to 64 letters, digits \
+             and dashes, never starting with a dash"
+        ));
+    }
+    conn.execute(
+        "UPDATE runs SET cli_session_id = ?2 WHERE run_id = ?1",
+        rusqlite::params![run_id, id],
+    )
+    .map_err(|e| format!("runs (cli session): {e}"))?;
     Ok(())
 }
 
@@ -963,15 +1014,17 @@ fn write_facts(conn: &Connection, run_id: &str, facts: &RunFacts) -> Result<(), 
 /// One row per run with a NON-EMPTY denial array, reusing the registered
 /// `capability_unavailable` code — operational by the two-destinies rule: a
 /// denied tool call is a capability gap of this run, not epistemic history.
-/// An empty array records nothing; `Some(0)` lives in RunFacts, and a zero
-/// row per run would train everyone to stop reading the log. Best-effort by
-/// construction (`record_or_warn`): telemetry must never become a second way
-/// for the run to fail.
+/// The detail says how many calls were denied and names the tools (M54.9,
+/// `denial_detail`), so a connector tool a record narrowed out reads by name
+/// under its run. An empty array records nothing; `Some(0)` lives in
+/// RunFacts, and a zero row per run would train everyone to stop reading the
+/// log. Best-effort by construction (`record_or_warn`): telemetry must never
+/// become a second way for the run to fail.
 fn route_denials(conn: &Connection, run_id: &str, store_uuid: Option<&str>, facts: &RunFacts) {
     let Some(denied) = facts.permission_denials.filter(|count| *count > 0) else {
         return;
     };
-    let detail = format!("the CLI reported {denied} permission denial(s) during this run");
+    let detail = denial_detail(denied, facts.denied_tools.as_deref().unwrap_or(&[]));
     let refusal = crate::policy::table::PolicyTable::load()
         .ok()
         .and_then(|table| {
@@ -992,6 +1045,35 @@ fn route_denials(conn: &Connection, run_id: &str, store_uuid: Option<&str>, fact
         };
         super::operational::record_or_warn(conn, &refusal, &entry);
     }
+}
+
+/// What a run's `agent.permission` row says (M54.9): `the CLI denied N
+/// call(s) this run: a, b`, the tools sorted as RunFacts holds them. Twenty
+/// names at most, then how many more; each name loses control characters and
+/// stops at 120 characters, since a server picks its own tool names.
+fn denial_detail(calls: u64, tools: &[String]) -> String {
+    const NAMED: usize = 20;
+    const LONGEST: usize = 120;
+    let mut detail = format!("the CLI denied {calls} call(s) this run");
+    if tools.is_empty() {
+        return detail;
+    }
+    let named: Vec<String> = tools
+        .iter()
+        .take(NAMED)
+        .map(|tool| {
+            tool.chars()
+                .filter(|c| !c.is_control())
+                .take(LONGEST)
+                .collect()
+        })
+        .collect();
+    detail.push_str(": ");
+    detail.push_str(&named.join(", "));
+    if tools.len() > NAMED {
+        detail.push_str(&format!(" and {} more", tools.len() - NAMED));
+    }
+    detail
 }
 
 /// Today's ambient spend across every vault — what the meter reads.
@@ -1156,6 +1238,7 @@ mod tests {
             small(),
             &["a.md".to_string()],
             None,
+            None,
             now,
         )
         .unwrap() else {
@@ -1209,6 +1292,7 @@ mod tests {
                 small(),
                 &["a.md".into()],
                 None,
+                None,
                 now
             )
             .unwrap(),
@@ -1221,6 +1305,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             None,
             now,
         )
@@ -1246,6 +1331,7 @@ mod tests {
                 "filed",
                 small(),
                 &["b.md".into()],
+                None,
                 None,
                 now
             )
@@ -1283,6 +1369,7 @@ mod tests {
                         small(),
                         &[key.into()],
                         None,
+                        None,
                         now
                     )
                     .unwrap(),
@@ -1299,6 +1386,7 @@ mod tests {
                 "filed",
                 small(),
                 &["c.md".into()],
+                None,
                 None,
                 now
             )
@@ -1354,6 +1442,7 @@ mod tests {
             small(),
             &["a.md".into()],
             Some("process:digest"),
+            None,
             now,
         )
         .unwrap();
@@ -1388,6 +1477,7 @@ mod tests {
                 small(),
                 &["b.md".into()],
                 Some("process:scout"),
+                None,
                 now
             )
             .unwrap(),
@@ -1418,6 +1508,7 @@ mod tests {
                 small(),
                 &["a.md".into()],
                 Some("process:digest"),
+                None,
                 now,
             )
             .unwrap()
@@ -1466,6 +1557,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1483,6 +1575,7 @@ mod tests {
                 "filed",
                 small(),
                 &["b.md".into()],
+                None,
                 None,
                 at("2026-08-09T10:21:00Z"),
             )
@@ -1541,6 +1634,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             now,
         )
         .unwrap() else {
@@ -1553,6 +1647,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             None,
             now,
         )
@@ -1633,6 +1728,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             now,
         )
         .unwrap() else {
@@ -1701,6 +1797,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -1711,6 +1808,7 @@ mod tests {
             stop_reason: Some("end_turn".into()),
             total_cost_micros: Some(41_200),
             permission_denials: Some(2),
+            denied_tools: Some(vec!["Bash".into(), "mcp__gmail__trash_thread".into()]),
             ..RunFacts::default()
         };
         finalize(
@@ -1733,15 +1831,19 @@ mod tests {
         assert_eq!(model.as_deref(), Some("claude-opus-5"));
         assert_eq!(cost, Some(41_200));
         assert_eq!(turns, None, "an absent field is NULL, never zero");
-        let routed: i64 = conn
+        let (routed, detail): (i64, String) = conn
             .query_row(
-                "SELECT count(*) FROM operational_log \
+                "SELECT count(*), coalesce(max(detail), '') FROM operational_log \
                  WHERE surface = 'agent.permission' AND run_id = ?1",
                 [&lease.run_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
         assert_eq!(routed, 1, "a non-empty denial array is one operational row");
+        assert_eq!(
+            detail, "the CLI denied 2 call(s) this run: Bash, mcp__gmail__trash_thread",
+            "the row names the denied tools (M54.9)"
+        );
 
         // No facts at all: every fact column stays NULL and nothing routes.
         let Dispatched::Started(second) = claim(
@@ -1751,6 +1853,7 @@ mod tests {
             "filed",
             small(),
             &["b.md".into()],
+            None,
             None,
             at("2026-08-09T11:00:00Z"),
         )
@@ -1783,6 +1886,28 @@ mod tests {
     }
 
     #[test]
+    fn a_denial_detail_names_twenty_tools_then_counts_the_rest() {
+        assert_eq!(denial_detail(3, &[]), "the CLI denied 3 call(s) this run");
+        let tools: Vec<String> = (0..23).map(|i| format!("mcp__toy__t{i:02}")).collect();
+        let detail = denial_detail(40, &tools);
+        assert!(
+            detail.starts_with("the CLI denied 40 call(s) this run: mcp__toy__t00, "),
+            "{detail}"
+        );
+        assert!(detail.ends_with("mcp__toy__t19 and 3 more"), "{detail}");
+        assert!(!detail.contains("t20"), "{detail}");
+        // A server picks its own tool names: no control character reaches
+        // the row, and no name runs past 120 characters.
+        let odd = vec![format!("mcp__toy__a\u{7}b{}", "x".repeat(200))];
+        let detail = denial_detail(1, &odd);
+        assert!(!detail.contains('\u{7}'));
+        assert_eq!(
+            detail.len(),
+            "the CLI denied 1 call(s) this run: ".len() + 120
+        );
+    }
+
+    #[test]
     fn an_absurd_cost_degrades_to_null_and_never_fails_the_finalize() {
         // 1e300 USD is finite and non-negative, so it survives the parse
         // filter as a saturated u64 — and a wrapped `as i64` cast would go
@@ -1799,6 +1924,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             at("2026-08-09T10:00:00Z"),
         )
@@ -1852,6 +1978,7 @@ mod tests {
                 small(),
                 &["a.md".into()],
                 None,
+                None,
                 now,
             )
             .unwrap() else {
@@ -1896,6 +2023,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             now,
         )
         .unwrap();
@@ -1922,6 +2050,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             now,
         )
@@ -1970,6 +2099,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             now,
         )
@@ -2020,6 +2150,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             now,
         )
@@ -2080,6 +2211,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             now,
         )
         .unwrap() else {
@@ -2127,6 +2259,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             at("2026-08-09T10:05:00Z"),
         )
         .unwrap();
@@ -2157,6 +2290,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             now,
         )
@@ -2213,6 +2347,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -2259,6 +2394,7 @@ mod tests {
             small(),
             &["a.md".to_string()],
             Some(crate::ingest::driver::ACTOR),
+            None,
             now,
         )
         .unwrap() else {
@@ -2277,6 +2413,7 @@ mod tests {
             None,
             Some("process:weekly-digest"),
             None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -2287,6 +2424,7 @@ mod tests {
             Some(&vault),
             Some("store"),
             RunOutcome::Succeeded,
+            None,
             None,
             None,
             None,
@@ -2338,6 +2476,7 @@ mod tests {
             None,
             Some("process:librarian"),
             None,
+            None,
             now,
             at("2026-08-09T10:01:00Z"),
         )
@@ -2352,6 +2491,7 @@ mod tests {
             None,
             Some("process:contradiction-hunter"),
             Some("root-1"),
+            None,
             now,
             at("2026-08-09T10:02:00Z"),
         )
@@ -2437,6 +2577,7 @@ mod tests {
             Some("store"),
             Some("process:librarian"),
             Some("root-0"),
+            None,
             now,
         )
         .unwrap();
@@ -2465,6 +2606,7 @@ mod tests {
             None,
             Some("process:librarian"),
             Some("root-0"),
+            None,
             now,
             at("2026-09-27T10:05:00Z"),
         )
@@ -2492,6 +2634,7 @@ mod tests {
             Some(&vault),
             Some("store"),
             RunOutcome::Failed,
+            None,
             None,
             None,
             None,
@@ -2525,10 +2668,21 @@ mod tests {
             Some("store"),
             None,
             None,
+            None,
             before,
         )
         .unwrap();
-        begin_attended(&conn, "mine", Some(&vault), Some("store"), None, None, now).unwrap();
+        begin_attended(
+            &conn,
+            "mine",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            None,
+            now,
+        )
+        .unwrap();
         crate::runtime::sink::arm(&dir).unwrap();
         committed(1, 0).book("orphan");
         crate::runtime::sink::disarm();
@@ -2576,6 +2730,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             before,
             now,
         )
@@ -2592,7 +2747,17 @@ mod tests {
     fn a_child_that_never_spawned_leaves_no_attended_row() {
         let (dir, conn, vault) = fixture("dispatch-attended-discard");
         let now = at("2026-09-27T10:00:00Z");
-        begin_attended(&conn, "never", Some(&vault), Some("store"), None, None, now).unwrap();
+        begin_attended(
+            &conn,
+            "never",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            None,
+            now,
+        )
+        .unwrap();
         discard_unstarted_attended(&conn, "never").unwrap();
         let count = |run_id: &str| -> i64 {
             conn.query_row(
@@ -2614,6 +2779,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             now,
             now,
         )
@@ -2622,6 +2788,285 @@ mod tests {
         assert_eq!(count("done"), 1, "a finished run is never taken back");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn cause_of(conn: &Connection, run_id: &str) -> Option<String> {
+        conn.query_row("SELECT cause FROM runs WHERE run_id = ?1", [run_id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_claim_writes_its_cause_with_the_row() {
+        use crate::runtime::cause::CauseKind;
+        let (dir, conn, vault) = fixture("dispatch-cause-claim");
+        let _lock = status::test_lock();
+        status::clear();
+        let cause = RunCause::new(
+            CauseKind::Schedule,
+            None,
+            Some("weekdays 08:30"),
+            Some("2026-08-09T08:30:00Z"),
+        );
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            small(),
+            &[],
+            Some("process:scout"),
+            Some(&cause),
+            at("2026-08-09T09:15:00Z"),
+        )
+        .unwrap() else {
+            panic!("an empty claim reaches the gate and starts");
+        };
+        assert_eq!(
+            cause_of(&conn, &lease.run_id).as_deref(),
+            Some(cause.to_column().as_str())
+        );
+        // And with no cause, the row holds NULL: "why not recorded". The
+        // first run says what it spent, so the day's accounting stays exact.
+        finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::Succeeded,
+            Some(Usage {
+                output_tokens: 10,
+                ..Usage::default()
+            }),
+            None,
+            ItemOutcome::Consume,
+            at("2026-08-09T09:20:00Z"),
+        )
+        .unwrap();
+        let Dispatched::Started(bare) = claim(
+            &conn,
+            &vault,
+            "store",
+            "scheduled",
+            small(),
+            &[],
+            None,
+            None,
+            at("2026-08-09T09:30:00Z"),
+        )
+        .unwrap() else {
+            panic!("expected a lease");
+        };
+        assert_eq!(cause_of(&conn, &bare.run_id), None);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_attended_open_writes_its_cause() {
+        use crate::runtime::cause::CauseKind;
+        let (dir, conn, vault) = fixture("dispatch-cause-open");
+        let attended = RunCause::of(CauseKind::Attended);
+        begin_attended(
+            &conn,
+            "turn",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            Some(&attended),
+            at("2026-08-09T10:00:00Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            cause_of(&conn, "turn").as_deref(),
+            Some(r#"{"kind":"attended"}"#)
+        );
+        let handed = RunCause::handoff("process:scout");
+        begin_attended(
+            &conn,
+            "hop",
+            Some(&vault),
+            Some("store"),
+            Some("process:knowledge"),
+            Some("turn"),
+            Some(&handed),
+            at("2026-08-09T10:01:00Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            cause_of(&conn, "hop").as_deref(),
+            Some(r#"{"kind":"handoff","subject":"process:scout"}"#),
+            "a hand-off records its caller"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_meter_fallback_insert_carries_its_cause() {
+        use crate::runtime::cause::CauseKind;
+        let (dir, conn, vault) = fixture("dispatch-cause-fallback");
+        let now = at("2026-08-09T10:00:00Z");
+        meter_attended(
+            &conn,
+            "never-opened",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            None,
+            None,
+            Some(&RunCause::of(CauseKind::Assembly)),
+            now,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            cause_of(&conn, "never-opened").as_deref(),
+            Some(r#"{"kind":"assembly"}"#),
+            "a row inserted whole at the end carries its cause too"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_finish_never_rewrites_the_cause() {
+        use crate::runtime::cause::CauseKind;
+        let (dir, conn, vault) = fixture("dispatch-cause-finish");
+        let now = at("2026-08-09T10:00:00Z");
+        begin_attended(
+            &conn,
+            "turn",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            Some(&RunCause::of(CauseKind::Attended)),
+            now,
+        )
+        .unwrap();
+        // A finisher that names another cause, or none, changes nothing:
+        // why a run started is written once, with its row.
+        meter_attended(
+            &conn,
+            "turn",
+            Some(&vault),
+            Some("store"),
+            RunOutcome::Succeeded,
+            None,
+            None,
+            None,
+            None,
+            Some(&RunCause::of(CauseKind::Manual)),
+            now,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            cause_of(&conn, "turn").as_deref(),
+            Some(r#"{"kind":"attended"}"#)
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn record_cli_session_writes_a_valid_id_and_refuses_a_bad_one() {
+        let (dir, conn, vault) = fixture("dispatch-cli-session");
+        let now = at("2026-08-09T10:00:00Z");
+        begin_attended(
+            &conn,
+            "turn",
+            Some(&vault),
+            Some("store"),
+            None,
+            None,
+            None,
+            now,
+        )
+        .unwrap();
+        let session = |conn: &Connection| -> Option<String> {
+            conn.query_row(
+                "SELECT cli_session_id FROM runs WHERE run_id = 'turn'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        record_cli_session(&conn, "turn", "00000000-0000-4000-8000-000000000001").unwrap();
+        assert_eq!(
+            session(&conn).as_deref(),
+            Some("00000000-0000-4000-8000-000000000001")
+        );
+        for bad in ["../x1234", "--dangerously-skip-permissions", "short"] {
+            let refused = record_cli_session(&conn, "turn", bad).unwrap_err();
+            assert!(
+                refused.contains("not a Claude Code session id"),
+                "{refused}"
+            );
+        }
+        assert_eq!(
+            session(&conn).as_deref(),
+            Some("00000000-0000-4000-8000-000000000001"),
+            "a refused id leaves the recorded one standing"
+        );
+        // The stream's own id wins over whatever the row held.
+        record_cli_session(&conn, "turn", "11111111-1111-4111-8111-111111111111").unwrap();
+        assert_eq!(
+            session(&conn).as_deref(),
+            Some("11111111-1111-4111-8111-111111111111")
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every statement outside a test that inserts a run row lives in this
+    /// file, and every one of them names `cause` — a writer added elsewhere,
+    /// or one that forgot the column, fails here rather than writing rows
+    /// that can never say why they ran (M56.7).
+    #[test]
+    fn every_production_runs_insert_names_its_cause() {
+        fn visit(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    visit(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        visit(&root, &mut files);
+        assert!(files.len() > 50, "the walk found the tree");
+        let mut writers = Vec::new();
+        for file in &files {
+            let text = std::fs::read_to_string(file).unwrap();
+            // Production code is what precedes the file's test module.
+            let production = text
+                .find("#[cfg(test)]\nmod tests")
+                .map_or(text.as_str(), |at| &text[..at]);
+            let mut rest = production;
+            while let Some(at) = rest.find("INTO runs (") {
+                let statement = &rest[at..];
+                let columns = &statement[..statement.find(')').unwrap()];
+                let name = file.strip_prefix(&root).unwrap().display().to_string();
+                writers.push((name, columns.contains("cause")));
+                rest = &rest[at + 1..];
+            }
+        }
+        assert_eq!(
+            writers,
+            [
+                ("runtime/dispatch.rs".to_string(), true),
+                ("runtime/dispatch.rs".to_string(), true),
+                ("runtime/dispatch.rs".to_string(), true),
+            ],
+            "the claim, the attended open and the meter's fallback insert, each naming cause"
+        );
     }
 
     #[test]
@@ -2639,6 +3084,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             now,
         )
@@ -2687,6 +3133,7 @@ mod tests {
             small(),
             &["a.md".into()],
             None,
+            None,
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap();
@@ -2712,6 +3159,7 @@ mod tests {
             small(),
             &["a.md".to_string()],
             None,
+            Some(&RunCause::of(crate::runtime::cause::CauseKind::Ingest)),
             at("2026-08-09T10:00:00Z"),
         );
     }
@@ -2734,6 +3182,7 @@ mod tests {
             small(),
             &["a.md".to_string()],
             None,
+            Some(&RunCause::of(crate::runtime::cause::CauseKind::Ingest)),
             at("2026-08-09T10:00:00Z"),
         )
         .unwrap() else {
@@ -2794,6 +3243,12 @@ mod tests {
             if started {
                 assert_eq!(item.state, SchedulerState::Claimed, "{point}");
                 assert_eq!(leases, 1, "{point}");
+                // The cause was written with the row, in the same commit
+                // (M56.7): a committed claim never stands without it.
+                let cause: Option<String> = conn
+                    .query_row("SELECT cause FROM runs", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(cause.as_deref(), Some(r#"{"kind":"ingest"}"#), "{point}");
                 // And the lease is recoverable, which is what makes the
                 // claimed state safe rather than a wedge.
                 assert_eq!(
@@ -2916,6 +3371,7 @@ mod tests {
             "filed",
             small(),
             &["a.md".into()],
+            None,
             None,
             at("2026-08-09T10:00:00Z"),
         )

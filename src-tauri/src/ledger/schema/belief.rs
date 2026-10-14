@@ -8,6 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::normalize::normalize_alias_v1;
+use super::projection::validate_projection_claim;
 use super::subject::SubjectRef;
 use super::value::{validate_field_path, TypedValue};
 use super::{canonical_json, is_id128, is_sha256, schema_body, sha256_first128};
@@ -75,7 +76,9 @@ impl BeliefBasis {
 
 schema_body! {
     /// A new Belief (draft). The subject is always resolved — a Belief about
-    /// nobody is not a Belief.
+    /// nobody is not a Belief. Its first `.md` alias, if any, claims the
+    /// knowledge-relative path the Belief projects to, and must be one the
+    /// projection writer can create (`validate_claimable_path`).
     pub struct BeliefCreated {
         pub belief_id: String,
         pub subject: SubjectRef,
@@ -91,10 +94,11 @@ impl BeliefCreated {
         if !is_id128(&self.belief_id) {
             return Err("belief_id is not a stable 128-bit hex id".into());
         }
-        if !matches!(self.subject, SubjectRef::Resolved { .. }) {
+        let SubjectRef::Resolved { aliases, .. } = &self.subject else {
             return Err("belief.created subject must be resolved".into());
-        }
+        };
         self.subject.validate()?;
+        validate_projection_claim(aliases)?;
         if !self.fields.is_object() {
             return Err("belief fields must be a JSON object".into());
         }
@@ -333,6 +337,53 @@ mod tests {
         let mut bad_fields = event;
         bad_fields.fields = serde_json::json!("not an object");
         assert!(bad_fields.validate().is_err());
+    }
+
+    #[test]
+    fn a_created_belief_claims_only_a_writable_projection_path() {
+        let claiming = |aliases: &[&str]| {
+            let mut event = belief_created();
+            event.subject = SubjectRef::Resolved {
+                entity_id: ID_B.into(),
+                aliases: aliases.iter().map(|a| a.to_string()).collect(),
+            };
+            event
+        };
+        claiming(&["concepts/acme.md"]).validate().unwrap();
+        // What the migration records under a dot-folder or as a dotfile.
+        claiming(&[".archive/acme.md"]).validate().unwrap();
+        claiming(&[".hidden.md"]).validate().unwrap();
+        for bad in [
+            "../escape.md",
+            "concepts/../../escape.md",
+            "./acme.md",
+            "concepts/./acme.md",
+            "/concepts/acme.md",
+            "concepts//acme.md",
+            ".md",
+            "concepts/.md",
+            "back\\slash.md",
+            // Paths of the right shape the projection writer still cannot
+            // create: a NUL, and a leaf whose `<leaf>.cerebro-tmp` passes
+            // NAME_MAX.
+            "concepts/a\0b.md",
+            &format!("concepts/{}.md", "a".repeat(241)),
+        ] {
+            let error = claiming(&["Acme", bad]).validate().unwrap_err();
+            assert!(error.contains("projection path"), "{bad:?}: {error}");
+        }
+        claiming(&[&format!("concepts/{}.md", "a".repeat(240))])
+            .validate()
+            .unwrap();
+        // A non-.md alias claims nothing, whatever it spells.
+        claiming(&["../not/a/claim", "Acme"]).validate().unwrap();
+        // Only the FIRST .md alias is the claim; a later one is a hint.
+        claiming(&["concepts/acme.md", "../escape.md"])
+            .validate()
+            .unwrap();
+        assert!(claiming(&["../escape.md", "concepts/acme.md"])
+            .validate()
+            .is_err());
     }
 
     #[test]

@@ -225,7 +225,7 @@ pub fn plan(state: &EpistemicState, store_uuid: &str, classified_at: &str) -> Ve
             Ok(plan) => out.push(plan),
             // A body that will not build is a bug in this module, not a
             // reason to stop classifying the rest of the base.
-            Err(detail) => eprintln!(
+            Err(detail) => log::error!(
                 "conflict gauntlet: comparison {} could not be planned — {detail}",
                 comparison.comparison_id
             ),

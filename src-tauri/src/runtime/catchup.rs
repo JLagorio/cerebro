@@ -590,7 +590,10 @@ pub fn outcome_for(contract: &Contract, closed_for: Duration) -> Outcome {
 
 /// Record one typed catch-up outcome, pinning the contract version and digest
 /// that were active when the app closed.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per column of the catch-up outcome row it writes"
+)]
 pub fn record_outcome(
     conn: &Connection,
     vault_id: &str,

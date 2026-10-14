@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
+import { DIVERGED_MESSAGE } from '@/engine/roots';
+import {
+  resetMockRoots,
+  seedFile,
+  seedRoot,
+  seedRootGit,
+  seedRootGitRemoteFailure,
+} from '@/lib/mockRoots';
 import { initialRootsState, selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { RootTree } from './RootTree';
@@ -19,6 +26,9 @@ describe('RootTree', () => {
     render(<RootTree />);
 
     expect(screen.getAllByTestId('tree-row')).toHaveLength(2);
+    // Both roots are git-capable, so the tree reads their status and then
+    // their dirty count (M32.9). Let both land inside act, not after the test.
+    await waitFor(() => expect(Object.keys(useRootsStore.getState().gitDirty)).toHaveLength(2));
   });
 
   it('expands a root on click and lists its children', async () => {
@@ -158,5 +168,108 @@ describe('RootTree', () => {
         .find((r) => r.getAttribute('data-path') === 'README.md');
       expect(row?.getAttribute('data-active')).toBe('true');
     });
+  });
+});
+
+describe('RootTree git badge', () => {
+  it('shows branch and counts for a repo root that has something to say', async () => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha', git: true });
+    seedRootGit('/repos/alpha', { branch: 'main', ahead: 2, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-badge').textContent).toBe('main ↑2 ↓1');
+    });
+  });
+
+  it('stays silent for a clean repo in sync — nothing speaks first', async () => {
+    seedRoot({ path: '/repos/quiet', label: 'quiet', git: true });
+    seedRootGit('/repos/quiet', { branch: 'main', ahead: 0, behind: 0 });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    await waitFor(() => {
+      expect(useRootsStore.getState().gitStatus['root-1']?.branch).toBe('main');
+    });
+    expect(screen.queryByTestId('root-git-badge')).toBeNull();
+  });
+
+  it('never badges a root that is not a repo, and stores the refusal instead', async () => {
+    seedRoot({ path: '/notes', label: 'notes', git: false });
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+
+    expect(screen.queryByTestId('root-git-badge')).toBeNull();
+    // No git capability means the tree never even asks, so nothing is refused
+    // and nothing is toasted — the row is simply a plain folder.
+    expect(useRootsStore.getState().gitRefusals['root-1']).toBeUndefined();
+  });
+});
+
+describe('RootTree sync control', () => {
+  /** Render, then let the mount-time status and dirty reads land. */
+  async function renderSettled(rootId: string): Promise<HTMLElement> {
+    render(<RootTree />);
+    await waitFor(() => expect(useRootsStore.getState().gitDirty[rootId]).toBe(0));
+    return screen.getByTestId('root-git-sync');
+  }
+
+  it('names a failed sync on the row, with the credential hint, and toasts nothing', async () => {
+    const root = seedRoot({ path: '/repos/locked', label: 'locked', git: true });
+    seedRootGit('/repos/locked', { branch: 'main', behind: 1 });
+    seedRootGitRemoteFailure('/repos/locked', 'auth_error');
+    await useRootsStore.getState().loadRoots();
+    useUiStore.setState({ toasts: [] });
+
+    const control = await renderSettled(root.id);
+    expect(control.textContent).toBe('\u21bb');
+    fireEvent.click(control);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-sync').textContent).toBe('auth failed');
+    });
+    const failed = screen.getByTestId('root-git-sync');
+    expect(failed.getAttribute('title')).toContain('Check your credential helper or SSH key');
+    expect(failed.getAttribute('aria-label')).toBe('Sync locked: auth failed');
+    expect(useUiStore.getState().toasts).toEqual([]);
+    // The control sits inside the row's button; syncing must not also open it.
+    expect(useRootsStore.getState().expanded[`${root.id} `]).toBeUndefined();
+  });
+
+  it('says a diverged root diverged, in the words a fast-forward refusal uses', async () => {
+    const root = seedRoot({ path: '/repos/div', label: 'div', git: true });
+    seedRootGit('/repos/div', { branch: 'main', ahead: 1, behind: 1 });
+    await useRootsStore.getState().loadRoots();
+
+    fireEvent.click(await renderSettled(root.id));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-sync').textContent).toBe('diverged');
+    });
+    expect(screen.getByTestId('root-git-sync').getAttribute('title')).toBe(DIVERGED_MESSAGE);
+  });
+
+  it('goes quiet again once a sync lands', async () => {
+    const root = seedRoot({ path: '/repos/behind', label: 'behind', git: true });
+    seedRootGit('/repos/behind', { branch: 'main', behind: 1 });
+    await useRootsStore.getState().loadRoots();
+    useRootsStore.setState({
+      gitSync: {
+        [root.id]: { status: 'network_error', message: 'x', updatedFiles: [], conflictFiles: [] },
+      },
+    });
+
+    const control = await renderSettled(root.id);
+    expect(control.textContent).toBe('offline');
+    fireEvent.click(control);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('root-git-sync').textContent).toBe('\u21bb');
+    });
+    expect(screen.getByTestId('root-git-sync').getAttribute('aria-label')).toBe('Sync behind');
   });
 });

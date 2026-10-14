@@ -1,0 +1,63 @@
+{
+  "format": 1,
+  "why": "How Claude Code spells a connector's server name in the tool names it reports, recorded from init's tool list on the CLI version below, one server per name. Each UTF-16 code unit outside [A-Za-z0-9_-] becomes _, so an accented letter is one _ and an emoji two. Nothing collapses, case stays and nothing is cut, 60 characters included. Replayed by cli_names_match_what_the_cli_reports in src-tauri/src/connectors.rs, which changes to match this file, never the reverse.",
+  "cli": "2.1.250",
+  "cases": [
+    {
+      "server": "toy.v2",
+      "heard": "toy_v2"
+    },
+    {
+      "server": "my toy",
+      "heard": "my_toy"
+    },
+    {
+      "server": "caf\u00e9",
+      "heard": "caf_"
+    },
+    {
+      "server": "a__b",
+      "heard": "a__b"
+    },
+    {
+      "server": "Toy",
+      "heard": "Toy"
+    },
+    {
+      "server": "_x",
+      "heard": "_x"
+    },
+    {
+      "server": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "heard": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "server": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "heard": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "server": "emoji\ud83d\ude00",
+      "heard": "emoji__"
+    },
+    {
+      "server": "a,b",
+      "heard": "a_b"
+    },
+    {
+      "server": "x/y",
+      "heard": "x_y"
+    },
+    {
+      "server": "-dash",
+      "heard": "-dash"
+    },
+    {
+      "server": "end_",
+      "heard": "end_"
+    },
+    {
+      "server": "UPPER.case",
+      "heard": "UPPER_case"
+    }
+  ]
+}

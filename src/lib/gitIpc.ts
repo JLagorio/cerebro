@@ -16,9 +16,9 @@ import type {
   GitWorkspaceInfo,
   LastCommitInfo,
   ModifiedFile,
-  PulseCommit,
   RemoteResult,
   Resolution,
+  VaultPulse,
 } from '@/engine/git';
 import * as mock from './mockGit';
 
@@ -79,7 +79,7 @@ export function getCommitDiff(vault: string, commit: string): Promise<string> {
     : mock.getCommitDiff(vault, commit);
 }
 
-export function getVaultPulse(vault: string): Promise<PulseCommit[]> {
+export function getVaultPulse(vault: string): Promise<VaultPulse> {
   return inTauri() ? invokeTauri('get_vault_pulse', { vault }) : mock.getVaultPulse(vault);
 }
 

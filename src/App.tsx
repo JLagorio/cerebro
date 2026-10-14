@@ -182,8 +182,8 @@ function VaultChooser() {
         </span>
         <h1 className="m-0 text-lg font-semibold text-n-900">Open a vault</h1>
         <p className="m-0 text-sm leading-[19px] text-n-600">
-          A vault is a folder of markdown files — projects, docs, and work items live there as plain
-          text.
+          A vault is a folder of markdown files — pages, databases and their records live there as
+          plain text.
         </p>
         {(error ?? pickError) ? (
           <p className="m-0 text-xs text-danger-500">{error ?? pickError}</p>
@@ -475,7 +475,10 @@ function App() {
                   run). Parked is `park.frame`: clipped to zero width in the
                   same layout pass — see SHELL_CLASSES. `inert` (React 19)
                   follows a frame later, and takes it out of the tab order and
-                  the a11y tree, which `aria-hidden` alone would not do. */}
+                  the a11y tree, which `aria-hidden` alone would not do. A
+                  vault switch is the one remount, and it is on purpose
+                  (M53.10): keyed by the vault, the panel ends its turn with
+                  the vault it was asked in, so no turn outlives its vault. */}
               {aiPanelOpen && (
                 <div
                   data-testid="ai-panel-frame"
@@ -486,7 +489,7 @@ function App() {
                     maxWidth: detailOpen ? `calc(100% - ${RIGHT_PANEL_MIN_WIDTH}px)` : '100%',
                   }}
                 >
-                  <AiPanel room={rooms?.assistant ?? null} />
+                  <AiPanel key={vaultPath} room={rooms?.assistant ?? null} />
                 </div>
               )}
               {/* M52: parked, and saying so. The sidebar's zap stayed pressed

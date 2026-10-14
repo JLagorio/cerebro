@@ -1,4 +1,5 @@
 import type { Place } from '@/engine/place';
+import type { RunOwner } from '@/engine/runLog';
 
 /**
  * What the assistant is doing right now (M17.7).
@@ -16,20 +17,14 @@ import type { Place } from '@/engine/place';
  * back to it.
  */
 
-export type RunOwner =
-  /** A turn someone typed and is watching. */
-  | 'chat'
-  /** A background job: distilling, a scheduled skill, an agent record. */
-  | 'job';
-
 export interface RunRecord {
   /**
    * UI-side identity, minted when the task starts.
    *
    * Deliberately not the backend run id: a task exists from the moment Send is
    * pressed, and the child does not exist until a skill body has been read and
-   * the MCP handshake has completed. Keying on the backend id would leave that
-   * window invisible, which is exactly the window a first send spends in.
+   * `run_agent` has spawned it. Keying on the backend id would leave that
+   * window invisible, which is exactly the window a send spends in.
    */
   id: string;
   owner: RunOwner;

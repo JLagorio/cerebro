@@ -37,6 +37,7 @@ function concept(partial: Partial<Entry> & { path: string }): Entry {
     createdAt: '2026-07-01T00:00:00Z',
     modifiedAt: '2026-07-01T00:00:00Z',
     parseError: null,
+    hash: null,
     ...partial,
   };
 }

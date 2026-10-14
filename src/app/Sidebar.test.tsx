@@ -22,6 +22,7 @@ function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
     createdAt: '2026-07-01T00:00:00Z',
     modifiedAt: '2026-07-01T00:00:00Z',
     parseError: null,
+    hash: null,
     ...partial,
   };
 }
@@ -338,14 +339,15 @@ describe('Sidebar', () => {
         ],
       });
       render(<Sidebar />);
-      // The row is a destination for ONE agent — and it lives outside the
-      // `nav-surfaces` containers, so an agent named after a destination can
-      // never be caught by a spec scoped to them.
+      // The row is a destination for ONE agent — its page (M55.12) — and it
+      // lives outside the `nav-surfaces` containers, so an agent named after
+      // a destination can never be caught by a spec scoped to them.
       fireEvent.click(screen.getByTestId('nav-agent'));
       expect(useNavStore.getState().selection).toEqual({
-        kind: 'agents',
-        actor: 'process:scout',
+        kind: 'doc',
+        path: 'records/agents/scout.md',
       });
+      expect(screen.getByTestId('nav-agent').getAttribute('aria-current')).toBe('page');
       // The header's reveals: ↗ is the door to the fleet, ＋ starts a new
       // agent — the affordances the destination row and its nested "New
       // agent" row used to carry.
@@ -358,8 +360,10 @@ describe('Sidebar', () => {
       fireEvent.click(head);
       expect(screen.queryAllByTestId('nav-agent')).toEqual([]);
       expect(useNavStore.getState().selection).toEqual({ kind: 'agents' });
-      // The header action survives the fold — creation is not membership.
-      expect(screen.getByTestId('nav-agent-new')).toBeTruthy();
+      // The header action survives the fold — creation is not membership —
+      // and it is still the Library's create flow.
+      fireEvent.click(screen.getByTestId('nav-agent-new'));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'library', tab: 'agent' });
     });
 
     it('the search row opens QuickOpen', () => {
@@ -902,6 +906,24 @@ describe('Sidebar', () => {
       expect(useUiStore.getState().favorites['/demo-vault']).toEqual(['notes/keep.md']);
       fireEvent.click(rows[0]);
       expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/keep.md' });
+    });
+
+    it('a pinned agent keeps its bot and opens its page (M55.12)', () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          mkEntry({ path: 'records/agents/scout.md', title: 'Scout', type: 'Agent' }),
+        ],
+      });
+      useUiStore.setState({ favorites: { '/demo-vault': ['records/agents/scout.md'] } });
+      render(<Sidebar />);
+      const [row] = screen.getAllByTestId('nav-favorite');
+      expect(row.querySelector('.lucide-bot')).toBeTruthy();
+      fireEvent.click(row);
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'records/agents/scout.md',
+      });
     });
 
     it("creates pages from the Pages header through the tree's own dialog", () => {

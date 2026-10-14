@@ -17,6 +17,7 @@ import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import * as mockBackend from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
+import { sha256Hex } from '@/lib/sha256';
 import { useUiStore } from '@/stores/uiStore';
 import { getSchema, useEntry, useVaultStore } from '@/stores/vaultStore';
 
@@ -208,6 +209,93 @@ describe('vaultStore', () => {
       expect(useVaultStore.getState().entriesVault).toBe('/second');
     } finally {
       vi.mocked(ipc.startWatcher).mockReset();
+    }
+  });
+
+  // M53.30: the shell shows the last vault's records until the new scan
+  // lands, and an inline edit wrote their path under the new vault, onto
+  // whatever page sat at the same path there.
+  it('an inline edit made while a vault opens writes nothing, and lands once its entries have', async () => {
+    const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+    const STILL_OPENING = 'Not saved — the vault is still opening';
+    const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
+    let releaseWatcher: () => void = () => undefined;
+    // Both vaults scan the demo vault, so the path names a page in each.
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    vi.mocked(ipc.startWatcher).mockImplementation((vault) =>
+      vault === '/second'
+        ? new Promise<void>((resolve) => (releaseWatcher = resolve))
+        : Promise.resolve(),
+    );
+    try {
+      await useVaultStore.getState().openVault('/first');
+      const second = useVaultStore.getState().openVault('/second');
+      await vi.waitFor(() => expect(vi.mocked(ipc.startWatcher)).toHaveBeenCalledWith('/second'));
+      const { patchFrontmatter, setTitle } = useVaultStore.getState();
+      const firstEntries = useVaultStore.getState().entries;
+      useUiStore.setState({ toasts: [] });
+
+      expect(await patchFrontmatter(PATH, { status: 'done' })).toBe(false);
+      expect(toasts()).toEqual([STILL_OPENING]);
+      useUiStore.setState({ toasts: [] });
+      // A title cell commits on every blur: one left unchanged is no edit.
+      expect(await setTitle(PATH, 'First-run walkthrough GA')).toBe(false);
+      expect(toasts()).toEqual([]);
+      expect(await setTitle(PATH, 'Renamed mid-open')).toBe(false);
+      expect(toasts()).toEqual([STILL_OPENING]);
+      // The toast on screen answers for every refusal behind it.
+      expect(await patchFrontmatter(PATH, { status: 'todo' })).toBe(false);
+      expect(toasts()).toEqual([STILL_OPENING]);
+      expect(vi.mocked(ipc.updateFrontmatter)).not.toHaveBeenCalled();
+      expect(vi.mocked(ipc.setNoteTitle)).not.toHaveBeenCalled();
+      expect(useVaultStore.getState().entries).toBe(firstEntries);
+
+      releaseWatcher();
+      await second;
+      expect(useVaultStore.getState().entriesVault).toBe('/second');
+      expect(await patchFrontmatter(PATH, { status: 'done' })).toBe(true);
+      expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledWith('/second', PATH, {
+        status: 'done',
+      });
+      expect(await setTitle(PATH, 'Renamed after the open')).toBe(true);
+      expect(vi.mocked(ipc.setNoteTitle)).toHaveBeenCalledWith(
+        '/second',
+        PATH,
+        'Renamed after the open',
+      );
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+      expect(findEntry(PATH)?.title).toBe('Renamed after the open');
+    } finally {
+      // A held watcher holds every later open behind it (`watcherQueue`).
+      releaseWatcher();
+      vi.mocked(ipc.scanVault).mockReset();
+      vi.mocked(ipc.startWatcher).mockReset();
+    }
+  });
+
+  it("an inline edit after a failed open says the vault didn't open, and writes nothing", async () => {
+    const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+    const DID_NOT_OPEN = "Not saved — the vault didn't open";
+    const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    try {
+      await useVaultStore.getState().openVault('/first');
+      vi.mocked(ipc.scanVault).mockRejectedValueOnce(new Error('not a vault'));
+      await useVaultStore.getState().openVault('/bad-vault');
+      // The last vault's records stay on screen under the vault that failed.
+      expect(useVaultStore.getState().status).toBe('error');
+      expect(useVaultStore.getState().entriesVault).toBe('/first');
+      useUiStore.setState({ toasts: [] });
+
+      expect(await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' })).toBe(false);
+      expect(toasts()).toEqual([DID_NOT_OPEN]);
+      useUiStore.setState({ toasts: [] });
+      expect(await useVaultStore.getState().setTitle(PATH, 'Renamed')).toBe(false);
+      expect(toasts()).toEqual([DID_NOT_OPEN]);
+      expect(vi.mocked(ipc.updateFrontmatter)).not.toHaveBeenCalled();
+      expect(vi.mocked(ipc.setNoteTitle)).not.toHaveBeenCalled();
+    } finally {
+      vi.mocked(ipc.scanVault).mockReset();
     }
   });
 
@@ -446,5 +534,128 @@ describe('vaultStore', () => {
     expect(result.current?.title).toBe('First-run walkthrough GA');
     const { result: missing } = renderHook(() => useEntry('items/nope.md'));
     expect(missing.current).toBeNull();
+  });
+});
+
+/**
+ * M55.2: an entry's hash is the identity of its bytes, and only the write
+ * knows the bytes an inline edit landed. Until it answers, the optimistic
+ * entry's hash is null, and the trigger diff compares nothing.
+ */
+describe('vaultStore content hash (M55.2)', () => {
+  const PATH = 'projects/guided-onboarding-ga/items/fld-1.md';
+
+  /** The store's snapshots, fed through the trigger diff as useJobRunner does. */
+  function observeChanges(): {
+    events: Array<{ kind: string; path: string; fields?: string[] }>;
+    stop: () => void;
+  } {
+    const events: Array<{ kind: string; path: string; fields?: string[] }> = [];
+    let baseline: ScanBaseline | null = null;
+    const stop = useVaultStore.subscribe((s, prev) => {
+      if (s.entriesVault === null) return;
+      if (s.entries === prev.entries && s.entriesVault === prev.entriesVault) return;
+      const scan = observeScan(baseline, s.entriesVault, s.entries);
+      baseline = scan.baseline;
+      for (const e of scan.events) {
+        events.push(
+          e.kind === 'changed'
+            ? { kind: e.kind, path: e.path, fields: e.fields }
+            : { kind: e.kind, path: e.path },
+        );
+      }
+    });
+    return { events, stop };
+  }
+
+  it('the optimistic entry has no hash, then takes the hash the write answered', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    expect(findEntry(PATH)?.hash).toBe(sha256Hex(mockFsDisk().get(PATH) ?? ''));
+    enterTauri();
+    try {
+      vi.mocked(ipc.updateFrontmatter).mockResolvedValueOnce('h-written');
+      const pending = useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+      expect(findEntry(PATH)?.hash).toBeNull();
+      expect(await pending).toBe(true);
+      // No rescan in Tauri: the optimistic entry stands, with the write's hash.
+      expect(findEntry(PATH)?.hash).toBe('h-written');
+      expect(findEntry(PATH)?.properties.status).toBe('done');
+    } finally {
+      exitTauri();
+    }
+  });
+
+  it('in the browser, the hash is the sha256 of the bytes the mock wrote', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+    expect(findEntry(PATH)?.hash).toBe(sha256Hex(mockFsDisk().get(PATH) ?? ''));
+  });
+
+  it('a scan that landed before the write answered is not overwritten', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    enterTauri();
+    try {
+      vi.mocked(ipc.updateFrontmatter).mockImplementationOnce(async () => {
+        // A scan lands while the write is in flight: it read the disk itself.
+        useVaultStore.setState({
+          entries: useVaultStore
+            .getState()
+            .entries.map((e) => (e.path === PATH ? { ...e, hash: 'h-scanned' } : e)),
+        });
+        return 'h-written';
+      });
+      expect(await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' })).toBe(true);
+      expect(findEntry(PATH)?.hash).toBe('h-scanned');
+    } finally {
+      exitTauri();
+    }
+  });
+
+  it('a failed write leaves no hash of its own, and fires no event', async () => {
+    const scans = observeChanges();
+    try {
+      await useVaultStore.getState().openVault('/demo-vault');
+      const before = findEntry(PATH)?.hash;
+      enterTauri();
+      try {
+        vi.mocked(ipc.updateFrontmatter).mockRejectedValueOnce(new Error('disk full'));
+        vi.mocked(ipc.scanVault).mockRejectedValueOnce(new Error('scan failed too'));
+        expect(await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' })).toBe(
+          false,
+        );
+        // The revert's rescan failed as well: the optimistic entry is all the
+        // store holds, and nothing named its bytes.
+        expect(findEntry(PATH)?.hash).toBeNull();
+      } finally {
+        exitTauri();
+      }
+      // The next scan reads the old bytes back, and the old hash is no change.
+      await useVaultStore.getState().rescan();
+      expect(findEntry(PATH)?.hash).toBe(before);
+      expect(scans.events).toEqual([]);
+    } finally {
+      scans.stop();
+    }
+  });
+
+  it('setTitle clears the hash until its rescan reads the new bytes', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    const pending = useVaultStore.getState().setTitle(PATH, 'Renamed');
+    expect(findEntry(PATH)?.hash).toBeNull();
+    expect(await pending).toBe(true);
+    expect(findEntry(PATH)?.hash).toBe(sha256Hex(mockFsDisk().get(PATH) ?? ''));
+  });
+
+  // HEAD fired two: once for the optimistic millisecond stamp, and again for
+  // the stamp the rescan brought.
+  it('an in-app patch is one changed event, not two', async () => {
+    const scans = observeChanges();
+    try {
+      await useVaultStore.getState().openVault('/demo-vault');
+      await useVaultStore.getState().patchFrontmatter(PATH, { status: 'done' });
+      expect(scans.events).toEqual([{ kind: 'changed', path: PATH, fields: ['status'] }]);
+    } finally {
+      scans.stop();
+    }
   });
 });

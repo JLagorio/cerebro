@@ -3,6 +3,7 @@
 pub mod entry;
 pub mod link;
 pub mod parse;
+pub mod quote;
 pub mod scan;
 pub mod watcher;
 pub mod write;

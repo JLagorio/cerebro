@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { stopAgent } from '@/agent/agentIpc';
 import { placeLabel } from '@/engine/place';
-import { describeRun, loadRunLog } from '@/engine/runLog';
+import { describeRun } from '@/engine/runLog';
 import { useNavStore } from '@/stores/navStore';
+import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -28,16 +29,15 @@ export function RunList() {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const collections = useVaultStore((s) => s.collections);
+  // M17.15: what it did, under what it is doing.
+  const log = useRunLogStore((s) => s.entries);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
-  // M17.15: what it did, under what it is doing. Read when the popover opens
-  // rather than subscribed to — the log is append-only and nothing else in the
-  // app writes it while this is on screen.
-  const history = useMemo(() => (open ? loadRunLog().slice(0, 8) : []), [open]);
+  const history = open ? log.slice(0, 8) : [];
 
   // Nothing running and nothing ever run: the status bar stays quiet. A
   // segment that is always there is chrome, which the bar has a rule against.
-  if (runs.length === 0 && loadRunLog().length === 0) return null;
+  if (runs.length === 0 && log.length === 0) return null;
   const lookup = { entries, views, collections };
 
   return (

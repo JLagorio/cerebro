@@ -64,7 +64,7 @@ const CONFIG_FILE: &str = "config.json";
 pub struct AppConfig {
     pub last_vault: Option<String>,
     /// **The proposal kill switch** (M26.3c). While this is false, the live
-    /// loopback MCP server serves its twelve read/write tools and NO
+    /// loopback MCP server serves only the tool manifest's base rows and NO
     /// proposal tools at all — a model cannot call a mutation surface it
     /// cannot see.
     ///
@@ -125,6 +125,41 @@ mod tests {
         assert!(!name.is_empty());
         assert_eq!(hex.len(), 12);
         assert!(build_label().contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// Everything that reads the app directory goes through `app_dir`
+    /// (M53.2). In a dev build the bundle's own config directory is the
+    /// installed app's: M32.8's root git commands asked tauri for it
+    /// directly, so re-landed on M49.2's split they read the installed app's
+    /// `roots.json` and refused every root the dev build mounted with
+    /// `no_such_root`. Only this file may ask.
+    #[test]
+    fn nothing_but_app_dir_asks_tauri_for_the_config_directory() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let this_file = src.join("app_config.rs");
+        let mut scanned = 0;
+        let mut offenders = Vec::new();
+        for entry in walkdir::WalkDir::new(&src)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if path == this_file || path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                continue;
+            }
+            scanned += 1;
+            let Ok(source) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            if source.contains("app_config_dir(") {
+                offenders.push(path.display().to_string());
+            }
+        }
+        assert!(scanned > 50, "the scan is walking the real tree");
+        assert!(
+            offenders.is_empty(),
+            "call app_config::app_dir instead of app_config_dir(): {offenders:?}"
+        );
     }
 
     #[test]

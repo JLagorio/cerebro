@@ -309,9 +309,9 @@ fn record_run_costs(
         }
         Err(CostError::Storage(detail)) => {
             // The database that refused the rows is the database the
-            // operational log lives in; stderr is the honest fallback,
-            // exactly `record_or_warn`'s own.
-            eprintln!("attended synthesis: run {run_id} cost accounting: {detail}");
+            // operational log lives in; the diagnostic log is the honest
+            // fallback, exactly `record_or_warn`'s own.
+            log::warn!("attended synthesis: run {run_id} cost accounting: {detail}");
         }
     }
 }
@@ -339,7 +339,7 @@ fn record_plan(
         &manifest.assembly_id,
         now,
     ) {
-        eprintln!(
+        log::warn!(
             "attended synthesis: discovery plan {}: {detail}",
             plan.plan_id
         );
@@ -642,6 +642,7 @@ mod tests {
             // The actor the live path stamps for this construct (M33.1).
             Some(ACTOR),
             // A root: a person asked (M34.3).
+            None,
             None,
             now(),
             now(),

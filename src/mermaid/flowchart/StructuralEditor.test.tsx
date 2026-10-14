@@ -90,6 +90,7 @@ const entry = (path: string, title: string, filename: string, folder: string): E
     createdAt: '',
     modifiedAt: '',
     parseError: null,
+    hash: null,
   }) satisfies Entry;
 
 const ENTRIES: Entry[] = [

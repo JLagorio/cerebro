@@ -8,12 +8,12 @@ The owner, 2026-10-12: "This app has achieved a large part of what we are trying
 | --- | --- | --- | --- | --- |
 | D0 | How may Macro's code be used? | Copy or transliterate it; or rebuild guided by it | **Decided by the owner, 2026-10-12: guided rebuild, no license gate.** Macro is the behaviour guide; Cerebro writes its own code. Reuse is limited to permissive islands (with attribution) and the upstream libraries Macro uses. | — |
 | D1 | Single user or team? | (a) single user, local, files-first; (b) (a) plus team-shaped seams: an actor and a cause on every write and run; (c) Macro's team model: accounts, sharing, presence, channels | **Decided by the owner, 2026-10-12: single user**, built as (b): the actor and cause seams stay, because agents need them. Teammates become agents, channels become page threads (D10), team memory is the verified knowledge bundle, and sharing stays a git remote. No accounts, ACLs or presence. | — |
-| D2 | May agent writes carry a content-hash precondition? Convergent D5 keeps vault files last-write-wins. | (a) no; (b) advisory hash only; (c) narrow amendment: agent tools, batch writes and undo inverses may carry `expect_hash`, and a mismatch is refused with a new operational code; human saves stay last-write-wins with reconcile; the ledger's `expected_version` is untouched | (c). Without it, `edit_note`, `set_fields`, the batch writer and undo can each overwrite a concurrent write without a word. | M55, M60 |
-| D3 | May Rust twin TS vault semantics (filters, field kinds, dates, fences, canvas)? | (a) twin interpreters framed as vault semantics (the `link.rs` precedent), held together by shared artifacts and goldens; (b) MCP tools answered by the renderer (unavailable when no window is open); (c) one Rust engine compiled to WASM (this Mac has no wasm32 toolchain; the policy README defers it) | (a), with the reviewer ruling recorded once in `shared/policy/README.md`. Each grammar starts narrow and grows only with goldens. | M60, M62, M67, M68 |
-| D4 | Agent transport for attended turns | (a) per-turn `claude -p` plus loopback MCP and the CLI's own seams (`--session-id`, PreToolUse defer + `--resume`, `--permission-prompt-tool`, `--model`, `--effort`); (b) one long-lived `--input-format stream-json` child per attended conversation (can_use_tool, interrupt, set_model, mcp_status); (c) ACP through `claude-agent-acp` (Node, a pinned npm adapter) | (a) now. M56.1 spikes (b) with recorded fixtures; switch only if steer or re-attach need it. (c) only if a second harness becomes a goal, and then through the upstream SDK. | M57 |
-| D5 | May run detail show a run's transcript? M17.15 calls the run log "not a transcript"; M40 forbids a second transcript surface. | (a) no; (b) a read-only, collapsed fold of Claude Code's own session file, stored nowhere | (b). Nothing enters the vault; after Claude Code's 30-day sweep the run reads "cleared by Claude Code". | M56 |
-| D6 | Should "ask" join the shell ceiling? M8.1 made shell one Settings ceiling. | (a) off and on only; (b) off, ask, on, decided by a shared policy table; unattended runs never prompt | (b). | M57 |
-| D7 | Where does an agent's `recent` memory live? Since PR #17 every run is told to patch it, and every patch is refused. | (a) Rust allows exactly `recent`, size-capped, on the run's own Agent record; (b) move it to `runtime.db`; (c) stop asking runs to keep memory | (a): memory stays a file the owner can read and edit. | M56 |
+| D2 | May agent writes carry a content-hash precondition? Convergent D5 keeps vault files last-write-wins. | (a) no; (b) advisory hash only; (c) narrow amendment: agent tools, batch writes and undo inverses may carry `expect_hash`, and a mismatch is refused with a new operational code; human saves stay last-write-wins with reconcile; the ledger's `expected_version` is untouched | **Decided by the owner, 2026-10-12: (c).** Without it, `edit_note`, `set_fields`, the batch writer and undo can each overwrite a concurrent write without a word. | M55, M60 |
+| D3 | May Rust twin TS vault semantics (filters, field kinds, dates, fences, canvas)? | (a) twin interpreters framed as vault semantics (the `link.rs` precedent), held together by shared artifacts and goldens; (b) MCP tools answered by the renderer (unavailable when no window is open); (c) one Rust engine compiled to WASM (this Mac has no wasm32 toolchain; the policy README defers it) | **Decided by the owner, 2026-10-12: (a)**, with the reviewer ruling recorded once in `shared/policy/README.md`. Each grammar starts narrow and grows only with goldens. | M60, M62, M67, M68 |
+| D4 | Agent transport for attended turns | (a) per-turn `claude -p` plus loopback MCP and the CLI's own seams (`--session-id`, PreToolUse defer + `--resume`, `--permission-prompt-tool`, `--model`, `--effort`); (b) one long-lived `--input-format stream-json` child per attended conversation (can_use_tool, interrupt, set_model, mcp_status); (c) ACP through `claude-agent-acp` (Node, a pinned npm adapter) | **Decided by the owner, 2026-10-12: (a) now.** M56.1 spikes (b) with recorded fixtures; switch only if steer or re-attach need it. (c) only if a second harness becomes a goal, and then through the upstream SDK. | M57 |
+| D5 | May run detail show a run's transcript? M17.15 calls the run log "not a transcript"; M40 forbids a second transcript surface. | (a) no; (b) a read-only, collapsed fold of Claude Code's own session file, stored nowhere | **Decided by the owner, 2026-10-12: (b).** Nothing enters the vault; after Claude Code's 30-day sweep the run reads "cleared by Claude Code". | M56 |
+| D6 | Should "ask" join the shell ceiling? M8.1 made shell one Settings ceiling. | (a) off and on only; (b) off, ask, on, decided by a shared policy table; unattended runs never prompt | **Decided by the owner, 2026-10-12: (b).** | M57 |
+| D7 | Where does an agent's `recent` memory live? Since PR #17 every run is told to patch it, and every patch is refused. | (a) Rust allows exactly `recent`, size-capped, on the run's own Agent record; (b) move it to `runtime.db`; (c) stop asking runs to keep memory | **Decided by the owner, 2026-10-12: (a)**: memory stays a file the owner can read and edit. | M56 |
 | D8 | Answer a trigger's `ask:` before the run? Reverses M17.12. | (a) keep it inside the run; (b) a tool-less pre-run check that answers through `submit_condition`, metered and budget-gated; a "no" records a skip | (b): a "no" costs one cheap run instead of a full one, and the skip is recorded with its question. | M63 |
 | D9 | How far may Home speak first? M8, M43 ("no feed"), the owner's "Home = My Work/Tasks". | (a) as today; (b) pull-only lanes under My work: silent when empty; no nav count, bell or push; Done only on event rows; proposals decided on their own cards; OS banners only for reminders the user set; (c) Macro's feed with unread state and badges | (b), recorded as an amendment to M43. | M64 |
 | D10 | Comments and discussions on pages? M47 §9 lists them as a non-goal; M33b D8 keeps one chat surface. | (a) none; (b) threads in a sidecar outside scan and search, anchored by quote and occurrence, `.md` bytes untouched, explicit @agent replies; (c) anchor markers written into the markdown | (b), behind a spike that proves the anchors and byte stability. D18 moves it up: M70 builds right after M57 (see Build order). Notion, Macro and Plane all comment on pages. Amends M47 §9 and M33b D8. | M70 |
@@ -97,7 +97,7 @@ The model is Notion's pages, Macro's "everything is a doc", and Plane's work ite
 **Before M53.**
 
 - **Land M49–M52.** The four commits on `m49-knowledge-integrity` (the 2026-09-25 audit doc through "prep ush") are not on `origin/main`: main is at `runtime.db` schema v16, the branch at v18. Merge them, then resync local `main` (e067ce0, behind `origin/main` at 263e7de). M53 starts from that main.
-- **D0, D1 and D18 are decided.** Ask D2–D7 in week 1, because they gate M55–M58. Ask the rest before their milestone starts.
+- **D0–D7 and D18 are decided** (D2–D7 on 2026-10-12, each as recommended). Ask the rest before their milestone starts.
 
 **Rules for every part.**
 
@@ -165,24 +165,38 @@ The model is Notion's pages, Macro's "everything is a doc", and Plane's work ite
 | M53.23 | Tracked dev skills in `.claude/skills` (verify-ui, policy-artifact-edit, land-stacked-pr, dependabot-triage), listed in AGENTS.md. | PRACTICES-7 | rebuild · adapt · S |
 | M53.24 | Local diagnostics: a size-capped JSONL log in `app_dir()/logs`, a panic hook, webview errors through one command, redaction; then deny `print_stdout` and `print_stderr`. No exporter. | PRACTICES-6, CLIENT-DESKTOP-5 | rebuild · inspire · S |
 
-**Status, 2026-10-12.** M53.4, M53.7, M53.8 and M53.9 were built ahead of this plan as hotfixes. They sit uncommitted in the main checkout. Each went through a two-lens review, a repair and a recheck. A last round then fixed the three serious findings the recheck left, and the full gate passes (lint, typecheck, format, coverage 84.77%, cargo fmt, clippy and 1854 tests with the crash skip list, e2e 175). The full crash-test suite is still owed after a reboot. To land them, review the diff, then commit each as its own part.
+**Status, 2026-10-12.** M53.4, M53.7, M53.8 and M53.9 were built ahead of this plan as hotfixes. They are committed on `m53-macro-port` (0c1e199, 6ee7ecc, fc510e6), and CI passes, including the full crash suite on Linux. The remaining parts are planned in `2026-10-12-m53-safe-core-and-rails.md`.
 
 - **M53.4:** every note writer, the agent's and the human's, refuses:
   - dot-paths, as HFS+ hears them too;
   - non-notes;
   - notes under `views/` or `attachments/`.
 
-  It judges the path as asked and where it lands (symlinks, APFS folding, the bundle reached by another name). One shared fixture holds both backends to the same answers. The projection writer only keeps a concept inside `knowledge/`; the agent's concept doors refuse folders the scan cannot list.
+  It judges the path as asked and where it lands. The projection writer only keeps a concept inside `knowledge/`; the agent's concept doors refuse folders the scan cannot list.
 - **M53.7 and M53.8:**
   - event runs get their own `<identity>#event` slot;
   - only event runs start the cooldown;
   - the scan baseline is kept per vault;
   - scans land newer over older.
 - **M53.9:** the AI block saves as a `:::ai` directive. Marker lines are read from plain text only, the question is saved as it is typed, and Enter at the end of the answer leaves the block.
-- **Owner calls still open:**
-  - dotfile notes are listed but read-only (hide them from the scan?);
-  - the `.mmd` exemption for canvases under `views/whiteboards/`;
-  - trigger-only agents fire once per session in a vault where nothing has a `schedule:`. A one-line fix brings back the designed limit of 4 runs an hour, and with it the spend.
+- **Owner calls, decided 2026-10-12:**
+  - dotfile notes are hidden from the scan, Obsidian-style;
+  - the `.mmd` exemption for `views/whiteboards/` stays;
+  - a trigger-only agent's clock ticks, which restores the designed limit of 4 runs an hour.
+
+**Status, 2026-10-13: built, not committed.**
+
+- Every other part (M53.1–.3, .5, .6, .10–.32) sits in the main checkout as uncommitted edits, which is how the owner asked for it. The owner commits.
+- Gates: each of the plan's nine waves passed lint, typecheck, format and coverage, with every floor held. Each also passed cargo fmt, clippy and the skip-listed cargo test, and the full e2e suite. Wave 9's gate was the full milestone close.
+- The acceptance audit counts 33 of 39 items met. The other six:
+  - the packaged checks: links, the hidden-window tick, the grandchild sweep and the log file;
+  - CI and the Linux crash suite, which run on the owner's push.
+- Still open:
+  - the TS half of PRACTICES-4 (Q9);
+  - the coverage-ratchet guard (Q8);
+  - routing the editor's save through the vault-open guard (Q11);
+  - the formatting toolbar and ⌘⇧6 can still make toggles until M55.4 gives them a carrier;
+  - Dependabot PR #20 gets no CI run now that CI triggers only on pushes.
 
 **Acceptance.**
 
@@ -199,7 +213,7 @@ The model is Notion's pages, Macro's "everything is a doc", and Plane's work ite
 
 **Risks.**
 
-- M32.1 runs CI only on PRs and on pushes to main. The owner decides whether branch pushes keep their gates.
+- M32.1 ran CI only on PRs and on pushes to main. **The owner decided 2026-10-12: branch pushes keep CI.** The Mac pre-push hook skips the crash tests, so CI on push is where they run.
 - Crash-test children can wedge macOS while spawn code changes; keep the cargo skip list on.
 - Processes that call `setsid` escape the group kill. Say so; don't promise otherwise.
 - New lint and clippy rules surface legacy sites. Fix them, or suppress them in place with a reason, in the same part.

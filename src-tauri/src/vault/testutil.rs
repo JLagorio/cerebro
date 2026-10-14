@@ -1,4 +1,5 @@
-//! Test-only helpers: build throwaway fixture vaults under the system temp dir.
+//! Test-only helpers: build throwaway fixture vaults under the system temp
+//! dir, and run one test of this binary as a child process.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -37,6 +38,11 @@ pub fn write(vault: &Path, rel: &str, content: &str) {
 /// (`module::path::test_name`); the child filters with `--exact`, so the
 /// scenario must be `#[ignore]`d and read `CEREBRO_CRASH_VAULT` to find its
 /// fixture. The caller asserts filesystem post-conditions afterwards.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "test-only: re-runs this test binary as a child; crash children keep spawning \
+              exactly as before"
+)]
 pub fn run_crash_scenario(
     scenario: &str,
     crash_point: &str,
@@ -50,4 +56,21 @@ pub fn run_crash_scenario(
         .stderr(std::process::Stdio::null())
         .status()
         .expect("spawn crash-scenario child")
+}
+
+/// Run one `#[ignore]`d test of this binary as a child and wait for it, for
+/// a check only a fresh process can make, such as what a child does with an
+/// environment its parent hands it. `test` is the FULL test path, filtered
+/// with `--exact`.
+///
+/// The child starts through `spawn::command` like every other, and `envs`
+/// are applied after its scrub, so a test may hand the child even a
+/// repo-selecting variable the scrub removed. Its output comes back whole,
+/// for the caller to show when the child fails.
+pub fn run_test_child(test: &str, envs: &[(&str, &std::ffi::OsStr)]) -> std::process::Output {
+    crate::spawn::command(std::env::current_exe().expect("current test binary"))
+        .args([test, "--exact", "--include-ignored", "--test-threads=1"])
+        .envs(envs.iter().copied())
+        .output()
+        .expect("spawn test child")
 }

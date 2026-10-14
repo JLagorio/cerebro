@@ -448,3 +448,38 @@ describe('RecordTabs view tabs (M45.4)', () => {
     expect(next[2]).toEqual({ id: 'tab', name: 'Tab', icon: null, content: 'sections' });
   });
 });
+
+/*
+ * An agent page's strip (M55.12): Instructions, Runs and Memory are the app's
+ * own tab set, so a host that passes no onChange gets a strip nobody edits.
+ */
+describe('RecordTabs without onChange is a fixed strip (M55.12)', () => {
+  function fixed() {
+    const onSelect = vi.fn();
+    render(<RecordTabs tabs={TABS} activeId="overview" onSelect={onSelect} />);
+    return onSelect;
+  }
+
+  it('offers no new tab, no grip and no caret', () => {
+    fixed();
+    expect(screen.queryByTestId('new-record-tab')).toBeNull();
+    expect(screen.queryByLabelText(/^Reorder /)).toBeNull();
+    expect(screen.getByTestId('record-tabs').querySelector('.lucide-chevron-down')).toBeNull();
+  });
+
+  it('opens no menu on the active tab or on a right-click', () => {
+    const onSelect = fixed();
+    fireEvent.click(screen.getByTestId('record-tab-overview'));
+    fireEvent.contextMenu(screen.getByTestId('record-tab-spec'));
+    expect(screen.queryByRole('menuitem')).toBeNull();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('still selects on press and roves on arrows', () => {
+    const onSelect = fixed();
+    fireEvent.click(screen.getByTestId('record-tab-spec'));
+    expect(onSelect).toHaveBeenCalledWith('spec');
+    fireEvent.keyDown(screen.getByTestId('record-tab-overview'), { key: 'ArrowRight' });
+    expect(onSelect).toHaveBeenCalledTimes(2);
+  });
+});

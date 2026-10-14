@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toIsoDate } from '@/engine/dates';
 import { buildSchema } from '@/engine/schema';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
-import { DatabaseBlockView } from './DatabaseBlockView';
+import { ConnectedDatabaseBlock, DatabaseBlockView } from './DatabaseBlockView';
 
 afterEach(cleanup);
 
@@ -413,5 +414,70 @@ describe('DatabaseBlockView open full page', () => {
   it('offers nothing to open when no host can navigate', () => {
     show('Reading list', 'shelf');
     expect(screen.queryByTestId('database-block-open')).toBeNull();
+  });
+});
+
+/**
+ * A calendar embedded in a page creates on a day too (M53.16).
+ *
+ * The day "+" existed only on the database's own screen and on a List, and
+ * both wrote the bare day. Embedded, a calendar offered no "+" at all; on its
+ * screen, a calendar keyed to a `daterange` made records that failed their own
+ * validation on the next read. The block now resolves the field its view is
+ * keyed on, and the host writes the date in the shape that field declares.
+ */
+describe('DatabaseBlockView creates on a calendar day (M53.16)', () => {
+  const sprints: Entry[] = [
+    typeDoc('Sprint', {
+      fields: { window: { kind: 'daterange' } },
+      views: [{ id: 'cal', name: 'Calendar', presentation: { type: 'calendar' } }],
+    }),
+  ];
+  const sprintSchema = buildSchema(sprints);
+
+  /** Type a title into a day's "+" and submit it. */
+  const createOn = (day: string, title: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `New record on ${day}` }));
+    const input = screen.getByRole('textbox', { name: `New record on ${day}` });
+    fireEvent.change(input, { target: { value: title } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+  };
+
+  it('hands the host the field its calendar is keyed on', async () => {
+    // No `today` reaches an embedded calendar, so it opens on the real one.
+    const day = toIsoDate(new Date());
+    const onCreateOn = vi.fn(async () => true);
+    render(
+      <DatabaseBlockView
+        database="Sprint"
+        view="cal"
+        schema={sprintSchema}
+        entries={sprints}
+        onCreateOn={onCreateOn}
+      />,
+    );
+    createOn(day, 'Retro');
+    await waitFor(() => expect(onCreateOn).toHaveBeenCalledWith('Retro', day, 'window'));
+  });
+
+  it('offers no day "+" when the host cannot create', () => {
+    render(
+      <DatabaseBlockView database="Sprint" view="cal" schema={sprintSchema} entries={sprints} />,
+    );
+    expect(screen.getByTestId('calendar-view')).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /^New record on / })).toHaveLength(0);
+  });
+
+  it('creates the record in the database folder, dated as an open range', async () => {
+    const day = toIsoDate(new Date());
+    useVaultStore.setState({ entries: sprints });
+    render(<ConnectedDatabaseBlock database="Sprint" view="cal" />);
+    createOn(day, 'Retro');
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0].folder).toBe('records/sprints');
+    expect(created[0].frontmatter).toEqual({
+      type: 'Sprint',
+      window: { start: day, end: null },
+    });
   });
 });

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type {
   ConflictMode,
   GitCommit,
   GitRemoteStatus,
   ModifiedFile,
-  PulseCommit,
+  VaultPulse,
 } from '@/engine/git';
 import { syncState, type SyncState } from '@/engine/git';
 import * as git from '@/lib/gitIpc';
@@ -102,8 +102,14 @@ export async function refreshGit(): Promise<void> {
  *
  * Three triggers, because they catch different things: the vault's entries
  * changing (a save, a rescan, an agent write), coming back to the window, and
- * a slow poll for everything that happened outside the app — a terminal
- * commit, a `git pull` in another tool.
+ * a slow poll for what happens outside the app while the window is in view —
+ * a terminal commit, a `git pull` in another tool.
+ *
+ * The poll sleeps while the window is hidden (M53.13). The shell turns
+ * WebKit's background throttling off, so a hidden window's timers keep
+ * running, and an awake poll would spawn about ten git processes every 20 s
+ * for a state nothing hidden shows. Coming back re-reads it. The entries
+ * trigger stays awake: rescans and agent writes still land while hidden.
  */
 const POLL_MS = 20_000;
 const SETTLE_MS = 700;
@@ -126,6 +132,12 @@ const onVisible = (): void => {
   if (document.visibilityState === 'visible') void refreshGit();
 };
 
+const onPoll = (): void => {
+  // Only `hidden` sleeps: a jsdom that is not pretending to be visual says
+  // `prerender`, and that must keep polling.
+  if (document.visibilityState !== 'hidden') void refreshGit();
+};
+
 function attach(): void {
   watchers += 1;
   if (watchers > 1) return;
@@ -135,7 +147,7 @@ function attach(): void {
     lastEntries = s.entries;
     refreshSoon();
   });
-  poll = window.setInterval(() => void refreshGit(), POLL_MS);
+  poll = window.setInterval(onPoll, POLL_MS);
   document.addEventListener('visibilitychange', onVisible);
 }
 
@@ -185,68 +197,93 @@ export function resetGitState(): void {
   useGitStore.setState({ ...EMPTY });
 }
 
-/** One note's commit history, refetched when the path changes. */
-export function useFileHistory(path: string | null): {
-  commits: GitCommit[];
-  loading: boolean;
-} {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
-  const [commits, setCommits] = useState<GitCommit[]>([]);
-  const [loading, setLoading] = useState(false);
+/**
+ * A git read, as a surface has to render it (M53.15).
+ *
+ * Three answers, never two. A read that failed is `unavailable`, never an
+ * empty `ready`: "this note has no history" and "this note's history could
+ * not be read" are opposite sentences, and these hooks used to turn the
+ * second into the first. `loading` renders as nothing, so no surface states
+ * an empty answer before its read has landed.
+ */
+export type GitRead<T> = { kind: 'loading' } | { kind: 'unavailable' } | { kind: 'ready'; data: T };
+
+const LOADING: GitRead<never> = { kind: 'loading' };
+const UNAVAILABLE: GitRead<never> = { kind: 'unavailable' };
+
+/**
+ * Run one read and keep its answer beside the request it answers.
+ *
+ * The request's identity is the key: callers build `run` with `useMemo` over
+ * exactly the inputs the read depends on. A render whose inputs have moved on
+ * finds an answer to some other request and shows `loading`, and a late answer
+ * to an old request is dropped, so a stale answer never renders. `reload`
+ * asks the same request again.
+ */
+function useGitRead<T>(run: (() => Promise<T>) | null): { read: GitRead<T>; reload: () => void } {
+  const [attempt, setAttempt] = useState(0);
+  const [answer, setAnswer] = useState<{
+    run: () => Promise<T>;
+    attempt: number;
+    read: GitRead<T>;
+  } | null>(null);
 
   useEffect(() => {
-    if (vaultPath === null || path === null) {
-      setCommits([]);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    void git
-      .getFileHistory(vaultPath, path)
-      .then((result) => {
-        if (!cancelled) setCommits(result);
-      })
-      .catch(() => {
-        if (!cancelled) setCommits([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    if (run === null) return;
+    let live = true;
+    // A read that throws before it hands back a promise failed all the same.
+    new Promise<T>((resolve) => resolve(run())).then(
+      (data) => {
+        if (live) setAnswer({ run, attempt, read: { kind: 'ready', data } });
+      },
+      () => {
+        if (live) setAnswer({ run, attempt, read: UNAVAILABLE });
+      },
+    );
     return () => {
-      cancelled = true;
+      live = false;
     };
-  }, [vaultPath, path]);
+  }, [run, attempt]);
 
-  return { commits, loading };
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  const answered =
+    run !== null && answer !== null && answer.run === run && answer.attempt === attempt;
+  return { read: answered ? answer.read : LOADING, reload };
 }
 
-export function useVaultPulse(): { commits: PulseCommit[]; loading: boolean; reload: () => void } {
+/** One note's commit history, read again when the note or the vault changes. */
+export function useFileHistory(path: string): GitRead<GitCommit[]> {
   const vaultPath = useVaultStore((s) => s.vaultPath);
-  const [commits, setCommits] = useState<PulseCommit[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [nonce, setNonce] = useState(0);
+  const run = useMemo(
+    () => (vaultPath === null ? null : () => git.getFileHistory(vaultPath, path)),
+    [vaultPath, path],
+  );
+  const { read } = useGitRead(run);
+  return vaultPath === null ? UNAVAILABLE : read;
+}
 
-  useEffect(() => {
-    if (vaultPath === null) return;
-    let cancelled = false;
-    setLoading(true);
-    void git
-      .getVaultPulse(vaultPath)
-      .then((result) => {
-        if (!cancelled) setCommits(result);
-      })
-      .catch(() => {
-        if (!cancelled) setCommits([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [vaultPath, nonce]);
+/** The vault's history for the History page, and a way to ask again. */
+export function useVaultPulse(): { pulse: GitRead<VaultPulse>; reload: () => void } {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const run = useMemo(
+    () => (vaultPath === null ? null : () => git.getVaultPulse(vaultPath)),
+    [vaultPath],
+  );
+  const { read, reload } = useGitRead(run);
+  return { pulse: vaultPath === null ? UNAVAILABLE : read, reload };
+}
 
-  return { commits, loading, reload: () => setNonce((n) => n + 1) };
+/** Everything one commit changed. No commit asked for is no read: `null`
+ * stays `loading`, which every caller renders as nothing. */
+export function useCommitDiff(hash: string | null): GitRead<string> {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const run = useMemo(
+    () => (vaultPath === null || hash === null ? null : () => git.getCommitDiff(vaultPath, hash)),
+    [vaultPath, hash],
+  );
+  const { read } = useGitRead(run);
+  if (hash === null) return LOADING;
+  return vaultPath === null ? UNAVAILABLE : read;
 }
 
 /** Idle thresholds, in seconds. */

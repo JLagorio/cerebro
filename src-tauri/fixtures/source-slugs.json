@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "about": "Where a fetched source's cached copy lands (INTEGRATIONS-2a). The canonical id is the id trimmed of ASCII whitespace. An issue key is lowercased. A URL loses one leading http:// or https:// in any case, its host (everything before the first /, ? or #) is ASCII-lowercased, and trailing / go; path case, query and fragment stay part of the identity. An issue lands at sources/issues/<canonical>.md. A web page lands at sources/web/<readable>-<suffix>.md: readable is the canonical id with every character outside [A-Za-z0-9._-] turned into -, runs of - collapsed, leading - and . and trailing - trimmed, lowercased, cut to 64 characters and trimmed of trailing - again; suffix is the first 12 hex characters of sha256(\"cerebro-source-cache-v1\\0web\\0\" + canonical). With nothing readable left the file is sources/web/<suffix>.md. Replayed by source_slugs_replay_the_shared_cases in src-tauri/src/mcp.rs and by src/engine/ingest.test.ts, which both also hold that distinct canonical ids never share a path. `why` is for the reader.",
+  "cases": [
+    {
+      "kind": "issue",
+      "id": "PHX-421",
+      "canonical": "phx-421",
+      "path": "sources/issues/phx-421.md",
+      "why": "An issue's path is the one it has had since M8.2."
+    },
+    {
+      "kind": "issue",
+      "id": " phx-421 ",
+      "canonical": "phx-421",
+      "path": "sources/issues/phx-421.md",
+      "why": "Whitespace around an id is not part of it."
+    },
+    {
+      "kind": "web",
+      "id": "https://wiki.test/x/Rollback",
+      "canonical": "wiki.test/x/Rollback",
+      "path": "sources/web/wiki.test-x-rollback-16990b2f5ec5.md"
+    },
+    {
+      "kind": "web",
+      "id": "HTTP://Wiki.Test/x/Rollback/",
+      "canonical": "wiki.test/x/Rollback",
+      "path": "sources/web/wiki.test-x-rollback-16990b2f5ec5.md",
+      "why": "Scheme case, host case and a trailing slash are spelling, not identity."
+    },
+    {
+      "kind": "web",
+      "id": "  https://wiki.test/x/Rollback\n",
+      "canonical": "wiki.test/x/Rollback",
+      "path": "sources/web/wiki.test-x-rollback-16990b2f5ec5.md"
+    },
+    {
+      "kind": "web",
+      "id": "https://wiki.test/x/rollback",
+      "canonical": "wiki.test/x/rollback",
+      "path": "sources/web/wiki.test-x-rollback-4a27226b97a5.md",
+      "why": "Path case is identity: a case-sensitive server serves two pages."
+    },
+    {
+      "kind": "web",
+      "id": "https://wiki.test/x/Rollback#steps",
+      "canonical": "wiki.test/x/Rollback#steps",
+      "path": "sources/web/wiki.test-x-rollback-steps-24b4e13701be.md",
+      "why": "A fragment is identity: in a single-page app it is the page."
+    },
+    {
+      "kind": "web",
+      "id": "https://a.test/p?q=1&r=2",
+      "canonical": "a.test/p?q=1&r=2",
+      "path": "sources/web/a.test-p-q-1-r-2-7b2ad192b3b4.md"
+    },
+    {
+      "kind": "web",
+      "id": "http://a.test/p/",
+      "canonical": "a.test/p",
+      "path": "sources/web/a.test-p-ebfce8612e8b.md"
+    },
+    {
+      "kind": "web",
+      "id": "https://a.test/a--b",
+      "canonical": "a.test/a--b",
+      "path": "sources/web/a.test-a-b-bb20c24ade14.md",
+      "why": "Runs of - collapse. The old twins disagreed here: a.test-a--b against a.test-a-b."
+    },
+    {
+      "kind": "web",
+      "id": "https://acme.atlassian.net/wiki/spaces/ENG/pages/123/Release+-+Q3+Plan",
+      "canonical": "acme.atlassian.net/wiki/spaces/ENG/pages/123/Release+-+Q3+Plan",
+      "path": "sources/web/acme.atlassian.net-wiki-spaces-eng-pages-123-release-q3-plan-2742f6dc4925.md",
+      "why": "Confluence's +-+, where the old twins wrote release---q3-plan and release-q3-plan, so the Inbox never found the copy."
+    },
+    {
+      "kind": "web",
+      "id": "https://www.notion.so/acme/Quarterly-planning-review-for-the-platform-team-and-every-partner-0123456789abcdef0123456789abcdef",
+      "canonical": "www.notion.so/acme/Quarterly-planning-review-for-the-platform-team-and-every-partner-0123456789abcdef0123456789abcdef",
+      "path": "sources/web/www.notion.so-acme-quarterly-planning-review-for-the-platform-te-a844fb3f4681.md",
+      "why": "This page and the next shared one file under the old 80-character cut, and the second fetch overwrote the first."
+    },
+    {
+      "kind": "web",
+      "id": "https://www.notion.so/acme/Quarterly-planning-review-for-the-platform-team-and-every-partner-fedcba9876543210fedcba9876543210",
+      "canonical": "www.notion.so/acme/Quarterly-planning-review-for-the-platform-team-and-every-partner-fedcba9876543210fedcba9876543210",
+      "path": "sources/web/www.notion.so-acme-quarterly-planning-review-for-the-platform-te-85fe4713f198.md",
+      "why": "The same readable half, a different suffix: two files."
+    },
+    {
+      "kind": "web",
+      "id": "https://wiki.test/caf\u00e9/na\u00efve",
+      "canonical": "wiki.test/caf\u00e9/na\u00efve",
+      "path": "sources/web/wiki.test-caf-na-ve-82305d31a300.md",
+      "why": "Non-ASCII never reaches a file name, and no Unicode class has to mean the same thing in both twins."
+    },
+    {
+      "kind": "web",
+      "id": "https://\u00fc\u00f1",
+      "canonical": "\u00fc\u00f1",
+      "path": "sources/web/c58af104ffd4.md",
+      "why": "Nothing readable left: the suffix alone names the file."
+    },
+    {
+      "kind": "web",
+      "id": "https://Wiki.Test#Top",
+      "canonical": "wiki.test#Top",
+      "path": "sources/web/wiki.test-top-07324b181657.md",
+      "why": "The host ends at the first /, ? or #, and only the host is lowercased."
+    },
+    {
+      "kind": "web",
+      "id": "https://.hidden/x",
+      "canonical": ".hidden/x",
+      "path": "sources/web/hidden-x-b6fb12b71044.md",
+      "why": "A file name never starts with a dot: the scan hides dotfiles and the note writers refuse them."
+    },
+    {
+      "kind": "web",
+      "id": "https://wiki.test/x/page",
+      "canonical": "wiki.test/x/page",
+      "path": "sources/web/wiki.test-x-page-d5a166ed61a8.md"
+    }
+  ]
+}

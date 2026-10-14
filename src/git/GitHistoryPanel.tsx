@@ -17,24 +17,44 @@ export function relativeDate(unixSeconds: number, now = Date.now()): string {
  * One note's history (M9.4). Ported from tolaria's GitHistoryPanel; lifts
  * cleanly because it is genuinely small.
  *
- * Renders nothing when the note has no commits — a heading over an empty
- * list is chrome, and a note you just created has no history to show.
+ * Renders nothing while the read is out, and nothing when the note has no
+ * commits — a heading over an empty list is chrome, and a note you just
+ * created has no history to show. A read that FAILED is said, under the
+ * heading (M53.15): rendering nothing for it would claim the note has no
+ * history when nobody could tell.
  */
 export function GitHistoryPanel({ path }: { path: string }) {
-  const { commits, loading } = useFileHistory(path);
+  const history = useFileHistory(path);
   // M9.7: the diff replaces the editor in place rather than opening over it.
   const openDiff = useUiStore((s) => s.openDiff);
 
-  if (loading || commits.length === 0) return null;
+  if (history.kind === 'loading') return null;
+
+  const heading = (
+    <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
+      <Icon name="history" size={12} />
+      History
+    </div>
+  );
+
+  if (history.kind === 'unavailable') {
+    return (
+      <div data-testid="git-history" className="mt-5">
+        {heading}
+        <p data-testid="section-unavailable" className="m-0 text-xs text-n-500">
+          This note's history could not be read.
+        </p>
+      </div>
+    );
+  }
+
+  if (history.data.length === 0) return null;
 
   return (
     <div data-testid="git-history" className="mt-5">
-      <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
-        <Icon name="history" size={12} />
-        History
-      </div>
+      {heading}
       <div className="flex flex-col gap-2">
-        {commits.map((c) => (
+        {history.data.map((c) => (
           <div key={c.hash} data-testid="git-commit" className="border-l-2 border-n-200 pl-2.5">
             <button
               type="button"

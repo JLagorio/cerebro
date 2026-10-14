@@ -59,7 +59,8 @@ describe('MermaidDiagram', () => {
  * The doc-canvas view injects mermaid's svg straight into the page, and a
  * hand-written `click A "notes/x.md"` line makes that svg carry a real anchor
  * even at securityLevel 'strict' (measured in svgLinks.mermaid.test.ts).
- * Following it inside the Tauri webview takes the whole app off the SPA.
+ * The packaged shell guard refuses it (M53.12), but `pnpm dev` has no guard,
+ * and following it there takes the whole app off the SPA.
  */
 describe('MermaidDiagram cannot navigate the app away (M29.38)', () => {
   const linked = (gen: string, target: string): string =>

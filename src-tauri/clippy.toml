@@ -1,0 +1,11 @@
+# Methods this crate may not call (M53.21). Clippy's `disallowed_methods`
+# lint reads this list, and the [lints.clippy] table in Cargo.toml denies it.
+# A site that must call one carries
+# #[expect(clippy::disallowed_methods, reason = "...")].
+#
+# One entry per line, each with its reason: src/rails.rs reads them that way.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "start children through crate::spawn: it scrubs the repo-selecting variables and nulls stdin, and a supervised run gets its own process group, TERM then KILL, and a stderr tail" },
+    { path = "std::env::set_var", reason = "changing this process's environment races every thread and leaks into every child; set the child's variable on its Command instead" },
+    { path = "std::env::remove_var", reason = "changing this process's environment races every thread and leaks into every child; remove the child's variable on its Command instead" },
+]

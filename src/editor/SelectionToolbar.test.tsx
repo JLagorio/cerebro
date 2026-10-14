@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PRESETS } from './SelectionToolbar';
+import { en } from '@blocknote/core/locales';
+import { getFormattingToolbarItems } from '@blocknote/react';
+import {
+  blockMenuItems,
+  formattingToolbarItems,
+  PRESETS,
+  UNCARRIED_ACTIONS,
+} from './SelectionToolbar';
 
 /**
  * M18 — the AI controls you can see.
@@ -38,5 +45,40 @@ describe('PRESETS', () => {
 
   it('has a unique label per preset, since the label is the React key', () => {
     expect(new Set(PRESETS.map((p) => p.label)).size).toBe(PRESETS.length);
+  });
+});
+
+/*
+ * M55.4, M55.15 — every control the editor offers keeps what it does through a
+ * save. `markdown.test.ts` measures each action; this holds the menus to it.
+ */
+describe('formattingToolbarItems', () => {
+  it("is BlockNote's toolbar without the actions a save drops", () => {
+    const blockNote = getFormattingToolbarItems().map((item) => String(item.key));
+    const keys = formattingToolbarItems().map((item) => String(item.key));
+    for (const key of [
+      'filePreviewButton',
+      'underlineStyleButton',
+      'colorStyleButton',
+      'textAlignLeftButton',
+      'textAlignCenterButton',
+      'textAlignRightButton',
+      'tableCellMergeButton',
+    ]) {
+      expect(blockNote).toContain(key);
+      expect(keys).not.toContain(key);
+    }
+    expect(keys).toEqual(blockNote.filter((key) => !(key in UNCARRIED_ACTIONS)));
+    expect(keys).toEqual(expect.arrayContaining(['boldStyleButton', 'createLinkButton']));
+  });
+});
+
+describe('blockMenuItems', () => {
+  it('offers Delete, and no colours or table header toggles', () => {
+    const items = blockMenuItems(en);
+    expect(items.map((item) => item.key)).toEqual(['removeBlockItem']);
+    for (const key of ['blockColorsItem', 'tableRowHeaderItem', 'tableColumnHeaderItem']) {
+      expect(UNCARRIED_ACTIONS[key], key).toBeTruthy();
+    }
   });
 });

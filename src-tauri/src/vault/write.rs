@@ -7,9 +7,17 @@
 //! also refuses anything that is not a note (PLATFORM-API-1) — the same
 //! mechanism under the agent's MCP doors and the human IPC commands — and the
 //! ledger's projection writer goes through `bundle_join`, which keeps a
-//! projection inside the bundle.
+//! projection inside the bundle. Every write runs under its path lock
+//! (`lock_paths`, M55.1): a writer that reads its file first holds the lock
+//! from the read to the rename (`rewrite_note`), so two writes to one file
+//! take turns and the second builds on the first.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
+use std::thread::ThreadId;
+
+use unicode_normalization::UnicodeNormalization;
 
 use super::parse;
 
@@ -78,7 +86,15 @@ const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(
 /// limitations (the same trade-off every atomic-save editor makes): xattrs
 /// are not preserved across the rename, and a symlinked destination is
 /// replaced by a regular file; plain permissions are preserved.
-fn write_file(abs: &Path, content: &str) -> Result<(), String> {
+///
+/// Every write runs under its path lock (M55.1): the funnel takes the
+/// `PathLock` that covers `abs`, so a write outside one does not compile.
+fn write_file(lock: &PathLock, abs: &Path, content: &str) -> Result<(), String> {
+    debug_assert!(
+        lock.covers(abs),
+        "{} is written outside its path lock",
+        abs.display()
+    );
     let parent = abs
         .parent()
         .ok_or_else(|| format!("no parent directory: {}", abs.display()))?;
@@ -170,7 +186,9 @@ pub fn clean_orphan_temps(vault: &Path) {
 /// symlink pointing wherever it likes, so containment has to be verified
 /// against the resolved filesystem path, not the requested one.
 fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
-    resolve(vault, rel).map(|resolved| resolved.joined)
+    resolve(vault, rel)
+        .map(|resolved| resolved.joined)
+        .map_err(String::from)
 }
 
 /// A contained vault-relative path, and where it actually lands.
@@ -184,20 +202,58 @@ struct Resolved {
     landing: PathBuf,
 }
 
+/// Why a write has no target, each with the message the writers have always
+/// returned (M54.10). Only `Refused` judges the target itself, so only it is
+/// what the agent's MCP doors record as `target_outside_corpus` before
+/// dispatch; the other two leave the call to answer in its own words.
+enum NoTarget {
+    /// Outside the vault, or no note a note writer may touch.
+    Refused(String),
+    /// An argument that names nothing: an empty path, or a slug that is not
+    /// one name.
+    Malformed(String),
+    /// The disk could not say where the path lands, which judges nothing
+    /// about it.
+    Unresolved(String),
+}
+
+impl From<NoTarget> for String {
+    fn from(no_target: NoTarget) -> String {
+        match no_target {
+            NoTarget::Refused(message)
+            | NoTarget::Malformed(message)
+            | NoTarget::Unresolved(message) => message,
+        }
+    }
+}
+
+/// The message in a judgement that refused the target itself, or `None`.
+fn refused<T>(judged: Result<T, NoTarget>) -> Option<String> {
+    match judged {
+        Err(NoTarget::Refused(message)) => Some(message),
+        _ => None,
+    }
+}
+
 /// `safe_join`'s whole check, keeping the resolution it already has to do
 /// for `note_join` to judge.
-fn resolve(vault: &Path, rel: &str) -> Result<Resolved, String> {
-    let contained = !rel.is_empty()
-        && Path::new(rel)
-            .components()
-            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+fn resolve(vault: &Path, rel: &str) -> Result<Resolved, NoTarget> {
+    let escapes = || format!("path escapes the vault: {rel:?}");
+    if rel.is_empty() {
+        // Refused in the same words as an escape, but an empty path names
+        // nothing, which is not the same as naming somewhere outside.
+        return Err(NoTarget::Malformed(escapes()));
+    }
+    let contained = Path::new(rel)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
     if !contained {
-        return Err(format!("path escapes the vault: {rel:?}"));
+        return Err(NoTarget::Refused(escapes()));
     }
     let joined = vault.join(rel);
     let canonical_vault = vault
         .canonicalize()
-        .map_err(|e| format!("resolving vault root: {e}"))?;
+        .map_err(|e| NoTarget::Unresolved(format!("resolving vault root: {e}")))?;
     // `canonicalize` requires the path to exist, and most of the paths this
     // function sees are about to be CREATED. Walk up to the longest
     // existing ancestor (the vault root itself always exists, so this
@@ -213,17 +269,251 @@ fn resolve(vault: &Path, rel: &str) -> Result<Resolved, String> {
     }
     let canonical_existing = existing
         .canonicalize()
-        .map_err(|e| format!("resolving path: {e}"))?;
+        .map_err(|e| NoTarget::Unresolved(format!("resolving path: {e}")))?;
     let Ok(inside) = canonical_existing.strip_prefix(&canonical_vault) else {
-        return Err(format!("path escapes the vault: {rel:?}"));
+        return Err(NoTarget::Refused(escapes()));
     };
     // `existing` was walked up from `joined` by `parent`, so it is a prefix
     // and this cannot miss; if it ever did, refusing is the safe answer.
     let rest = joined
         .strip_prefix(existing)
-        .map_err(|_| format!("resolving path: {rel:?}"))?;
+        .map_err(|_| NoTarget::Unresolved(format!("resolving path: {rel:?}")))?;
     let landing = inside.join(rest);
     Ok(Resolved { joined, landing })
+}
+
+/// Where `rel` lands, `/`-joined: the path as the scan lists it, or `None`
+/// when it is not a contained vault path.
+///
+/// What the agent's MCP writes announce to the open pages (M53.6). A page
+/// knows its file by the path the scan listed it under, and the agent may
+/// spell that file `./notes/a.md` or, on APFS, with its folder case-folded;
+/// the landing is the one spelling both agree on.
+pub fn landing_path(vault: &Path, rel: &str) -> Option<String> {
+    resolve(vault, rel).ok().map(|r| slashed(&r.landing))
+}
+
+// --- Path locks (M55.1) ------------------------------------------------------
+//
+// One writer per file. A person's patch, an agent's append and a second run
+// each read, compute and rename, so without a lock the last rename silently
+// dropped the other change, and a writer that picked a free name and then
+// wrote could overwrite one picked at the same moment. Writes to one file now
+// take turns, keyed by where the path LANDS (`lock_key`), so every spelling of
+// one file waits on the same key; writes to different files overlap.
+//
+// Lock order: while a path lock is held, code takes only leaf locks — the
+// watcher's own-write map and the runtime sink (`shadow_write`). It never
+// calls `shadow::with_writer`, and never calls `lock_paths` a second time
+// (that refuses instead of hanging). knowledge/ projections belong to the
+// ledger writer alone and take no path lock.
+//
+// What it does not cover: a folder move holds only the folder's own keys, so
+// a write into that folder racing the move may land in either place or fail;
+// and outside writers (git, other editors) never take the lock.
+
+/// Which thread holds each key, and the signal a release sends.
+type LockTable = (Mutex<HashMap<String, ThreadId>>, Condvar);
+
+/// The process-global lock table, built like `watcher::own_writes`.
+fn path_locks() -> &'static LockTable {
+    static LOCKS: OnceLock<LockTable> = OnceLock::new();
+    LOCKS.get_or_init(|| (Mutex::new(HashMap::new()), Condvar::new()))
+}
+
+/// The one key every spelling of a file shares: where it lands (`resolve`:
+/// `./`, symlinks, and the names the disk stores), under the canonical vault,
+/// each name folded as a folding disk hears it (`knowledge::disk_folded`:
+/// case and the HFS+ ignorables) and NFC-normalized. Case twins on a
+/// case-sensitive disk share a key too, which only over-locks.
+fn lock_key(vault: &Path, rel: &str) -> Result<String, String> {
+    let resolved = resolve(vault, rel)?;
+    let canonical_vault = vault
+        .canonicalize()
+        .map_err(|e| format!("resolving vault root: {e}"))?;
+    Ok(canonical_vault
+        .join(&resolved.landing)
+        .components()
+        .map(|c| {
+            crate::knowledge::disk_folded(&c.as_os_str().to_string_lossy())
+                .nfc()
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+/// The paths one write holds. Dropping it releases every key and wakes the
+/// writers waiting on them, during a panic's unwinding too.
+#[must_use = "a path lock releases its paths as soon as it is dropped"]
+pub(crate) struct PathLock {
+    keys: Vec<String>,
+    /// `vault.join(rel)` for each path, as the writers open it.
+    joined: Vec<PathBuf>,
+}
+
+impl PathLock {
+    /// Does this lock hold `abs`?
+    fn covers(&self, abs: &Path) -> bool {
+        self.joined.iter().any(|path| path == abs)
+    }
+}
+
+impl Drop for PathLock {
+    fn drop(&mut self) {
+        let (table, released) = path_locks();
+        // The table guards plain data, so a poisoned one is taken back as it
+        // is: refusing every later write until a restart is the worse failure.
+        let mut held = table.lock().unwrap_or_else(PoisonError::into_inner);
+        for key in &self.keys {
+            held.remove(key);
+        }
+        drop(held);
+        released.notify_all();
+    }
+}
+
+/// Take every path in `rels` at once, waiting until none of them is held.
+///
+/// All or nothing, so two writers that each need several paths cannot hold
+/// one apiece and wait on each other forever. A path this thread already
+/// holds refuses (`<rel> is already locked by this write`) instead of
+/// waiting on itself. Waits have no timeout: writers are short and make no
+/// network calls.
+pub(crate) fn lock_paths(vault: &Path, rels: &[&str]) -> Result<PathLock, String> {
+    let mut keys: Vec<(String, &str)> = Vec::new();
+    let mut joined = Vec::new();
+    for rel in rels {
+        let key = lock_key(vault, rel)?;
+        joined.push(vault.join(rel));
+        if !keys.iter().any(|(taken, _)| *taken == key) {
+            keys.push((key, rel));
+        }
+    }
+    let me = std::thread::current().id();
+    let (table, released) = path_locks();
+    let mut held = table.lock().unwrap_or_else(PoisonError::into_inner);
+    loop {
+        if let Some((_, rel)) = keys.iter().find(|(key, _)| held.get(key) == Some(&me)) {
+            return Err(format!("{rel} is already locked by this write"));
+        }
+        if keys.iter().all(|(key, _)| !held.contains_key(key)) {
+            break;
+        }
+        held = released.wait(held).unwrap_or_else(PoisonError::into_inner);
+    }
+    for (key, _) in &keys {
+        held.insert(key.clone(), me);
+    }
+    Ok(PathLock {
+        keys: keys.into_iter().map(|(key, _)| key).collect(),
+        joined,
+    })
+}
+
+/// An agent write's expectation that did not hold (M55.3): it named the
+/// hash of `expected` bytes, and the lock found `actual` ones. Nothing was
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleContent {
+    pub path: String,
+    pub expected: String,
+    pub actual: String,
+}
+
+/// Why a note write wrote nothing (M55.3): the agent's expectation was
+/// stale, or the write was refused in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteWriteError {
+    Stale(StaleContent),
+    Refused(String),
+}
+
+impl From<String> for NoteWriteError {
+    fn from(message: String) -> Self {
+        NoteWriteError::Refused(message)
+    }
+}
+
+impl From<NoteWriteError> for String {
+    /// The words a caller that passed no expectation reads. Such a caller
+    /// never meets `Stale`, so its words are only a fallback.
+    fn from(error: NoteWriteError) -> Self {
+        match error {
+            NoteWriteError::Refused(message) => message,
+            NoteWriteError::Stale(stale) => format!(
+                "{} changed since it was read, so nothing was written",
+                stale.path
+            ),
+        }
+    }
+}
+
+/// Rewrite one note under its path lock: the one note funnel (M55.1).
+///
+/// In order, all under one lock: `note_join` judges the target (it refuses
+/// before any lock or read), the lock is taken, the file is read, `expect`
+/// (an agent's hash of the bytes it read, M55.3) is compared with the bytes
+/// the lock holds, `next` computes the new bytes from them, and `write_file`
+/// renames them into place, recorded by `shadow_write` unless it is a `.mmd`.
+/// A stale `expect` or an `Err` from `next` writes nothing: no temp file, no
+/// `vault_writes` row. Human writers never pass an expectation, so a save
+/// never compares and the last write wins. Returns the written bytes'
+/// SHA-256.
+pub(crate) fn rewrite_note(
+    vault: &Path,
+    rel: &str,
+    extensions: &[&str],
+    expect: Option<&str>,
+    next: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<String, NoteWriteError> {
+    let target = note_join(vault, rel, extensions)?;
+    let lock = lock_paths(vault, &[rel])?;
+    let current = std::fs::read_to_string(&target).map_err(|e| format!("{rel}: {e}"))?;
+    if let Some(expected) = expect {
+        let actual = crate::ledger::sha256_hex(current.as_bytes());
+        if actual != expected {
+            return Err(NoteWriteError::Stale(StaleContent {
+                path: rel.to_string(),
+                expected: expected.to_string(),
+                actual,
+            }));
+        }
+    }
+    let content = next(&current)?;
+    write_file(&lock, &target, &content)?;
+    if !rel.ends_with(".mmd") {
+        shadow_write(vault, rel, &content, "vault.write", None);
+    }
+    Ok(crate::ledger::sha256_hex(content.as_bytes()))
+}
+
+/// Write the first free name among `candidates`, and return it.
+///
+/// Each candidate taken already is passed over; the first free one is
+/// judged (`judge`, in the writer's own words), locked, and checked again
+/// under its lock, since another writer may have taken it while this one
+/// waited. Then `write` lands it, or the lock is released and the walk goes
+/// on.
+fn claim_free_name(
+    vault: &Path,
+    candidates: impl IntoIterator<Item = String>,
+    judge: impl Fn(&str) -> Result<PathBuf, String>,
+    write: impl FnOnce(&PathLock, &str, &Path) -> Result<(), String>,
+) -> Result<String, String> {
+    for rel in candidates {
+        if vault.join(&rel).exists() {
+            continue;
+        }
+        let target = judge(&rel)?;
+        let lock = lock_paths(vault, &[&rel])?;
+        if target.exists() {
+            continue;
+        }
+        write(&lock, &rel, &target)?;
+        return Ok(rel);
+    }
+    Err("every candidate name is taken".to_string())
 }
 
 /// Require a single normal path component: non-empty, no separators, no
@@ -252,37 +542,37 @@ const MARKDOWN_OR_DIAGRAM: &[&str] = &["md", "mmd"];
 
 /// Why `path` is not a note a note writer may touch, or `None` when it is.
 ///
-/// Judged per component, the way the scanner judges folders:
-/// - No component may start with `.`: not `.git/`, whose config the app's
-///   own `git status` poll and auto-commit execute (`core.fsmonitor`,
-///   `gpg.program`, and more); not `.cerebro/`, with its write-once ledger
-///   segments and connector config; not `.claude/`, any other dot-folder, or
-///   any dotfile. Heard as HFS+ hears a name (`disk_folded`), which ignores
-///   U+200C, U+FEFF and their kind: there, `\u{200c}.claude/` IS `.claude/`
-///   (git's `core.protectHFS` class), and with no such folder yet the landing
-///   check has nothing to resolve.
+/// Judged per component, the way the scanner judges names:
+/// - No component may be hidden (`scan::is_hidden`): not `.git/`, whose
+///   config the app's own auto-commit and sync still execute
+///   (`gpg.program`, `core.sshCommand`, and more), and whose
+///   `core.fsmonitor` and hooks the person's own git runs (Cerebro's git
+///   pins those two off); not `.cerebro/`, with its write-once ledger
+///   segments and connector config; not `.claude/`, any other dot-folder,
+///   or any dotfile. Heard as HFS+ hears a name, which ignores U+200C,
+///   U+FEFF and their kind (`scan::hfs_ignorable`): there, `\u{200c}.claude/`
+///   IS `.claude/` (git's `core.protectHFS` class), and with no such folder
+///   yet the landing check has nothing to resolve. The scanner hides exactly
+///   what this rule refuses, Obsidian-style, so no page it lists is one this
+///   rule leaves read-only.
 /// - The extension must be one of `extensions`, spelled exactly as the
 ///   scanner spells it. An append adds markdown and a frontmatter patch
 ///   prepends YAML, and in a `.canvas`, `.csv`, `.json` or `.yml` either one
 ///   is corruption.
 /// - A markdown note may not sit in a folder the scanner skips, asked with
-///   the scanner's own predicate (`scan::is_skipped_dir`): exactly `views/`
-///   and `attachments/`, at any depth. This rule only decides what is
-///   VISIBLE — the two above are the boundary — so it says exactly what the
-///   scanner says. `Attachments/`, `Views/` and `views./` are folders the
-///   scanner lists, so their notes save; where a disk folds `Views/` onto an
-///   existing `views/`, the LANDING is `views/` (see `note_join`), and that
-///   refuses.
+///   the scanner's own predicate (`scan::is_skipped_dir`), which past the
+///   rule above is exactly `views/` and `attachments/`, at any depth. This
+///   rule only decides what is VISIBLE — the two above are the boundary — so
+///   it says exactly what the scanner says. `Attachments/`, `Views/` and
+///   `views./` are folders the scanner lists, so their notes save; where a
+///   disk folds `Views/` onto an existing `views/`, the LANDING is `views/`
+///   (see `note_join`), and that refuses.
 ///
-/// Two consequences, both deliberate:
-/// - A dotfile note the scanner still lists (`records/.draft.md`) is
-///   read-only in the app. PLATFORM-API-1 refuses every dotfile; whether the
-///   scanner should hide them too is the owner's call, and
-///   note-targets.json records the decision as it stands.
-/// - A `.mmd` is exempt from the folder rule because something writes one
-///   there today: `WhiteboardView` files a legacy `views/<id>.yml` List's
-///   canvases under `views/whiteboards/`, and refusing would strand every
-///   canvas such a List already has. Only the human doors take a `.mmd`.
+/// One consequence, deliberate: a `.mmd` is exempt from the folder rule
+/// because something writes one there today. `WhiteboardView` files a legacy
+/// `views/<id>.yml` List's canvases under `views/whiteboards/`, and refusing
+/// would strand every canvas such a List already has. Only the human doors
+/// take a `.mmd`.
 ///
 /// Mirrored by `noteRefusal` in src/lib/mockIpc.ts; both replay
 /// src-tauri/fixtures/note-targets.json.
@@ -294,7 +584,7 @@ fn note_refusal(path: &Path, extensions: &[&str]) -> Option<String> {
             _ => None,
         })
         .collect();
-    if names.iter().any(|name| disk_folded(name).starts_with('.')) {
+    if names.iter().any(|name| super::scan::is_hidden(name)) {
         return Some("dot-folders and dotfiles hold no notes".to_string());
     }
     let leaf = names.last().map(|name| name.as_ref()).unwrap_or_default();
@@ -311,22 +601,6 @@ fn note_refusal(path: &Path, extensions: &[&str]) -> Option<String> {
         return Some("views/ and attachments/ hold no notes".to_string());
     }
     None
-}
-
-/// `name` as a disk that folds names may hear it: Unicode case folded — APFS
-/// hears U+212A KELVIN SIGN as `k` — with the code points HFS+ ignores in a
-/// name dropped. Two names that fold alike may be one folder on such a disk.
-fn disk_folded(name: &str) -> String {
-    let heard: String = name
-        .chars()
-        .filter(|c| {
-            !matches!(
-                c,
-                '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'
-            )
-        })
-        .collect();
-    heard.to_uppercase().to_lowercase()
 }
 
 /// Where the bundle is on this disk, relative to the vault: what
@@ -354,7 +628,7 @@ fn first_name(path: &Path) -> Option<String> {
 
 /// Is `path`'s first component one a folding disk hears as `knowledge`?
 fn names_the_bundle(path: &Path) -> bool {
-    first_name(path).is_some_and(|name| disk_folded(&name) == crate::knowledge::KNOWLEDGE_DIR)
+    first_name(path).is_some_and(|name| crate::knowledge::folds_to_bundle(&name))
 }
 
 /// A vault-relative path `/`-joined, for a message.
@@ -369,9 +643,10 @@ fn slashed(path: &Path) -> String {
 /// must be contained, AND be a note.
 ///
 /// Every note writer below resolves its target here before it reads a byte —
-/// `save_note`, `update_frontmatter`, `set_note_title`, `create_note`, the
-/// agent's append (`appended_body`), `write_source` and `write_text_file` —
-/// so the agent's MCP doors and the human IPC commands share one boundary,
+/// the ones that go through `rewrite_note` (`save_note`, `update_frontmatter`,
+/// `set_note_title`, and the agent's `patch_note_checked`,
+/// `append_note_checked` and `edit_note`), `create_note`, `write_source` and
+/// `write_text_file` — so the agent's MCP doors and the human IPC commands share one boundary,
 /// and a refused file is never opened, let alone rewritten. It lives in the
 /// mechanism because the grant cannot hold it: panel turns, and every Agent
 /// record without `scope:`, run unscoped, so nothing upstream ever stopped an
@@ -384,42 +659,71 @@ fn slashed(path: &Path) -> String {
 /// name a folding disk hears as a skipped folder (`view` + U+017F LONG S IS
 /// `views` on APFS) is judged as the folder it reaches.
 ///
-/// And it may not reach `knowledge/` by any name but the bundle's own. The
-/// bundle's guards (`knowledge::canonical_path`) read the name and fold ASCII
-/// case only, so a write reaching the bundle another way — a symlink, or a
-/// spelling APFS folds onto it (U+212A KELVIN SIGN + `nowledge`) — walks past
-/// every one of them. Membership is IDENTITY (it lands under where
-/// `knowledge/` resolves) or NAME (a first component that folds to
-/// `knowledge`, as asked or as landed). Identity alone misses the plant: a
-/// folder made under the folded spelling before the bundle exists, which the
-/// bundle's own writes then land in, and which no name-based guard would
-/// ever recognise again.
+/// And it may not reach `knowledge/` by any name but exactly the bundle's
+/// own (M53.28). The bundle's guards (`knowledge::canonical_path`) fold a
+/// first name as the disk does, so they hear `Knowledge/` and U+212A KELVIN
+/// SIGN + `nowledge` as the bundle; but a symlink into it, or the folder
+/// `knowledge` links to, carries a name no fold can guess, so this check
+/// leans on none of them. Past it, a write reaches the bundle only under the
+/// one spelling the capture valve and the ledger file a concept by.
+/// Membership is IDENTITY (it lands under where `knowledge/` resolves) or
+/// NAME (a first component that folds to `knowledge`, as asked or as
+/// landed). Identity alone misses the plant: a folder made under a folded
+/// spelling before the bundle exists, which the bundle's own writes then
+/// land in.
+///
+/// The agent's MCP doors also ask this judgement before dispatch (M54.10),
+/// through `note_target_refusal` and `new_note_refusal`, so a refusal is
+/// recorded against its run in the words the door would use. The doors
+/// still come through here, so a path that changes on disk between that
+/// check and the write is refused all the same, uncoded.
 fn note_join(vault: &Path, rel: &str, extensions: &[&str]) -> Result<PathBuf, String> {
+    Ok(judge_note(vault, rel, extensions)?.joined)
+}
+
+/// `note_join`'s judgement, keeping why it refused (M54.10).
+fn judge_note(vault: &Path, rel: &str, extensions: &[&str]) -> Result<Resolved, NoTarget> {
     let resolved = resolve(vault, rel)?;
     if let Some(reason) = note_refusal(Path::new(rel), extensions) {
-        return Err(format!("not a note: {rel} — {reason}"));
+        return Err(NoTarget::Refused(format!("not a note: {rel} — {reason}")));
     }
     let landing = slashed(&resolved.landing);
     if let Some(reason) = note_refusal(&resolved.landing, extensions) {
-        return Err(format!(
+        return Err(NoTarget::Refused(format!(
             "not a note: {rel} resolves to {landing} — {reason}"
-        ));
+        )));
     }
     let in_bundle = names_the_bundle(Path::new(rel))
         || names_the_bundle(&resolved.landing)
         || bundle_root(vault).is_some_and(|root| resolved.landing.starts_with(root));
-    if in_bundle && !crate::knowledge::is_knowledge_path(rel) {
+    let own_name = first_name(Path::new(rel)).as_deref() == Some(crate::knowledge::KNOWLEDGE_DIR);
+    if in_bundle && !own_name {
         let lands = if landing == slashed(Path::new(rel)) {
             String::new()
         } else {
             format!(" (it resolves to {landing})")
         };
-        return Err(format!(
+        return Err(NoTarget::Refused(format!(
             "{rel} is inside knowledge/ by another name{lands} — the bundle is reached by its own \
              name or not at all"
-        ));
+        )));
     }
-    Ok(resolved.joined)
+    Ok(resolved)
+}
+
+/// Why a markdown note door refuses `rel` as no note it may touch, in
+/// `note_join`'s words, or `None` (M54.10): the check the agent's
+/// `update_frontmatter`, `append_to_note` and `edit_note` make before
+/// dispatch.
+///
+/// `None` as well where those doors answer in other words: a `.mmd`, which
+/// each refuses as raw diagram source before it judges a note, an empty
+/// path, and a path the disk could not resolve.
+pub(crate) fn note_target_refusal(vault: &Path, rel: &str) -> Option<String> {
+    if rel.ends_with(".mmd") {
+        return None;
+    }
+    refused(judge_note(vault, rel, MARKDOWN))
 }
 
 /// `safe_join` for the ledger's projection writer (`ledger::manifest`): the
@@ -466,12 +770,6 @@ pub fn bundle_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
 /// tool tells the agent it waits in Knowledge for review.
 pub(crate) fn concept_refusal(rel: &str) -> Option<String> {
     note_refusal(Path::new(rel), MARKDOWN)
-}
-
-/// `read_file` for a note writer: `note_join` judges the target before a byte
-/// of it is read.
-fn read_note_target(vault: &Path, rel: &str, extensions: &[&str]) -> Result<String, String> {
-    std::fs::read_to_string(note_join(vault, rel, extensions)?).map_err(|e| format!("{rel}: {e}"))
 }
 
 fn read_file(vault: &Path, rel: &str) -> Result<String, String> {
@@ -528,30 +826,37 @@ fn shadow_write(vault: &Path, rel: &str, content: &str, kind: &str, actor: Optio
     crate::runtime::vault_writes::record(vault, kind, rel, None, Some(&hash), actor);
 }
 
-/// The exact bytes `update_frontmatter` will write for a patch.
+/// `rel`'s refusal when it is a `.mmd` asked for a frontmatter patch.
 ///
-/// Public for the same reason as `compose_new_note`: a guard has to read what
-/// LANDS ON DISK. A patch that nulls out every remaining key leaves an empty
-/// mapping, which serialises as no block at all — and then the body is the
-/// whole file, so a `---` fence sitting in that body arrives at byte zero and
-/// becomes the frontmatter the scanner reads (PR #17 security review).
-pub fn patched_frontmatter(
-    vault: &Path,
-    rel: &str,
-    patch: &serde_json::Map<String, serde_json::Value>,
-) -> Result<String, String> {
-    // A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
-    // mermaid config — valid YAML, so without this guard a patch (including
-    // the agent's MCP update_frontmatter) would merge into the diagram's
-    // config header and reserialize it. Refused at the mechanism, not the
-    // callers, same as vault containment.
+/// A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
+/// mermaid config — valid YAML, so without this guard a patch (including the
+/// agent's MCP update_frontmatter) would merge into the diagram's config
+/// header and reserialize it. Refused at the mechanism, not the callers, same
+/// as vault containment, and before the note is judged.
+fn refuse_mmd_patch(rel: &str) -> Result<(), String> {
     if rel.ends_with(".mmd") {
         return Err(format!(
             "{rel}: a .mmd is raw diagram source and has no frontmatter to update"
         ));
     }
-    let content = read_note_target(vault, rel, MARKDOWN)?;
-    let (block, body) = parse::split_frontmatter(&content);
+    Ok(())
+}
+
+/// The bytes a frontmatter patch turns `current` into. `null` deletes a key;
+/// existing keys keep their position; new keys append; unknown keys and the
+/// body are untouched.
+///
+/// A patch that nulls out every remaining key leaves an empty mapping, which
+/// serialises as no block at all — and then the body is the whole file, so a
+/// `---` fence sitting in that body arrives at byte zero and becomes the
+/// frontmatter the scanner reads (PR #17 security review). The agent's check
+/// judges these bytes, under the write's lock (`patch_note_checked`).
+fn patch_bytes(
+    rel: &str,
+    current: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<String, String> {
+    let (block, body) = parse::split_frontmatter(current);
     let mut mapping = match block {
         Some(b) => parse::parse_frontmatter(b)
             .map_err(|e| format!("{rel}: cannot patch malformed frontmatter: {e}"))?,
@@ -569,9 +874,9 @@ pub fn patched_frontmatter(
     Ok(compose(new_block.as_deref(), body))
 }
 
-/// Apply a JSON patch to a note's frontmatter. `null` deletes a key; existing
-/// keys keep their position; new keys append; unknown keys and the body are
-/// untouched.
+/// Apply a JSON patch to a note's frontmatter (`patch_bytes`), under the
+/// note's path lock. Returns the written bytes' SHA-256, the hash the next
+/// scan reads (M55.2).
 ///
 /// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
 /// top of parse.rs) are normalized: the frontmatter block is reserialized and
@@ -582,11 +887,28 @@ pub fn update_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), String> {
-    let content = patched_frontmatter(vault, rel, patch)?;
-    write_file(&note_join(vault, rel, MARKDOWN)?, &content)?;
-    shadow_write(vault, rel, &content, "vault.write", None);
-    Ok(())
+) -> Result<String, String> {
+    patch_note_checked(vault, rel, patch, None, |_, _| Ok(())).map_err(String::from)
+}
+
+/// `update_frontmatter` for an agent: `expect`, when given, is the hash of
+/// the bytes the agent read, and other bytes refuse as `Stale` (M55.3);
+/// `check` judges the bytes the lock holds and the bytes the patch would
+/// write, `(before, after)`, under the same lock as the write (M55.1). Either
+/// refusal writes nothing. Returns the written bytes' SHA-256.
+pub fn patch_note_checked(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+    expect: Option<&str>,
+    check: impl FnOnce(&str, &str) -> Result<(), String>,
+) -> Result<String, NoteWriteError> {
+    refuse_mmd_patch(rel)?;
+    rewrite_note(vault, rel, MARKDOWN, expect, |current| {
+        let after = patch_bytes(rel, current, patch)?;
+        check(current, &after)?;
+        Ok(after)
+    })
 }
 
 /// The verify path (M23.4): the stamp is a field revision plus a
@@ -608,97 +930,181 @@ pub fn verify_frontmatter(
 /// `.mmd` files are RAW (M29.20): mermaid's own `---` config header is
 /// diagram syntax, so the body IS the whole file — no frontmatter compose.
 pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
-    let composed = saved_note(vault, rel, body)?;
-    write_file(&note_join(vault, rel, MARKDOWN_OR_DIAGRAM)?, &composed)?;
-    if !rel.ends_with(".mmd") {
-        shadow_write(vault, rel, &composed, "vault.write", None);
-    }
-    Ok(())
+    rewrite_note(vault, rel, MARKDOWN_OR_DIAGRAM, None, |current| {
+        Ok(compose_saved(rel, current, body))
+    })
+    .map(drop)
+    .map_err(String::from)
 }
 
-/// The exact bytes `save_note` will write for a new body.
-///
-/// Public for the same reason as `compose_new_note` and `patched_frontmatter`:
-/// a guard has to read what LANDS ON DISK. `save_note` keeps the note's
-/// existing frontmatter block and composes the body under it — so a note that
-/// has NO block has its body as the whole file, and a `---` fence the new body
-/// completes arrives at byte zero as the frontmatter the scanner will read
-/// (PR #17 security review).
-pub fn saved_note(vault: &Path, rel: &str, body: &str) -> Result<String, String> {
-    let content = read_note_target(vault, rel, MARKDOWN_OR_DIAGRAM)?;
+/// The bytes `save_note` turns `current` into for a new body: the existing
+/// frontmatter block with the body composed under it. A note that has NO
+/// block has its body as the whole file. A `.mmd` is the body itself.
+fn compose_saved(rel: &str, current: &str, body: &str) -> String {
     if rel.ends_with(".mmd") {
-        // Read anyway: same contract as .md, save only overwrites.
-        return Ok(body.to_string());
+        return body.to_string();
     }
-    let (block, _) = parse::split_frontmatter(&content);
-    Ok(compose(block, body))
+    let (block, _) = parse::split_frontmatter(current);
+    compose(block, body)
 }
 
 /// The `type` a note's frontmatter declares, if the file exists and parses.
-/// The MCP layer uses this to refuse agent writes to `type: Type` docs — the
-/// vault's schema (M13.5). Malformed frontmatter reads as untyped, which is
-/// also how scan.rs reads it: a doc the scanner does not type is not schema.
+/// A test reader: the writers judge the bytes their lock holds instead.
+/// Malformed frontmatter reads as untyped, which is also how scan.rs reads
+/// it, and a .mmd is always untyped: its `---` header is mermaid config, and
+/// a stray `type:` key in there is diagram data, not vault schema (M29.23).
+#[cfg(test)]
 pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
-    // A .mmd is always untyped: its `---` header is mermaid config, and a
-    // stray `type:` key in there is diagram data, not vault schema (M29.23).
     if rel.ends_with(".mmd") {
         return None;
     }
-    // Not a note, so no type worth asking for: every note writer refuses the
-    // file anyway, and judging it first means the agent's governed-type
-    // checks never open `.git/` or a ledger segment to find out
-    // (PLATFORM-API-1).
-    parse::declared_type(&read_note_target(vault, rel, MARKDOWN).ok()?)
+    let target = note_join(vault, rel, MARKDOWN).ok()?;
+    parse::declared_type(&std::fs::read_to_string(target).ok()?)
 }
 
 /// Return the note body only (frontmatter stripped). `.mmd` files pass
 /// through verbatim — their `---` header is mermaid config, not frontmatter.
 pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
-    let content = read_file(vault, rel)?;
-    if rel.ends_with(".mmd") {
-        return Ok(content);
-    }
-    let (_, body) = parse::split_frontmatter(&content);
-    Ok(body.to_string())
+    read_note_hashed(vault, rel).map(|(body, _)| body)
 }
 
-/// The body the agent's `append_to_note` saves (mcp.rs): the note's body with
-/// `addition` appended as its own paragraph.
+/// `read_note`, with the SHA-256 of the whole file it read the body from
+/// (M55.2): one read, so the hash names exactly the bytes behind the body,
+/// and it equals the scan's `Entry.hash` for those bytes.
+pub fn read_note_hashed(vault: &Path, rel: &str) -> Result<(String, String), String> {
+    let content = read_file(vault, rel)?;
+    let hash = crate::ledger::sha256_hex(content.as_bytes());
+    if rel.ends_with(".mmd") {
+        return Ok((content, hash));
+    }
+    let (_, body) = parse::split_frontmatter(&content);
+    Ok((body.to_string(), hash))
+}
+
+/// The bytes an append turns `current` into: its body with `addition`
+/// appended as its own paragraph, under the frontmatter block it already has.
+fn append_bytes(current: &str, addition: &str) -> String {
+    let (block, body) = parse::split_frontmatter(current);
+    let body = format!("{}\n\n{}\n", body.trim_end(), addition.trim());
+    compose(block, &body)
+}
+
+/// Append `addition` to a markdown note, under its path lock (M55.1).
+/// `expect`, when given, is the hash of the bytes the agent read, and other
+/// bytes refuse as `Stale` (M55.3); `check` judges the bytes the lock holds
+/// and the bytes the append would write, `(before, after)`. Either refusal
+/// writes nothing. Returns the written bytes' SHA-256.
 ///
 /// Markdown notes only, judged before a byte is read (PLATFORM-API-1). A
 /// `.mmd` is refused outright rather than with the other non-notes because it
 /// IS a note elsewhere — just not one markdown can be appended to: the text
 /// lands in raw mermaid source, and the diagram stops parsing.
-pub fn appended_body(vault: &Path, rel: &str, addition: &str) -> Result<String, String> {
+pub fn append_note_checked(
+    vault: &Path,
+    rel: &str,
+    addition: &str,
+    expect: Option<&str>,
+    check: impl FnOnce(&str, &str) -> Result<(), String>,
+) -> Result<String, NoteWriteError> {
     if rel.ends_with(".mmd") {
         return Err(format!(
             "{rel}: a .mmd is raw diagram source, and markdown appended to it is not a diagram"
-        ));
+        )
+        .into());
     }
-    let content = read_note_target(vault, rel, MARKDOWN)?;
-    let (_, body) = parse::split_frontmatter(&content);
-    Ok(format!("{}\n\n{}\n", body.trim_end(), addition.trim()))
+    rewrite_note(vault, rel, MARKDOWN, expect, |current| {
+        let after = append_bytes(current, addition);
+        check(current, &after)?;
+        Ok(after)
+    })
 }
 
-fn unique_rel_path(vault: &Path, folder: &str, slug: &str) -> String {
+/// What an agent's quoted edit left behind (M55.5): the hash of the bytes it
+/// wrote, as get_note's Hash line will print it, and the 1-based line where
+/// each edit's new text starts, in the order the edits were given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditedNote {
+    pub content_hash: String,
+    pub lines: Vec<usize>,
+}
+
+/// Replace quoted passages of a markdown note's body, in place, under its
+/// path lock (M55.5): the agent's `edit_note`.
+///
+/// `rewrite_note` with a closure, so in order and under one lock: the target
+/// is judged a note, a missing file is `no note at <rel>`, `expect` is
+/// compared with the bytes the lock holds (M55.3), the edits are planned
+/// against the body (`quote::plan_edits`), and `check` judges the bytes held
+/// and the bytes the edits would land, `(before, after)`. Any refusal writes
+/// nothing, so the edits land together or not at all. A plan that fails on a
+/// note `check` refuses as it stands answers with `check`'s refusal, so a
+/// governed note is never quoted back.
+///
+/// Every byte before the body (a BOM, the fences as spelled, the YAML) is
+/// kept as it is, and so is every body byte no edit quoted. That is why this
+/// never goes through `compose` or `save_note`, which rewrite the fences
+/// and drop a BOM. Markdown notes only: a `.mmd` is not a note
+/// here.
+pub fn edit_note(
+    vault: &Path,
+    rel: &str,
+    edits: &[super::quote::QuoteEdit],
+    expect: Option<&str>,
+    check: impl Fn(&str, &str) -> Result<(), String>,
+) -> Result<EditedNote, NoteWriteError> {
+    if !note_join(vault, rel, MARKDOWN)?.is_file() {
+        return Err(format!("no note at {rel}").into());
+    }
+    let mut lines = Vec::new();
+    let content_hash = rewrite_note(vault, rel, MARKDOWN, expect, |current| {
+        let (_, body) = parse::split_frontmatter(current);
+        let prefix = &current[..current.len() - body.len()];
+        let planned = match super::quote::plan_edits(body, prefix, edits) {
+            Ok(planned) => planned,
+            Err(refusal) => {
+                check(current, current)?;
+                return Err(refusal);
+            }
+        };
+        let after = format!("{prefix}{}", planned.text);
+        check(current, &after)?;
+        lines = planned.lines;
+        Ok(after)
+    })?;
+    Ok(EditedNote {
+        content_hash,
+        lines,
+    })
+}
+
+/// `<folder>/<stem>.md`: the name `create_note` gives a note.
+fn note_in(folder: &str, stem: &str) -> String {
     // '' means the vault root — no separator, or the path grows a leading '/'.
-    let prefix = if folder.is_empty() {
-        String::new()
+    if folder.is_empty() {
+        format!("{stem}.md")
     } else {
-        format!("{folder}/")
-    };
-    let first = format!("{prefix}{slug}.md");
-    if !vault.join(&first).exists() {
-        return first;
+        format!("{folder}/{stem}.md")
     }
-    let mut n = 2;
-    loop {
-        let candidate = format!("{prefix}{slug}-{n}.md");
-        if !vault.join(&candidate).exists() {
-            return candidate;
+}
+
+/// The file `create_note` names for `slug` in `folder`, before a `-2` makes
+/// the name new (M54.10), or `None` when `slug` is not one name, which
+/// `create_note` refuses in its own words.
+pub(crate) fn planned_note_path(folder: &str, slug: &str) -> Option<String> {
+    safe_component("slug", slug).ok()?;
+    Some(note_in(folder, slug))
+}
+
+/// The names `create_note` tries for `slug` in `folder`, in order:
+/// `<slug>.md`, then `<slug>-2.md`, `<slug>-3.md`, …
+fn note_candidates<'a>(folder: &'a str, slug: &'a str) -> impl Iterator<Item = String> + 'a {
+    (1..).map(move |n: u64| {
+        if n == 1 {
+            note_in(folder, slug)
+        } else {
+            note_in(folder, &format!("{slug}-{n}"))
         }
-        n += 1;
-    }
+    })
 }
 
 /// Extensions `write_text_file` may create. `.mmd` only for now: the command
@@ -726,20 +1132,19 @@ pub fn write_text_file(vault: &Path, rel: &str, content: &str) -> Result<String,
         ));
     }
     note_join(vault, rel, &TEXT_FILE_EXTENSIONS)?;
-    let mut n = 1;
-    let actual = loop {
-        let candidate = if n == 1 {
+    let candidates = (1..).map(|n: u64| {
+        if n == 1 {
             rel.to_string()
         } else {
             format!("{stem}-{n}.{ext}")
-        };
-        if !vault.join(&candidate).exists() {
-            break candidate;
         }
-        n += 1;
-    };
-    write_file(&note_join(vault, &actual, &TEXT_FILE_EXTENSIONS)?, content)?;
-    Ok(actual)
+    });
+    claim_free_name(
+        vault,
+        candidates,
+        |candidate| note_join(vault, candidate, &TEXT_FILE_EXTENSIONS),
+        |lock, _, target| write_file(lock, target, content),
+    )
 }
 
 /// The one folder attachments live in.
@@ -752,27 +1157,22 @@ pub const ATTACHMENTS_DIR: &str = "attachments";
 
 /// `report.pdf` → `attachments/report.pdf`, then `-2`, `-3`, …
 ///
-/// Not `unique_rel_path`: that one hardcodes `.md`, and `report.pdf-2` is a
+/// Not `note_candidates`: that one hardcodes `.md`, and `report.pdf-2` is a
 /// file the OS can no longer open. The dedupe goes on the STEM.
-fn unique_attachment_path(vault: &Path, name: &str) -> String {
+fn attachment_candidates(name: &str) -> impl Iterator<Item = String> + '_ {
     // A leading dot is the whole name (".gitignore"), not an extension.
     let (stem, ext) = match name.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
         _ => (name, String::new()),
     };
-    let mut n = 1;
-    loop {
+    (1..).map(move |n: u64| {
         let suffix = if n == 1 {
             String::new()
         } else {
             format!("-{n}")
         };
-        let candidate = format!("{ATTACHMENTS_DIR}/{stem}{suffix}{ext}");
-        if !vault.join(&candidate).exists() {
-            return candidate;
-        }
-        n += 1;
-    }
+        format!("{ATTACHMENTS_DIR}/{stem}{suffix}{ext}")
+    })
 }
 
 /// Copy a file from anywhere on disk into the vault's `attachments/` folder
@@ -801,14 +1201,19 @@ pub fn import_attachment(vault: &Path, source: &str) -> Result<String, String> {
         .and_then(|n| n.to_str())
         .ok_or_else(|| format!("unusable file name: {source}"))?;
     safe_component("attachment name", name)?;
-    let rel = unique_attachment_path(vault, name);
-    let dest = safe_join(vault, &rel)?;
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::copy(src, &dest).map_err(|e| format!("{source}: {e}"))?;
-    super::watcher::note_own_write(&dest);
-    Ok(rel)
+    claim_free_name(
+        vault,
+        attachment_candidates(name),
+        |candidate| safe_join(vault, candidate),
+        |_lock, _, dest| {
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::copy(src, dest).map_err(|e| format!("{source}: {e}"))?;
+            super::watcher::note_own_write(dest);
+            Ok(())
+        },
+    )
 }
 
 /// The exact bytes `create_note` will write for a frontmatter map and a body.
@@ -853,17 +1258,48 @@ pub fn create_note(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<String, String> {
-    safe_join(vault, folder)?; // folder must stay inside the vault
+    resolve(vault, folder)?; // folder must stay inside the vault
     safe_component("slug", slug)?;
-    let rel = unique_rel_path(vault, folder, slug);
+    let content = compose_new_note(frontmatter, slug, body)?;
+    // Judged on each file it may actually write (PLATFORM-API-1), and picked
+    // under that file's lock, so two creates of one slug land in two files.
+    claim_free_name(
+        vault,
+        note_candidates(folder, slug),
+        |rel| Ok(judge_note(vault, rel, MARKDOWN)?.joined),
+        |lock, rel, target| {
+            write_file(lock, target, &content)?;
+            shadow_write(vault, rel, &content, "vault.write", None);
+            Ok(())
+        },
+    )
+}
+
+/// What `create_note` judges before it writes, in its order and its words
+/// (M54.10): the folder stays inside the vault, the slug is one name, and
+/// the file the two name, made new with a `-2` or `-3`, is a note.
+fn judge_new_note(vault: &Path, folder: &str, slug: &str) -> Result<String, NoTarget> {
+    resolve(vault, folder)?; // folder must stay inside the vault
+    safe_component("slug", slug).map_err(NoTarget::Malformed)?;
+    let rel = note_candidates(folder, slug)
+        .find(|candidate| !vault.join(candidate).exists())
+        .unwrap_or_default();
     // Judged on the file it will actually write (PLATFORM-API-1): the folder
     // can be a dot-folder (`.git/hooks`), a skipped one, or a symlink into
     // either, and the slug can make a dotfile.
-    let target = note_join(vault, &rel, MARKDOWN)?;
-    let content = compose_new_note(frontmatter, slug, body)?;
-    write_file(&target, &content)?;
-    shadow_write(vault, &rel, &content, "vault.write", None);
+    judge_note(vault, &rel, MARKDOWN)?;
     Ok(rel)
+}
+
+/// Why `create_note` refuses to write `slug` in `folder` as no note it may
+/// write, in its words, or `None` (M54.10): the check the agent's door makes
+/// before dispatch. It names the file `create_note` would write, `-2`
+/// included, because that is the name the refusal carries.
+///
+/// `None` as well where the call answers in other words: a slug that is not
+/// one name, an empty folder, and a folder the disk could not resolve.
+pub(crate) fn new_note_refusal(vault: &Path, folder: &str, slug: &str) -> Option<String> {
+    refused(judge_new_note(vault, folder, slug))
 }
 
 /// Create or REPLACE a knowledge concept at an exact path (M6).
@@ -905,8 +1341,9 @@ fn concept_write(
     body: &str,
 ) -> Result<String, String> {
     // A cached source is a note like any other (PLATFORM-API-1), and the
-    // frontend finds one by SCANNING for its path — a copy written where the
-    // scan cannot see it reads as never fetched, forever.
+    // frontend and `cache_source` find one by SCANNING, for its path or its
+    // `source_id` — a copy written where the scan cannot see it reads as never
+    // fetched, forever.
     let target = note_join(vault, rel, MARKDOWN)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
@@ -924,7 +1361,8 @@ fn concept_write(
         Some(b) => format!("---\n{b}---\n\n{body}\n"),
         None => format!("{body}\n"),
     };
-    write_file(&target, &content)?;
+    let lock = lock_paths(vault, &[rel])?;
+    write_file(&lock, &target, &content)?;
     Ok(content)
 }
 
@@ -1003,13 +1441,18 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
              to set"
         ));
     }
-    let content = read_note_target(vault, rel, MARKDOWN)?;
-    let (block, body) = parse::split_frontmatter(&content);
-    let new_body = replace_h1(body, title);
-    let composed = compose(block, &new_body);
-    write_file(&note_join(vault, rel, MARKDOWN)?, &composed)?;
-    shadow_write(vault, rel, &composed, "vault.write", None);
-    Ok(())
+    rewrite_note(vault, rel, MARKDOWN, None, |current| {
+        Ok(retitle_bytes(current, title))
+    })
+    .map(drop)
+    .map_err(String::from)
+}
+
+/// The bytes `set_note_title` turns `current` into: its H1 spliced
+/// (`replace_h1`), every other byte kept.
+fn retitle_bytes(current: &str, title: &str) -> String {
+    let (block, body) = parse::split_frontmatter(current);
+    compose(block, &replace_h1(body, title))
 }
 
 fn collect_views_dir(
@@ -1044,18 +1487,16 @@ fn collect_views_dir(
     Ok(())
 }
 
-/// Walk the vault the way the scanner does — skipping dot dirs, the legacy
-/// `views/` dirs, and `attachments/`.
+/// Walk the folders the scanner walks, asked with its own predicate
+/// (`scan::is_skipped_dir`) — skipping dot dirs, the legacy `views/` dirs,
+/// and `attachments/`.
 fn vault_walker(vault: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
     walkdir::WalkDir::new(vault)
         .into_iter()
         .filter_entry(|e| {
             e.depth() == 0
                 || e.file_type().is_file()
-                || !{
-                    let name = e.file_name().to_string_lossy();
-                    name.starts_with('.') || name == "views" || name == "attachments"
-                }
+                || !super::scan::is_skipped_dir(&e.file_name().to_string_lossy())
         })
         .filter_map(Result::ok)
 }
@@ -1175,8 +1616,9 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 /// is rejected: the vault root is not a Collection.
 pub fn save_collection(vault: &Path, folder: &str, yaml: &str) -> Result<(), String> {
     let dir = safe_join(vault, folder)?;
-    write_file(&dir.join(COLLECTION_MARKER), yaml)?;
     let rel = format!("{folder}/{COLLECTION_MARKER}");
+    let lock = lock_paths(vault, &[&rel])?;
+    write_file(&lock, &dir.join(COLLECTION_MARKER), yaml)?;
     shadow_write(vault, &rel, yaml, "vault.write", None);
     Ok(())
 }
@@ -1190,12 +1632,13 @@ pub fn save_list(vault: &Path, folder: &str, id: &str, yaml: &str) -> Result<(),
     } else {
         safe_join(vault, folder)?
     };
-    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)?;
     let rel = if folder.is_empty() {
         format!("{id}{LIST_SUFFIX}")
     } else {
         format!("{folder}/{id}{LIST_SUFFIX}")
     };
+    let lock = lock_paths(vault, &[&rel])?;
+    write_file(&lock, &base.join(format!("{id}{LIST_SUFFIX}")), yaml)?;
     shadow_write(vault, &rel, yaml, "vault.write", None);
     Ok(())
 }
@@ -1209,11 +1652,12 @@ pub fn save_view(vault: &Path, id: &str, yaml: &str, folder: Option<&str>) -> Re
         Some(f) => safe_join(vault, f)?,
         None => vault.to_path_buf(),
     };
-    write_file(&base.join("views").join(format!("{id}.yml")), yaml)?;
     let rel = match folder {
         Some(f) => format!("{f}/views/{id}.yml"),
         None => format!("views/{id}.yml"),
     };
+    let lock = lock_paths(vault, &[&rel])?;
+    write_file(&lock, &base.join("views").join(format!("{id}.yml")), yaml)?;
     shadow_write(vault, &rel, yaml, "vault.write", None);
     Ok(())
 }
@@ -1229,9 +1673,14 @@ pub fn create_folder(vault: &Path, rel: &str) -> Result<(), String> {
 /// Move a note — or a whole folder — within the vault. Refuses to clobber an
 /// existing target. Both paths register as own-writes so the watcher doesn't
 /// bounce our move back as external changes.
+///
+/// Both ends are locked in one `lock_paths` call (M55.1), so the target is
+/// judged free under its lock. A folder move holds only the folder's keys,
+/// not those of the files inside it.
 pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
     let src = safe_join(vault, from)?;
     let dst = safe_join(vault, to)?;
+    let _lock = lock_paths(vault, &[from, to])?;
     if dst.exists() {
         return Err(format!("target already exists: {to}"));
     }
@@ -1249,6 +1698,7 @@ pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
 /// hard-deleted.
 pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
     let abs = safe_join(vault, rel)?;
+    let _lock = lock_paths(vault, &[rel])?;
     if !abs.exists() {
         return Err(format!("not found: {rel}"));
     }
@@ -1296,6 +1746,163 @@ mod tests {
             read(&vault, "items/atl-1.md"),
             "---\ntype: Work item\nkey: ATL-1\nstatus: done\ncustom_field: kept\n---\n\n# Ship the scanner\n\nBody stays.\n"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M55.2: the write answers the hash of the bytes it landed, which is the
+    // hash the next scan reads, and read_note_hashed names the same bytes.
+    #[test]
+    fn update_frontmatter_returns_the_hash_of_what_it_wrote() {
+        let vault = vault_with_note("wfm-hash");
+        let hash = update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
+        let landed = std::fs::read(vault.join("items/atl-1.md")).unwrap();
+        assert_eq!(hash, crate::ledger::sha256_hex(&landed));
+        let scanned = crate::vault::scan::scan_vault(&vault).unwrap();
+        let entry = scanned.iter().find(|e| e.path == "items/atl-1.md").unwrap();
+        assert_eq!(entry.hash.as_deref(), Some(hash.as_str()));
+        let (body, read_hash) = read_note_hashed(&vault, "items/atl-1.md").unwrap();
+        assert_eq!(read_hash, hash);
+        assert_eq!(body, read_note(&vault, "items/atl-1.md").unwrap());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// This vault's `vault_writes` rows, oldest first, from the armed sink.
+    fn vault_write_rows(vault: &Path) -> Vec<(String, String)> {
+        let vault_id = crate::runtime::scope::derive_vault_id(vault);
+        crate::runtime::sink::with_sink(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT kind, path FROM vault_writes WHERE vault_id = ?1 ORDER BY rowid")
+                .unwrap();
+            stmt.query_map([&vault_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
+        .expect("the sink is armed")
+    }
+
+    // M55.3: an agent write that names the hash of other bytes than the lock
+    // holds writes nothing at all.
+    #[test]
+    fn a_stale_expectation_writes_nothing() {
+        let _lock = crate::runtime::sink::test_lock();
+        let config = testutil::temp_vault("wfm-stale-config");
+        crate::runtime::sink::arm(&config).unwrap();
+        let vault = vault_with_note("wfm-stale");
+        let read_hash = crate::ledger::sha256_hex(read(&vault, "items/atl-1.md").as_bytes());
+        // Someone else writes the note after the agent read it.
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nEdited.\n",
+        )
+        .unwrap();
+        let bytes = read(&vault, "items/atl-1.md");
+        let actual = crate::ledger::sha256_hex(bytes.as_bytes());
+        let modified = || {
+            std::fs::metadata(vault.join("items/atl-1.md"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let mtime = modified();
+        let rows = vault_write_rows(&vault);
+        let stale = NoteWriteError::Stale(StaleContent {
+            path: "items/atl-1.md".into(),
+            expected: read_hash.clone(),
+            actual,
+        });
+
+        let patched = patch_note_checked(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+            Some(&read_hash),
+            |_, _| Ok(()),
+        );
+        assert_eq!(patched, Err(stale.clone()));
+        let appended = append_note_checked(
+            &vault,
+            "items/atl-1.md",
+            "More.",
+            Some(&read_hash),
+            |_, _| panic!("a stale write never reaches its check"),
+        );
+        assert_eq!(appended, Err(stale));
+
+        assert_eq!(
+            read(&vault, "items/atl-1.md"),
+            bytes,
+            "the bytes are unchanged"
+        );
+        assert_eq!(modified(), mtime, "the file was not rewritten");
+        assert_eq!(vault_write_rows(&vault), rows, "no vault_writes row");
+        assert!(temp_files(&vault).is_empty(), "no temp file");
+        crate::runtime::sink::disarm();
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    #[test]
+    fn a_matching_expectation_writes_and_answers_the_new_hash() {
+        let vault = vault_with_note("wfm-expect-match");
+        let (_, read_hash) = read_note_hashed(&vault, "items/atl-1.md").unwrap();
+        let patched = patch_note_checked(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+            Some(&read_hash),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            patched,
+            crate::ledger::sha256_hex(read(&vault, "items/atl-1.md").as_bytes())
+        );
+        // The answered hash is the next write's expectation.
+        let appended =
+            append_note_checked(&vault, "items/atl-1.md", "More.", Some(&patched), |_, _| {
+                Ok(())
+            })
+            .unwrap();
+        let landed = read(&vault, "items/atl-1.md");
+        assert_eq!(appended, crate::ledger::sha256_hex(landed.as_bytes()));
+        assert!(landed.contains("status: done"), "{landed}");
+        assert!(landed.ends_with("Body stays.\n\nMore.\n"), "{landed}");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_human_save_never_compares() {
+        let vault = vault_with_note("wfm-human-wins");
+        let (_, read_hash) = read_note_hashed(&vault, "items/atl-1.md").unwrap();
+        // The note changes on disk after the person's editor read it...
+        testutil::write(
+            &vault,
+            "items/atl-1.md",
+            &NOTE.replace("Body stays.", "Outside."),
+        );
+        assert_ne!(
+            read_note_hashed(&vault, "items/atl-1.md").unwrap().1,
+            read_hash
+        );
+        // ...and the person's save and property edit still land: last write wins.
+        save_note(&vault, "items/atl-1.md", "\n# Ship the scanner\n\nMine.\n").unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
+        let landed = read(&vault, "items/atl-1.md");
+        assert!(landed.contains("status: done"), "{landed}");
+        assert!(landed.ends_with("Mine.\n"), "{landed}");
+        assert!(!landed.contains("Outside."), "{landed}");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -1489,7 +2096,7 @@ mod tests {
     fn create_note_with_empty_body_gets_default_h1() {
         let vault = testutil::temp_vault("wfm-create-empty");
         create_note(&vault, "items", "empty-note", &patch(&[]), "").unwrap();
-        // Sentence case per humanize_stem (mockParse.ts parity).
+        // Sentence case per humanize_stem (engine/frontmatter.ts parity).
         assert_eq!(read(&vault, "items/empty-note.md"), "# Empty note\n");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -1914,6 +2521,15 @@ mod tests {
     /// Every regular file under `vault`, dot-folders included, with its bytes:
     /// what "a refusal changed nothing" means. Symlinks are not followed, so
     /// a write carried through one shows up at the file it reached.
+    /// The edit_note door's edit in the shared cases: the seed's heading.
+    fn seed_to_landed() -> Vec<crate::vault::quote::QuoteEdit> {
+        vec![crate::vault::quote::QuoteEdit {
+            old: "Seed".into(),
+            new: "Landed".into(),
+            occurrence: None,
+        }]
+    }
+
     fn snapshot(vault: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
         walkdir::WalkDir::new(vault)
             .into_iter()
@@ -1939,7 +2555,10 @@ mod tests {
             let vault = testutil::temp_vault("wfm-note-targets");
             let door = case["door"].as_str().expect("a door");
             let path = case["path"].as_str().unwrap_or_default();
-            let edits = matches!(door, "save_note" | "update_frontmatter" | "set_note_title");
+            let edits = matches!(
+                door,
+                "save_note" | "update_frontmatter" | "set_note_title" | "edit_note"
+            );
             if edits && case["seed"] != serde_json::json!(false) {
                 testutil::write(&vault, path, seed);
             }
@@ -1951,7 +2570,7 @@ mod tests {
                     path,
                     &patch(&[("status", serde_json::json!("done"))]),
                 )
-                .map(|()| path.to_string()),
+                .map(|_| path.to_string()),
                 "set_note_title" => {
                     set_note_title(&vault, path, "Landed").map(|()| path.to_string())
                 }
@@ -1963,6 +2582,9 @@ mod tests {
                     "# Landed\n",
                 ),
                 "write_text_file" => write_text_file(&vault, path, "flowchart TD\n"),
+                "edit_note" => edit_note(&vault, path, &seed_to_landed(), None, |_, _| Ok(()))
+                    .map(|_| path.to_string())
+                    .map_err(String::from),
                 other => panic!("no door called {other}"),
             };
             match (case["refused"].as_str(), case["lands"].as_str()) {
@@ -1984,6 +2606,324 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&vault);
         }
+    }
+
+    // M54.10: the agent's MCP doors ask the note doors' own judgement before
+    // dispatch, to record a refusal against its run. Over the same shared
+    // cases, the check refuses what a door refuses, in its words byte for
+    // byte, lets through what lands, and changes nothing on disk.
+    #[test]
+    fn the_dispatch_check_agrees_with_every_note_door() {
+        let file: serde_json::Value =
+            serde_json::from_str(NOTE_TARGETS).expect("note-targets.json parses");
+        let seed = file["seed"].as_str().expect("a seed");
+        let mut replayed = 0;
+        for case in file["cases"].as_array().expect("cases") {
+            let door = case["door"].as_str().expect("a door");
+            if !matches!(
+                door,
+                "save_note" | "update_frontmatter" | "create_note" | "edit_note"
+            ) {
+                continue;
+            }
+            let path = case["path"].as_str().unwrap_or_default();
+            let folder = case["folder"].as_str().unwrap_or_default();
+            let slug = case["slug"].as_str().unwrap_or_default();
+            let vault = testutil::temp_vault("wfm-dispatch-check");
+            if door != "create_note" && case["seed"] != serde_json::json!(false) {
+                testutil::write(&vault, path, seed);
+            }
+            let before = snapshot(&vault);
+            let verdict = match door {
+                "create_note" => new_note_refusal(&vault, folder, slug),
+                _ => note_target_refusal(&vault, path),
+            };
+            assert_eq!(snapshot(&vault), before, "{case}: the check changed bytes");
+            if path.ends_with(".mmd") {
+                // The markdown doors refuse a diagram at the door, as raw
+                // diagram source (edit_note: as no note), so the check
+                // leaves it to them.
+                assert_eq!(verdict, None, "{case}");
+            } else {
+                match (case["refused"].as_str(), case["lands"].as_str()) {
+                    (Some(fragment), None) => {
+                        let message =
+                            verdict.unwrap_or_else(|| panic!("{case} must refuse before dispatch"));
+                        assert!(message.contains(fragment), "{case}: {message}");
+                        // A path case asks the agent's append, a markdown door:
+                        // save_note takes a .mmd too, so it words a non-note's
+                        // refusal differently.
+                        let door_says = match door {
+                            "create_note" => {
+                                create_note(&vault, folder, slug, &patch(&[]), "# Landed\n")
+                                    .map(drop)
+                            }
+                            "update_frontmatter" => update_frontmatter(
+                                &vault,
+                                path,
+                                &patch(&[("status", serde_json::json!("done"))]),
+                            )
+                            .map(drop),
+                            "edit_note" => {
+                                edit_note(&vault, path, &seed_to_landed(), None, |_, _| Ok(()))
+                                    .map(drop)
+                                    .map_err(String::from)
+                            }
+                            _ => append_note_checked(&vault, path, "Landed.", None, |_, _| Ok(()))
+                                .map(drop)
+                                .map_err(String::from),
+                        }
+                        .expect_err(&format!("{case} must refuse at its door"));
+                        assert_eq!(message, door_says, "{case}");
+                    }
+                    (None, Some(_)) => assert_eq!(verdict, None, "{case}"),
+                    _ => panic!("{case} must name exactly one of `refused` and `lands`"),
+                }
+            }
+            replayed += 1;
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+        assert!(replayed > 0, "the shared cases hold note-door cases");
+    }
+
+    // --- edit_note (M55.5) ----------------------------------------------
+
+    fn quote(old: &str, new: &str) -> crate::vault::quote::QuoteEdit {
+        crate::vault::quote::QuoteEdit {
+            old: old.into(),
+            new: new.into(),
+            occurrence: None,
+        }
+    }
+
+    #[test]
+    fn an_edit_changes_only_the_quoted_bytes() {
+        // A BOM, a CRLF opening fence, a closing fence with trailing spaces,
+        // a CRLF body and no final newline: every one of them is a byte a
+        // composing writer would rewrite.
+        let vault = testutil::temp_vault("wfm-edit-bytes");
+        let original =
+            "\u{feff}---\r\ntitle: Plan\r\n---  \r\n# Plan\r\n\r\nWe ship on Thursdays.\r\nLast line";
+        testutil::write(&vault, "notes/plan.md", original);
+        let edited = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("Thursdays", "Fridays")],
+            None,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        let landed = std::fs::read_to_string(vault.join("notes/plan.md")).unwrap();
+        assert_eq!(landed, original.replace("Thursdays", "Fridays"));
+        assert_eq!(edited.lines, vec![3]);
+        assert_eq!(
+            edited.content_hash,
+            crate::ledger::sha256_hex(landed.as_bytes())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_ambiguous_edit_writes_nothing() {
+        let vault = testutil::temp_vault("wfm-edit-ambiguous");
+        let original = "# Plan\n\nThursdays ship.\nThursdays rest.\n";
+        testutil::write(&vault, "notes/plan.md", original);
+        let refusal = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("Thursdays", "Fridays")],
+            None,
+            |_, _| Ok(()),
+        )
+        .map_err(String::from)
+        .unwrap_err();
+        assert!(refusal.contains("appears 2 times"), "{refusal}");
+        assert!(refusal.contains("  1. line 3: "), "{refusal}");
+        assert!(refusal.contains("  2. line 4: "), "{refusal}");
+        assert!(refusal.ends_with("\nNothing was written."), "{refusal}");
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            original
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_missing_note_is_named_and_nothing_is_created() {
+        let vault = testutil::temp_vault("wfm-edit-missing");
+        let refusal = edit_note(&vault, "notes/none.md", &[quote("a", "b")], None, |_, _| {
+            Ok(())
+        })
+        .map_err(String::from)
+        .unwrap_err();
+        assert_eq!(refusal, "no note at notes/none.md");
+        assert!(!vault.join("notes/none.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_stale_expect_hash_writes_nothing() {
+        let vault = testutil::temp_vault("wfm-edit-stale");
+        testutil::write(&vault, "notes/plan.md", "# Plan\n\nRead.\n");
+        let read = crate::ledger::sha256_hex(b"# Plan\n\nRead.\n");
+        let outside = "# Plan\n\nRead, then changed.\n";
+        testutil::write(&vault, "notes/plan.md", outside);
+        let outcome = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("Plan", "Plans")],
+            Some(&read),
+            |_, _| Ok(()),
+        );
+        match outcome {
+            Err(NoteWriteError::Stale(stale)) => {
+                assert_eq!(stale.path, "notes/plan.md");
+                assert_eq!(stale.expected, read);
+            }
+            other => panic!("a stale hash is refused as stale: {other:?}"),
+        }
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            outside
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_current_expect_hash_lands() {
+        let vault = testutil::temp_vault("wfm-edit-current");
+        let original = "# Plan\n\nRead.\n";
+        testutil::write(&vault, "notes/plan.md", original);
+        let hash = crate::ledger::sha256_hex(original.as_bytes());
+        let edited = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("Read.", "Read and edited.")],
+            Some(&hash),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(edited.lines, vec![3]);
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            "# Plan\n\nRead and edited.\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn two_edits_racing_on_one_hash_land_once() {
+        let vault = testutil::temp_vault("wfm-edit-race");
+        let original = "# Plan\n\nOne line.\n";
+        testutil::write(&vault, "notes/plan.md", original);
+        let hash = crate::ledger::sha256_hex(original.as_bytes());
+        let racers: Vec<_> = [("One line.", "First racer."), ("Plan", "Second racer")]
+            .into_iter()
+            .map(|(old, new)| {
+                let (vault, hash) = (vault.clone(), hash.clone());
+                std::thread::spawn(move || {
+                    edit_note(
+                        &vault,
+                        "notes/plan.md",
+                        &[quote(old, new)],
+                        Some(&hash),
+                        |_, _| Ok(()),
+                    )
+                })
+            })
+            .collect();
+        let outcomes: Vec<_> = racers.into_iter().map(|r| r.join().unwrap()).collect();
+        let landed = outcomes.iter().filter(|o| o.is_ok()).count();
+        let stale = outcomes
+            .iter()
+            .filter(|o| matches!(o, Err(NoteWriteError::Stale(_))))
+            .count();
+        assert_eq!((landed, stale), (1, 1), "{outcomes:?}");
+        let note = std::fs::read_to_string(vault.join("notes/plan.md")).unwrap();
+        assert!(
+            note.contains("First racer.") != note.contains("Second racer"),
+            "exactly one edit is on disk: {note}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn the_check_sees_the_bytes_it_would_write() {
+        let vault = testutil::temp_vault("wfm-edit-check");
+        let original = "---\ntitle: Plan\n---\n# Plan\n\nBody.\n";
+        testutil::write(&vault, "notes/plan.md", original);
+        let seen = std::sync::Mutex::new(None);
+        let outcome = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("Body.", "New body.")],
+            None,
+            |before, after| {
+                *seen.lock().unwrap() = Some((before.to_string(), after.to_string()));
+                Err("refused by the check".to_string())
+            },
+        );
+        assert_eq!(
+            outcome.map_err(String::from).unwrap_err(),
+            "refused by the check"
+        );
+        assert_eq!(
+            seen.lock().unwrap().clone(),
+            Some((
+                original.to_string(),
+                "---\ntitle: Plan\n---\n# Plan\n\nNew body.\n".to_string()
+            ))
+        );
+        assert_eq!(
+            std::fs::read_to_string(vault.join("notes/plan.md")).unwrap(),
+            original,
+            "an Err from the check writes nothing"
+        );
+        // A plan that fails on a note the check refuses answers with the
+        // check's refusal, never with a listing of the note's text.
+        let outcome = edit_note(
+            &vault,
+            "notes/plan.md",
+            &[quote("nowhere", "x")],
+            None,
+            |_, _| Err("governed".to_string()),
+        );
+        assert_eq!(outcome.map_err(String::from).unwrap_err(), "governed");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // What the dispatch check codes is a refusal of the target. A malformed
+    // argument or a disk that cannot answer is left to the door's own words,
+    // and create_note's first refusal names the folder, as the door does.
+    #[test]
+    fn the_dispatch_check_codes_only_a_refusal_of_the_target() {
+        let vault = testutil::temp_vault("wfm-dispatch-check-kinds");
+        let fm = patch(&[]);
+        let escaped = new_note_refusal(&vault, "../escaped", "note");
+        assert_eq!(
+            escaped,
+            create_note(&vault, "../escaped", "note", &fm, "x\n").err()
+        );
+        assert_eq!(
+            escaped.as_deref(),
+            Some("path escapes the vault: \"../escaped\"")
+        );
+        assert_eq!(new_note_refusal(&vault, "", "x"), None, "an empty folder");
+        assert_eq!(new_note_refusal(&vault, "records", "a/b"), None, "a slug");
+        assert_eq!(note_target_refusal(&vault, ""), None, "an empty path");
+        let gone = vault.join("no-such-vault");
+        assert_eq!(note_target_refusal(&gone, "records/a.md"), None);
+        assert_eq!(new_note_refusal(&gone, "records", "a"), None);
+        assert!(save_note(&gone, "records/a.md", "x\n").is_err());
+
+        // The planned name is create_note's, before a `-2` makes it new.
+        assert_eq!(planned_note_path("", "x").as_deref(), Some("x.md"));
+        assert_eq!(
+            planned_note_path("records", "x").as_deref(),
+            Some("records/x.md")
+        );
+        assert_eq!(planned_note_path("records", ".."), None);
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     // Containment waves a symlink through when it points INSIDE the vault,
@@ -2011,7 +2951,9 @@ mod tests {
         assert!(err.contains("resolves to .git/notes.md"), "{err}");
         assert!(update_frontmatter(&vault, "docs/notes.md", &hacked).is_err());
         assert!(set_note_title(&vault, "docs/notes.md", "Hacked").is_err());
-        assert!(appended_body(&vault, "docs/notes.md", "hacked").is_err());
+        assert!(
+            append_note_checked(&vault, "docs/notes.md", "hacked", None, |_, _| Ok(())).is_err()
+        );
         // A folder that does not exist yet still lands under the link.
         let err = create_note(&vault, "docs/hooks", "pre-commit", &hacked, "x\n").unwrap_err();
         assert!(
@@ -2024,7 +2966,10 @@ mod tests {
         let err = update_frontmatter(&vault, "records/config.md", &hacked).unwrap_err();
         assert!(err.contains("resolves to .git/config"), "{err}");
         assert!(save_note(&vault, "records/config.md", "hacked\n").is_err());
-        assert!(appended_body(&vault, "records/config.md", "hacked").is_err());
+        assert!(
+            append_note_checked(&vault, "records/config.md", "hacked", None, |_, _| Ok(()))
+                .is_err()
+        );
 
         // Every byte where it was, nothing new under .git, the link a link.
         assert_eq!(snapshot(&vault), before);
@@ -2040,9 +2985,9 @@ mod tests {
     // The disk the app ships for folds case — Unicode case, not just ASCII —
     // and `realpath` answers with the stored name, so a folded spelling is
     // judged by where it LANDS: `view` + U+017F LONG S is `views`, and
-    // U+212A KELVIN SIGN + `nowledge` is the bundle, under a spelling
-    // `knowledge::canonical_path` (ASCII folding) does not recognise — which
-    // would walk straight past every bundle guard keyed off that name.
+    // U+212A KELVIN SIGN + `nowledge` is the bundle. The bundle's guards hear
+    // that spelling as the bundle too (M53.28), and the note doors refuse it
+    // without them: they reach the bundle by its exact name or not at all.
     #[test]
     fn a_folded_spelling_cannot_reach_a_skipped_folder_or_the_bundle() {
         let vault = testutil::temp_vault("wfm-folding");
@@ -2055,7 +3000,10 @@ mod tests {
             return;
         }
         let kelvin = "\u{212a}nowledge/metrics/churn.md";
-        assert!(crate::knowledge::canonical_path(kelvin).is_none());
+        assert_eq!(
+            crate::knowledge::canonical_path(kelvin).as_deref(),
+            Some("knowledge/metrics/churn.md")
+        );
 
         let before = snapshot(&vault);
         let err = create_note(&vault, "view\u{17f}", "x", &patch(&[]), "# X\n").unwrap_err();
@@ -2081,13 +3029,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
-    // The views/attachments rule decides only what is VISIBLE — the dot rule
-    // and the extension rule are the boundary — so it must say exactly what
-    // the scanner says: a note the scanner lists and the writers refuse is a
-    // page whose every keystroke fails to save. `Attachments/` (an Obsidian
-    // habit), `Views/`, `notes/Views/` and `views./` are folders the scanner
-    // lists; `views/` and `attachments/`, at any depth, are folders it skips.
-    // Dotfile notes are the one deliberate exception: listed, and read-only.
+    // A note the scanner lists and the writers refuse is a page whose every
+    // keystroke fails to save, so the writers take exactly what the scanner
+    // lists. The views/attachments rule decides only what is VISIBLE — the
+    // dot rule and the extension rule are the boundary — and the scanner
+    // hides what the dot rule refuses (M53.25), names HFS+ hears with a
+    // leading dot included. `Attachments/` (an Obsidian habit), `Views/`,
+    // `notes/Views/` and `views./` are folders the scanner lists; `views/`
+    // and `attachments/`, at any depth, are folders it skips, and a dotfile
+    // or a dot-folder is a name it hides.
     #[test]
     fn the_note_writers_take_exactly_the_notes_the_scanner_lists() {
         let listed = |vault: &Path| -> Vec<String> {
@@ -2106,6 +3056,8 @@ mod tests {
             (&[], "views/x.md"),
             (&[], "attachments/y.md"),
             (&[], "notes/views/z.md"),
+            (&[], "records/.draft.md"),
+            (&[], "\u{200c}.notes/e.md"),
             // Beside an existing `views/`, a folding disk files `Views/` inside
             // it, where the scanner never looks; a case-sensitive one makes a
             // folder of its own, which the scanner lists. Both agree either way.
@@ -2156,22 +3108,52 @@ mod tests {
             }
             let _ = std::fs::remove_dir_all(&vault);
         }
+    }
 
-        // The exception, decided rather than overlooked (note-targets.json).
-        let vault = testutil::temp_vault("wfm-scanner-dotfile");
-        testutil::write(&vault, "records/.draft.md", NOTE);
-        assert_eq!(listed(&vault), ["records/.draft.md"]);
-        let err = save_note(&vault, "records/.draft.md", "\n# Saved\n").unwrap_err();
-        assert!(err.contains("dotfiles hold no notes"), "{err}");
+    // M53.6: an agent's write is announced under the path the scan lists, so
+    // the open page matches it however the agent spelled the file.
+    #[test]
+    fn landing_path_is_the_path_the_scan_lists() {
+        let vault = vault_with_note("wfm-landing");
+        let listed: Vec<String> = super::super::scan::scan_vault(&vault)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect();
+        assert_eq!(listed, ["items/atl-1.md"]);
+        for spelling in ["items/atl-1.md", "./items/atl-1.md", "items/./atl-1.md"] {
+            assert_eq!(
+                landing_path(&vault, spelling).as_deref(),
+                Some("items/atl-1.md"),
+                "{spelling}"
+            );
+        }
+        // On a disk that folds case (APFS, by default) the folder is named as
+        // the disk stores it, which is the name the scan lists.
+        if vault.join("ITEMS/atl-1.md").exists() {
+            assert_eq!(
+                landing_path(&vault, "ITEMS/atl-1.md").as_deref(),
+                Some("items/atl-1.md")
+            );
+        }
+        // Not written yet: the part that does not exist stays as asked.
+        assert_eq!(
+            landing_path(&vault, "./notes/new.md").as_deref(),
+            Some("notes/new.md")
+        );
+        for outside in ["../x.md", "/etc/hosts", ""] {
+            assert_eq!(landing_path(&vault, outside), None, "{outside:?}");
+        }
         let _ = std::fs::remove_dir_all(&vault);
     }
 
     // The plant: a folder made under a spelling a folding disk hears as
     // `knowledge`, BEFORE the bundle exists, is the bundle from then on — the
-    // bundle's own writes land in it — under a name no bundle guard reads. So
-    // the plant refuses at every note door, by NAME; and a bundle already
-    // stored that way (planted before this check, or made by hand) is still
-    // the bundle by IDENTITY, reached under that name or through a symlink.
+    // bundle's own writes land in it — under a name that is not the bundle's
+    // own. So the plant refuses at every note door, by NAME, whatever the
+    // guards in front of them hear; and a bundle already stored that way
+    // (planted before this check, or made by hand) is still the bundle by
+    // IDENTITY, reached under that name or through a symlink.
     #[cfg(unix)]
     #[test]
     fn the_bundle_cannot_be_planted_under_another_spelling() {
@@ -2216,7 +3198,10 @@ mod tests {
             );
             assert!(save_note(&vault, &rel, "\n# Rewritten\n").is_err(), "{rel}");
             assert!(set_note_title(&vault, &rel, "Rewritten").is_err(), "{rel}");
-            assert!(appended_body(&vault, &rel, "More.").is_err(), "{rel}");
+            assert!(
+                append_note_checked(&vault, &rel, "More.", None, |_, _| Ok(())).is_err(),
+                "{rel}"
+            );
         }
         let smuggled = create_note(&vault, "docs/metrics", "smuggled", &patch(&[]), "# S\n");
         assert!(smuggled.is_err());
@@ -2297,17 +3282,25 @@ mod tests {
     }
 
     #[test]
-    fn appended_body_appends_to_markdown_notes_only() {
+    fn an_append_lands_on_markdown_notes_only() {
         let vault = vault_with_note("wfm-appended-body");
         testutil::write(&vault, "diagrams/flow.mmd", "flowchart TD\n  A --> B\n");
+        let none = |_: &str, _: &str| Ok(());
+        let hash = append_note_checked(&vault, "items/atl-1.md", "  More.  ", None, none).unwrap();
+        let landed = read(&vault, "items/atl-1.md");
         assert_eq!(
-            appended_body(&vault, "items/atl-1.md", "  More.  ").unwrap(),
-            "\n# Ship the scanner\n\nBody stays.\n\nMore.\n"
+            landed,
+            NOTE.replace("Body stays.\n", "Body stays.\n\nMore.\n")
         );
+        assert_eq!(hash, crate::ledger::sha256_hex(landed.as_bytes()));
         // A .mmd is a note elsewhere — just not one markdown appends to.
-        let err = appended_body(&vault, "diagrams/flow.mmd", "More.").unwrap_err();
+        let err = String::from(
+            append_note_checked(&vault, "diagrams/flow.mmd", "More.", None, none).unwrap_err(),
+        );
         assert!(err.contains("raw diagram source"), "{err}");
-        let err = appended_body(&vault, ".git/config", "More.").unwrap_err();
+        let err = String::from(
+            append_note_checked(&vault, ".git/config", "More.", None, none).unwrap_err(),
+        );
         assert!(err.starts_with("not a note: .git/config"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -2396,7 +3389,7 @@ mod tests {
     }
 
     // `report.pdf-2` is a file the OS can no longer open, which is what
-    // reusing `unique_rel_path`'s `.md`-shaped dedupe would have produced.
+    // reusing `note_candidates`' `.md`-shaped dedupe would have produced.
     #[test]
     fn a_second_file_of_the_same_name_dedupes_the_stem_not_the_extension() {
         let vault = testutil::temp_vault("wfm-attach-dupe");
@@ -2462,6 +3455,261 @@ mod tests {
         assert!(crate::vault::scan::scan_vault(&vault).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    // --- Path locks (M55.1) -------------------------------------------------
+
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Long enough that a write which could enter would have; short enough
+    /// that a test proving a wait stays quick.
+    const WAITS: Duration = Duration::from_millis(300);
+    /// How long a test waits for something that must happen, so a lock that
+    /// never releases fails the test instead of hanging it.
+    const LANDS: Duration = Duration::from_secs(10);
+
+    /// Run `write` on a thread of its own and hear its outcome on a channel.
+    fn in_thread<T: Send + 'static>(
+        write: impl FnOnce() -> T + Send + 'static,
+    ) -> mpsc::Receiver<T> {
+        let (sent, outcome) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sent.send(write());
+        });
+        outcome
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_keys_hear_one_file_however_it_is_spelled() {
+        let vault = testutil::temp_vault("wfm-lock-keys");
+        testutil::write(&vault, "items/a.md", NOTE);
+        testutil::write(&vault, "items/b.md", NOTE);
+        testutil::write(&vault, "items/caf\u{e9}.md", NOTE);
+        std::os::unix::fs::symlink(vault.join("items"), vault.join("linked")).unwrap();
+        let key = |rel: &str| lock_key(&vault, rel).unwrap();
+        let one = key("items/a.md");
+        for spelling in [
+            "./items/a.md",
+            "items/./a.md",
+            "ITEMS/A.md",
+            "items/a\u{200c}.md",
+            "it\u{feff}ems/a.md",
+            "linked/a.md",
+        ] {
+            assert_eq!(key(spelling), one, "{spelling}");
+        }
+        // NFC and NFD spell one name.
+        assert_eq!(key("items/cafe\u{301}.md"), key("items/caf\u{e9}.md"));
+        assert_ne!(key("items/b.md"), one, "another file has its own key");
+        assert!(lock_key(&vault, "../x.md").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn two_writes_to_one_note_take_turns() {
+        let vault = vault_with_note("wfm-lock-turns");
+        let (entered, inside) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let dir = vault.clone();
+        let first = in_thread(move || {
+            rewrite_note(&dir, "items/atl-1.md", MARKDOWN, None, |current| {
+                let _ = entered.send(());
+                let _ = released.recv_timeout(LANDS);
+                Ok(current.replace("Body stays.", "A was here."))
+            })
+        });
+        inside
+            .recv_timeout(LANDS)
+            .expect("the first write is inside");
+        let dir = vault.clone();
+        let second = in_thread(move || {
+            update_frontmatter(
+                &dir,
+                "./items/atl-1.md",
+                &patch(&[("status", serde_json::json!("done"))]),
+            )
+        });
+        assert!(
+            second.recv_timeout(WAITS).is_err(),
+            "the second write entered while the first held the note"
+        );
+        release.send(()).unwrap();
+        first.recv_timeout(LANDS).unwrap().unwrap();
+        second.recv_timeout(LANDS).unwrap().unwrap();
+        assert_eq!(
+            read(&vault, "items/atl-1.md"),
+            NOTE.replace("status: todo", "status: done")
+                .replace("Body stays.", "A was here.")
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn writes_to_two_notes_overlap() {
+        let vault = testutil::temp_vault("wfm-lock-overlap");
+        testutil::write(&vault, "items/a.md", NOTE);
+        testutil::write(&vault, "items/b.md", NOTE);
+        let (a_in, hear_a) = mpsc::channel();
+        let (b_in, hear_b) = mpsc::channel();
+        // Each closure signals that it is inside, then waits for the other's
+        // signal: only two writes inside at once can both see it.
+        let inside = |rel: &'static str, mine: mpsc::Sender<()>, theirs: mpsc::Receiver<()>| {
+            let dir = vault.clone();
+            in_thread(move || {
+                rewrite_note(&dir, rel, MARKDOWN, None, |current| {
+                    let _ = mine.send(());
+                    theirs
+                        .recv_timeout(LANDS)
+                        .map_err(|_| format!("{rel}: the other write never came in"))?;
+                    Ok(current.replace("Body stays.", "Both inside."))
+                })
+            })
+        };
+        let a = inside("items/a.md", a_in, hear_b);
+        let b = inside("items/b.md", b_in, hear_a);
+        a.recv_timeout(LANDS * 2).unwrap().unwrap();
+        b.recv_timeout(LANDS * 2).unwrap().unwrap();
+        assert!(read(&vault, "items/a.md").contains("Both inside."));
+        assert!(read(&vault, "items/b.md").contains("Both inside."));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_agent_append_and_a_person_patch_both_land() {
+        let vault = vault_with_note("wfm-lock-append-patch");
+        let (entered, inside) = mpsc::channel();
+        let (release, released) = mpsc::channel::<()>();
+        let dir = vault.clone();
+        let append = in_thread(move || {
+            append_note_checked(&dir, "items/atl-1.md", "The agent's line.", None, |_, _| {
+                let _ = entered.send(());
+                let _ = released.recv_timeout(LANDS);
+                Ok(())
+            })
+        });
+        inside.recv_timeout(LANDS).expect("the append is judging");
+        let dir = vault.clone();
+        let person = in_thread(move || {
+            update_frontmatter(
+                &dir,
+                "items/atl-1.md",
+                &patch(&[("status", serde_json::json!("done"))]),
+            )
+        });
+        assert!(person.recv_timeout(WAITS).is_err(), "the patch waits");
+        release.send(()).unwrap();
+        append.recv_timeout(LANDS).unwrap().unwrap();
+        person.recv_timeout(LANDS).unwrap().unwrap();
+        let landed = read(&vault, "items/atl-1.md");
+        assert!(landed.contains("status: done"), "{landed}");
+        assert!(
+            landed.ends_with("Body stays.\n\nThe agent's line.\n"),
+            "{landed}"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn two_creates_of_one_slug_land_in_two_files() {
+        let vault = testutil::temp_vault("wfm-lock-create");
+        let held = lock_paths(&vault, &["notes/x.md"]).unwrap();
+        let dir = vault.clone();
+        let create = in_thread(move || create_note(&dir, "notes", "x", &patch(&[]), "# Second\n"));
+        assert!(create.recv_timeout(WAITS).is_err(), "the create waits");
+        write_file(&held, &vault.join("notes/x.md"), "# First\n").unwrap();
+        drop(held);
+        assert_eq!(create.recv_timeout(LANDS).unwrap().unwrap(), "notes/x-2.md");
+        assert_eq!(read(&vault, "notes/x.md"), "# First\n");
+        assert_eq!(read(&vault, "notes/x-2.md"), "# Second\n");
+
+        // The same race for an imported attachment.
+        let src = source_file("wfm-lock-attach-src", "report.pdf", "second");
+        let held = lock_paths(&vault, &["attachments/report.pdf"]).unwrap();
+        let (dir, source) = (vault.clone(), src.to_str().unwrap().to_string());
+        let import = in_thread(move || import_attachment(&dir, &source));
+        assert!(import.recv_timeout(WAITS).is_err(), "the import waits");
+        write_file(&held, &vault.join("attachments/report.pdf"), "first").unwrap();
+        drop(held);
+        assert_eq!(
+            import.recv_timeout(LANDS).unwrap().unwrap(),
+            "attachments/report-2.pdf"
+        );
+        assert_eq!(read(&vault, "attachments/report.pdf"), "first");
+        assert_eq!(read(&vault, "attachments/report-2.pdf"), "second");
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    #[test]
+    fn rename_holds_both_ends() {
+        let vault = testutil::temp_vault("wfm-lock-rename");
+        testutil::write(&vault, "items/a.md", NOTE);
+        let held = lock_paths(&vault, &["items/b.md"]).unwrap();
+        let dir = vault.clone();
+        let rename = in_thread(move || rename_note(&dir, "items/a.md", "items/b.md"));
+        assert!(rename.recv_timeout(WAITS).is_err(), "the rename waits");
+        write_file(&held, &vault.join("items/b.md"), "# B\n").unwrap();
+        drop(held);
+        let err = rename.recv_timeout(LANDS).unwrap().unwrap_err();
+        assert_eq!(err, "target already exists: items/b.md");
+        assert_eq!(read(&vault, "items/a.md"), NOTE);
+        assert_eq!(read(&vault, "items/b.md"), "# B\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_panic_inside_a_locked_write_releases_the_path() {
+        let vault = vault_with_note("wfm-lock-panic");
+        let dir = vault.clone();
+        let panicked = std::thread::spawn(move || {
+            rewrite_note(&dir, "items/atl-1.md", MARKDOWN, None, |_| {
+                panic!("a write that panics while it holds its path")
+            })
+        })
+        .join();
+        assert!(panicked.is_err(), "the write panicked");
+        let dir = vault.clone();
+        let next = in_thread(move || {
+            update_frontmatter(
+                &dir,
+                "items/atl-1.md",
+                &patch(&[("status", serde_json::json!("done"))]),
+            )
+        });
+        next.recv_timeout(LANDS)
+            .expect("the panic released the path")
+            .unwrap();
+        assert!(read(&vault, "items/atl-1.md").contains("status: done"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_lock_taken_twice_by_one_write_refuses_instead_of_hanging() {
+        let vault = vault_with_note("wfm-lock-twice");
+        let dir = vault.clone();
+        let nested = in_thread(move || {
+            let mut inner = None;
+            let outer = rewrite_note(&dir, "items/atl-1.md", MARKDOWN, None, |current| {
+                inner = Some(save_note(&dir, "./items/atl-1.md", "\n# Inner\n"));
+                Ok(current.to_string())
+            });
+            (outer, inner)
+        });
+        let (outer, inner) = nested
+            .recv_timeout(LANDS)
+            .expect("no write hangs on itself");
+        assert_eq!(
+            inner.unwrap().unwrap_err(),
+            "./items/atl-1.md is already locked by this write"
+        );
+        outer.unwrap();
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        // One call naming one file twice takes it once.
+        let both = lock_paths(&vault, &["items/atl-1.md", "./items/atl-1.md"]).unwrap();
+        drop(both);
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     // --- Atomic writes (M21.1) ---------------------------------------------
@@ -2572,8 +3820,11 @@ mod tests {
         let Ok(vault) = std::env::var("CEREBRO_CRASH_VAULT") else {
             return;
         };
+        let vault = Path::new(&vault);
+        let lock = lock_paths(vault, &["items/atl-1.md"]).unwrap();
         write_file(
-            &Path::new(&vault).join("items/atl-1.md"),
+            &lock,
+            &vault.join("items/atl-1.md"),
             "# Rewritten by the crash scenario\n",
         )
         .unwrap();

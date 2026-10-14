@@ -12,6 +12,7 @@ import {
 } from '@/engine/okf';
 import { sourceTarget } from '@/editor/citations';
 import { resolveAuthor } from '@/engine/authors';
+import { linkLabel } from '@/engine/linkLabels';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
 import { FacetChips } from '@/knowledge/FacetChips';
@@ -191,13 +192,16 @@ function SourceRow({
       </span>
       <span className="min-w-0 flex-1">
         {external ? (
+          // An untitled link reads as the name its URL carries (M69.2), and
+          // the URL stays one hover away: the name is derived, never stored.
           <a
             href={source.resource}
             target="_blank"
             rel="noreferrer noopener"
+            title={source.resource}
             className="block truncate text-xs text-cortex-600 underline decoration-cortex-200 underline-offset-2"
           >
-            {source.title ?? source.resource}
+            {source.title ?? linkLabel(source.resource)?.text ?? source.resource}
           </a>
         ) : internal !== null ? (
           <button

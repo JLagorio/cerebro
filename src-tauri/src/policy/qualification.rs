@@ -223,7 +223,7 @@ impl<'a> Catalog<'a> {
         self.types.get_or_init(|| match read_types(self.vault) {
             Ok(types) => types,
             Err(e) => {
-                eprintln!("qualification: could not read type docs: {e}");
+                log::warn!("qualification: could not read type docs: {e}");
                 BTreeMap::new()
             }
         })

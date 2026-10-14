@@ -26,6 +26,10 @@ const K = [
 
 const rotr = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
 
+// Module-local so the engine's no-DOM typecheck (tsconfig.engine.json) sees
+// it: a global declaration would collide with lib.dom under tsconfig.json.
+declare const TextEncoder: { new (): { encode(input?: string): Uint8Array } };
+
 export function sha256Hex(input: string): string {
   // First 32 bits of the fractional parts of the square roots of the first
   // 8 primes — the initial hash value of §5.3.3.

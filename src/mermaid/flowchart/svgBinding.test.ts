@@ -293,12 +293,14 @@ describe('cluster binding (M29.38)', () => {
   });
 });
 
-// A LIVE navigation bug, measured on the bundled 11.16.0 (links.mermaid.test.ts):
+// A real navigation bug, measured on the bundled 11.16.0 (links.mermaid.test.ts):
 // at securityLevel 'strict' mermaid attaches no click HANDLER but still wraps
 // every clickable node group in a real `<a href="…">`. A default action is not
 // propagation, so the node handler's stopPropagation() never touched it, and
 // clicking a linked node merely to SELECT it navigated the whole Tauri webview
-// off the SPA. Live today for hand-authored click lines.
+// off the SPA. The packaged shell guard now refuses or reroutes that navigation
+// (M53.12), but `pnpm dev` has no guard, and a select-click must not follow a
+// link either way.
 describe('bindFlowchartSvg neutralizes mermaid anchors (M29.38)', () => {
   const LINKED_SVG = [
     '<svg id="cerebro-mermaid-9" viewBox="0 0 100 100">',

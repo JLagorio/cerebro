@@ -1,0 +1,164 @@
+{
+  "format": 1,
+  "about": "What a tool call writes and where it is aimed, read off shared/policy/tools.v1.json (M54.1). A name is read in its short or its mcp__cerebro__ spelling. `writes_disk` is whether a successful call changes something on disk: the row's door, the generated door for an op the policy table offers agents, or the CLI row, and false for a name the manifest does not know (propose_revert_proposal is no agent-facing op, so it is one). `write_target` is the path the write scope checks, '' being the vault root when a folder target is missing; `read_target` is the path the read scope checks, the bundle's folder for a bundle target, and a read_write writer (edit_note, M55.5) has both. `written_path` is what a run log reports for the call: the target argument of a tool that writes, else null, for the frontend's replay (M54.2). Replayed by replays_the_shared_tool_cases in src-tauri/src/mcp.rs.",
+  "cases": [
+    {
+      "tool": "append_to_note",
+      "args": { "path": "notes/a.md", "content": "More." },
+      "writes_disk": true,
+      "write_target": "notes/a.md",
+      "read_target": null,
+      "written_path": "notes/a.md"
+    },
+    {
+      "tool": "mcp__cerebro__append_to_note",
+      "args": { "path": "notes/a.md", "content": "More." },
+      "writes_disk": true,
+      "write_target": "notes/a.md",
+      "read_target": null,
+      "written_path": "notes/a.md"
+    },
+    {
+      "tool": "edit_note",
+      "args": { "path": "notes/a.md", "edits": [{ "old": "A", "new": "B" }] },
+      "writes_disk": true,
+      "write_target": "notes/a.md",
+      "read_target": "notes/a.md",
+      "written_path": "notes/a.md"
+    },
+    {
+      "tool": "create_note",
+      "args": { "folder": "projects/atlas", "slug": "kickoff", "body": "# Kickoff" },
+      "writes_disk": true,
+      "write_target": "projects/atlas",
+      "read_target": null,
+      "written_path": "projects/atlas"
+    },
+    {
+      "tool": "create_note",
+      "args": { "slug": "loose", "body": "# Loose" },
+      "writes_disk": true,
+      "write_target": "",
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "update_frontmatter",
+      "args": { "path": "records/risks/r-1.md", "patch": { "status": "closed" } },
+      "writes_disk": true,
+      "write_target": "records/risks/r-1.md",
+      "read_target": null,
+      "written_path": "records/risks/r-1.md"
+    },
+    {
+      "tool": "get_note",
+      "args": { "path": "records/risks/r-1.md" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": "records/risks/r-1.md",
+      "written_path": null
+    },
+    {
+      "tool": "knowledge_about",
+      "args": { "target": "atlas" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": "knowledge",
+      "written_path": null
+    },
+    {
+      "tool": "search_notes",
+      "args": { "query": "kestrel" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "write_concept",
+      "args": {
+        "path": "knowledge/metrics/churn.md",
+        "type": "Metric",
+        "title": "Churn",
+        "description": "How many customers leave each month.",
+        "body": "# Churn"
+      },
+      "writes_disk": true,
+      "write_target": null,
+      "read_target": null,
+      "written_path": "knowledge/metrics/churn.md"
+    },
+    {
+      "tool": "cache_source",
+      "args": { "id": "PHX-421", "kind": "issue", "title": "PHX-421", "body": "The ticket." },
+      "writes_disk": true,
+      "write_target": null,
+      "read_target": null,
+      "written_path": "PHX-421"
+    },
+    {
+      "tool": "propose_organize",
+      "args": { "path": "inbox/capture.md", "reasoning": "It is a risk." },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "open_note",
+      "args": { "path": "records/risks/r-1.md" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "propose_create_belief",
+      "args": { "reason": "A new claim." },
+      "writes_disk": true,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "propose_revert_proposal",
+      "args": { "reason": "Undo it." },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "commit_proposals",
+      "args": { "proposal_ids": ["p-1"] },
+      "writes_disk": true,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "MultiEdit",
+      "args": { "file_path": "/VAULT/notes/a.md", "edits": [] },
+      "writes_disk": true,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "Bash",
+      "args": { "command": "ls" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    },
+    {
+      "tool": "delete_everything",
+      "args": { "path": "notes/a.md" },
+      "writes_disk": false,
+      "write_target": null,
+      "read_target": null,
+      "written_path": null
+    }
+  ]
+}

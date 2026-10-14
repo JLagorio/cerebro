@@ -3,6 +3,89 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
+// Import rails (M53.20). Each rail bans one kind of import: static imports,
+// re-exports and `import type` through no-restricted-imports, `import()`
+// through no-restricted-syntax. Flat config REPLACES a rule's options in each
+// matching object instead of merging them, so every file class at the bottom
+// of this file composes the full set of rails it keeps: a class that named
+// only its own exemption would silently drop every other rail.
+// scripts/lint-rails.test.ts proves each rail and each exemption.
+
+/** The only files that may load `@tauri-apps/*`. */
+const ADAPTERS = [
+  'src/lib/ipc.ts',
+  'src/lib/gitIpc.ts',
+  'src/lib/rootsIpc.ts',
+  'src/agent/agentIpc.ts',
+];
+
+/** What engine/ may import, as one negative lookahead: anything else fails. */
+const ENGINE_IMPORTS = new RegExp(
+  `^(?!${[
+    '\\./',
+    '@/engine/',
+    'yaml$',
+    // Pure leaves: no DOM, no store, no IPC. tsconfig.engine.json typechecks
+    // them through these imports, which is the only check that reaches them.
+    '@/lib/(?:slug|templates|sha256|policy/(?:table|tools))$',
+    // viewTab.ts's one edge into views, deliberate: capability data over
+    // engine types with no React in it (its comment says why).
+    '@/views/viewKinds$',
+    // okf.ts reads the staleness table the backends share.
+    '\\.\\./\\.\\./shared/policy/[\\w.-]+\\.json$',
+  ].join('|')})`,
+);
+
+const RAILS = {
+  tauri: {
+    pattern: /^@tauri-apps\//,
+    message:
+      'Tauri loads only in the IPC adapters (src/lib/ipc.ts, src/lib/gitIpc.ts, src/lib/rootsIpc.ts, src/agent/agentIpc.ts): add a function there and call it.',
+  },
+  mermaid: {
+    pattern: /^(?:mermaid|@mermaid-js)(?:\/|$)/,
+    message:
+      "Only src/mermaid/render.ts and *.mermaid.test.ts load mermaid: render through renderMermaid, and mock '@/mermaid/render' with a fixture svg in a test.",
+  },
+  mockParse: {
+    pattern: /(?:^|\/)mockParse$/,
+    message:
+      "Only the mock backend (src/lib/mockIpc.ts) reads mockParse: take splitFrontmatter and humanize from '@/engine/frontmatter', and wikilinks from '@/engine/wikilink'.",
+  },
+  engine: {
+    pattern: ENGINE_IMPORTS,
+    // `typeof import('…')` names a module too, so the engine checks types.
+    types: true,
+    message:
+      'engine/ is the pure core: it imports engine modules, yaml, the lib leaves slug, templates, sha256, policy/table and policy/tools, views/viewKinds and shared/policy JSON. Move the code into engine/, or have the caller pass the value in.',
+  },
+};
+
+/** One full set of both rules for the named rails. A regex's `.source`
+ * escapes its slashes, so it reads the same in a selector literal. */
+function rails(...names) {
+  const picked = names.map((name) => RAILS[name]);
+  return {
+    'no-restricted-imports': [
+      'error',
+      {
+        patterns: picked.map(({ pattern, message }) => ({
+          regex: pattern.source,
+          caseSensitive: true,
+          message,
+        })),
+      },
+    ],
+    'no-restricted-syntax': [
+      'error',
+      ...picked.flatMap(({ pattern, message, types }) => [
+        { selector: `ImportExpression[source.value=/${pattern.source}/]`, message },
+        ...(types ? [{ selector: `TSImportType[source.value=/${pattern.source}/]`, message }] : []),
+      ]),
+    ],
+  };
+}
+
 // Zero-warning policy: `pnpm lint` runs with --max-warnings=0, so a warning
 // IS a failure. Suppressions must carry a justification comment — the M14
 // audit found exactly one unexplained kind (exhaustive-deps) and it took a
@@ -74,5 +157,30 @@ export default tseslint.config(
     rules: {
       'no-console': 'off',
     },
+  },
+  // The rails' file classes. Each later object replaces the rail rules of the
+  // ones before it, and the four after the first never overlap.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    rules: rails('tauri', 'mermaid', 'mockParse'),
+  },
+  {
+    files: ADAPTERS,
+    rules: rails('mermaid', 'mockParse'),
+  },
+  {
+    files: ['src/mermaid/render.ts', 'src/**/*.mermaid.test.ts'],
+    rules: rails('tauri', 'mockParse'),
+  },
+  {
+    // The mock backend and the two tests that hold its parser to Rust.
+    files: ['src/lib/mockIpc.ts', 'src/lib/mockParse.test.ts', 'src/lib/scanGolden.test.ts'],
+    rules: rails('tauri', 'mermaid'),
+  },
+  {
+    // Engine tests may import a fixture or a store; the engine itself may not.
+    files: ['src/engine/**/*.{ts,tsx}'],
+    ignores: ['src/engine/**/*.test.{ts,tsx}'],
+    rules: rails('tauri', 'mermaid', 'mockParse', 'engine'),
   },
 );

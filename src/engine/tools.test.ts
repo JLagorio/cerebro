@@ -1,60 +1,84 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import TOOL_CASES from '../../src-tauri/fixtures/tool-cases.json';
 import { agentFacingOps, POLICY } from '@/lib/policy/table';
+import { TOOLS } from '@/lib/policy/tools';
 import {
   ALL_TOOLS,
   holdsProposalTools,
+  isWriteTool,
   matchedToolset,
   proposalConsequence,
+  showsAsChange,
+  toolIconName,
   TOOLSETS,
   unknownTools,
   writesAnything,
 } from './tools';
 
-/**
- * M18.4 — the catalog is a MIRROR, and this is what keeps it one.
- *
- * `src-tauri/src/mcp.rs` serves the tools and enforces the narrowing; this
- * module only exists so a person can pick from a list instead of typing
- * identifiers from memory. A mirror that drifts is worse than no
- * mirror: the picker would offer a tool the server does not have, and the
- * resulting `allowed-tools:` would narrow a run to nothing while looking
- * deliberate.
- *
- * Same discipline the mock backend already carries for the Rust write guards.
- */
-const RUST = readFileSync(resolve(process.cwd(), 'src-tauri/src/mcp.rs'), 'utf8');
-
-/**
- * Names in the `base_tools()` vec, in source order.
- *
- * `base_tools` and not `tool_catalog` since M26.3c: the catalog now appends a
- * half GENERATED from the policy artifact, which carries no `"name": "literal"`
- * for a source scrape to find. Scraping the whole catalog would silently see
- * only the hand-written half and call the mirror complete.
- */
-function rustToolNames(): string[] {
-  const start = RUST.indexOf('fn base_tools()');
-  expect(start).toBeGreaterThan(-1);
-  const body = RUST.slice(start);
-  const end = body.indexOf('\n}\n');
-  return [...body.slice(0, end).matchAll(/"name":\s*"([a-z_]+)"/g)].map((m) => m[1]);
+/** The generated proposal tools, in policy order, named with the manifest's
+ * prefix — the same source the Rust server generates its half from. */
+function generatedNames(): string[] {
+  return agentFacingOps(POLICY).map((op) => `${TOOLS.generated.prefix}${op}`);
 }
 
-/** The proposal half, derived from the shared artifact — the same source the
- * Rust server generates its half from. */
+/** The proposal half: the generated tools, then the rows filed beside them. */
 function expectedProposalTools(): string[] {
-  return [...agentFacingOps(POLICY).map((op) => `propose_${op}`), 'commit_proposals'].sort();
+  return [...generatedNames(), 'commit_proposals'];
 }
 
-describe('the tool catalog mirrors Rust', () => {
-  it('offers exactly the hand-written tools the server serves', () => {
-    // The scrape target is `base_tools()` now: the proposal half has no
-    // `"name": "literal"` in the source to find, because it is generated.
-    const generated = new Set(expectedProposalTools());
-    const handWritten = ALL_TOOLS.map((t) => t.name).filter((n) => !generated.has(n));
-    expect([...handWritten].sort()).toEqual([...rustToolNames()].sort());
+/** Does a call through this door change something on disk? */
+function doorWrites(id: string): boolean {
+  const door = TOOLS.doors.find((d) => d.id === id);
+  if (door === undefined) throw new Error(`no door ${id}`);
+  return door.writes;
+}
+
+describe('the picker reads the tool manifest (M54.2)', () => {
+  it('lists every manifest row exactly once', () => {
+    for (const row of TOOLS.tools) {
+      expect(
+        ALL_TOOLS.filter((t) => t.name === row.name),
+        row.name,
+      ).toHaveLength(1);
+    }
+  });
+
+  it('keeps the manifest’s toolsets, in its order, and leaves none empty', () => {
+    expect(TOOLSETS.map(({ id, label, hint }) => ({ id, label, hint }))).toEqual(TOOLS.toolsets);
+    for (const set of TOOLSETS) expect(set.tools.length, set.id).toBeGreaterThan(0);
+  });
+
+  it('files each row under its own toolset, in served order, with its own summary', () => {
+    const generated = new Set(generatedNames());
+    for (const set of TOOLSETS) {
+      const rows = TOOLS.tools.filter((row) => row.toolset === set.id);
+      const handWritten = set.tools.filter((t) => !generated.has(t.name));
+      expect(handWritten.map((t) => t.name)).toEqual(rows.map((row) => row.name));
+      expect(handWritten.map((t) => t.summary)).toEqual(rows.map((row) => row.summary));
+    }
+  });
+
+  it('leaves out of every picker exactly the rows with no toolset', () => {
+    const picked = new Set(TOOLSETS.flatMap((set) => set.tools.map((t) => t.name)));
+    const unpickable = ALL_TOOLS.filter((t) => !picked.has(t.name)).map((t) => t.name);
+    expect(unpickable).toEqual(
+      TOOLS.tools.filter((row) => row.toolset === null).map((row) => row.name),
+    );
+  });
+
+  it('fills the proposal set with the generated tools in policy order, then commit_proposals', () => {
+    const set = TOOLSETS.find((s) => s.id === TOOLS.generated.toolset);
+    expect(set?.tools.map((t) => t.name)).toEqual(expectedProposalTools());
+  });
+
+  it('takes each writes flag from the tool’s door', () => {
+    const generated = new Set(generatedNames());
+    for (const tool of ALL_TOOLS) {
+      const row = TOOLS.tools.find((r) => r.name === tool.name);
+      const door = generated.has(tool.name) ? TOOLS.generated.door : row?.door;
+      expect(door, tool.name).toBeDefined();
+      expect(tool.writes, tool.name).toBe(doorWrites(door ?? ''));
+    }
   });
 
   it('names every tool once — a duplicate would double a checkbox', () => {
@@ -114,6 +138,46 @@ describe('the tool catalog mirrors Rust', () => {
   });
 });
 
+describe('the write toolset', () => {
+  it('is create_note, update_frontmatter, append_to_note and edit_note, in that order, all writing', () => {
+    const write = TOOLSETS.find((s) => s.id === 'write');
+    expect(write?.tools.map((t) => t.name)).toEqual([
+      'create_note',
+      'update_frontmatter',
+      'append_to_note',
+      'edit_note',
+    ]);
+    expect(write?.tools.every((t) => t.writes)).toBe(true);
+  });
+});
+
+describe('isWriteTool', () => {
+  // The shared cases are Rust's `writes_disk`, replayed here from the same
+  // bytes, so the turn checkpoint and the server cannot disagree about which
+  // calls write.
+  it.each(TOOL_CASES.cases.map((c) => [c.tool, c.writes_disk] as const))(
+    'replays shared case %# for %s: writes %s',
+    (tool, writes) => {
+      expect(isWriteTool(tool)).toBe(writes);
+    },
+  );
+});
+
+describe('showsAsChange and toolIconName', () => {
+  it('draws a change card only where the manifest says so', () => {
+    expect(showsAsChange('mcp__cerebro__append_to_note')).toBe(true);
+    expect(showsAsChange('Write')).toBe(true);
+    expect(showsAsChange('mcp__cerebro__propose_organize')).toBe(false);
+    expect(showsAsChange('mcp__gmail__send')).toBe(false);
+  });
+
+  it('falls back to the wrench only for a tool the manifest does not know', () => {
+    expect(toolIconName('mcp__cerebro__hand_to')).toBe('forward');
+    expect(toolIconName('Task')).toBe('bot');
+    expect(toolIconName('mcp__gmail__send')).toBe('wrench');
+  });
+});
+
 describe('toolsets', () => {
   it('puts every writing tool in a set whose hint says so', () => {
     // The grouping axis is "what can this change", so a tool that writes must
@@ -163,6 +227,7 @@ describe('proposal consequence (M36.5)', () => {
   it('the table renders for armed agents only', () => {
     expect(holdsProposalTools(null)).toBe(false);
     expect(holdsProposalTools(['get_note', 'write_concept'])).toBe(false);
+    expect(holdsProposalTools(['propose_organize'])).toBe(false);
     expect(holdsProposalTools(['commit_proposals'])).toBe(true);
     expect(holdsProposalTools([`propose_${agentFacingOps(POLICY)[0]}`])).toBe(true);
   });

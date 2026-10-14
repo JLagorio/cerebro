@@ -29,11 +29,33 @@ export const KNOWLEDGE_DIR = 'knowledge';
 export const RESERVED_FILENAMES = ['index.md', 'log.md'];
 
 /**
+ * Code points HFS+ ignores in a name, as git's `core.protectHFS` lists them
+ * (scan.rs `hfs_ignorable`): the zero-width non-joiner and joiner, the
+ * direction marks, the bidirectional embeddings and overrides, the deprecated
+ * format characters and the byte order mark.
+ */
+const HFS_IGNORABLE = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+
+/** `name` as HFS+ hears it, its ignorables dropped: there, U+200C + `.claude`
+ * IS `.claude`. */
+export const hfsHeard = (name: string): string => name.replace(HFS_IGNORABLE, '');
+
+/**
+ * `name` as a disk that folds names may hear it (knowledge.rs `disk_folded`):
+ * heard as HFS+ hears it, then Unicode case folded the way Rust folds it, to
+ * upper case and then to lower, so APFS's U+212A KELVIN SIGN is `k`. Two
+ * names that fold alike may be one folder on such a disk.
+ */
+export const diskFolded = (name: string): string => hfsHeard(name).toUpperCase().toLowerCase();
+
+/**
  * True for the bundle root and anything beneath it — judged on the path the
  * filesystem resolves (M49.4), not the raw string: `./knowledge/x.md`,
  * `records/../knowledge/x.md` and, on case-folding APFS, `Knowledge/x.md`
- * are all the bundle. Mirrors `knowledge::is_knowledge_path` in Rust; both
- * assert the same case table.
+ * are all the bundle. The fold is the disk's, not ASCII's (M53.28), so U+212A
+ * KELVIN SIGN + `nowledge` and `know` + U+200C + `ledge` are the bundle too.
+ * Mirrors `knowledge::is_knowledge_path` in Rust; both replay
+ * src-tauri/fixtures/bundle-paths.json.
  */
 export function isKnowledgePath(path: string): boolean {
   return canonicalKnowledgePath(path) !== null;
@@ -53,9 +75,9 @@ export function canonicalKnowledgePath(path: string): string | null {
     segments.push(segment);
   }
   const [head, ...rest] = segments;
-  // ASCII-only folding, as Rust's eq_ignore_ascii_case: toLowerCase would
-  // also fold the Kelvin sign into `k`, and the two backends must agree.
-  if (head === undefined || !/^knowledge$/i.test(head)) return null;
+  // The first name as a folding disk hears it, as Rust's `folds_to_bundle`
+  // hears it (M53.28). Only that name is respelled.
+  if (head === undefined || diskFolded(head) !== KNOWLEDGE_DIR) return null;
   return [KNOWLEDGE_DIR, ...rest].join('/');
 }
 
@@ -480,10 +502,12 @@ export function sectionOf(entry: Entry): string {
 /**
  * `sectionOf` for a bare path (M52.3) — what the sidebar has when a concept
  * is open as a page: a `doc` selection carries a path, not an entry, and the
- * folder row it lights has to be the one `listSections` filed it under.
+ * folder row it lights has to be the one `listSections` filed it under. Read
+ * off the canonical spelling, so `./knowledge/…` and a name the disk folds
+ * onto `knowledge` are filed under the folder they sit in (M53.28).
  */
 export function sectionOfPath(path: string): string {
-  const rest = path.slice(KNOWLEDGE_DIR.length + 1);
+  const rest = (canonicalKnowledgePath(path) ?? path).slice(KNOWLEDGE_DIR.length + 1);
   const cut = rest.indexOf('/');
   return cut === -1 ? '' : rest.slice(0, cut);
 }

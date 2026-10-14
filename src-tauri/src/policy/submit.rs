@@ -308,6 +308,57 @@ mod tests {
     }
 
     #[test]
+    fn a_create_claiming_an_unwritable_path_never_reaches_policy() {
+        // M53.29: the claim is the file the applied set projects to. A claim
+        // the projection writer could not create is refused as schema, before
+        // policy and before anything is appended: past this point only the
+        // writer could refuse it, at append, after policy had already
+        // accepted the proposal.
+        let create = |claim: &str| {
+            proposal(
+                ProposalOp::CreateBelief {
+                    belief_id: C.into(),
+                    subject: crate::ledger::schema::SubjectRef::Resolved {
+                        entity_id: B.into(),
+                        aliases: vec![claim.into()],
+                    },
+                    content: "# New\n".into(),
+                    fields: serde_json::json!({}),
+                    basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                        reason: "new".into(),
+                    },
+                    distinctness_reason: "nothing matched".into(),
+                },
+                vec![ProposalTarget {
+                    target_id: C.into(),
+                    target_class: TargetClass::Belief,
+                    expected_version: None,
+                }],
+                Risk::Low,
+            )
+        };
+        let long_leaf = format!("concepts/{}.md", "a".repeat(241));
+        for claim in [
+            "../x.md",
+            ".md",
+            "concepts/./x.md",
+            "/x.md",
+            "concepts/a\0b.md",
+            &long_leaf,
+        ] {
+            let err = evaluate(&table(), &create(claim)).unwrap_err();
+            assert_eq!(err.code, "schema_invalid", "{claim:?}");
+            assert!(
+                err.detail.contains("projection path"),
+                "{claim:?}: {}",
+                err.detail
+            );
+        }
+        // The same create with a writable claim is past the schema.
+        evaluate(&table(), &create("concepts/x.md")).unwrap();
+    }
+
+    #[test]
     fn a_submit_result_round_trips_as_json() {
         // It is the wire shape the eventual MCP tool returns; if it cannot
         // serialize and come back identical it cannot be that surface.
@@ -471,7 +522,7 @@ mod tests {
     fn the_surface_is_off_until_it_is_switched_on() {
         // REGISTRATION IS NOT ACTIVATION. The switch defaults off, so a
         // fresh install serves only the base catalog, and M26.9 has something
-        // real to flip. Seventeen: M26.4h added `report_window_outcome` and
+        // real to flip. Eighteen: M26.4h added `report_window_outcome` and
         // M26.5e added `submit_answer` — neither is a proposal tool nor gated
         // by the switch, because a run must be able to say a window concluded
         // nothing, or to answer the question it was given, whether or not it
@@ -485,10 +536,11 @@ mod tests {
         // `write_concept`, a server-built door whose stamp the policy table
         // decides as an `update_belief` proposal — in the base catalog
         // because it is no `propose_*` surface tool, not because it escapes
-        // governance.
+        // governance. M55.5 added `edit_note`, a note writer like
+        // `append_to_note`.
         let base = served(false);
         let table = PolicyTable::load().unwrap();
-        assert_eq!(base.len(), 17, "{base:?}");
+        assert_eq!(base.len(), 18, "{base:?}");
         assert!(base.contains("report_window_outcome"));
         assert!(base.contains(crate::assembly::prompt::SUBMIT_TOOL));
         assert!(base.is_disjoint(&expected(&table)));

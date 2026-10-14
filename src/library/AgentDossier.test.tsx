@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentDraft } from '@/engine/libraryDraft';
+import type { Entry } from '@/engine/types';
 import type { FleetActorSummary, FleetRun } from '@/lib/ipc';
+import { useVaultStore } from '@/stores/vaultStore';
+import { makeEntry } from '@/test/factories';
 import { AgentDossier } from './AgentDossier';
 
 /**
- * The agent dossier (M33.6).
+ * The agent page's duty bar (M33.6, M55.12).
  *
- * Two properties: **absent is never zero** (an agent with no runs says so, a
- * lifetime total names the runs it could not include), and **nothing about
- * the agent is stored outside the vault** — on duty is derived from the
- * draft, and the only thing read from SQLite is the run join.
+ * Two properties: **absent is never zero** (a lifetime total names the runs
+ * it could not include, a failed read says so), and **nothing about the agent
+ * is stored outside the vault** — on duty is derived from the record, and the
+ * only thing read from SQLite is the actor's summary.
  *
  * The clock is PINNED. Every date this component renders is relative to
  * `now`, and an unpinned test has a shelf life (M26's lesson, which cost
@@ -42,22 +44,14 @@ vi.mock('@/lib/ipc', async () => {
 
 afterEach(cleanup);
 
-function draft(over: Partial<AgentDraft> = {}): AgentDraft {
-  return {
-    slug: 'weekly-digest',
-    description: '',
-    scope: null,
-    readScope: null,
-    allowedTools: null,
-    connectors: null,
-    shell: false,
-    schedule: 'daily 09:00',
-    triggers: [],
-    preferences: '',
-    recent: '',
-    instructions: '',
-    ...over,
-  };
+function agent(properties: Record<string, unknown> = {}): Entry {
+  return makeEntry({
+    path: 'records/agents/weekly-digest.md',
+    folder: 'records/agents',
+    title: 'Weekly digest',
+    type: 'Agent',
+    properties: { slug: 'weekly-digest', schedule: 'daily 09:00', ...properties } as never,
+  });
 }
 
 function summary(over: Partial<FleetActorSummary> = {}): FleetActorSummary {
@@ -74,32 +68,14 @@ function summary(over: Partial<FleetActorSummary> = {}): FleetActorSummary {
   };
 }
 
-function run(over: Partial<FleetRun> = {}): FleetRun {
-  return {
-    run_id: 'r1',
-    actor: 'process:weekly-digest',
-    vault_id: 'v1',
-    mode: 'attended',
-    lane: 'agent',
-    started_at: '2026-07-28T09:00:00Z',
-    ended_at: '2026-07-28T09:01:00Z',
-    outcome: 'succeeded',
-    usage_state: 'exact',
-    input_tokens: 900,
-    output_tokens: 100,
-    proposals_submitted: 0,
-    applied: 0,
-    rejected: 0,
-    parent_run_id: null,
-    ...over,
-  };
-}
-
 describe('AgentDossier', () => {
+  const patchFrontmatter = vi.fn(async (_path: string, _patch: Record<string, unknown>) => true);
+
   beforeEach(() => {
     vi.clearAllMocks();
     fleetActorSummary.mockResolvedValue(summary());
     fleetRuns.mockResolvedValue([]);
+    useVaultStore.setState({ patchFrontmatter: patchFrontmatter as never });
   });
 
   it('shows lifetime tokens with the unmetered runs called out separately', async () => {
@@ -113,8 +89,7 @@ describe('AgentDossier', () => {
         last_started_at: '2026-07-28T09:00:00Z',
       }),
     );
-    fleetRuns.mockResolvedValue([run()]);
-    render(<AgentDossier draft={draft()} actor="process:weekly-digest" now={NOW} />);
+    render(<AgentDossier entry={agent()} now={NOW} />);
 
     const tokens = await screen.findByTestId('dossier-tokens');
     expect(tokens.textContent).toContain('4,800');
@@ -125,71 +100,83 @@ describe('AgentDossier', () => {
     expect((await screen.findByTestId('dossier-runs')).textContent).toContain('5');
   });
 
-  it('says "no runs yet" rather than rendering an empty table', async () => {
-    render(<AgentDossier draft={draft()} actor="process:weekly-digest" now={NOW} />);
-
-    expect(await screen.findByTestId('section-empty')).toBeTruthy();
-    expect(screen.queryAllByTestId('fleet-row')).toHaveLength(0);
-    // And the derived pill is still right for an agent that has never run.
+  it('an agent that never ran says so in its last outcome', async () => {
+    render(<AgentDossier entry={agent()} now={NOW} />);
     expect((await screen.findByTestId('dossier-last')).textContent).toContain('never run');
   });
 
   it('computes the next fire against the injected clock, not the wall clock', async () => {
     // Pinned to noon local on 2026-07-28; a 09:00 daily has already gone
     // today, so the next one is tomorrow morning.
-    render(<AgentDossier draft={draft()} actor="process:weekly-digest" now={NOW} />);
+    render(<AgentDossier entry={agent()} now={NOW} />);
 
     const next = await screen.findByTestId('dossier-next-fire');
     expect(next.textContent).toContain('2026-07-29 09:00');
   });
 
-  it('derives on-duty from what can fire it, and says so when nothing can', async () => {
-    render(
-      <AgentDossier
-        draft={draft({ schedule: '', triggers: [] })}
-        actor="process:weekly-digest"
-        now={NOW}
-      />,
-    );
-
+  it('is on duty on a schedule alone', async () => {
+    render(<AgentDossier entry={agent()} now={NOW} />);
     const duty = await screen.findByTestId('dossier-duty');
-    expect(duty.getAttribute('data-on-duty')).toBe('false');
-    expect(duty.textContent).toContain('nothing can fire it');
-    expect((await screen.findByTestId('dossier-next-fire')).textContent).toContain('no schedule');
+    expect(duty.getAttribute('data-on-duty')).toBe('true');
+    expect(duty.textContent).toContain('On duty');
   });
 
   it('is on duty on a trigger alone, with no schedule at all', async () => {
     // The derivation is "something can fire it", not "it has a schedule".
-    render(
-      <AgentDossier
-        draft={draft({ schedule: '', triggers: [{ event: 'created' }] })}
-        actor="process:weekly-digest"
-        now={NOW}
-      />,
-    );
-
+    render(<AgentDossier entry={agent({ schedule: null, when: ['created'] })} now={NOW} />);
     const duty = await screen.findByTestId('dossier-duty');
     expect(duty.getAttribute('data-on-duty')).toBe('true');
+    expect(duty.textContent).toContain('On duty');
+  });
+
+  it('says off duty when nothing can fire it', async () => {
+    render(<AgentDossier entry={agent({ schedule: null })} now={NOW} />);
+    const duty = await screen.findByTestId('dossier-duty');
+    expect(duty.getAttribute('data-on-duty')).toBe('false');
+    expect(duty.textContent).toContain('Off duty — nothing can fire it');
+    expect((await screen.findByTestId('dossier-next-fire')).textContent).toContain('no schedule');
+  });
+
+  it('a paused agent is not on duty, whatever could fire it', async () => {
+    render(<AgentDossier entry={agent({ paused: true })} now={NOW} />);
+    const duty = await screen.findByTestId('dossier-duty');
+    expect(duty.getAttribute('data-on-duty')).toBe('false');
+    expect(duty.textContent).toContain('Paused');
+  });
+
+  it('Pause writes paused: true, and Resume removes it', async () => {
+    render(<AgentDossier entry={agent()} now={NOW} />);
+    fireEvent.click(screen.getByTestId('agent-duty-toggle'));
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(1));
+    expect(patchFrontmatter).toHaveBeenCalledWith('records/agents/weekly-digest.md', {
+      paused: true,
+    });
+    cleanup();
+
+    render(<AgentDossier entry={agent({ paused: true })} now={NOW} />);
+    const toggle = screen.getByTestId('agent-duty-toggle');
+    expect(toggle.textContent).toBe('Resume');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalledTimes(2));
+    expect(patchFrontmatter).toHaveBeenLastCalledWith('records/agents/weekly-digest.md', {
+      paused: null,
+    });
   });
 
   it('says the history could not be read rather than claiming it never ran', async () => {
     fleetActorSummary.mockRejectedValue(new Error('no runtime database'));
-    render(<AgentDossier draft={draft()} actor="process:weekly-digest" now={NOW} />);
+    render(<AgentDossier entry={agent()} now={NOW} />);
 
     expect((await screen.findByTestId('section-unavailable')).textContent).toContain(
       'could not be read',
     );
-    expect(screen.queryByTestId('section-empty')).toBeNull();
+    expect(screen.queryByTestId('dossier-last')).toBeNull();
   });
 
-  it('asks only for this actor, and for a bounded page', async () => {
-    render(<AgentDossier draft={draft()} actor="process:weekly-digest" now={NOW} />);
-
-    await waitFor(() => expect(fleetRuns).toHaveBeenCalled());
-    expect(fleetRuns).toHaveBeenCalledWith(
-      expect.objectContaining({ actor: 'process:weekly-digest' }),
-    );
-    const filter = fleetRuns.mock.calls[0][0] as { limit?: number };
-    expect(filter.limit).toBeGreaterThan(0);
+  it('reads only the actor summary: the runs are the Runs tab', async () => {
+    render(<AgentDossier entry={agent()} now={NOW} />);
+    await waitFor(() => expect(fleetActorSummary).toHaveBeenCalledWith('process:weekly-digest'));
+    await screen.findByTestId('dossier-last');
+    expect(fleetRuns).not.toHaveBeenCalled();
   });
 });

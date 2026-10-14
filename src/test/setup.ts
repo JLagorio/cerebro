@@ -1,5 +1,6 @@
 import { configure } from '@testing-library/react';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
+import { installMermaidGuard } from './mermaidGuard';
 
 // waitFor's 1s default is calibrated for a developer machine; CI runs on
 // shared macos-14 runners where a BlockNote serialize that takes ~100ms
@@ -57,7 +58,8 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
   })) as unknown as typeof window.matchMedia;
 }
 
-// Node 22 ships an experimental global localStorage that is undefined
+// Node 25 and later, the major package.json pins among them, ship an
+// experimental global localStorage (Node 22 has none) that is undefined
 // without --localstorage-file and shadows jsdom's implementation (window is
 // globalThis in the vitest jsdom env). Back it with a Map so store
 // persistence code runs for real in tests.
@@ -86,3 +88,7 @@ if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
 if (typeof document !== 'undefined' && !document.elementFromPoint) {
   document.elementFromPoint = () => null;
 }
+
+// CV-14: a test file that reaches the real mermaid renderer fails, naming the
+// fix (mermaidGuard.ts). vitest sets the file's path before setup runs.
+installMermaidGuard(expect.getState().testPath ?? '');

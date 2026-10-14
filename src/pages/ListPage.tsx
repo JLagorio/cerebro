@@ -20,7 +20,7 @@ import { seedView } from '@/app/viewActions';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
-import { useNewRecord, useQuickAdd } from '@/views/QuickAdd';
+import { useCreateOnDay, useNewRecord, useQuickAdd } from '@/views/QuickAdd';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
@@ -115,6 +115,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M9.6: a typeless view has no single type to create into, so the
   // affordance is simply absent there rather than guessing one.
   const quickAdd = useQuickAdd(sourceType ?? '', null);
+  const createOnDay = useCreateOnDay(sourceType ?? '');
   // M12.8: the tab row's New button — creates untitled, opens the panel.
   const newRecord = useNewRecord(sourceType ?? '');
   const onCreate =
@@ -123,12 +124,12 @@ export function ListPage({ selection }: { selection: ListSelection }) {
       : (title: string, band: { groupBy: string; groupValue: string }) => quickAdd(title, band);
   // Creating on a calendar day means creating WITH that date — the band
   // mechanism carries a grouping value, not an arbitrary property, so the date
-  // goes through quickAdd's `extra` frontmatter instead.
+  // goes through `useCreateOnDay`, in the shape the field declares (M53.16).
   const dateField = resolveDateField(presentation, fields);
   const onCreateOn =
     sourceType === null || dateField === null
       ? undefined
-      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
+      : (title: string, day: string) => createOnDay(title, day, dateField);
   // Collapse state is namespaced per TAB: two views of one List group
   // differently, so a band collapsed in the board is not the same band.
   const scope = `list:${selection.collection ?? ''}:${selection.id}:${activeId}`;

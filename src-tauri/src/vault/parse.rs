@@ -192,7 +192,7 @@ fn strip_title_markdown(raw: &str) -> String {
 }
 
 /// Humanize a filename stem: `fix-login-flow` → `Fix login flow`.
-/// Sentence case — parity with `humanize` in `src/lib/mockParse.ts`.
+/// Sentence case — parity with `humanize` in `src/engine/frontmatter.ts`.
 pub fn humanize_stem(stem: &str) -> String {
     let spaced = stem
         .split(['-', '_'])
@@ -443,8 +443,7 @@ mod tests {
 
     #[test]
     fn humanizes_filename_stems() {
-        // Sentence case, matching mockParse.ts `humanize` (cross-language
-        // parity; see the parity fixtures in entry.rs and mockParse.test.ts).
+        // Sentence case, matching the TS `humanize`; conformance/scan holds both.
         assert_eq!(humanize_stem("fix-login-flow"), "Fix login flow");
         assert_eq!(humanize_stem("fld-7"), "Fld 7");
         assert_eq!(humanize_stem("meeting-notes"), "Meeting notes");

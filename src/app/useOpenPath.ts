@@ -71,12 +71,20 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
       navigate({ kind: 'collection', folder: entry.folder });
       return;
     }
-    // M18: same rule, one level out. A skill's frontmatter is the app's own
-    // contract — `allowed-tools:` is a boundary Rust enforces — so it opens in
-    // the editor that knows what those values mean, never in a property table
-    // or a doc canvas. This is why a wikilink to a template lands somewhere
-    // useful instead of in a body editor that would let you break it.
+    // M55.12: an agent opens as a page. Its body is its instructions, and its
+    // grants are that page's own property rows — each writes one key on Done,
+    // never a generic property table.
     const kind = libraryKind(entry);
+    if (kind === 'agent') {
+      navigate({ kind: 'doc', path });
+      return;
+    }
+    // M18: same rule, one level out. A skill's frontmatter is the app's own
+    // contract — `allowed-tools:` is a boundary Rust enforces — so a skill or
+    // a template opens in the Library editor that knows what those values
+    // mean, never in a property table or a doc canvas. This is why a wikilink
+    // to a template lands somewhere useful instead of in a body editor that
+    // would let you break it.
     if (kind !== null) {
       navigate({ kind: 'library', tab: kind, path });
       return;

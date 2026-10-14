@@ -288,7 +288,8 @@ fn common(actor: &str) -> (u64, Option<String>, Option<String>, Actor) {
 ///
 /// `ordinal` is where the caller will place that member. It was a constant
 /// `0` while capture was the only caller and always staged first; M26.4i's
-/// ingest pass can stage two registrations in one batch, so the position is
+/// ingest pass can stage up to three registrations in one batch (the owner's,
+/// the bundle's and, since M66.7b, imported material's), so the position is
 /// the caller's to state.
 pub(crate) fn resolve_registration(
     state: &EpistemicState,
@@ -334,7 +335,10 @@ pub(crate) fn resolve_registration(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one argument per field of the assertion body it builds"
+)]
 pub(crate) fn human_assertion(
     actor_id: &str,
     source_id: &str,

@@ -2,6 +2,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { makeEntry } from '@/test/factories';
 import { useOpenPath } from './useOpenPath';
@@ -66,5 +67,57 @@ describe('useOpenPath collection pages (M48.7)', () => {
     const { result } = renderHook(() => useOpenPath());
     act(() => result.current('delivery/delivery.md'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'collection', folder: 'delivery' });
+  });
+});
+
+/*
+ * An agent opens as a page (M55.12): its body is its instructions and its
+ * grants are that page's property rows. Skills and templates keep the
+ * Library editor.
+ */
+describe('useOpenPath library records (M55.12)', () => {
+  beforeEach(() => {
+    useNavStore.setState({
+      selection: { kind: 'home' },
+      history: [{ kind: 'home' }],
+      historyIndex: 0,
+    });
+    useUiStore.setState({ detailPath: null });
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'records/agents/release-scout.md',
+          folder: 'records/agents',
+          title: 'Release scout',
+          type: 'Agent',
+        }),
+        makeEntry({
+          path: 'records/skills/risk-sweep.md',
+          folder: 'records/skills',
+          title: 'Risk sweep',
+          type: 'Skill',
+        }),
+      ],
+    });
+  });
+
+  it('opens an agent as its page, with no detail panel', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('records/agents/release-scout.md'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'records/agents/release-scout.md',
+    });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  it('still opens a skill in the Library editor', () => {
+    const { result } = renderHook(() => useOpenPath());
+    act(() => result.current('records/skills/risk-sweep.md'));
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'library',
+      tab: 'skill',
+      path: 'records/skills/risk-sweep.md',
+    });
   });
 });

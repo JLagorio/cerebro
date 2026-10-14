@@ -2,6 +2,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runAgent, stopAllAgents } from '@/agent/agentIpc';
 import NOTE_TARGETS from '../../src-tauri/fixtures/note-targets.json';
+import QUOTE_CASES from '../../src-tauri/fixtures/quote-cases.json';
+import CAUSE_RS from '../../src-tauri/src/runtime/cause.rs?raw';
+import { demoFleetRuns } from './demoOperational';
 import * as mock from './mockIpc';
 import { sha256Hex } from './sha256';
 
@@ -358,9 +361,11 @@ describe('mockIpc', () => {
       await expect(
         mock.saveNote('/demo-vault', CONCEPT, '# Rewritten by a human\n'),
       ).resolves.toBeUndefined();
+      // A captured write answers no hash, as Rust's valve answers None: the
+      // projection is the ledger's (M55.2).
       await expect(
         mock.updateFrontmatter('/demo-vault', CONCEPT, { lifecycle: 'deprecated' }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBeNull();
       // What cannot be represented safely stays refused.
       await expect(mock.setNoteTitle('/demo-vault', CONCEPT, 'Mine now')).rejects.toThrow(
         /read-only/,
@@ -451,10 +456,64 @@ describe('mockIpc', () => {
       ).rejects.toThrow(/read-only/);
     });
 
-    it('leaves notes outside the bundle writable', async () => {
+    // M53.28: lib.rs guards both; the mock guarded neither.
+    it('refuses a collection or a list in the bundle', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      const before = new Map(fs);
       await expect(
-        mock.updateFrontmatter('/demo-vault', 'inbox/welcome.md', { type: 'Note' }),
-      ).resolves.toBeUndefined();
+        mock.saveCollection('/demo-vault', 'knowledge', 'name: Knowledge\n'),
+      ).rejects.toThrow(/read-only/);
+      await expect(
+        mock.saveList('/demo-vault', 'knowledge/metrics', 'churn', 'name: Churn\n'),
+      ).rejects.toThrow(/read-only/);
+      expect(new Map(fs)).toEqual(before);
+    });
+
+    // Parity with lib.rs's `the_bundle_doors_refuse_the_spelling_apfs_folds_onto_knowledge`
+    // (M53.28): APFS hears U+212A KELVIN SIGN as `k`, so this spelling IS the
+    // bundle there, and every door that checks the bundle's name hears it so.
+    it('refuses the spelling APFS folds onto knowledge/ at every door that checks the name', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      const kelvin = '\u212anowledge';
+      const concept = `${kelvin}/metrics/churn.md`;
+      fs.set(concept, '---\ntype: Metric\n---\n\n# Churn\n');
+      const before = new Map(fs);
+      const foldersBefore = await mock.listFolders('/demo-vault');
+      const doors: [string, () => Promise<void>][] = [
+        ['renameNote out', () => mock.renameNote('/demo-vault', concept, 'docs/stolen.md')],
+        [
+          'renameNote in',
+          () => mock.renameNote('/demo-vault', 'inbox/welcome.md', `${kelvin}/x.md`),
+        ],
+        ['deleteNote', () => mock.deleteNote('/demo-vault', concept)],
+        ['deleteNote, the folder', () => mock.deleteNote('/demo-vault', kelvin)],
+        ['createFolder', () => mock.createFolder('/demo-vault', `${kelvin}/new`)],
+        ['saveCollection', () => mock.saveCollection('/demo-vault', kelvin, 'name: Knowledge\n')],
+        [
+          'saveList',
+          () => mock.saveList('/demo-vault', `${kelvin}/metrics`, 'churn', 'name: Churn\n'),
+        ],
+      ];
+      for (const [door, open] of doors) {
+        await expect(open(), door).rejects.toThrow(/read-only/);
+      }
+      expect(new Map(fs)).toEqual(before);
+      expect(await mock.listFolders('/demo-vault')).toEqual(foldersBefore);
+    });
+
+    it('leaves notes outside the bundle writable, and answers the hash it wrote', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      const hash = await mock.updateFrontmatter('/demo-vault', 'inbox/welcome.md', {
+        type: 'Note',
+      });
+      const landed = fs.get('inbox/welcome.md') ?? '';
+      expect(landed).toContain('type: Note');
+      expect(hash).toBe(sha256Hex(landed));
+      // …the hash the next scan reads for those bytes (M55.2).
+      const scanned = (await mock.scanVault('/demo-vault')).find(
+        (e) => e.path === 'inbox/welcome.md',
+      );
+      expect(scanned?.hash).toBe(hash);
     });
 
     it('allows verifyConcept, scoped to the verified key', async () => {
@@ -492,6 +551,256 @@ describe('mockIpc', () => {
         mock.verifyConcept('/demo-vault', CONCEPT, { verified: [{ by: 'human:josef' }] }, viewed),
       ).rejects.toThrow(/^stale_view: /);
       expect(fs.get(CONCEPT)).toBe(edited);
+    });
+  });
+
+  /**
+   * The agent's `append_to_note` for the browser-mode mock agent (M53.6),
+   * mirroring mcp.rs `tool_append`: the write the e2e lands on an open page
+   * mid-turn, through the same refusals Rust makes before writing a byte.
+   */
+  describe('agentAppend', () => {
+    const PAGE = 'records/appended.md';
+    const fs = () =>
+      (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    const modifiedAt = async (path: string) =>
+      (await mock.scanVault('/demo-vault')).find((e) => e.path === path)?.modifiedAt;
+
+    it('appends its own paragraph under the frontmatter the note has, and moves the stamp', async () => {
+      fs().set(PAGE, '---\ntype: Doc\nowner: ana\n---\n\n# Appended\n\nFirst line.\n\n\n');
+      const before = await modifiedAt(PAGE);
+      await mock.agentAppend('/demo-vault', PAGE, '  Agent line one.  \n');
+      expect(fs().get(PAGE)).toBe(
+        '---\ntype: Doc\nowner: ana\n---\n\n# Appended\n\nFirst line.\n\nAgent line one.\n',
+      );
+      expect(await modifiedAt(PAGE)).not.toBe(before);
+      await mock.agentAppend('/demo-vault', PAGE, 'Agent line two.');
+      expect(fs().get(PAGE)).toMatch(/Agent line one\.\n\nAgent line two\.\n$/);
+    });
+
+    it('appends to a note with no frontmatter as the whole file', async () => {
+      fs().set(PAGE, '# Bare\n');
+      await mock.agentAppend('/demo-vault', PAGE, 'More.');
+      expect(fs().get(PAGE)).toBe('# Bare\n\nMore.\n');
+    });
+
+    it('refuses the bundle, a diagram and a dot-path, and leaves every byte', async () => {
+      fs().set('diagrams/flow.mmd', 'flowchart TD\n  A --> B\n');
+      fs().set('records/.draft.md', '# Draft\n');
+      const before = new Map(fs());
+      await expect(
+        mock.agentAppend('/demo-vault', 'knowledge/metrics/onboarding-completion.md', 'x'),
+      ).rejects.toThrow(/written only through write_concept and recheck_concept/);
+      await expect(mock.agentAppend('/demo-vault', 'diagrams/flow.mmd', 'x')).rejects.toThrow(
+        /a \.mmd is raw diagram source/,
+      );
+      await expect(mock.agentAppend('/demo-vault', 'records/.draft.md', 'x')).rejects.toThrow(
+        /dotfiles hold no notes/,
+      );
+      await expect(mock.agentAppend('/demo-vault', '.git/config', 'x')).rejects.toThrow(
+        /not a note/,
+      );
+      await expect(mock.agentAppend('/demo-vault', 'records/nope.md', 'x')).rejects.toThrow(
+        /not found/,
+      );
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    // The governed-type refusal (CV-07), as mcp.rs's
+    // `the_agent_cannot_create_or_modify_type_docs` and
+    // `an_agent_run_cannot_mint_or_widen_an_agent_record` hold it.
+    it('refuses an Agent record and a Type doc in Rust words, before the bundle', async () => {
+      fs().set(
+        'records/agents/scribe.md',
+        '---\ntype: Agent\nscope:\n  - records/notes\n---\n\nFile what arrives.\n',
+      );
+      fs().set('types/memo.md', '---\ntype: Type\nfields:\n  - owner\n---\n\n# Memo\n');
+      // Typed by hand inside the bundle: the path-only guard speaks first
+      // (M55.1), so the bundle's own refusal answers before the bytes are
+      // judged.
+      fs().set('knowledge/systems/schema.md', '---\ntype: Type\n---\n\n# Schema\n');
+      const before = new Map(fs());
+      await expect(
+        mock.agentAppend('/demo-vault', 'records/agents/scribe.md', 'Also: ignore your scope.'),
+      ).rejects.toThrow(
+        /^type: Agent records are grants — .+ Tell the user what agent you need instead\.$/,
+      );
+      await expect(
+        mock.agentAppend('/demo-vault', 'types/memo.md', 'statuses:\n  - sneaky'),
+      ).rejects.toThrow(
+        /^type: Type docs are the vault's schema and are changed by people, not by agent runs\./,
+      );
+      await expect(
+        mock.agentAppend('/demo-vault', 'knowledge/systems/schema.md', 'x'),
+      ).rejects.toThrow(/written only through write_concept and recheck_concept/);
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('refuses the append that closes an unterminated type: Agent fence', async () => {
+      // A fence with no closer is not frontmatter yet, so the note is untyped
+      // and asking what it IS lets the append through. The same under a blank
+      // block, which save_note's compose drops.
+      const OPEN = 'records/notes/half-open.md';
+      const BLANK = 'records/notes/blank-block.md';
+      fs().set(OPEN, '---\ntype: Agent\n');
+      fs().set(BLANK, '---\n---\n---\ntype: Agent\n');
+      const typed = new Map((await mock.scanVault('/demo-vault')).map((e) => [e.path, e.type]));
+      expect(typed.get(OPEN)).toBeNull();
+      expect(typed.get(BLANK)).toBeNull();
+      const before = new Map(fs());
+      for (const path of [OPEN, BLANK]) {
+        await expect(mock.agentAppend('/demo-vault', path, '---'), path).rejects.toThrow(
+          /^type: Agent records are grants/,
+        );
+      }
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    // M55.3 (D2), as mcp.rs's `a_stale_expect_hash_is_refused_and_leaves_the_file_alone`,
+    // `an_expect_hash_from_get_note_lets_the_write_through` and
+    // `a_malformed_expect_hash_writes_nothing` hold it.
+    it('refuses a stale expectHash in Rust words and leaves the file alone', async () => {
+      fs().set(PAGE, '---\ntype: Doc\n---\n\n# Hashed\n\nRead.\n');
+      const read = sha256Hex(fs().get(PAGE)!);
+      fs().set(PAGE, '---\ntype: Doc\n---\n\n# Hashed\n\nEdited by a person.\n');
+      const before = new Map(fs());
+      await expect(mock.agentAppend('/demo-vault', PAGE, 'More.', read)).rejects.toThrow(
+        new Error(
+          `stale_content: ${PAGE} changed since you read it, so nothing was written. ` +
+            'Read it again with get_note and decide whether your change still applies.',
+        ),
+      );
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('writes when expectHash names the bytes the note holds, in either case', async () => {
+      fs().set(PAGE, '# Hashed\n');
+      await mock.agentAppend('/demo-vault', PAGE, 'One.', sha256Hex(fs().get(PAGE)!));
+      expect(fs().get(PAGE)).toBe('# Hashed\n\nOne.\n');
+      await mock.agentAppend('/demo-vault', PAGE, 'Two.', sha256Hex(fs().get(PAGE)!).toUpperCase());
+      expect(fs().get(PAGE)).toBe('# Hashed\n\nOne.\n\nTwo.\n');
+    });
+
+    it('refuses a malformed expectHash before anything else', async () => {
+      fs().set(PAGE, '# Hashed\n');
+      const hash = sha256Hex(fs().get(PAGE)!);
+      const before = new Map(fs());
+      for (const bad of ['', hash.slice(0, 63), `${hash}0`, `${hash.slice(0, 63)}g`]) {
+        await expect(mock.agentAppend('/demo-vault', PAGE, 'x', bad), bad).rejects.toThrow(
+          new Error("expect_hash must be the 64-character hash from get_note's Hash line"),
+        );
+      }
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('appends a fence that cannot reach byte zero: the note already has a block', async () => {
+      fs().set(PAGE, '---\ntype: Note\n---\n\n# About agents\n');
+      await mock.agentAppend('/demo-vault', PAGE, '---\ntype: Agent\n---\n');
+      expect(fs().get(PAGE)).toBe(
+        '---\ntype: Note\n---\n\n# About agents\n\n---\ntype: Agent\n---\n',
+      );
+      expect((await mock.scanVault('/demo-vault')).find((e) => e.path === PAGE)?.type).toBe('Note');
+    });
+  });
+
+  /**
+   * The agent's `edit_note` for the browser-mode mock agent (M55.5),
+   * mirroring mcp.rs `tool_edit_note_in` and write.rs `edit_note`: quoted
+   * passages replaced in place, all or none, through the refusals Rust makes
+   * before writing a byte, in Rust's words.
+   */
+  describe('agentEdit', () => {
+    const PAGE = 'records/edited.md';
+    const fs = () =>
+      (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+
+    it('keeps every byte it was not asked to change, BOM and CRLF included', async () => {
+      const original =
+        '\uFEFF---\r\ntitle: Plan\r\n---  \r\n# Plan\r\n\r\nWe ship on Thursdays.\r\nLast line';
+      fs().set(PAGE, original);
+      await mock.agentEdit('/demo-vault', PAGE, [{ old: 'Thursdays', new: 'Fridays' }]);
+      expect(fs().get(PAGE)).toBe(original.replace('Thursdays', 'Fridays'));
+    });
+
+    it('reports the path, each edit\u2019s new line and the new hash', async () => {
+      fs().set(PAGE, '# Plan\n\nThursdays ship.\nThursdays rest.\n');
+      const report = await mock.agentEdit('/demo-vault', PAGE, [
+        { old: 'Thursdays', new: 'Fridays', occurrence: 2 },
+        { old: '# Plan', new: '# Plans' },
+      ]);
+      expect(report).toBe(
+        [
+          `Edited ${PAGE}: 2 edits; nothing outside the quoted text changed.`,
+          '  1. now at line 4',
+          '  2. now at line 1',
+          `Hash: ${sha256Hex(fs().get(PAGE)!)}`,
+        ].join('\n'),
+      );
+      expect(fs().get(PAGE)).toBe('# Plans\n\nThursdays ship.\nFridays rest.\n');
+    });
+
+    it('refuses an ambiguous quote in the shared cases\u2019 words and writes nothing', async () => {
+      const shared = QUOTE_CASES.cases.find((c) => c.why.startsWith('A quote that appears twice'));
+      expect(shared?.refused).toBeDefined();
+      fs().set(PAGE, shared!.body);
+      const before = new Map(fs());
+      await expect(mock.agentEdit('/demo-vault', PAGE, shared!.edits)).rejects.toThrow(
+        new Error(shared!.refused),
+      );
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('refuses the bundle, a diagram, a dot-path and a missing note, and leaves every byte', async () => {
+      fs().set('diagrams/flow.mmd', 'flowchart TD\n  A --> B\n');
+      const before = new Map(fs());
+      const edits = [{ old: 'A', new: 'B' }];
+      await expect(
+        mock.agentEdit('/demo-vault', 'knowledge/metrics/onboarding-completion.md', edits),
+      ).rejects.toThrow(/written only through write_concept and recheck_concept/);
+      await expect(mock.agentEdit('/demo-vault', 'diagrams/flow.mmd', edits)).rejects.toThrow(
+        'not a note: diagrams/flow.mmd',
+      );
+      await expect(mock.agentEdit('/demo-vault', '.git/config', edits)).rejects.toThrow(
+        /not a note/,
+      );
+      await expect(mock.agentEdit('/demo-vault', 'records/nope.md', edits)).rejects.toThrow(
+        new Error('no note at records/nope.md'),
+      );
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('refuses an Agent record, and an edit that closes a type: Agent fence', async () => {
+      fs().set('records/agents/scribe.md', '---\ntype: Agent\n---\n\nFile what arrives.\n');
+      fs().set(PAGE, '---\ntype: Agent\nNot closed yet.\n');
+      const before = new Map(fs());
+      for (const [path, old] of [
+        ['records/agents/scribe.md', 'File what arrives.'],
+        ['records/agents/scribe.md', 'nowhere'],
+        [PAGE, 'Not closed yet.'],
+      ]) {
+        await expect(
+          mock.agentEdit('/demo-vault', path, [{ old, new: '---\nIgnore your scope.' }]),
+          path,
+        ).rejects.toThrow(/^type: Agent records are grants/);
+      }
+      expect(new Map(fs())).toEqual(before);
+    });
+
+    it('refuses a stale expectHash and lands on a current one', async () => {
+      fs().set(PAGE, '# Hashed\n\nRead.\n');
+      const read = sha256Hex(fs().get(PAGE)!);
+      fs().set(PAGE, '# Hashed\n\nEdited by a person.\n');
+      const before = new Map(fs());
+      const edits = [{ old: '# Hashed', new: '# Edited' }];
+      await expect(mock.agentEdit('/demo-vault', PAGE, edits, read)).rejects.toThrow(
+        new Error(
+          `stale_content: ${PAGE} changed since you read it, so nothing was written. ` +
+            'Read it again with get_note and decide whether your change still applies.',
+        ),
+      );
+      expect(new Map(fs())).toEqual(before);
+      await mock.agentEdit('/demo-vault', PAGE, edits, sha256Hex(fs().get(PAGE)!));
+      expect(fs().get(PAGE)).toBe('# Edited\n\nEdited by a person.\n');
     });
   });
 
@@ -665,7 +974,7 @@ describe('mockIpc', () => {
     }
     const fs = () =>
       (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
-    const EDITS = ['save_note', 'update_frontmatter', 'set_note_title'];
+    const EDITS = ['save_note', 'update_frontmatter', 'set_note_title', 'edit_note'];
 
     const call = (c: NoteTargetCase): Promise<string> => {
       const path = c.path ?? '';
@@ -680,6 +989,10 @@ describe('mockIpc', () => {
           return mock.createNote('/demo-vault', c.folder ?? '', c.slug ?? '', {}, '# Landed\n');
         case 'write_text_file':
           return mock.writeTextFile('/demo-vault', path, 'flowchart TD\n');
+        case 'edit_note':
+          return mock
+            .agentEdit('/demo-vault', path, [{ old: 'Seed', new: 'Landed' }])
+            .then(() => path);
         default:
           throw new Error(`no door called ${c.door}`);
       }
@@ -705,6 +1018,7 @@ describe('mockIpc', () => {
       const doors = new Set((NOTE_TARGETS.cases as NoteTargetCase[]).map((c) => c.door));
       expect([...doors].sort()).toEqual([
         'create_note',
+        'edit_note',
         'save_note',
         'set_note_title',
         'update_frontmatter',
@@ -712,11 +1026,12 @@ describe('mockIpc', () => {
       ]);
     });
 
-    // The views/attachments rule decides only what is VISIBLE, so it says
-    // exactly what scanVault says: a listed note that will not save is a page
-    // whose every keystroke fails. Parity with write.rs's
-    // `the_note_writers_take_exactly_the_notes_the_scanner_lists`, dotfile
-    // notes included — the one deliberate exception, listed and read-only.
+    // A listed note that will not save is a page whose every keystroke
+    // fails, so the writers take exactly what scanVault lists: the
+    // views/attachments rule says what scanVault says, and scanVault hides
+    // what the dot rule refuses (M53.25), names HFS+ hears with a leading
+    // dot included. Parity with write.rs's
+    // `the_note_writers_take_exactly_the_notes_the_scanner_lists`.
     it('saves exactly the notes scanVault lists', async () => {
       const paths = [
         'records/ok.md',
@@ -727,6 +1042,8 @@ describe('mockIpc', () => {
         'views/x.md',
         'attachments/y.md',
         'notes/views/z.md',
+        'records/.draft.md',
+        '\u200c.notes/e.md',
       ];
       for (const path of paths) fs().set(path, NOTE_TARGETS.seed);
       const listed = new Set((await mock.scanVault('/demo-vault')).map((e) => e.path));
@@ -744,13 +1061,6 @@ describe('mockIpc', () => {
         'records/ok.md',
         'views./d.md',
       ]);
-
-      fs().set('records/.draft.md', NOTE_TARGETS.seed);
-      const all = (await mock.scanVault('/demo-vault')).map((e) => e.path);
-      expect(all).toContain('records/.draft.md');
-      await expect(
-        mock.saveNote('/demo-vault', 'records/.draft.md', '\n# Saved\n'),
-      ).rejects.toThrow('dotfiles hold no notes');
     });
   });
 
@@ -888,6 +1198,20 @@ describe('mockIpc', () => {
     expect(dirs).toContain('projects/empty-folder');
     expect(dirs.some((d) => d === 'views' || d.startsWith('views/'))).toBe(false);
     expect([...dirs].sort()).toEqual(dirs);
+  });
+
+  // Parity with scan.rs `list_folders` (M53.25): a folder scanVault hides is
+  // no folder in the tree — a dot-folder, and one HFS+ hears as a dot-folder.
+  it('listFolders leaves out the folders scanVault hides', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set('\u200c.notes/e.md', '# Hidden\n');
+    fs.set('.obsidian/notes/workspace.md', '# Hidden\n');
+    fs.set('records/shown/x.md', '# Shown\n');
+    const dirs = await mock.listFolders('/demo-vault');
+    expect(dirs).toContain('records/shown');
+    for (const hidden of ['\u200c.notes', '.obsidian', '.obsidian/notes']) {
+      expect(dirs, hidden).not.toContain(hidden);
+    }
   });
 });
 
@@ -1055,7 +1379,32 @@ describe('the deferral gates (M28.1)', () => {
     applied: 0,
     rejected: 0,
     parent_run_id: null,
+    cause: null,
+    cli_session_id: null,
     ...over,
+  });
+
+  it("every demo run says why it started in Rust's words, and the legacy row cannot (M56.7)", () => {
+    // WORDS, read from the one place the vocabulary lives: a demo `why` that
+    // drifted from Rust would teach every surface test a sentence the app
+    // never says.
+    const table = CAUSE_RS.slice(CAUSE_RS.indexOf('pub const WORDS'));
+    const words = new Map(
+      [...table.slice(0, table.indexOf('];')).matchAll(/\("([a-z]+)", "([^"]+)"\)/g)].map(
+        (m) => [m[1], m[2]] as const,
+      ),
+    );
+    expect(words.size).toBe(10);
+    const runs = demoFleetRuns();
+    for (const run of runs) {
+      expect(run, run.run_id).toHaveProperty('cause');
+      expect(run, run.run_id).toHaveProperty('cli_session_id');
+      if (run.cause !== null) expect(run.cause.why, run.run_id).toBe(words.get(run.cause.kind));
+    }
+    expect(runs.find((r) => r.run_id === 'run-legacy-1')?.cause).toBeNull();
+    const scout = runs.find((r) => r.run_id === 'run-scout-1');
+    expect(scout?.cause?.kind).toBe('schedule');
+    expect(scout?.cli_session_id).toMatch(/^[0-9A-Za-z][0-9A-Za-z-]{7,63}$/);
   });
 
   it('fleet runs filter by actor and come back newest first', async () => {
@@ -1253,7 +1602,6 @@ describe('a paused agent cannot be run (M33b.5)', () => {
         shell: false,
         connectors: false,
         attended: false,
-        mcp: null,
       }),
     ).rejects.toThrow(/process:scout is paused/);
   });
@@ -1265,7 +1613,6 @@ describe('a paused agent cannot be run (M33b.5)', () => {
       shell: false,
       connectors: false,
       attended: false,
-      mcp: null,
     };
     await expect(runAgent('/demo-vault', options)).resolves.toBeDefined();
     await expect(
@@ -1285,7 +1632,6 @@ describe('a paused agent cannot be run (M33b.5)', () => {
         shell: false,
         connectors: false,
         attended: false,
-        mcp: null,
       }),
     ).resolves.toBeDefined();
     await stopAllAgents();
@@ -1361,5 +1707,49 @@ describe('the job ledgers (M34.2.2) — parity with runtime/job_ledger.rs', () =
     const read = await mock.jobLedgerRead('/vault-import');
     expect(read.skillRuns['agent:risks']).toBe('2026-08-20');
     expect(read.attempts['records/a.md']).toBe('2026-08-19T00:00:00.000Z');
+  });
+});
+
+describe('connector status (M54.11)', () => {
+  const row = {
+    connector: 'Gmail',
+    cli_name: 'Gmail',
+    refused: null,
+    state: 'needs_sign_in' as const,
+    signal: 'init',
+    seen_at: '2026-07-28T11:00:00.000Z',
+    run_id: 'run-1',
+  };
+
+  it('has no rows until a run is seeded: the browser runs nothing', async () => {
+    expect(await mock.connectorStatus('/demo-vault')).toEqual([]);
+  });
+
+  it('returns the seeded rows, as copies', async () => {
+    mock.__seedConnectorStatus([row]);
+    const rows = await mock.connectorStatus('/demo-vault');
+    expect(rows).toEqual([row]);
+    rows[0].state = 'working';
+    expect((await mock.connectorStatus('/demo-vault'))[0].state).toBe('needs_sign_in');
+  });
+
+  it("'fail' makes the read reject, never answer empty", async () => {
+    mock.__seedConnectorStatus('fail');
+    await expect(mock.connectorStatus('/demo-vault')).rejects.toThrow('no runtime database');
+  });
+
+  it('resetOperational clears the rows and the failure', async () => {
+    mock.__seedConnectorStatus([row]);
+    mock.resetOperational();
+    expect(await mock.connectorStatus('/demo-vault')).toEqual([]);
+    mock.__seedConnectorStatus('fail');
+    mock.resetOperational();
+    expect(await mock.connectorStatus('/demo-vault')).toEqual([]);
+  });
+
+  it('is installed as a window seam for the e2e specs', () => {
+    expect(
+      (window as unknown as { __cerebroSeedConnectorStatus: unknown }).__cerebroSeedConnectorStatus,
+    ).toBe(mock.__seedConnectorStatus);
   });
 });

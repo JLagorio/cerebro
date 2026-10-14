@@ -137,9 +137,11 @@ impl Measured {
 /// than wire-exact (M31.6); their rows are written `estimated = 1` so the
 /// R1 protocol can count them toward completeness while keeping them out of
 /// the cost projection. Callers with only exact measurements pass `&[]`.
-// Each argument is a distinct measured fact about ONE run; folding them into
-// a struct would only rename the list.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct measured fact about ONE run; folding them into a struct \
+              would only rename the list"
+)]
 pub fn record_costs(
     conn: &Connection,
     vault_id: &str,

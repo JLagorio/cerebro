@@ -8,18 +8,42 @@ use super::entry::{build_entry, Entry};
 
 const SKIPPED_DIRS: [&str; 2] = ["views", "attachments"];
 
-/// A folder the scan never descends into, by its exact name. The note
-/// writers ask this same predicate (write.rs `note_refusal`), so a note the
-/// scan lists is a note they will save.
-pub(crate) fn is_skipped_dir(name: &str) -> bool {
-    name.starts_with('.') || SKIPPED_DIRS.contains(&name)
+/// A code point HFS+ ignores in a name, as git's `core.protectHFS` lists
+/// them: the zero-width non-joiner and joiner, the direction marks, the
+/// bidirectional embeddings and overrides, the deprecated format characters
+/// and the byte order mark. On such a disk `\u{200c}.claude` IS `.claude`.
+pub(crate) fn hfs_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'
+    )
 }
 
+/// A dotfile or a dot-folder, Obsidian-style, heard as HFS+ hears the name:
+/// its first character that is not [`hfs_ignorable`] is `.`. The scan hides
+/// it, and the note writers refuse it with this same predicate (write.rs
+/// `note_refusal`), so no listed note is one they refuse.
+pub(crate) fn is_hidden(name: &str) -> bool {
+    name.chars().find(|c| !hfs_ignorable(*c)) == Some('.')
+}
+
+/// A folder the scan never descends into: a hidden one, or one named exactly
+/// `views` or `attachments`, at any depth. The note writers ask this same
+/// predicate (write.rs `note_refusal`), so a note the scan lists is a note
+/// they will save.
+pub(crate) fn is_skipped_dir(name: &str) -> bool {
+    is_hidden(name) || SKIPPED_DIRS.contains(&name)
+}
+
+/// The walk's filter: a folder the scan descends into, or a file it is not
+/// hiding.
 fn keep(item: &walkdir::DirEntry) -> bool {
-    if !item.file_type().is_dir() {
-        return true;
+    let name = item.file_name().to_string_lossy();
+    if item.file_type().is_dir() {
+        !is_skipped_dir(&name)
+    } else {
+        !is_hidden(&name)
     }
-    !is_skipped_dir(&item.file_name().to_string_lossy())
 }
 
 fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
@@ -43,9 +67,10 @@ fn timestamps(path: &Path) -> (String, String) {
     (iso_or_now(created), iso_or_now(modified))
 }
 
-/// Scan every `.md` and `.mmd` file in the vault (skipping dot-directories,
-/// `views/`, and `attachments/`) into Entries with vault-relative
-/// forward-slash paths, sorted by path.
+/// Scan every `.md` and `.mmd` file in the vault into Entries with
+/// vault-relative forward-slash paths, sorted by path. Dotfiles and
+/// dot-folders are hidden, Obsidian-style ([`is_hidden`]), and `views/` and
+/// `attachments/` are skipped.
 pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
@@ -76,6 +101,9 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
             Err(e) => {
                 let mut entry = build_entry(&rel, "", created, modified);
                 entry.parse_error = Some(format!("unreadable: {e}"));
+                // The empty string stood in for bytes nobody read, so its
+                // hash names nothing on disk: not recorded (M55.2).
+                entry.hash = None;
                 entry
             }
         };
@@ -137,7 +165,8 @@ mod tests {
 
     /// A small but representative v2 vault: a type note, a project carrying
     /// a statuses override, two items, one malformed item — plus files that
-    /// must be skipped (views/, attachments/, dot-dir, non-md).
+    /// must be skipped (views/, attachments/, a dot-dir, a dotfile, a dot-dir
+    /// HFS+ hears behind a U+200C, non-md).
     fn fixture_vault(label: &str) -> PathBuf {
         let vault = testutil::temp_vault(label);
         testutil::write(&vault, "type/work-item.md", "---\ntype: Type\nicon: check-square\nfields:\n  status: { kind: status }\n  priority: { kind: select }\n---\n\n# Work item\n");
@@ -170,6 +199,12 @@ mod tests {
         testutil::write(&vault, "views/all-items.yml", "name: All items\n");
         testutil::write(&vault, "attachments/readme.md", "# Not scanned\n");
         testutil::write(&vault, ".obsidian/workspace.md", "# Hidden\n");
+        testutil::write(
+            &vault,
+            "items/.draft.md",
+            "---\ntype: Work item\nstatus: todo\n---\n\n# Hidden draft\n",
+        );
+        testutil::write(&vault, "\u{200c}.notes/x.md", "# Hidden too\n");
         testutil::write(&vault, "notes.txt", "not markdown\n");
         vault
     }
@@ -215,16 +250,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // M53.25: a dotfile note is hidden, Obsidian-style, as a dot-folder is,
+    // and a name is heard as HFS+ hears it — the rule the note writers
+    // refuse by, so the scan never lists a page they will not save.
     #[test]
-    fn skips_views_attachments_and_dot_dirs() {
+    fn skips_dotfiles_dot_dirs_views_and_attachments() {
         let vault = fixture_vault("scan-skips");
         let entries = scan_vault(&vault).unwrap();
         assert!(entries.iter().all(|e| {
             !e.path.starts_with("views/")
                 && !e.path.starts_with("attachments/")
-                && !e.path.starts_with(".obsidian/")
+                && !e.path.split('/').any(is_hidden)
                 && (e.path.ends_with(".md") || e.path.ends_with(".mmd"))
         }));
+        for hidden in [
+            ".obsidian/workspace.md",
+            "items/.draft.md",
+            "\u{200c}.notes/x.md",
+        ] {
+            assert!(vault.join(hidden).is_file(), "{hidden} is in the fixture");
+            assert!(
+                entries.iter().all(|e| e.path != hidden),
+                "{hidden} is listed"
+            );
+        }
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -345,6 +394,7 @@ mod tests {
         assert!(dirs.contains(&"projects/empty-folder".to_string()));
         assert!(!dirs.iter().any(|d| d.starts_with("views")
             || d.starts_with(".obsidian")
+            || d.starts_with("\u{200c}.notes")
             || d.starts_with("attachments")));
         let mut sorted = dirs.clone();
         sorted.sort();
@@ -369,5 +419,119 @@ mod tests {
             .iter()
             .any(|e| e.path == "items/atl-1.md" && e.parse_error.is_none()));
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M55.2: the hash of bytes nobody read is not recorded, never the hash
+    // of the empty string the entry was built from.
+    #[test]
+    fn an_unreadable_file_has_no_hash() {
+        let vault = fixture_vault("scan-nohash");
+        std::fs::write(vault.join("items/bad.md"), [0xFF, 0xFE, 0x00, 0x80]).unwrap();
+        let entries = scan_vault(&vault).unwrap();
+        let bad = entries.iter().find(|e| e.path == "items/bad.md").unwrap();
+        assert!(bad.parse_error.is_some());
+        assert_eq!(bad.hash, None);
+        let good = entries.iter().find(|e| e.path == "items/atl-1.md").unwrap();
+        let bytes = std::fs::read(vault.join("items/atl-1.md")).unwrap();
+        assert_eq!(
+            good.hash.as_deref(),
+            Some(crate::ledger::sha256_hex(&bytes).as_str())
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Notes the scan golden runs through `build_entry` beside the demo
+    /// vault, as `(vault-relative path, content)`. A new parser edge case
+    /// goes HERE, where the golden carries it to the TS replay — never as
+    /// twin assertions written once in Rust and again in TS.
+    const GOLDEN_FIXTURES: [(&str, &str); 3] = [
+        (
+            "items/fld-7.md",
+            "---\ntype: Work item\nkey: FLD-7\nstatus: progress\npriority: urgent\nproject: \"[[guided-onboarding-ga]]\"\n---\n\n# Checklist stalls on step 3 offline\n\nSteps to reproduce the stall, see [[offline-sync-hardening]].\n",
+        ),
+        (
+            "items/broken.md",
+            "---\ntype: [unclosed\nstatus: todo\n---\n\n# Broken note\n",
+        ),
+        (
+            "notes/meeting-notes.md",
+            "Just a plain paragraph that links to [[field-platform]].\n",
+        ),
+    ];
+
+    const GOLDEN_REGEN: &str =
+        "UPDATE_CONFORMANCE=1 cargo test --lib vault::scan::tests::scan_golden (from src-tauri/)";
+
+    /// An Entry as the golden records it: every field but the timestamps,
+    /// which are this checkout's file times rather than part of the corpus.
+    /// `shift_remove`, because `preserve_order` is on and a plain `remove`
+    /// would swap the last field into the hole.
+    fn golden_entry(entry: &Entry) -> serde_json::Value {
+        let mut value = serde_json::to_value(entry).unwrap();
+        let fields = value.as_object_mut().unwrap();
+        fields.shift_remove("createdAt");
+        fields.shift_remove("modifiedAt");
+        value
+    }
+
+    /// M53.22 — the scan golden, the parser's parity rail. Rust is the
+    /// reference: under `UPDATE_CONFORMANCE` this writes
+    /// `conformance/scan/entries.json`, and otherwise the committed bytes
+    /// must equal regeneration. src/lib/scanGolden.test.ts replays the file
+    /// against the mock backend's parser.
+    #[test]
+    fn scan_golden_is_committed_and_current() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let demo_vault = scan_vault(&root.join("demo-vault")).unwrap();
+        let fixtures: Vec<serde_json::Value> = GOLDEN_FIXTURES
+            .iter()
+            .map(|(path, content)| {
+                let entry = build_entry(path, content, String::new(), String::new());
+                serde_json::json!({
+                    "path": path,
+                    "content": content,
+                    "entry": golden_entry(&entry),
+                })
+            })
+            .collect();
+        let golden = serde_json::json!({
+            "description": "Rust's scan of demo-vault/ and its build_entry over the fixtures, \
+                            without createdAt/modifiedAt. Written by src-tauri/src/vault/scan.rs; \
+                            replayed by src/lib/scanGolden.test.ts.",
+            "demo_vault": demo_vault.iter().map(golden_entry).collect::<Vec<_>>(),
+            "fixtures": fixtures,
+        });
+        let bytes = serde_json::to_string_pretty(&golden).unwrap() + "\n";
+        let file = root.join("conformance/scan/entries.json");
+        if std::env::var("UPDATE_CONFORMANCE").is_ok() {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, &bytes).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&file).unwrap_or_else(|_| {
+            panic!("conformance/scan/entries.json is not committed: run {GOLDEN_REGEN}")
+        });
+        if committed != bytes {
+            // The file runs to thousands of lines, so name the first line
+            // that moved rather than printing both copies whole.
+            let index = committed
+                .lines()
+                .zip(bytes.lines())
+                .position(|(was, now)| was != now)
+                .unwrap_or_else(|| committed.lines().count().min(bytes.lines().count()));
+            let line = |text: &str| {
+                let line = text.lines().nth(index);
+                line.unwrap_or("(end of file)").to_string()
+            };
+            panic!(
+                "conformance/scan/entries.json differs from regeneration at line {}:\n  \
+                 committed:   {}\n  regenerated: {}\n\
+                 A demo-vault or parser change must regenerate it: run {GOLDEN_REGEN}. \
+                 An untracked file in demo-vault/ changes the scan too.",
+                index + 1,
+                line(&committed),
+                line(&bytes),
+            );
+        }
     }
 }

@@ -1,0 +1,48 @@
+# cargo-deny policy (M32.6). Advisory lane — a new CVE is time-triggered
+# operational state, not a property of any commit, so this NEVER blocks a
+# push and never enters the husky gate.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Vulnerabilities and yanked crates stay hard errors — those are actionable.
+# `unmaintained` is scoped to crates this workspace names itself, because the
+# first run surfaced 16 unmaintained advisories and ZERO vulnerabilities, and
+# all 16 are transitive and unfixable from here: the gtk-rs GTK3 bindings
+# (10 of them, Linux-only deps of tauri that macOS never compiles), the
+# `unic-*` family via tauri-utils → urlpattern (RUSTSEC-2025-0098, upstream
+# says "no safe upgrade is available"), and proc-macro-error. Pinning 16
+# ignore ids instead would rot silently as tauri's tree moves. We are
+# accountable for what we depend on; tauri is accountable for its tree.
+# If this ever hides something actionable, the answer is to raise it back to
+# "all" and carry explicit, dated ignores.
+unmaintained = "workspace"
+
+[licenses]
+version = 2
+# Start from what the tree actually carries: the first run prints every
+# license present; extend this list deliberately, one license at a time,
+# never with a blanket allow. Copyleft in a shipped binary is the failure.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "MPL-2.0",
+  "CC0-1.0",
+  "BSL-1.0",
+]
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

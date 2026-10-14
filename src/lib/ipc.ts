@@ -1,7 +1,11 @@
 // IPC facade: every vault operation in the app goes through these functions.
 // Inside Tauri (detected via __TAURI_INTERNALS__) they invoke the Rust
 // commands; in the browser (pnpm dev, vitest, Playwright) they delegate to
-// the in-memory mock in mockIpc.ts. Signatures follow the plan's IPC table.
+// the in-memory mock in mockIpc.ts. ipcContract.test.ts holds every command
+// name and payload key here to Rust's generate_handler!.
+// listenVaultChanged is the one event here: the watcher's `vault-changed`,
+// which the browser has no watcher to emit.
+import type { ConnectorStatusRow } from '@/engine/connectors';
 import type { Entry } from '@/engine/types';
 import * as mock from './mockIpc';
 
@@ -44,11 +48,16 @@ export function saveNote(vault: string, path: string, body: string): Promise<voi
     : mock.saveNote(vault, path, body);
 }
 
+/**
+ * Patch a note's frontmatter. Answers the SHA-256 of the bytes written
+ * (M55.2), or null when the knowledge capture valve took the write: the
+ * projection is the ledger's, and the next scan reads its hash.
+ */
 export function updateFrontmatter(
   vault: string,
   path: string,
   patch: Record<string, unknown>,
-): Promise<void> {
+): Promise<string | null> {
   return inTauri()
     ? invokeTauri('update_frontmatter', { vault, path, patch })
     : mock.updateFrontmatter(vault, path, patch);
@@ -154,6 +163,18 @@ export function startWatcher(vault: string): Promise<void> {
   return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
 }
 
+/**
+ * Call `handler` on every `vault-changed` event the watcher emits; resolves
+ * to the unlisten function once the listener is bound. The browser has no
+ * watcher (the mock's startWatcher is a no-op, and its writers rescan
+ * directly), so there it binds nothing and resolves a no-op.
+ */
+export async function listenVaultChanged(handler: () => void): Promise<() => void> {
+  if (!inTauri()) return () => undefined;
+  const { listen } = await import('@tauri-apps/api/event');
+  return listen('vault-changed', () => handler());
+}
+
 // --- Connectors (M13.3) ----------------------------------------------------
 
 /** Raw `.cerebro/connectors.json`, '' when the vault has none. Rejects when
@@ -168,6 +189,13 @@ export function saveConnectors(vault: string, json: string): Promise<void> {
   return inTauri()
     ? invokeTauri('save_connectors', { vault, json })
     : mock.saveConnectors(vault, json);
+}
+
+/** Each connector in the vault's list with the last status a run saw it in
+ * (M54.11). Rejects when the runtime database or the list cannot be read,
+ * which Settings shows as unavailable, never as "not observed yet". */
+export function connectorStatus(vault: string): Promise<ConnectorStatusRow[]> {
+  return inTauri() ? invokeTauri('connector_status', { vault }) : mock.connectorStatus(vault);
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---
@@ -465,6 +493,7 @@ export function pipelineOverview(vault: string): Promise<PipelineOverview> {
 
 import type {
   FleetRun,
+  FleetRunCause,
   FleetCostComponent,
   FleetAssemblyMetrics,
   FleetRunDetail,
@@ -475,6 +504,7 @@ import type {
 
 export type {
   FleetRun,
+  FleetRunCause,
   FleetCostComponent,
   FleetAssemblyMetrics,
   FleetRunDetail,
@@ -780,4 +810,22 @@ export function setAgentPaused(vault: string, actor: string, paused: boolean): P
   return inTauri()
     ? invokeTauri('set_agent_paused', { vault, actor, paused })
     : mock.setAgentPaused(vault, actor, paused);
+}
+
+// --- Diagnostics (M53.24) --------------------------------------------------
+
+import type { FrontendLogEntry } from './mockIpc';
+export type { FrontendLogEntry };
+
+/**
+ * Hand one uncaught webview error to the diagnostic log. Rust redacts,
+ * clamps and writes it; the browser mock drops it, since its console already
+ * shows the error.
+ *
+ * It never rejects. A report that failed would be an unhandled rejection
+ * itself, and `installErrorReporting` would report that one too, forever.
+ */
+export function logFrontend(entry: FrontendLogEntry): Promise<void> {
+  const sent = inTauri() ? invokeTauri<void>('log_frontend', { entry }) : mock.logFrontend(entry);
+  return sent.catch(() => undefined);
 }

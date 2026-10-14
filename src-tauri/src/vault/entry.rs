@@ -26,6 +26,11 @@ pub struct Entry {
     pub created_at: String,
     pub modified_at: String,
     pub parse_error: Option<String>,
+    /// Lowercase-hex SHA-256 of the file's bytes as read (M55.2): the
+    /// content's identity, which a trigger compares instead of a timestamp.
+    /// None means not recorded (the file could not be read), never the hash
+    /// of nothing.
+    pub hash: Option<String>,
 }
 
 impl Entry {
@@ -50,6 +55,7 @@ impl Entry {
             created_at: "2026-07-28T00:00:00Z".into(),
             modified_at: "2026-07-28T00:00:00Z".into(),
             parse_error: None,
+            hash: None,
         }
     }
 }
@@ -78,7 +84,9 @@ fn mermaid_snippet(content: &str) -> String {
 }
 
 /// Build an Entry from a vault-relative path (forward slashes) and raw file
-/// content. Timestamps are passed in by the scanner (ISO 8601 strings).
+/// content. Timestamps are passed in by the scanner (ISO 8601 strings). The
+/// hash is of `content`'s bytes, so a caller that could not read the file
+/// clears it (scan.rs).
 pub fn build_entry(
     rel_path: &str,
     content: &str,
@@ -91,6 +99,7 @@ pub fn build_entry(
         .map(|(d, _)| d)
         .unwrap_or("")
         .to_string();
+    let hash = Some(crate::ledger::sha256_hex(content.as_bytes()));
     // M29.20: a `.mmd` file is RAW mermaid source, end to end. Mermaid's own
     // `---\ntitle:…\nconfig:…\n---` header is valid diagram syntax, so it
     // must NEVER go through the note frontmatter split — the title comes from
@@ -111,6 +120,7 @@ pub fn build_entry(
             created_at,
             modified_at,
             parse_error: None,
+            hash,
         };
     }
     let stem = filename
@@ -174,6 +184,7 @@ pub fn build_entry(
         created_at,
         modified_at,
         parse_error,
+        hash,
     }
 }
 
@@ -323,6 +334,30 @@ mod tests {
         assert!(e.parse_error.is_none());
     }
 
+    // M55.2: the hash names the bytes, `.md` and `.mmd` alike, so a trigger
+    // can tell a content change from a touch.
+    #[test]
+    fn an_entry_carries_the_hash_of_its_bytes() {
+        let note = "---\ntype: Work item\n---\n\n# Hashed\n";
+        let e = build("items/hashed.md", note);
+        assert_eq!(
+            e.hash.as_deref(),
+            Some(crate::ledger::sha256_hex(note.as_bytes()).as_str())
+        );
+        let diagram = "flowchart TD\n  A --> B\n";
+        let m = build("diagrams/flow.mmd", diagram);
+        assert_eq!(
+            m.hash.as_deref(),
+            Some(crate::ledger::sha256_hex(diagram.as_bytes()).as_str())
+        );
+        // A different byte is a different hash; the timestamps play no part.
+        assert_ne!(build("items/hashed.md", "# Hashed \n").hash, e.hash);
+        assert_eq!(
+            build_entry("items/hashed.md", note, "a".into(), "b".into()).hash,
+            e.hash
+        );
+    }
+
     #[test]
     fn serializes_to_camel_case_json() {
         let e = build("items/x.md", "# X\n");
@@ -332,61 +367,6 @@ mod tests {
         assert!(json.get("modifiedAt").is_some());
         assert!(json.get("parseError").is_some());
         assert!(json.get("type").is_some());
-    }
-
-    // CROSS-LANGUAGE PARITY FIXTURES
-    // These three fixture strings are also asserted by the TS mock parser
-    // tests in src/lib/mockParse.test.ts (Task 10). If a fixture or an
-    // expected value changes here it must change there too: the mock parser
-    // and the Rust scanner must produce the same Entry for the same content.
-
-    const FIXTURE_ITEM: &str = "---\ntype: Work item\nkey: FLD-7\nstatus: progress\npriority: urgent\nproject: \"[[guided-onboarding-ga]]\"\n---\n\n# Checklist stalls on step 3 offline\n\nSteps to reproduce the stall, see [[offline-sync-hardening]].\n";
-
-    const FIXTURE_BAD_YAML: &str = "---\ntype: [unclosed\nstatus: todo\n---\n\n# Broken note\n";
-
-    const FIXTURE_PLAIN: &str = "Just a plain paragraph that links to [[field-platform]].\n";
-
-    #[test]
-    fn parity_fixture_1_full_item() {
-        let e = build("items/fld-7.md", FIXTURE_ITEM);
-        assert_eq!(e.path, "items/fld-7.md");
-        assert_eq!(e.filename, "fld-7.md");
-        assert_eq!(e.title, "Checklist stalls on step 3 offline");
-        assert_eq!(e.entry_type.as_deref(), Some("Work item"));
-        assert_eq!(e.properties["key"], "FLD-7");
-        assert_eq!(e.properties["status"], "progress");
-        assert_eq!(e.properties["priority"], "urgent");
-        assert!(!e.properties.contains_key("project"));
-        assert_eq!(e.relationships["project"], vec!["guided-onboarding-ga"]);
-        assert_eq!(e.outgoing_links, vec!["offline-sync-hardening"]);
-        assert_eq!(
-            e.snippet,
-            "Steps to reproduce the stall, see offline-sync-hardening."
-        );
-        assert!(e.parse_error.is_none());
-    }
-
-    #[test]
-    fn parity_fixture_2_malformed_yaml() {
-        let e = build("items/broken.md", FIXTURE_BAD_YAML);
-        assert!(e.parse_error.is_some());
-        assert!(e.properties.is_empty());
-        assert!(e.relationships.is_empty());
-        assert_eq!(e.entry_type, None);
-        assert_eq!(e.title, "Broken note");
-    }
-
-    #[test]
-    fn parity_fixture_3_plain_note() {
-        let e = build("notes/meeting-notes.md", FIXTURE_PLAIN);
-        assert_eq!(e.title, "Meeting notes");
-        assert_eq!(e.entry_type, None);
-        assert!(e.properties.is_empty());
-        assert_eq!(e.outgoing_links, vec!["field-platform"]);
-        assert_eq!(
-            e.snippet,
-            "Just a plain paragraph that links to field-platform."
-        );
-        assert!(e.parse_error.is_none());
+        assert!(json.get("hash").is_some());
     }
 }

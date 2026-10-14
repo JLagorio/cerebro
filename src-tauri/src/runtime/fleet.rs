@@ -20,6 +20,8 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use super::cause::{view_of_column, CauseView};
+
 /// The most rows one page will ever return, however large a limit is asked
 /// for. A UI that wants more asks for another page; a UI that asks for
 /// 10_000_000 gets 200 rather than an unbounded read on the main thread.
@@ -74,6 +76,15 @@ pub struct FleetRun {
     /// FROM. `None` is a root — every run before handoffs existed, and every
     /// run a person or a schedule started directly.
     pub parent_run_id: Option<String>,
+    /// Why the run started (M56.7), with the kind's words in Rust's
+    /// vocabulary (`cause::view_of_column`). `None` is a row from before
+    /// causes were recorded, or an unattended request that named none: the
+    /// UI reads it "why not recorded", and nothing backfills it.
+    pub cause: Option<CauseView>,
+    /// The Claude Code session the run ran as, from its stream (M56.7).
+    /// `None` is not recorded: a row from before, or a run whose stream never
+    /// named one (the app died under it).
+    pub cli_session_id: Option<String>,
 }
 
 /// One row of `run_cost_components` (M31.6).
@@ -145,7 +156,8 @@ pub struct ActorSummary {
 
 const RUN_COLUMNS: &str = "run_id, actor, vault_id, mode, lane, started_at, ended_at, outcome, \
                            usage_state, input_tokens, output_tokens, proposals_submitted, \
-                           applied, rejected, parent_run_id, counters_booked";
+                           applied, rejected, parent_run_id, counters_booked, cause, \
+                           cli_session_id";
 
 fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
     let booked = row.get::<_, i64>(15)? != 0;
@@ -168,6 +180,11 @@ fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<FleetRun> {
         applied: counter(12)?,
         rejected: counter(13)?,
         parent_run_id: row.get(14)?,
+        cause: row
+            .get::<_, Option<String>>(16)?
+            .as_deref()
+            .and_then(view_of_column),
+        cli_session_id: row.get(17)?,
     })
 }
 
@@ -572,7 +589,11 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18, "v17 upgrades through v18");
+        assert_eq!(
+            version,
+            crate::runtime::USER_VERSION,
+            "v17 upgrades through v18 to the current version"
+        );
         let at = chrono::DateTime::parse_from_rfc3339("2026-09-27T10:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
@@ -587,6 +608,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 at,
                 at,
             )
@@ -595,7 +617,7 @@ mod tests {
         // The production order: open at spawn, book mid-run through the
         // sink (as a write inside the run does), finish.
         crate::runtime::sink::arm(&dir).unwrap();
-        dispatch::begin_attended(&conn, "fresh", None, None, None, None, at).unwrap();
+        dispatch::begin_attended(&conn, "fresh", None, None, None, None, None, at).unwrap();
         crate::policy::commit::CommitOutcome {
             commit_set_id: "set".into(),
             transition: crate::policy::commit::TransitionCode::Apply,
@@ -610,7 +632,7 @@ mod tests {
         .book("fresh");
         crate::runtime::sink::disarm();
         finish("fresh");
-        dispatch::begin_attended(&conn, "quiet", None, None, None, None, at).unwrap();
+        dispatch::begin_attended(&conn, "quiet", None, None, None, None, None, at).unwrap();
         finish("quiet");
         finish("late");
 
@@ -643,6 +665,90 @@ mod tests {
             run_detail(&conn, "legacy").unwrap().run.applied,
             None,
             "the detail read says the same"
+        );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // M56.7 — why a run started reads back in Rust's words, beside the
+    // values it was written with; a row with none reads as none.
+    #[test]
+    fn a_run_reads_back_its_cause_in_rusts_words() {
+        use crate::runtime::cause::{CauseKind, RunCause};
+        let (dir, conn, vault) = fixture("fleet-cause");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new(
+                "r1",
+                Some("process:release-scout"),
+                "2026-07-28T09:15:00Z",
+            )],
+        );
+        let cause = RunCause::new(
+            CauseKind::Schedule,
+            None,
+            Some("weekdays 08:30"),
+            Some("2026-07-28T08:30:00Z"),
+        );
+        conn.execute(
+            "UPDATE runs SET cause = ?1 WHERE run_id = 'r1'",
+            [cause.to_column()],
+        )
+        .unwrap();
+        let run = runs(&conn, &Filter::default()).unwrap().remove(0);
+        assert_eq!(
+            run.cause,
+            Some(CauseView {
+                kind: "schedule".into(),
+                why: "its schedule came due".into(),
+                subject: None,
+                detail: Some("weekdays 08:30".into()),
+                due_at: Some("2026-07-28T08:30:00.000Z".into()),
+            })
+        );
+        assert_eq!(run_detail(&conn, "r1").unwrap().run.cause, run.cause);
+        let wire = serde_json::to_value(&run).unwrap();
+        assert_eq!(wire["cause"]["subject"], serde_json::Value::Null);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_null_cause_reads_back_as_none() {
+        let (dir, conn, vault) = fixture("fleet-cause-null");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new("legacy", None, "2026-07-28T04:20:00Z")],
+        );
+        let run = runs(&conn, &Filter::default()).unwrap().remove(0);
+        assert_eq!(run.cause, None, "why not recorded, never a guess");
+        assert_eq!(run.cli_session_id, None);
+        let wire = serde_json::to_value(&run).unwrap();
+        assert_eq!(wire["cause"], serde_json::Value::Null);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_reads_back_its_cli_session() {
+        let (dir, conn, vault) = fixture("fleet-cli-session");
+        seed_runs(
+            &conn,
+            &vault,
+            &[Seed::new("r1", None, "2026-07-28T09:15:00Z")],
+        );
+        crate::runtime::dispatch::record_cli_session(
+            &conn,
+            "r1",
+            "00000000-0000-4000-8000-000000000001",
+        )
+        .unwrap();
+        let run = run_detail(&conn, "r1").unwrap().run;
+        assert_eq!(
+            run.cli_session_id.as_deref(),
+            Some("00000000-0000-4000-8000-000000000001")
         );
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);

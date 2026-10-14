@@ -53,6 +53,8 @@ function run(over: Partial<FleetRun> = {}): FleetRun {
     applied: 0,
     rejected: 0,
     parent_run_id: null,
+    cause: null,
+    cli_session_id: null,
     ...over,
   };
 }
@@ -147,6 +149,30 @@ describe('FleetSection', () => {
 
     const row = await screen.findByTestId('fleet-row');
     expect(row.textContent).toContain('unattributed');
+  });
+
+  it('says why each run started, and that a run from before causes is "why not recorded"', async () => {
+    fleetRuns.mockResolvedValue([
+      run({
+        run_id: 'scheduled',
+        started_at: '2026-07-28T09:15:00Z',
+        cause: {
+          kind: 'schedule',
+          why: 'its schedule came due',
+          subject: null,
+          detail: 'weekdays 08:30',
+          due_at: '2026-07-28T08:30:00.000Z',
+        },
+      }),
+      run({ run_id: 'legacy', started_at: '2026-07-28T04:20:00Z' }),
+    ]);
+    render(<FleetSection />);
+    await screen.findAllByTestId('fleet-row');
+    const whys = screen.getAllByTestId('run-why').map((why) => why.textContent);
+    expect(whys).toEqual([
+      'its schedule came due (weekdays 08:30) · ran 45m late',
+      'why not recorded',
+    ]);
   });
 
   it('shows recorded cost components, and marks the estimated ones as estimates', async () => {

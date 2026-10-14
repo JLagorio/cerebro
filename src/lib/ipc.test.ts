@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
+const { listenSpy } = vi.hoisted(() => ({ listenSpy: vi.fn() }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: listenSpy }));
 
 import {
   askQuestion,
@@ -11,12 +13,15 @@ import {
   ingestItemState,
   ledgerHead,
   ledgerStatus,
+  listenVaultChanged,
+  logFrontend,
   scanVault,
   updateFrontmatter,
 } from './ipc';
 
 afterEach(() => {
   invokeSpy.mockClear();
+  listenSpy.mockReset();
   delete (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'];
 });
 
@@ -38,6 +43,32 @@ describe('ipc backend detection', () => {
       path: 'items/a.md',
       patch: { status: 'done' },
     });
+  });
+});
+
+/**
+ * The watcher's event, bound in the adapter (M53.20): vaultStore asks for it
+ * here instead of importing the Tauri event API itself.
+ */
+describe('listenVaultChanged', () => {
+  it('binds nothing in the browser, which has no watcher to emit', async () => {
+    const unlisten = await listenVaultChanged(() => undefined);
+    expect(listenSpy).not.toHaveBeenCalled();
+    expect(() => unlisten()).not.toThrow();
+  });
+
+  it('runs the handler on every vault-changed event inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    const unlistenFn = vi.fn();
+    listenSpy.mockResolvedValueOnce(unlistenFn);
+    const handler = vi.fn();
+    const unlisten = await listenVaultChanged(handler);
+    expect(listenSpy).toHaveBeenCalledWith('vault-changed', expect.any(Function));
+    const onEvent = listenSpy.mock.calls[0][1] as (event: unknown) => void;
+    onEvent({ payload: null });
+    onEvent({ payload: null });
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(unlisten).toBe(unlistenFn);
   });
 });
 
@@ -146,5 +177,36 @@ describe('asking the base a question (M26.5e)', () => {
       aliases: ['Falcon'],
       intendedUse: use,
     });
+  });
+});
+
+/**
+ * The diagnostic log's one door (M53.24). It must never reject: the reporter
+ * forwards unhandled rejections, so a report that failed loudly would be
+ * reported again, forever.
+ */
+describe('logFrontend', () => {
+  const entry = {
+    level: 'error',
+    message: 'Uncaught Error: probe',
+    source: 'index.js:1:2',
+  } as const;
+
+  it('invokes log_frontend with the entry inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await logFrontend(entry);
+    expect(invokeSpy).toHaveBeenCalledWith('log_frontend', { entry });
+  });
+
+  it('resolves even when the invoke rejects', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    invokeSpy.mockRejectedValueOnce(new Error('command log_frontend not found'));
+    await expect(logFrontend(entry)).resolves.toBeUndefined();
+    expect(invokeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves through the mock outside Tauri', async () => {
+    await expect(logFrontend(entry)).resolves.toBeUndefined();
+    expect(invokeSpy).not.toHaveBeenCalled();
   });
 });

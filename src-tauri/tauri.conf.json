@@ -12,12 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "Cerebro",
         "width": 1400,
         "height": 900,
         "minWidth": 900,
         "minHeight": 600,
-        "resizable": true
+        "resizable": true,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {

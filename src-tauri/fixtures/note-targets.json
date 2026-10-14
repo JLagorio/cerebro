@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "about": "What a note writer may touch (PLATFORM-API-1). A note is a .md file, or a .mmd for the doors that edit diagrams, with no path component starting with '.', and, for markdown, in no folder the scanner skips: exactly views/ or attachments/, at any depth, matched as the scanner matches them, so Views/ and Attachments/, which it lists, hold notes. Nor may a note reach knowledge/ by another name: a first component a folding disk hears as `knowledge` (Unicode case folded, HFS+ ignorables dropped) that the bundle's ASCII-folding guards do not read. Only filesystem-independent cases live here; what a disk folds or a symlink reaches is write.rs's own tests. Replayed through the real doors by note_targets_replay_the_shared_cases in src-tauri/src/vault/write.rs and by src/lib/mockIpc.test.ts. A case whose door edits an existing file is seeded with `seed` first unless it says \"seed\": false. `refused` is a fragment both backends' refusals carry, and a refused case must leave every byte where it was; `lands` is the vault-relative path the door wrote; `why` is for the reader.",
+  "about": "What a note writer may touch (PLATFORM-API-1). A note is a .md file, or a .mmd for the doors that edit diagrams, with no path component starting with '.' as HFS+ hears it (its ignorables dropped), and, for markdown, in no folder the scanner skips: exactly views/ or attachments/, at any depth, matched as the scanner matches them, so Views/ and Attachments/, which it lists, hold notes. The scanner hides what the dot rule refuses, Obsidian-style, so a note it lists is a note the writers take. Nor may a note reach knowledge/ by another name: a first component a folding disk hears as `knowledge` (Unicode case folded, HFS+ ignorables dropped) that is not exactly `knowledge`. The bundle's guards hear those names as the bundle too (M53.28), and a note door refuses them without leaning on the guards: it reaches the bundle by its own name or not at all. Only filesystem-independent cases live here; what a disk folds or a symlink reaches is write.rs's own tests. Replayed through the real doors by note_targets_replay_the_shared_cases in src-tauri/src/vault/write.rs and by src/lib/mockIpc.test.ts. A case whose door edits an existing file is seeded with `seed` first unless it says \"seed\": false. `refused` is a fragment both backends' refusals carry, and a refused case must leave every byte where it was; `lands` is the vault-relative path the door wrote; `why` is for the reader.",
   "seed": "---\ntype: Note\n---\n\n# Seed\n",
   "cases": [
     { "door": "save_note", "path": ".git/config", "refused": "not a note" },
@@ -30,10 +30,16 @@
       "door": "save_note",
       "path": "records/.hidden.md",
       "refused": "not a note",
-      "why": "Decided, not overlooked: the scanner still LISTS a dotfile note, and the writers refuse it, so it is read-only in the app. PLATFORM-API-1 refuses every dotfile; hiding them from the scanner too is the owner's call."
+      "why": "Decided (M53.25): a dotfile note is hidden, Obsidian-style. The scanner does not list it and every note writer refuses it, so the app never shows a page that cannot save."
     },
     { "door": "save_note", "path": "views/x.yml", "refused": "not a note" },
     { "door": "save_note", "path": "Views/x.yml", "refused": "not a note" },
+    {
+      "door": "save_note",
+      "path": "delivery/smoke.list.yml",
+      "refused": "not a note",
+      "why": "A List (M10): config that save_list writes and list_views reads, so a body saved over it or a frontmatter block patched onto it is corruption."
+    },
     { "door": "save_note", "path": "boards/plan.canvas", "refused": "not a note" },
     { "door": "save_note", "path": "data/table.csv", "refused": "not a note" },
     { "door": "save_note", "path": "data/config.json", "refused": "not a note" },
@@ -61,6 +67,12 @@
       "refused": "inside knowledge/ by another name",
       "why": "HFS+ ignores U+200C ZERO WIDTH NON-JOINER in a name: on such a disk this IS knowledge/."
     },
+    {
+      "door": "save_note",
+      "path": "Knowledge/x.md",
+      "refused": "inside knowledge/ by another name",
+      "why": "APFS folds ASCII case too, so this IS knowledge/ there. The guards in front of the door hear it as the bundle, and the door refuses it by name without them (M53.28)."
+    },
     { "door": "save_note", "path": ".git/flow.mmd", "refused": "not a note" },
     { "door": "save_note", "path": "../outside.md", "seed": false, "refused": "escapes the vault" },
     { "door": "save_note", "path": "records/x.md", "lands": "records/x.md" },
@@ -82,6 +94,7 @@
     { "door": "update_frontmatter", "path": ".claude/settings.json", "refused": "not a note" },
     { "door": "update_frontmatter", "path": "views/x.yml", "refused": "not a note" },
     { "door": "update_frontmatter", "path": "VIEWS/X.YML", "refused": "not a note" },
+    { "door": "update_frontmatter", "path": "delivery/smoke.list.yml", "refused": "not a note" },
     { "door": "update_frontmatter", "path": "boards/plan.canvas", "refused": "not a note" },
     { "door": "update_frontmatter", "path": "data/table.csv", "refused": "not a note" },
     { "door": "update_frontmatter", "path": "data/config.json", "refused": "not a note" },
@@ -92,7 +105,7 @@
       "door": "update_frontmatter",
       "path": "\u212anowledge/metrics/churn.md",
       "refused": "inside knowledge/ by another name",
-      "why": "APFS hears U+212A KELVIN SIGN as k, and the bundle's guards fold ASCII only: a verified stamp patched here lands on a concept."
+      "why": "APFS hears U+212A KELVIN SIGN as k, so on such a disk a verified stamp patched here lands on a concept."
     },
     {
       "door": "update_frontmatter",
@@ -129,7 +142,7 @@
       "folder": "\u212anowledge/metrics",
       "slug": "churn",
       "refused": "inside knowledge/ by another name",
-      "why": "The plant: made before the bundle exists, this folder IS the bundle on APFS from then on, under a name no guard reads."
+      "why": "The plant: made before the bundle exists, this folder IS the bundle on APFS from then on, under a name that is not the bundle's own."
     },
     {
       "door": "create_note",
@@ -150,7 +163,8 @@
     {
       "door": "write_text_file",
       "path": "\u212anowledge/flow.mmd",
-      "refused": "inside knowledge/ by another name"
+      "refused": "read-only",
+      "why": "write_text_file guards the bundle before it judges a note target, and the guard hears this spelling as the bundle (M53.28)."
     },
     {
       "door": "write_text_file",
@@ -161,6 +175,18 @@
       "door": "write_text_file",
       "path": "views/whiteboards/note-target-probe.mmd",
       "lands": "views/whiteboards/note-target-probe.mmd"
-    }
+    },
+
+    { "door": "edit_note", "path": ".git/config", "refused": "not a note" },
+    { "door": "edit_note", "path": "records/.hidden.md", "refused": "not a note" },
+    { "door": "edit_note", "path": "views/x.md", "refused": "not a note" },
+    { "door": "edit_note", "path": "boards/plan.canvas", "refused": "not a note" },
+    {
+      "door": "edit_note",
+      "path": "diagrams/flow.mmd",
+      "refused": "not a note",
+      "why": "edit_note edits markdown only (Q10): a diagram's whole file is its source."
+    },
+    { "door": "edit_note", "path": "notes/edit-target.md", "lands": "notes/edit-target.md" }
   ]
 }

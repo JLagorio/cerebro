@@ -14,6 +14,15 @@ export interface NavigateOptions {
    * record panel from another surface is not part of it.
    */
   keepDetail?: boolean;
+  /**
+   * Write over the current history slot instead of adding one (M55.12).
+   *
+   * For a selection that only forwards: `{kind:'agents', actor}` and a library
+   * agent path both render nothing and send you to the agent's page. Pushed,
+   * the forwarder would be the step Back lands on, and landing there forwards
+   * you straight back — Back would never leave the page.
+   */
+  replace?: boolean;
 }
 
 interface NavState {
@@ -103,6 +112,13 @@ export const useNavStore = create<NavState>((set, get) => ({
     // nothing. Surface state is still dropped above — that part did happen.
     if (sameSelection(history[historyIndex], target)) {
       set({ selection: target });
+      return;
+    }
+    if (options?.replace === true) {
+      set({
+        selection: target,
+        history: history.map((sel, i) => (i === historyIndex ? target : sel)),
+      });
       return;
     }
     const next = [...history.slice(0, historyIndex + 1), target];

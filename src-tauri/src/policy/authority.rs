@@ -1092,6 +1092,10 @@ mod tests {
     /// side effect of running the suite.
     #[test]
     #[ignore = "run explicitly to release a new authority-routes snapshot"]
+    #[expect(
+        clippy::print_stdout,
+        reason = "an #[ignore]d writer run by hand; what it wrote is its whole output"
+    )]
     fn write_authority_snapshot() {
         let artifact = AuthorityRoutesV1::load().unwrap();
         let dir = repo(SNAPSHOT_DIR);

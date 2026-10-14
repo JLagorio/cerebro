@@ -20,6 +20,14 @@ import {
   tightenColumnMarkers,
   type ColumnMarker,
 } from '@/engine/pageColumns';
+import {
+  formatMediaLine,
+  mediaKindOf,
+  parseMediaLine,
+  readMediaAt,
+  type MediaKind,
+  type PageMedia,
+} from '@/engine/pageMedia';
 
 /** Schema-agnostic editor view: custom inline specs (chips) change the
  * concrete BlockNoteEditor generics, but these helpers only need the
@@ -448,7 +456,8 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
   });
 }
 
-// --- Container round-trip: columns (M48.2) and the AI block (M53.9) --------
+// --- Containers: columns (M48.2), the AI block (M53.9), toggles, nested -----
+// --- children and media (M55.4) ---------------------------------------------
 // On disk a column layout is a `:::columns` / `::::column` directive
 // container, so a column's CONTENTS stay ordinary markdown blocks — a
 // wikilink inside a column still resolves and a database fence inside one
@@ -476,6 +485,22 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
 // does not. Each value is a JSON string — `"`, `\`, control characters and
 // the line and paragraph separators escaped (`attributeValue`), nothing else —
 // and, like `width=`, written only when it is set.
+//
+// M55.4 gave every other block the `/` menu offers a carrier the same way
+// (the markdown.test.ts describe that walks the menu holds it):
+//
+//   :::toggle The summary, any inline markdown     a toggle list item
+//   ::::toggle-heading                             a heading that folds, its
+//   ## The heading                                 own line kept a real heading
+//   ::::                                           (the colons step with depth)
+//   :::indent                                      the children of the block
+//   :::                                            just above it (Tab-nesting)
+//   ![name|300](attachments/a.png "Caption")       an image, video, audio clip
+//                                                  or file, by its extension
+//
+// BlockNote's serializer kept none of them: a toggle wrote a bullet, a child
+// of anything but a list item was flattened into its parent's flow, and media
+// wrote invented alt text ("BlockNote image") or a bare link.
 //
 // A line that only LOOKS like a marker — `:::columns` typed as a paragraph,
 // an agent's answer quoting the page's own carrier — is written with a
@@ -556,9 +581,68 @@ export function formatAiMarker(depth: number, props: Omit<AiMarker, 'depth'>): s
   return `${':'.repeat(depth)}ai${set.length === 0 ? '' : `{${set.join(' ')}}`}`;
 }
 
-/** Is this one line a marker some marker reader would take — a column's, or an AI block's? */
-const isMarkerLine = (line: string): boolean =>
-  parseColumnMarker(line) !== null || parseAiMarker(line) !== null;
+const TOGGLE_OPEN = /^(:{3,})toggle(?:[ \t]+(.*?))?[ \t]*$/;
+const TOGGLE_HEADING_OPEN = /^(:{3,})toggle-heading[ \t]*$/;
+const INDENT_OPEN = /^(:{3,})indent[ \t]*$/;
+
+/** What a toggle list item's opening line says: its depth, and its summary as markdown. */
+export interface ToggleOpener {
+  depth: number;
+  summary: string;
+}
+
+/**
+ * Read one line as a toggle list item's opening line (M55.4), or null. The
+ * summary is the rest of the line, inline markdown; a summary with a hard
+ * break goes on over the lines after it (`liftMarkers` joins them).
+ */
+export function parseToggleOpener(line: string): ToggleOpener | null {
+  const open = TOGGLE_OPEN.exec(line);
+  return open === null ? null : { depth: open[1].length, summary: open[2] ?? '' };
+}
+
+/** The opening line of a toggle list item at this depth. */
+export const formatToggleOpener = (depth: number, summary: string): string =>
+  `${':'.repeat(depth)}toggle${summary === '' ? '' : ` ${summary}`}`;
+
+/** Read one line as a toggle heading's opening line (M55.4): its depth, or null. */
+export function parseToggleHeadingOpener(line: string): number | null {
+  const open = TOGGLE_HEADING_OPEN.exec(line);
+  return open === null ? null : open[1].length;
+}
+
+export const formatToggleHeadingOpener = (depth: number): string =>
+  `${':'.repeat(depth)}toggle-heading`;
+
+/** Read one line as a nested-children opening line (M55.4): its depth, or null. */
+export function parseIndentOpener(line: string): number | null {
+  const open = INDENT_OPEN.exec(line);
+  return open === null ? null : open[1].length;
+}
+
+export const formatIndentOpener = (depth: number): string => `${':'.repeat(depth)}indent`;
+
+/**
+ * Is this a marker some marker reader would take: a column's, or one of the
+ * openers? A kept toggle opener can run over several lines (a hard break in
+ * its summary), and is judged by its first.
+ */
+const isMarkerLine = (text: string): boolean => {
+  const line = text.split('\n')[0];
+  return (
+    parseColumnMarker(line) !== null ||
+    parseAiMarker(line) !== null ||
+    parseToggleOpener(line) !== null ||
+    parseToggleHeadingOpener(line) !== null ||
+    parseIndentOpener(line) !== null
+  );
+};
+
+/** A line a fence could open on. */
+const FENCE_START = /^[ \t]*(`{3,}|~{3,})/;
+
+/** An odd run of trailing backslashes: the line ends in a hard break. */
+const endsInBreak = (line: string): boolean => (/\\+$/.exec(line)?.[0].length ?? 0) % 2 === 1;
 
 /**
  * A placeholder spelling no file will hold — fresh for every call, and nothing
@@ -568,74 +652,259 @@ const isMarkerLine = (line: string): boolean =>
 const placeholderPrefix = (): string =>
   `cerebro-line-${Date.now().toString(36)}${Math.random().toString(36).slice(2)}-`;
 
-/** A line lifted out of a file on the way in: an AI opening line, or an escaped column marker. */
-interface Lifted {
-  line: string;
-  /** What an AI opening line says. Unset for an escaped column marker, which is text. */
-  ai?: AiMarker;
+/**
+ * A line lifted out of a file on the way in, by kind: an escaped column
+ * marker (text), one of the openers, or a media line.
+ */
+type Lifted =
+  | { kind: 'column'; line: string }
+  | { kind: 'ai'; line: string; ai: AiMarker }
+  | {
+      kind: 'toggle';
+      line: string;
+      depth: number;
+      summary: string;
+      /** The summary read as inline content; null when it is not one paragraph. */
+      content?: unknown[] | null;
+    }
+  | { kind: 'toggleHeading'; line: string; depth: number }
+  | { kind: 'indent'; line: string; depth: number }
+  | { kind: 'media'; line: string; media: PageMedia };
+
+type Opener = Extract<Lifted, { kind: 'ai' | 'toggle' | 'toggleHeading' | 'indent' }>;
+
+/** An image the parser will read itself, with its destination swapped for a token. */
+interface SwappedSource {
+  /** The embed exactly as the file wrote it. */
+  raw: string;
+  media: PageMedia;
 }
 
 /** The lines lifted out of one file, by the placeholder written in each one's place. */
 interface LiftedLines {
   prefix: string;
   lines: Map<string, Lifted>;
+  /** Swapped image destinations, by token (`swapSources`). */
+  sources: Map<string, SwappedSource>;
 }
 
 /** `\:::columns` — a column marker written as text (`escapeMarkerLines`). */
 const isEscapedColumnMarker = (line: string): boolean =>
   line.startsWith('\\') && parseColumnMarker(line.slice(1)) !== null;
 
+/** The opener or media line a whole line is, or null. */
+function liftedKindOf(line: string): Exclude<Lifted, { kind: 'column' }> | null {
+  const ai = parseAiMarker(line);
+  if (ai !== null) return { kind: 'ai', line, ai };
+  const toggle = parseToggleOpener(line);
+  if (toggle !== null) return { kind: 'toggle', line, ...toggle };
+  const heading = parseToggleHeadingOpener(line);
+  if (heading !== null) return { kind: 'toggleHeading', line, depth: heading };
+  const indent = parseIndentOpener(line);
+  if (indent !== null) return { kind: 'indent', line, depth: indent };
+  const media = parseMediaLine(line);
+  if (media !== null) return { kind: 'media', line, media };
+  return null;
+}
+
 /**
- * Swap two kinds of line for placeholders before the parse.
+ * Swap the destination of every image embed on a line the parser will read
+ * for a token (M55.4), outside code spans.
  *
- * An AI block's opening line never meets the markdown parser — nor, on the
- * way out (`restoreSetAside`), the serializer. A question is free text and
- * both sides read text as markdown: MEASURED, a prompt holding `*why*` came
- * back from the parser as emphasis with its asterisks gone, `<div>` was
- * dropped as HTML, a `\"` lost its backslash, and the serializer collapsed
- * every run of spaces. The placeholder carries only an index, so the line's
- * bytes stay this module's alone. It gets blank lines round it, which is what
- * `loosenColumnMarkers` does for the column markers: the parser only gives a
- * line its own paragraph when it is blank-line separated.
+ * A media line on its own is lifted, but one the parser reads itself — inside
+ * a list item, say — comes back as an image block whose url is `img.src`,
+ * which a browser resolves against the page: MEASURED in jsdom,
+ * `* ![](attachments/a.png)` reopened as `http://localhost:3000/attachments/a.png`,
+ * its title dropped. A token is an absolute url already, so it comes back as
+ * written, and `promoteMedia` puts the embed's own name, url and caption back.
+ */
+function swapSources(line: string, lifted: LiftedLines): string {
+  if (!line.includes('![')) return line;
+  return line
+    .split('`')
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      let out = '';
+      let at = 0;
+      for (let found = part.indexOf('![', at); found !== -1; found = part.indexOf('![', at)) {
+        const escapes = /\\*$/.exec(part.slice(0, found))?.[0].length ?? 0;
+        const read = escapes % 2 === 0 ? readMediaAt(part, found) : null;
+        if (read === null) {
+          out += part.slice(at, found + 2);
+          at = found + 2;
+          continue;
+        }
+        const token = `cerebro-src:${lifted.prefix.slice('cerebro-line-'.length)}${lifted.sources.size}`;
+        lifted.sources.set(token, { raw: part.slice(found, read.end), media: read.media });
+        out += `${part.slice(at, found)}![](${token})`;
+        at = read.end;
+      }
+      return out + part.slice(at);
+    })
+    .join('`');
+}
+
+/**
+ * Swap lines for placeholders before the parse.
+ *
+ * An opening line — an AI block's, a toggle's, a toggle heading's or an
+ * indent's — and a media line on its own never meet the markdown parser, nor,
+ * on the way out (`restoreSetAside`), the serializer. A question or a summary
+ * is free text and both sides read text as markdown: MEASURED, a prompt
+ * holding `*why*` came back from the parser as emphasis with its asterisks
+ * gone, `<div>` was dropped as HTML, a `\"` lost its backslash, and the
+ * serializer collapsed every run of spaces. The placeholder carries only an
+ * index, so the line's bytes stay this module's alone. It gets blank lines
+ * round it, which is what `loosenColumnMarkers` does for the column markers:
+ * the parser only gives a line its own paragraph when it is blank-line
+ * separated. A toggle's summary that ends in a hard break (an odd run of
+ * backslashes) goes on over the next line, and that line joins its entry.
  *
  * An ESCAPED column marker is text, but the parser reads `\:::columns` back as
  * `:::columns`, which the fold — it reads the column markers off paragraph
  * text — would take for a marker. Its placeholder stands exactly where the
  * line stood, with no blank lines, so a paragraph it belongs to stays one
  * paragraph, and the text goes back after the fold (`restorePlaceholders`).
- * An escaped AI line needs neither: it is not lifted, so nothing reads it as
+ * An escaped opener needs neither: it is not lifted, so nothing reads it as
  * one.
+ *
+ * Every other line has its image destinations swapped (`swapSources`).
  *
  * Fenced code is skipped (`fenceReader`): a marker in a fence is somebody's
  * example of this syntax.
  */
 function liftMarkers(markdown: string): { text: string; lifted: LiftedLines } {
-  const lifted: LiftedLines = { prefix: placeholderPrefix(), lines: new Map() };
+  const lifted: LiftedLines = { prefix: placeholderPrefix(), lines: new Map(), sources: new Map() };
   const read = fenceReader();
   const out: string[] = [];
-  for (const line of markdown.split('\n')) {
-    const code = read(line) !== 'text';
-    const ai = code ? null : parseAiMarker(line);
-    if (code || (ai === null && !isEscapedColumnMarker(line))) {
+  const lines = markdown.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (read(line) !== 'text') {
       out.push(line);
       continue;
     }
     const placeholder = `${lifted.prefix}${lifted.lines.size}`;
-    if (ai === null) {
-      lifted.lines.set(placeholder, { line });
+    if (isEscapedColumnMarker(line)) {
+      lifted.lines.set(placeholder, { kind: 'column', line });
       out.push(placeholder);
-    } else {
-      lifted.lines.set(placeholder, { line, ai });
-      out.push('', placeholder, '');
+      continue;
     }
+    const entry = liftedKindOf(line);
+    if (entry === null) {
+      out.push(swapSources(line, lifted));
+      continue;
+    }
+    if (entry.kind === 'toggle') {
+      let last = line;
+      // A fence line ends the summary rather than joining it, and is left for
+      // the fence reader to read in its turn.
+      while (endsInBreak(last) && i + 1 < lines.length && !FENCE_START.test(lines[i + 1])) {
+        i += 1;
+        last = lines[i];
+        read(last);
+        entry.line += `\n${last}`;
+        entry.summary += `\n${last}`;
+      }
+    }
+    lifted.lines.set(placeholder, entry);
+    out.push('', placeholder, '');
   }
   return { text: out.join('\n'), lifted };
+}
+
+/**
+ * Read each lifted toggle's summary as inline content (M55.4), on its own,
+ * through the same passes a page takes. A summary is one paragraph or
+ * nothing; anything else (a `# heading`, a list) marks the entry, and the fold
+ * keeps its line as the text it is.
+ */
+async function readLiftedSummaries(editor: AnyEditor, lifted: LiftedLines): Promise<void> {
+  for (const entry of lifted.lines.values()) {
+    if (entry.kind !== 'toggle') continue;
+    if (entry.summary.trim() === '') {
+      entry.content = [];
+      continue;
+    }
+    const blocks = enrichChips(
+      normalizeParsedBlocks(
+        (await editor.tryParseMarkdownToBlocks(protectFootnotes(entry.summary))) as PartialBlock[],
+      ),
+    ) as { type?: string; content?: unknown; children?: unknown[] }[];
+    const [only] = blocks;
+    if (blocks.length === 0) entry.content = [];
+    else if (
+      blocks.length === 1 &&
+      only.type === 'paragraph' &&
+      (only.children ?? []).length === 0 &&
+      Array.isArray(only.content)
+    ) {
+      entry.content = only.content;
+    } else entry.content = null;
+  }
+}
+
+/** A line at the start of a summary line that a parser would read as a block of its own. */
+const BLOCK_START = [
+  /^(\s*)(#{1,6}(?:[ \t]|$))/,
+  /^(\s*)([>])/,
+  /^(\s*)([-+*](?:[ \t]|$))/,
+  /^(\s*)(`{3,}|~{3,})/,
+  /^(\s*)([=-]+[ \t]*$)/,
+];
+const ORDERED_START = /^(\s*\d{1,9})([.)])(?=[ \t]|$)/;
+
+/**
+ * Put a backslash in front of whatever would make one line of a summary a
+ * block rather than text: a heading's `#`, a quote's `>`, a list marker, a
+ * fence or a setext underline. The serializer writes paragraph text raw, so a
+ * summary reading `# Q4` would otherwise reopen as a heading.
+ */
+function escapeBlockStart(line: string): string {
+  for (const start of BLOCK_START) {
+    if (start.test(line))
+      return line.replace(start, (_m, space: string, mark: string) => `${space}\\${mark}`);
+  }
+  return line.replace(ORDERED_START, '$1\\$2');
+}
+
+/**
+ * Serialize every toggle's summary on the copy `blocksToMarkdown` makes,
+ * before `demoteContainers` flattens it (M55.4): chips to their text, through
+ * the serializer, the same escapes taken back off, and the final newline
+ * dropped. A line after the first that looks like a marker is escaped, as a
+ * paragraph's would be.
+ */
+async function writeToggleSummaries(
+  editor: AnyEditor,
+  blocks: PartialBlock[],
+  summaries: Map<object, string> = new Map(),
+): Promise<Map<object, string>> {
+  for (const block of blocks) {
+    const b = block as { type?: string; content?: unknown; children?: PartialBlock[] };
+    if (b.type === 'toggleListItem') {
+      const content = Array.isArray(b.content) ? b.content : [];
+      const paragraph = demoteChips([{ type: 'paragraph', content } as PartialBlock]);
+      const markdown = restoreFootnotes(
+        unescapeChipMarkdown(await editor.blocksToMarkdownLossy(paragraph)),
+      ).replace(/\n$/, '');
+      const [head, ...tail] = markdown.split('\n').map(escapeBlockStart);
+      summaries.set(
+        block,
+        tail.length === 0 ? head : `${head}\n${escapeMarkerLines(tail.join('\n'))}`,
+      );
+    }
+    if (Array.isArray(b.children)) await writeToggleSummaries(editor, b.children, summaries);
+  }
+  return summaries;
 }
 
 /** The marker lines `demoteContainers` set aside, by the placeholder written in each one's place. */
 interface SetAside {
   prefix: string;
   lines: Map<string, string>;
+  /** Each toggle's summary as markdown, by its block in the copy (`writeToggleSummaries`). */
+  summaries: Map<object, string>;
 }
 
 /** Put each set-aside marker line back where its placeholder was written. */
@@ -668,22 +937,41 @@ export function escapeMarkerLines(markdown: string): string {
 }
 
 /**
- * Drop the blank lines just under an AI block's opening line, inside the block.
+ * Drop the blank lines just under an opening line, inside its container: an
+ * AI block's, a toggle heading's or an indent's, and a toggle's after the
+ * last line of its summary.
  *
- * The AI half of `tightenColumnMarkers`, which already drops the blank before
- * the block's close (a close is a close, whoever opened it) but cannot see the
- * opening line, because it is not a column marker. The blank BEFORE the
- * opening line is the author's paragraph break and stays, as it does before a
- * `:::columns`.
+ * `tightenColumnMarkers` already drops the blank before a container's close
+ * (a close is a close, whoever opened it) but cannot see these opening lines,
+ * because they are not column markers. The blank BEFORE an opening line is the
+ * author's paragraph break and stays, as it does before a `:::columns`.
  */
-function tightenAiMarkers(markdown: string): string {
+function tightenOpeners(markdown: string): string {
   const out: string[] = [];
   const read = fenceReader();
   let afterOpen = false;
+  let summary = false;
   for (const line of markdown.split('\n')) {
     const text = read(line) === 'text';
+    if (summary) {
+      summary = endsInBreak(line);
+      afterOpen = !summary;
+      out.push(line);
+      continue;
+    }
     if (line === '' && afterOpen) continue;
-    if (line !== '') afterOpen = text && parseAiMarker(line) !== null;
+    if (line !== '') {
+      afterOpen =
+        text &&
+        (parseAiMarker(line) !== null ||
+          parseToggleHeadingOpener(line) !== null ||
+          parseIndentOpener(line) !== null ||
+          parseToggleOpener(line) !== null);
+      if (afterOpen && parseToggleOpener(line) !== null && endsInBreak(line)) {
+        summary = true;
+        afterOpen = false;
+      }
+    }
     out.push(line);
   }
   return out.join('\n');
@@ -767,22 +1055,110 @@ function markerOfBlock(block: PartialBlock): ColumnMarker | null {
   return text === null ? null : parseColumnMarker(text);
 }
 
-/** The lifted AI opening line a paragraph stands in for, or undefined. */
-function liftedAiOf(block: PartialBlock, lifted: LiftedLines): Required<Lifted> | undefined {
+/** The lifted line a paragraph stands in for, or undefined. */
+function liftedOf(block: PartialBlock, lifted: LiftedLines): Lifted | undefined {
   const b = block as { type?: string; content?: unknown; children?: PartialBlock[] };
   if (lifted.lines.size === 0 || b.type !== 'paragraph') return undefined;
   if (Array.isArray(b.children) && b.children.length > 0) return undefined;
   const text = markerText(b.content);
-  const entry = text === null ? undefined : lifted.lines.get(text);
-  return entry?.ai === undefined ? undefined : { line: entry.line, ai: entry.ai };
+  return text === null ? undefined : lifted.lines.get(text);
+}
+
+/** The lifted opening line a paragraph stands in for, or undefined. */
+function liftedOpenerOf(block: PartialBlock, lifted: LiftedLines): Opener | undefined {
+  const entry = liftedOf(block, lifted);
+  return entry === undefined || entry.kind === 'column' || entry.kind === 'media'
+    ? undefined
+    : entry;
+}
+
+const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'file']);
+
+/** The props each media block has (BlockNote 0.46's prop schemas). */
+const MEDIA_PROPS: Record<MediaKind, readonly string[]> = {
+  image: [
+    'textAlignment',
+    'backgroundColor',
+    'name',
+    'url',
+    'caption',
+    'showPreview',
+    'previewWidth',
+  ],
+  video: [
+    'textAlignment',
+    'backgroundColor',
+    'name',
+    'url',
+    'caption',
+    'showPreview',
+    'previewWidth',
+  ],
+  audio: ['backgroundColor', 'name', 'url', 'caption', 'showPreview'],
+  file: ['backgroundColor', 'name', 'url', 'caption'],
+};
+
+/** A media block for what a line says, typed by its extension, keeping only that type's props. */
+function mediaBlock(
+  media: PageMedia,
+  base: { props?: Record<string, unknown>; children?: PartialBlock[] } = {},
+): PartialBlock {
+  const kind = mediaKindOf(media.url);
+  const props: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(base.props ?? {})) {
+    if (MEDIA_PROPS[kind].includes(key)) props[key] = value;
+  }
+  props.name = media.name;
+  props.url = media.url;
+  props.caption = media.caption;
+  delete props.previewWidth;
+  if (media.width !== undefined && MEDIA_PROPS[kind].includes('previewWidth')) {
+    props.previewWidth = media.width;
+  }
+  return { ...base, type: kind, props, children: base.children ?? [] } as unknown as PartialBlock;
+}
+
+/**
+ * Make each media line a media block (M55.4), before the fold.
+ *
+ * A lifted media line becomes its block, typed by its extension. An image,
+ * video, audio or file block the parser read itself — a media line inside a
+ * list item — is retyped the same way, its url and words taken back from the
+ * swapped embed when it has one (`swapSources`): BlockNote calls anything that
+ * is not a video an image.
+ */
+function promoteMedia<T extends PartialBlock>(blocks: T[], lifted: LiftedLines): T[] {
+  return blocks.map((block) => {
+    const entry = liftedOf(block, lifted);
+    if (entry?.kind === 'media') return mediaBlock(entry.media) as T;
+    const b = block as {
+      type?: string;
+      props?: Record<string, unknown>;
+      children?: PartialBlock[];
+    };
+    const children = Array.isArray(b.children) ? promoteMedia(b.children, lifted) : b.children;
+    if (b.type !== undefined && MEDIA_TYPES.has(b.type)) {
+      const url = typeof b.props?.url === 'string' ? b.props.url : '';
+      const swapped = lifted.sources.get(url);
+      const media: PageMedia = swapped?.media ?? {
+        name: typeof b.props?.name === 'string' ? b.props.name : '',
+        url,
+        caption: typeof b.props?.caption === 'string' ? b.props.caption : '',
+        ...(typeof b.props?.previewWidth === 'number' ? { width: b.props.previewWidth } : {}),
+      };
+      return mediaBlock(media, { ...b, children }) as T;
+    }
+    return (children === b.children ? block : { ...b, children }) as T;
+  });
 }
 
 const KEPT_MARKER = 'kept-marker-';
 
 /**
  * Ids for the paragraphs that hold a marker line the FILE has and the fold
- * could not use (M53.9): a stray close, a column outside any list, or every
- * marker on a page whose fold was abandoned.
+ * could not use (M53.9): a stray close, a column outside any list, an opener
+ * that could not be built (M55.4), or every marker on a page whose fold was
+ * abandoned.
  *
  * Text that only looks like a marker is escaped on the way out, so it stays
  * text. These must not be: they are the file's markers, and the file is the
@@ -805,27 +1181,59 @@ const keptMarkerIds = (): (() => string) => {
 const isKeptMarker = (block: PartialBlock): boolean =>
   typeof block.id === 'string' && block.id.startsWith(KEPT_MARKER);
 
+/** A block that cannot take an `:::indent` as its children: it has its own, or it is a column. */
+const holdsOwnChildren = (block: PartialBlock | undefined): boolean => {
+  const b = block as { type?: string; props?: { isToggleable?: unknown } } | undefined;
+  return (
+    b === undefined ||
+    b.type === 'columnList' ||
+    b.type === 'column' ||
+    b.type === 'ai' ||
+    b.type === 'toggleListItem' ||
+    (b.type === 'heading' && b.props?.isToggleable === true)
+  );
+};
+
 /**
- * Fold a flat run of marker paragraphs into `columnList` / `column` / `ai`
- * blocks — one stack for all three, because they nest inside each other and a
- * close belongs to whichever container is innermost.
+ * Fold a flat run of marker paragraphs into containers — one stack for every
+ * kind, because they nest inside each other and a close belongs to whichever
+ * container is innermost.
+ *
+ * A row, a column and an AI block push their block when they open. A toggle,
+ * a toggle heading and an indent push theirs when they close (M55.4), because
+ * only then is it known whether they can be built: a toggle whose summary is
+ * not one paragraph, a toggle heading with no heading first, an indent with
+ * nothing above it to hold its children.
  *
  * Tolerance is the whole design here, and it is asymmetric on purpose:
  *
- * - A stray close, or a `::::column` outside any list, stays the PARAGRAPH it
- *   already is, kept (`keptMarkerIds`). The reader sees the marker text and
+ * - A stray close, a `::::column` outside any list, or an opener that could
+ *   not be built stays the PARAGRAPH it already is, kept (`keptMarkerIds`),
+ *   with what it held in place after it. The reader sees the marker text and
  *   can fix the file.
  * - An UNCLOSED container abandons the fold entirely and returns the document
- *   as it arrived — every marker a kept paragraph, and every AI opening line
+ *   as it arrived — every marker a kept paragraph, and every opening line
  *   back as the text it was. A half-built nest could silently swallow every
  *   block after the opening marker into a container nobody can see the end
  *   of, and losing sight of somebody's writing is worse than showing them a
  *   `:::`.
  */
 function promoteContainers<T extends PartialBlock>(blocks: T[], lifted: LiftedLines): T[] {
-  type Frame = { depth: number; kind: 'list' | 'column' | 'ai'; children: PartialBlock[] };
+  type Frame = {
+    depth: number;
+    kind: 'list' | 'column' | Opener['kind'];
+    children: PartialBlock[];
+    /** Where a container that pushes at its close goes, and the line it opened with. */
+    parent?: PartialBlock[];
+    opener?: Opener;
+  };
   const keptId = keptMarkerIds();
   const kept = (block: PartialBlock): PartialBlock => ({ ...block, id: keptId() });
+  const keptLine = (line: string): PartialBlock =>
+    kept({
+      type: 'paragraph',
+      content: [{ type: 'text', text: line, styles: {} }],
+    } as PartialBlock);
   const out: PartialBlock[] = [];
   const stack: Frame[] = [];
   const top = (): Frame | undefined => stack[stack.length - 1];
@@ -836,11 +1244,50 @@ function promoteContainers<T extends PartialBlock>(blocks: T[], lifted: LiftedLi
     stack.push({ depth, kind, children });
   };
 
+  /** Build a container that pushes at its close, or keep its lines as the text they are. */
+  const settle = (frame: Frame, close: PartialBlock): void => {
+    const parent = frame.parent ?? out;
+    const opener = frame.opener!;
+    const [first, ...rest] = frame.children as {
+      type?: string;
+      props?: Record<string, unknown>;
+      children?: PartialBlock[];
+    }[];
+    if (opener.kind === 'toggle' && Array.isArray(opener.content)) {
+      parent.push({
+        type: 'toggleListItem',
+        content: opener.content,
+        children: frame.children,
+      } as unknown as PartialBlock);
+      return;
+    }
+    if (opener.kind === 'toggleHeading' && first?.type === 'heading') {
+      parent.push({
+        ...first,
+        props: { ...first.props, isToggleable: true },
+        children: [...(first.children ?? []), ...(rest as PartialBlock[])],
+      } as unknown as PartialBlock);
+      return;
+    }
+    const previous = parent[parent.length - 1];
+    if (opener.kind === 'indent' && !holdsOwnChildren(previous)) {
+      const p = previous as { children?: PartialBlock[] };
+      p.children = [...(p.children ?? []), ...frame.children];
+      return;
+    }
+    parent.push(keptLine(opener.line), ...frame.children, kept(close));
+  };
+
   for (const block of blocks) {
-    const opening = liftedAiOf(block, lifted);
-    if (opening !== undefined) {
+    const opening = liftedOpenerOf(block, lifted);
+    if (opening?.kind === 'ai') {
       const { depth, prompt, generated } = opening.ai;
       open('ai', depth, { type: 'ai', props: { prompt, generated } });
+      continue;
+    }
+    if (opening !== undefined) {
+      const { depth, kind } = opening;
+      stack.push({ depth, kind, children: [], parent: target(), opener: opening });
       continue;
     }
     const marker = markerOfBlock(block);
@@ -864,21 +1311,56 @@ function promoteContainers<T extends PartialBlock>(blocks: T[], lifted: LiftedLi
       continue;
     }
     if (top()?.depth === marker.depth) {
-      stack.pop();
+      const frame = stack.pop()!;
+      if (frame.opener !== undefined) settle(frame, block);
       continue;
     }
     target().push(kept(block));
   }
 
-  if (stack.length === 0) return out as T[];
+  if (stack.length === 0) return settleNumbering(out) as T[];
   return blocks.map((block) => {
-    const opening = liftedAiOf(block, lifted);
+    const opening = liftedOpenerOf(block, lifted);
     if (opening !== undefined) {
       const text = [{ type: 'text', text: opening.line, styles: {} }];
       return kept({ ...block, content: text } as unknown as PartialBlock);
     }
     return markerOfBlock(block) === null ? block : kept(block);
   }) as T[];
+}
+
+/** The number a numbered item shows, given the item before it in its parent. */
+const numberOf = (block: PartialBlock, previous: number | null): number => {
+  const start = (block as { props?: { start?: unknown } }).props?.start;
+  return typeof start === 'number' ? start : (previous ?? 0) + 1;
+};
+
+/**
+ * Drop a numbered item's `start` where it only says what the editor would
+ * count anyway (M55.4): an item after an `:::indent` opens a new list on disk,
+ * so it is written with the number it had (`demoteContainers`), and once the
+ * indent's children are back inside the item above it the two are one list
+ * again.
+ */
+function settleNumbering(blocks: PartialBlock[]): PartialBlock[] {
+  let previous: number | null = null;
+  for (const block of blocks) {
+    const b = block as {
+      type?: string;
+      props?: Record<string, unknown>;
+      children?: PartialBlock[];
+    };
+    if (b.type === 'numberedListItem') {
+      const number = numberOf(block, previous);
+      if (previous !== null && b.props?.start === previous + 1) {
+        const { start: _start, ...props } = b.props;
+        b.props = props;
+      }
+      previous = number;
+    } else previous = null;
+    if (Array.isArray(b.children)) settleNumbering(b.children);
+  }
+  return blocks;
 }
 
 /**
@@ -888,36 +1370,47 @@ function promoteContainers<T extends PartialBlock>(blocks: T[], lifted: LiftedLi
  * `'code'` runs straight after the parse, on code text, before a ```mermaid or
  * database fence is promoted out of its code block. A placeholder there is a
  * line the fence reader took for text and the parser put in code (the
- * disagreements `fenceReader` names): it goes back exactly, and an AI line
- * takes the two blank lines the lift put round it with it.
+ * disagreements `fenceReader` names): it goes back exactly, and a lifted
+ * opener or media line takes the two blank lines the lift put round it with
+ * it. A swapped image goes back as the file wrote it.
  *
  * `'text'` runs after the fold, on inline text: an escaped column marker
- * becomes the text the parser would have read (`:::columns`), and an AI line
- * anywhere but on its own at the top of the page becomes its line.
+ * becomes the text the parser would have read (`:::columns`), and every other
+ * lifted line anywhere but where the fold used it becomes its line.
  */
 function restorePlaceholders<T extends PartialBlock>(
   blocks: T[],
   lifted: LiftedLines,
   where: 'code' | 'text',
 ): T[] {
-  if (lifted.lines.size === 0) return blocks;
+  if (lifted.lines.size === 0 && lifted.sources.size === 0) return blocks;
   const pattern = new RegExp(`${lifted.prefix}\\d+`, 'g');
+  const sourceToken = new RegExp(
+    `!\\[\\]\\((cerebro-src:${lifted.prefix.slice('cerebro-line-'.length)}\\d+)\\)`,
+    'g',
+  );
+  const sources = (text: string): string =>
+    lifted.sources.size === 0
+      ? text
+      : text.replace(sourceToken, (token, key: string) => lifted.sources.get(key)?.raw ?? token);
   const asText = (text: string): string =>
-    text.replace(pattern, (placeholder) => {
-      const entry = lifted.lines.get(placeholder);
-      if (entry === undefined) return placeholder;
-      return entry.ai === undefined ? entry.line.slice(1) : entry.line;
-    });
+    sources(
+      text.replace(pattern, (placeholder) => {
+        const entry = lifted.lines.get(placeholder);
+        if (entry === undefined) return placeholder;
+        return entry.kind === 'column' ? entry.line.slice(1) : entry.line;
+      }),
+    );
   const inCode = (text: string): string => {
     const lines = text.split('\n');
     const out: string[] = [];
     for (let i = 0; i < lines.length; i += 1) {
       const entry = lifted.lines.get(lines[i]);
-      if (entry !== undefined && entry.ai !== undefined) {
+      if (entry !== undefined && entry.kind !== 'column') {
         if (out[out.length - 1] === '') out.pop();
         if (lines[i + 1] === '') i += 1;
       }
-      out.push(entry?.line ?? lines[i]);
+      out.push(entry?.line ?? sources(lines[i]));
     }
     return out.join('\n');
   };
@@ -950,19 +1443,20 @@ function restorePlaceholders<T extends PartialBlock>(
 }
 
 /**
- * The colons an AI block's markers take: its nesting depth, unless a kept
- * marker in its answer (`keptMarkerIds`) is a close at that depth.
+ * The colons a container's markers take: its nesting depth, unless a kept
+ * marker among its children (`keptMarkerIds`) is a close at that depth.
+ * Shared by the AI block, the toggles and the indent.
  *
  * A kept marker is written back as the marker it is, so a close at the
- * block's own depth would end the block early when the file is read back, and
- * the rest of the answer would spill out below it. The block steps past every
- * depth such a line uses, the way a code fence lengthens past the backticks
- * inside it. Text that only looks like a close needs no room: it is escaped
- * on the way out.
+ * container's own depth would end it early when the file is read back, and
+ * the rest of its children would spill out below it. The container steps past
+ * every depth such a line uses, the way a code fence lengthens past the
+ * backticks inside it. Text that only looks like a close needs no room: it is
+ * escaped on the way out.
  */
-function aiMarkerDepth(answer: PartialBlock[], depth: number): number {
+function containerColons(children: PartialBlock[], depth: number): number {
   const taken = new Set<number>();
-  for (const block of answer) {
+  for (const block of children) {
     const marker = isKeptMarker(block) ? markerOfBlock(block) : null;
     if (marker?.kind === 'close') taken.add(marker.depth);
   }
@@ -970,6 +1464,19 @@ function aiMarkerDepth(answer: PartialBlock[], depth: number): number {
   while (taken.has(colons)) colons += 1;
   return colons;
 }
+
+const LIST_ITEMS = new Set(['bulletListItem', 'numberedListItem', 'checkListItem']);
+
+/**
+ * Children markdown nests natively: list items all the way down. Anything
+ * else under a list item — a paragraph, an image, a toggle — goes in an
+ * `:::indent`, because the serializer flattens it.
+ */
+const isPureListTree = (children: PartialBlock[]): boolean =>
+  children.every((child) => {
+    const c = child as { type?: string; children?: PartialBlock[] };
+    return c.type !== undefined && LIST_ITEMS.has(c.type) && isPureListTree(c.children ?? []);
+  });
 
 /**
  * Flatten the nest back into marker paragraphs.
@@ -979,11 +1486,17 @@ function aiMarkerDepth(answer: PartialBlock[], depth: number): number {
  * and `promoteContainers` relies on.
  *
  * Every marker line is set aside in `setAside` and written as a placeholder,
- * which `restoreSetAside` swaps back after serialization: an AI opening line
- * so the serializer never reads its question, and all of them so that
- * `escapeMarkerLines`, which runs in between, can tell them from text that
- * only looks like a marker. A kept marker goes the same way, exactly as the
- * file had it.
+ * which `restoreSetAside` swaps back after serialization: an opening line so
+ * the serializer never reads its question or summary, a media line so it is
+ * written as the line it is, and all of them so that `escapeMarkerLines`,
+ * which runs in between, can tell them from text that only looks like a
+ * marker. A kept marker goes the same way, exactly as the file had it.
+ *
+ * Children leave their block here (M55.4): a list item keeps them natively
+ * only when they are a pure list tree (`isPureListTree`); every other block
+ * with children is written, then an `:::indent` holding them. An empty
+ * paragraph's children, and an empty media block's, move up a level instead,
+ * because the block writes nothing for an indent to follow.
  */
 function demoteContainers<T extends PartialBlock>(
   blocks: T[],
@@ -998,7 +1511,17 @@ function demoteContainers<T extends PartialBlock>(
       content: [{ type: 'text', text: placeholder, styles: {} }],
     } as unknown as PartialBlock;
   };
+  const indent = (children: PartialBlock[]): PartialBlock[] => {
+    const colons = containerColons(children, depth);
+    return [
+      marker(formatIndentOpener(colons)),
+      ...demoteContainers(children, colons + 1, setAside),
+      marker(closeMarker(colons)),
+    ];
+  };
   const out: PartialBlock[] = [];
+  let number: number | null = null;
+  let renumber: number | null = null;
   for (const block of blocks) {
     const b = block as {
       type?: string;
@@ -1006,9 +1529,19 @@ function demoteContainers<T extends PartialBlock>(
       content?: unknown;
       children?: PartialBlock[];
     };
+    const children = b.children ?? [];
+    // An item after a split list opens a new list on disk: it says the number
+    // it had (`settleNumbering` takes it back off).
+    if (b.type === 'numberedListItem') {
+      if (renumber !== null && typeof b.props?.start !== 'number') {
+        b.props = { ...b.props, start: renumber };
+      }
+      number = numberOf(block, number);
+    } else number = null;
+    renumber = null;
     if (b.type === 'columnList') {
       out.push(marker(openListMarker(depth)));
-      for (const child of b.children ?? []) {
+      for (const child of children) {
         const column = child as {
           type?: string;
           props?: Record<string, unknown>;
@@ -1034,8 +1567,7 @@ function demoteContainers<T extends PartialBlock>(
       continue;
     }
     if (b.type === 'ai') {
-      const answer = b.children ?? [];
-      const colons = aiMarkerDepth(answer, depth);
+      const colons = containerColons(children, depth);
       out.push(
         marker(
           formatAiMarker(colons, {
@@ -1044,8 +1576,47 @@ function demoteContainers<T extends PartialBlock>(
           }),
         ),
       );
-      out.push(...demoteContainers(answer, colons + 1, setAside));
+      out.push(...demoteContainers(children, colons + 1, setAside));
       out.push(marker(closeMarker(colons)));
+      continue;
+    }
+    if (b.type === 'toggleListItem') {
+      const colons = containerColons(children, depth);
+      out.push(marker(formatToggleOpener(colons, setAside.summaries.get(block) ?? '')));
+      out.push(...demoteContainers(children, colons + 1, setAside));
+      out.push(marker(closeMarker(colons)));
+      continue;
+    }
+    if (b.type === 'heading' && b.props?.isToggleable === true) {
+      const colons = containerColons(children, depth);
+      out.push(marker(formatToggleHeadingOpener(colons)));
+      out.push({
+        ...b,
+        props: { ...b.props, isToggleable: false },
+        children: [],
+      } as unknown as PartialBlock);
+      out.push(...demoteContainers(children, colons + 1, setAside));
+      out.push(marker(closeMarker(colons)));
+      continue;
+    }
+    if (b.type !== undefined && MEDIA_TYPES.has(b.type)) {
+      const url = typeof b.props?.url === 'string' ? b.props.url : '';
+      if (url === '') {
+        out.push(...demoteContainers(children, depth, setAside));
+        continue;
+      }
+      const width = b.props?.previewWidth;
+      out.push(
+        marker(
+          formatMediaLine({
+            name: typeof b.props?.name === 'string' ? b.props.name : '',
+            url,
+            caption: typeof b.props?.caption === 'string' ? b.props.caption : '',
+            ...(typeof width === 'number' ? { width } : {}),
+          }),
+        ),
+      );
+      if (children.length > 0) out.push(...indent(children));
       continue;
     }
     // A kept paragraph somebody has linked, styled or put a chip in is not a
@@ -1053,23 +1624,28 @@ function demoteContainers<T extends PartialBlock>(
     // text it now is.
     const keptLine = b.type === 'paragraph' && isKeptMarker(block) ? markerText(b.content) : null;
     if (keptLine !== null && isMarkerLine(keptLine)) {
-      const line = marker(keptLine);
-      const children = b.children ?? [];
-      out.push(
-        children.length === 0
-          ? line
-          : ({ ...line, children: demoteContainers(children, depth, setAside) } as PartialBlock),
-      );
+      out.push(marker(keptLine));
+      if (children.length > 0) out.push(...indent(children));
       continue;
     }
-    if (Array.isArray(b.children) && b.children.length > 0) {
+    if (children.length === 0) {
+      out.push(block);
+      continue;
+    }
+    if (b.type !== undefined && LIST_ITEMS.has(b.type) && isPureListTree(children)) {
       out.push({
         ...b,
-        children: demoteContainers(b.children, depth, setAside),
+        children: demoteContainers(children, depth, setAside),
       } as unknown as PartialBlock);
       continue;
     }
-    out.push(block);
+    if (b.type === 'paragraph' && (!Array.isArray(b.content) || b.content.length === 0)) {
+      out.push(...demoteContainers(children, depth, setAside));
+      continue;
+    }
+    out.push({ ...b, children: [] } as unknown as PartialBlock);
+    out.push(...indent(children));
+    if (b.type === 'numberedListItem' && number !== null) renumber = number + 1;
   }
   return out as T[];
 }
@@ -1159,6 +1735,7 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
   // except between two layouts in a row, where the blank is the author's
   // (see `tightenColumnMarkers`).
   const { text, lifted } = liftMarkers(markdown);
+  await readLiftedSummaries(editor, lifted);
   const source = protectFootnotes(loosenColumnMarkers(text));
   const parsed = restorePlaceholders(
     normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(source)) as PartialBlock[]),
@@ -1166,7 +1743,7 @@ export async function markdownToBlocks(editor: AnyEditor, markdown: string): Pro
     'code',
   );
   return restorePlaceholders(
-    promoteContainers(promoteRichBlocks(enrichChips(parsed)), lifted),
+    promoteContainers(promoteMedia(promoteRichBlocks(enrichChips(parsed)), lifted), lifted),
     lifted,
     'text',
   ) as AnyBlocks;
@@ -1177,21 +1754,20 @@ export async function blocksToMarkdown(
   blocks?: PartialBlock[],
 ): Promise<string> {
   const source = (blocks ?? editor.document) as PartialBlock[];
-  const setAside: SetAside = { prefix: placeholderPrefix(), lines: new Map() };
   // Deep copy: demotion must never touch live editor state. Every custom
   // block and chip is plain markdown before the serializer sees it, because
   // the serializer renders whatever is left — and inside the unmount flush
   // nothing renders (see `demoteChips`).
+  const copy = JSON.parse(JSON.stringify(source)) as PartialBlock[];
+  const setAside: SetAside = {
+    prefix: placeholderPrefix(),
+    lines: new Map(),
+    summaries: await writeToggleSummaries(editor, copy),
+  };
   const demoted = demoteChips(
-    demoteRichBlocks(
-      demoteContainers(
-        JSON.parse(JSON.stringify(source)) as PartialBlock[],
-        BASE_MARKER_DEPTH,
-        setAside,
-      ),
-    ),
+    demoteRichBlocks(demoteContainers(copy, BASE_MARKER_DEPTH, setAside)),
   );
-  return tightenAiMarkers(
+  return tightenOpeners(
     tightenColumnMarkers(
       restoreSetAside(
         escapeMarkerLines(
@@ -1237,13 +1813,79 @@ export function spliceTitleIntoBlocks(editor: AnyEditor, title: string): void {
 
 const significantChars = (s: string): string => s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '');
 
+const CONTAINER_NAME = /^(\\?:{3,})(?:columns|column|ai|toggle-heading|toggle|indent)/;
+
 /**
- * True when the parse→serialize round trip lost textual content — e.g. raw
- * HTML blocks, which BlockNote drops entirely. Formatting normalization
- * (bullet chars, escapes, padding) compares equal because only letters and
- * digits are considered. Consumers surface a warning before edits overwrite
- * the file.
+ * The text with each container's NAME taken off its marker line (M55.4),
+ * outside fenced code, escaped or not: `:::indent` becomes `:::`, and the
+ * rest of the line stays. A save may add a container the file did not have —
+ * a hand-written list continuation comes back in an `:::indent` — and its name
+ * is not a word anyone wrote.
  */
+function withoutContainerNames(markdown: string): string {
+  const read = fenceReader();
+  return markdown
+    .split('\n')
+    .map((line) => (read(line) === 'text' ? line.replace(CONTAINER_NAME, '$1') : line))
+    .join('\n');
+}
+
+/** The letters and digits of a text, each with how many times it appears. */
+function charCounts(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const ch of text) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  return counts;
+}
+
+/** Whether `a` holds some letter or digit more times than `b` does. */
+function holdsMore(a: Map<string, number>, b: Map<string, number>): boolean {
+  for (const [ch, n] of a) if (n > (b.get(ch) ?? 0)) return true;
+  return false;
+}
+
+/** An HTML tag or comment, which the parser drops (an autolink is neither). */
+const RAW_HTML = /<!--|<\/?[A-Za-z][A-Za-z0-9-]*(?:[\s/][^<>]*)?>/;
+
+/** Raw HTML outside fenced code and inline code spans. */
+function hasRawHtml(markdown: string): boolean {
+  const read = fenceReader();
+  return markdown
+    .split('\n')
+    .some((line) => read(line) === 'text' && RAW_HTML.test(line.replace(/`+[^`]*`+/g, '')));
+}
+
+/**
+ * Why a save from the rich editor would change a file's words (M55.15):
+ *
+ * - `html`: it would drop text, and the file holds raw HTML, which the
+ *   parser drops whole;
+ * - `dropped`: it would drop text some other markdown carried (a link
+ *   reference definition, say);
+ * - `added`: it would add text the file never had;
+ * - `rewritten`: the same letters, in another order.
+ *
+ * The banner over a page opened read-only names the cause, where it once
+ * blamed raw HTML for all four.
+ */
+export type LossyCause = 'html' | 'dropped' | 'added' | 'rewritten';
+
+/**
+ * What the parse→serialize round trip did to a file's text, or null when it
+ * kept it. Formatting normalization (bullet chars, escapes, padding) is not a
+ * change, because only letters and digits are compared, once the container
+ * names a save adds are taken off both sides (`withoutContainerNames`); every
+ * word inside a container still counts. Consumers open such a page read-only.
+ */
+export function lossyImportCause(source: string, roundTripped: string): LossyCause | null {
+  const before = significantChars(withoutContainerNames(source));
+  const after = significantChars(withoutContainerNames(roundTripped));
+  if (before === after) return null;
+  const [had, has] = [charCounts(before), charCounts(after)];
+  if (holdsMore(had, has)) return hasRawHtml(source) ? 'html' : 'dropped';
+  return holdsMore(has, had) ? 'added' : 'rewritten';
+}
+
+/** True when the round trip changed the file's text (`lossyImportCause`). */
 export function isLossyImport(source: string, roundTripped: string): boolean {
-  return significantChars(roundTripped) !== significantChars(source);
+  return lossyImportCause(source, roundTripped) !== null;
 }

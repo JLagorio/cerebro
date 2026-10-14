@@ -89,7 +89,18 @@ schema_body! {
 }
 
 /// A knowledge-relative projection path: `systems/foo.md`, never absolute,
-/// never escaping, always markdown.
+/// never escaping, always markdown, and spelled one way — no `.` or empty
+/// segment, so `./x.md` and `a//b.md` cannot claim `x.md`'s and `a/b.md`'s
+/// file under a second key. The leaf must name a file: `.md` alone is a
+/// dotfile with no extension, which the projection writer refuses. A
+/// dot-folder or a dotfile with a stem (`.archive/x.md`, `.hidden.md`) stays
+/// legal, because the migration and the move adoption record what a person
+/// filed there.
+///
+/// The schema runs this on every path a projection or reconciliation event
+/// names and on the claim a created Belief makes (`validate_projection_claim`),
+/// so the writer refuses a bad path before a byte of its batch is written. A
+/// claim is held to more (`validate_claimable_path`).
 pub fn validate_projection_path(path: &str) -> Result<(), String> {
     if path.is_empty() || !path.ends_with(".md") {
         return Err(format!("projection path {path:?} must be a .md file"));
@@ -99,12 +110,98 @@ pub fn validate_projection_path(path: &str) -> Result<(), String> {
             "projection path {path:?} must be knowledge-relative with forward slashes"
         ));
     }
-    if path.split('/').any(|seg| seg.is_empty() || seg == "..") {
+    if path
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
         return Err(format!(
-            "projection path {path:?} must not escape or double-slash"
+            "projection path {path:?} must not escape, double-slash or carry a '.' segment"
+        ));
+    }
+    if path.rsplit('/').next() == Some(".md") {
+        return Err(format!(
+            "projection path {path:?} names no file — '.md' alone is a dotfile with no extension"
         ));
     }
     Ok(())
+}
+
+/// The most bytes one path segment holds: NAME_MAX on APFS and ext4.
+pub const MAX_SEGMENT_BYTES: usize = 255;
+
+/// What the projection writer appends to a leaf for its temp file:
+/// `manifest::write_projection_as` writes `<leaf>.cerebro-tmp`, then renames
+/// it over the leaf.
+const WRITER_TEMP_SUFFIX: &str = ".cerebro-tmp";
+
+/// The longest leaf a claim may name, 243 bytes: the writer's temp file
+/// must fit in a segment too. Pinned against the writer itself by
+/// `reduce::tests::the_longest_claimable_leaf_is_one_the_projection_writer_can_write`.
+pub const MAX_CLAIM_LEAF_BYTES: usize = MAX_SEGMENT_BYTES - WRITER_TEMP_SUFFIX.len();
+
+/// A path a created Belief may claim: a projection path the projection writer
+/// can create (M53.29). On top of the shape rule it carries no control
+/// character (U+0000–U+001F, U+007F–U+009F; a NUL is a name no file call
+/// takes, and the rest break every line a path is written into — the
+/// knowledge log, a git listing), no folder name over `MAX_SEGMENT_BYTES` and
+/// no leaf over `MAX_CLAIM_LEAF_BYTES`. Bytes, not characters: 82 CJK
+/// characters are 246 bytes.
+///
+/// Only a claim — a path entering the ledger — is held to this, a migrated
+/// file's included. The other paths an event names (a move's target, a
+/// divergence's sample, a resolution's affected paths) are files already on
+/// disk or claims already made, and refusing their event would stop the
+/// launch scan itself (`reconcile::adopt_moves` appends with `?`). Two claims
+/// that cannot both be files, one inside the other, are the reducer's to
+/// refuse: only it sees the other claim.
+pub fn validate_claimable_path(path: &str) -> Result<(), String> {
+    validate_projection_path(path)?;
+    if let Some(control) = path.chars().find(|c| c.is_control()) {
+        return Err(format!(
+            "projection path {path:?} carries the control character U+{:04X}",
+            u32::from(control)
+        ));
+    }
+    let mut segments = path.split('/').rev();
+    let leaf = segments.next().unwrap_or(path);
+    if leaf.len() > MAX_CLAIM_LEAF_BYTES {
+        return Err(format!(
+            "projection path {path:?} names a {}-byte file — the projection writer's temp file \
+             needs it at {MAX_CLAIM_LEAF_BYTES} bytes or fewer",
+            leaf.len()
+        ));
+    }
+    if let Some(folder) = segments.find(|segment| segment.len() > MAX_SEGMENT_BYTES) {
+        return Err(format!(
+            "projection path {path:?} has a {}-byte folder name — a file system holds \
+             {MAX_SEGMENT_BYTES}",
+            folder.len()
+        ));
+    }
+    Ok(())
+}
+
+/// The projection path a created Belief's subject claims: its first `.md`
+/// alias, or none. The reducer files the Belief under this path, one Belief
+/// per path, and the projection writes `knowledge/<claim>`.
+pub fn projection_claim(aliases: &[String]) -> Option<&str> {
+    aliases
+        .iter()
+        .map(String::as_str)
+        .find(|alias| alias.ends_with(".md"))
+}
+
+/// A claim, when the aliases make one, must be claimable (M53.29).
+/// Unchecked, a governed apply committed a claim like `../x.md`, and the
+/// projection step refused it only after the set was durable; every
+/// reconciliation exit rewrites every projection, so each exit failed from
+/// then on. Only the claim is judged: a later `.md` alias claims nothing and
+/// is a resolution hint like any other.
+pub fn validate_projection_claim(aliases: &[String]) -> Result<(), String> {
+    match projection_claim(aliases) {
+        Some(claim) => validate_claimable_path(claim),
+        None => Ok(()),
+    }
 }
 
 schema_body! {
@@ -274,6 +371,10 @@ pub(crate) mod tests {
     fn projection_paths_are_relative_markdown_only() {
         validate_projection_path("concepts/acme.md").unwrap();
         validate_projection_path("acme.md").unwrap();
+        // What a person files under a dot-folder, or as a dotfile with a
+        // stem, the migration and the move adoption record as written.
+        validate_projection_path(".archive/x.md").unwrap();
+        validate_projection_path(".hidden.md").unwrap();
         for bad in [
             "",
             "/abs.md",
@@ -282,9 +383,79 @@ pub(crate) mod tests {
             "../escape.md",
             "a/../b.md",
             "back\\slash.md",
+            // One file, two keys.
+            "./x.md",
+            "a/./b.md",
+            // A leaf that names no file.
+            ".md",
+            "a/.md",
         ] {
             assert!(validate_projection_path(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_claimable_path_is_one_the_projection_writer_can_create() {
+        let leaf = |bytes: usize| format!("concepts/{}.md", "a".repeat(bytes - 3));
+        let folder = |bytes: usize| format!("{}/acme.md", "d".repeat(bytes));
+        assert_eq!(MAX_CLAIM_LEAF_BYTES, 243);
+        for good in [
+            "concepts/acme.md".to_string(),
+            ".archive/x.md".to_string(),
+            leaf(MAX_CLAIM_LEAF_BYTES),
+            folder(MAX_SEGMENT_BYTES),
+            // U+00A0 is the first code point past the C1 controls.
+            "concepts/a\u{a0}b.md".to_string(),
+            // 80 CJK characters and the extension: 243 bytes.
+            format!("concepts/{}.md", "\u{6982}".repeat(80)),
+        ] {
+            validate_claimable_path(&good).unwrap();
+        }
+        for bad in [
+            // A NUL is a name no file call takes; the rest of C0, DEL and C1
+            // break the line a path is written into.
+            "concepts/a\0b.md".to_string(),
+            "concepts/a\u{1f}b.md".to_string(),
+            "concepts/a\nb.md".to_string(),
+            "concepts/a\u{7f}b.md".to_string(),
+            "concepts/a\u{80}b.md".to_string(),
+            "concepts/a\u{9f}b.md".to_string(),
+            // The writer's `<leaf>.cerebro-tmp` would pass NAME_MAX.
+            leaf(MAX_CLAIM_LEAF_BYTES + 1),
+            // 82 CJK characters and the extension: 85 characters, 249 bytes.
+            format!("concepts/{}.md", "\u{6982}".repeat(82)),
+            folder(MAX_SEGMENT_BYTES + 1),
+            // Still the shape rule first.
+            "../escape.md".to_string(),
+        ] {
+            let error = validate_claimable_path(&bad).unwrap_err();
+            assert!(error.contains("projection path"), "{bad:?}: {error}");
+            assert!(
+                !error.contains('\0') && !error.contains('\n'),
+                "the refusal escapes what it quotes: {error:?}"
+            );
+        }
+        // Only a claim is held to the writer's limits: a file a person
+        // already filed keeps the shape rule alone, so the event that names
+        // it — a move, a divergence sample — can still be appended.
+        validate_projection_path("concepts/a\u{7f}b.md").unwrap();
+        validate_projection_path(&leaf(MAX_SEGMENT_BYTES)).unwrap();
+    }
+
+    #[test]
+    fn the_claim_is_the_first_markdown_alias_and_only_it_is_judged() {
+        let aliases = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(projection_claim(&aliases(&["Acme Corp"])), None);
+        assert_eq!(
+            projection_claim(&aliases(&["Acme Corp", "concepts/acme.md", "other.md"])),
+            Some("concepts/acme.md")
+        );
+        validate_projection_claim(&aliases(&[])).unwrap();
+        validate_projection_claim(&aliases(&["../not/a/claim"])).unwrap();
+        validate_projection_claim(&aliases(&["concepts/acme.md", "../escape.md"])).unwrap();
+        assert!(
+            validate_projection_claim(&aliases(&["../escape.md", "concepts/acme.md"])).is_err()
+        );
     }
 
     #[test]

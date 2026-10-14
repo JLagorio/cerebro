@@ -1,0 +1,352 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "session_id": "00000000-0000-4000-8000-00000000000b",
+    "mcp_servers": [
+      {
+        "name": "ok",
+        "status": "connected"
+      },
+      {
+        "name": "auth",
+        "status": "needs-auth"
+      },
+      {
+        "name": "down",
+        "status": "failed"
+      },
+      {
+        "name": "errs",
+        "status": "connected"
+      },
+      {
+        "name": "asked",
+        "status": "connected"
+      },
+      {
+        "name": "narrow",
+        "status": "connected"
+      }
+    ],
+    "claude_code_version": "2.1.250"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000001",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000001",
+          "name": "mcp__ok__echo",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000002",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000002",
+          "name": "mcp__ok__broken",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000003",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000003",
+          "name": "mcp__ok__other",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000004",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000004",
+          "name": "mcp__errs__echo",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000005",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000005",
+          "name": "mcp__errs__other",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000006",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000006",
+          "name": "mcp__asked__echo",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000007",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000007",
+          "name": "mcp__narrow__other",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000008",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_000000000000000000000008",
+          "name": "mcp__down__echo",
+          "input": {
+            "text": "hi"
+          }
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000001",
+          "content": [
+            {
+              "type": "text",
+              "text": "toy ran echo"
+            }
+          ]
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000002",
+          "content": "toy broken failed",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000003",
+          "content": "Claude requested permissions to use mcp__ok__other, but you haven't granted it yet.",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000004",
+          "content": "toy echo failed",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000005",
+          "content": "toy other failed",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000006",
+          "content": "Claude requested permissions to use mcp__asked__echo, but you haven't granted it yet.",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000007",
+          "content": "Claude requested permissions to use mcp__narrow__other, but you haven't granted it yet.",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_000000000000000000000008",
+          "content": "<tool_use_error>Error: No such tool available: mcp__down__echo</tool_use_error>",
+          "is_error": true
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "id": "msg_00000000000000000000000009",
+      "model": "claude-sonnet-4-5",
+      "content": [
+        {
+          "type": "text",
+          "text": "done"
+        }
+      ]
+    },
+    "session_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "done",
+    "session_id": "00000000-0000-4000-8000-00000000000b",
+    "usage": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 10
+    },
+    "permission_denials": [
+      {
+        "tool_name": "mcp__ok__other",
+        "tool_use_id": "toolu_000000000000000000000003",
+        "tool_input": {
+          "text": "hi"
+        }
+      },
+      {
+        "tool_name": "mcp__asked__echo",
+        "tool_use_id": "toolu_000000000000000000000006",
+        "tool_input": {
+          "text": "hi"
+        }
+      },
+      {
+        "tool_name": "mcp__narrow__other",
+        "tool_use_id": "toolu_000000000000000000000007",
+        "tool_input": {
+          "text": "hi"
+        }
+      }
+    ]
+  }
+]

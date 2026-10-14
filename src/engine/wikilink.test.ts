@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatWikilink, parseWikilinks, resolveTarget } from './wikilink';
+import { formatWikilink, freshStem, parseWikilinks, resolveTarget } from './wikilink';
 import { makeEntry } from './testHelpers';
 
 describe('parseWikilinks', () => {
@@ -108,5 +108,55 @@ describe('resolveTarget', () => {
       });
       expect(resolveTarget('items', [item])).toBeNull();
     });
+  });
+});
+
+/**
+ * The stem a page made from the link menu gets (M55.7). Vault-wide, because
+ * resolveTarget's stem pass is: a stem unique only in its folder could send
+ * the new link to an older page.
+ */
+describe('freshStem', () => {
+  const page = (path: string, title = 'Something else') =>
+    makeEntry({
+      path,
+      filename: path.slice(path.lastIndexOf('/') + 1),
+      folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+      title,
+    });
+
+  it('slugs the title', () => {
+    expect(freshStem('Launch notes', [page('notes/other.md')])).toBe('launch-notes');
+  });
+
+  it('counts a page in another folder as taken', () => {
+    expect(freshStem('Launch notes', [page('delivery/launch-notes.md')])).toBe('launch-notes-2');
+  });
+
+  it('matches stems case-insensitively, as links do', () => {
+    expect(freshStem('Launch notes', [page('Launch-Notes.md')])).toBe('launch-notes-2');
+  });
+
+  it('counts on past every suffix already taken', () => {
+    const taken = [page('launch-notes.md'), page('archive/launch-notes-2.md')];
+    expect(freshStem('Launch notes', taken)).toBe('launch-notes-3');
+  });
+
+  it('falls back to page when nothing of the title survives the slug', () => {
+    expect(freshStem('\u{1F680}', [])).toBe('page');
+    expect(freshStem('\u{1F680}', [page('page.md')])).toBe('page-2');
+  });
+
+  it('does not count a diagram of the same name, whose stem keeps its .mmd', () => {
+    expect(freshStem('Launch notes', [page('diagrams/launch-notes.mmd')])).toBe('launch-notes');
+  });
+
+  // A stem outranks a project folder and a title in resolveTarget, so one
+  // equal to either would take over the links that already reach them.
+  it('steps around a project folder or a title that already answers to the stem', () => {
+    expect(freshStem('Atlas', [page('projects/atlas/project.md', 'Atlas rollout')])).toBe(
+      'atlas-2',
+    );
+    expect(freshStem('Launch notes', [page('notes/ln.md', 'launch-notes')])).toBe('launch-notes-2');
   });
 });

@@ -1,0 +1,53 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "session_id": "00000000-0000-4000-8000-000000000009",
+    "permissionMode": "acceptEdits",
+    "mcp_servers": [
+      {
+        "name": "toy",
+        "status": "connected"
+      }
+    ],
+    "tools": ["mcp__toy__echo", "mcp__toy__other"],
+    "claude_code_version": "2.1.250"
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "done",
+    "session_id": "00000000-0000-4000-8000-000000000009",
+    "usage": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 10
+    },
+    "permission_denials": [
+      {
+        "tool_name": "mcp__toy__other",
+        "tool_use_id": "toolu_000000000000000000000002",
+        "tool_input": {
+          "text": "hi"
+        }
+      },
+      {
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_000000000000000000000003",
+        "tool_input": {
+          "command": "curl -s http://127.0.0.1:9/",
+          "description": "Fetch"
+        }
+      },
+      {
+        "tool_name": "mcp__toy__other",
+        "tool_use_id": "toolu_000000000000000000000004",
+        "tool_input": {
+          "text": "hi"
+        }
+      }
+    ]
+  }
+]

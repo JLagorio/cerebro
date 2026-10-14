@@ -697,9 +697,11 @@ fn staleness(
 
 /// §89, operationally: a relied-upon thing carrying one of the named
 /// weaknesses. Deterministic reasons, never a judgement.
-#[allow(clippy::too_many_arguments)] // Each argument is a distinct input the
-                                     // definition names; bundling them would
-                                     // hide which of §89's terms is which.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a distinct input the definition names; bundling them would \
+              hide which of §89's terms is which"
+)]
 fn debt(
     tables: &bundle::Tables,
     definitions: &Definitions,

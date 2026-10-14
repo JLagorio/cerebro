@@ -12,6 +12,7 @@
  * appearing, unreviewed, in the surfaces you author.
  */
 
+import { sha256Hex } from '@/lib/sha256';
 import type { Entry } from './types';
 
 export type IngestFormat = 'vtt' | 'srt' | 'markdown' | 'text';
@@ -296,7 +297,8 @@ export interface ExternalRef {
   kind: 'issue' | 'url';
   /** What to fetch: an issue key (`PHX-421`) or a URL. */
   id: string;
-  /** Where a fetched copy is cached — see SOURCES_DIR. */
+  /** Where a new copy lands (`sourceCachePath`). A copy fetched earlier may
+   * live elsewhere under SOURCES_DIR; `uncachedRefs` finds it by `source_id`. */
   cachePath: string;
 }
 
@@ -317,9 +319,9 @@ export const SOURCES_DIR = 'sources';
  *   inventing a default refresh schedule.
  * - An absent `fetched_at` is `null`, never an epoch or a blank — "fetch
  *   not recorded" is a sentence the surface has to say.
- * - Stale means `stale_after <= today`, the same local-date-word comparison
- *   the refresh lane uses (engine/jobs.ts), so the chip and the queue can
- *   never disagree about whether a copy is due.
+ * - Stale means `stale_after <= today`, compared as local date words: a
+ *   copy is due ON its date, not after it. No background job re-fetches a
+ *   due copy since M54.9 (engine/jobs.ts).
  */
 export interface SourceFreshness {
   state: 'stale' | 'fresh' | 'no-expiry';
@@ -386,16 +388,82 @@ export function parseIssuePrefixes(raw: string): string[] {
   return [...seen];
 }
 
-const slugForUrl = (url: string): string =>
-  url
-    .replace(/^https?:\/\//, '')
-    .replace(/[^\w.-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
-    .toLowerCase();
+/** What a cached copy is a copy of: the `kind` `cache_source` takes and
+ * stamps as `source_kind`. */
+export type SourceKind = 'issue' | 'web';
+
+const SOURCE_KINDS: readonly SourceKind[] = ['issue', 'web'];
+
+const sourceKindOf = (kind: ExternalRef['kind']): SourceKind =>
+  kind === 'issue' ? 'issue' : 'web';
+
+/** One source, as a key: its kind and its canonical id. */
+const identityOf = (kind: SourceKind, canonical: string): string => `${kind}\0${canonical}`;
+
+/** How much of its URL a web copy's file name keeps, for a person to read. */
+const READABLE_MAX = 64;
+/** Hex characters of the identity hash a web copy's file name ends in: what
+ * keeps two sources that read alike in two files. */
+const SUFFIX_HEX = 12;
+
+const lowerAscii = (text: string): string => text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
 
 /**
- * External references in a note that have no cached copy yet.
+ * What a fetched source IS, however a note spells it (INTEGRATIONS-2a). The id
+ * is trimmed of ASCII whitespace. An issue key is lowercased. A URL loses one
+ * leading `https://` or `http://` in any case, its host (everything before the
+ * first `/`, `?` or `#`) is ASCII-lowercased, and trailing `/` go. Path case,
+ * query and fragment stay: each can name a different page.
+ *
+ * Twin of `canonical_source_id` in src-tauri/src/mcp.rs, which picks the file
+ * `cache_source` writes. Both replay src-tauri/fixtures/source-slugs.json.
+ */
+export function canonicalSourceId(kind: SourceKind, id: string): string {
+  const trimmed = id.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '');
+  if (kind === 'issue') return trimmed.toLowerCase();
+  const scheme = ['https://', 'http://'].find(
+    (prefix) => lowerAscii(trimmed.slice(0, prefix.length)) === prefix,
+  );
+  const rest = scheme === undefined ? trimmed : trimmed.slice(scheme.length);
+  const hostEnd = rest.search(/[/?#]/);
+  const cut = hostEnd === -1 ? rest.length : hostEnd;
+  return (lowerAscii(rest.slice(0, cut)) + rest.slice(cut)).replace(/\/+$/, '');
+}
+
+function cachePathOf(kind: SourceKind, canonical: string): string {
+  if (kind === 'issue') return `${SOURCES_DIR}/issues/${canonical}.md`;
+  const readable = canonical
+    .replace(/[^A-Za-z0-9._-]/gu, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+/, '')
+    .replace(/-+$/, '')
+    .toLowerCase()
+    .slice(0, READABLE_MAX)
+    .replace(/-+$/, '');
+  const suffix = sha256Hex(`cerebro-source-cache-v1\0web\0${canonical}`).slice(0, SUFFIX_HEX);
+  return `${SOURCES_DIR}/web/${readable === '' ? suffix : `${readable}-${suffix}`}.md`;
+}
+
+/**
+ * Where a NEW copy of a source lands. An issue at `issues/<canonical>.md`, as
+ * since M8.2. A web page at `web/<readable>-<suffix>.md`: the readable half is
+ * the canonical id with every character outside `[A-Za-z0-9._-]` turned into
+ * `-` (ASCII on purpose: no Unicode class means the same thing in both twins),
+ * runs of `-` collapsed, no leading `-` or `.` (no dotfile) and no trailing
+ * `-`, lowercased, cut at READABLE_MAX; the suffix is the first SUFFIX_HEX hex
+ * characters of a sha256 over the canonical id. With nothing readable left,
+ * the suffix alone names the file.
+ *
+ * Twin of `source_slug` in src-tauri/src/mcp.rs. Both replay
+ * src-tauri/fixtures/source-slugs.json.
+ */
+export function sourceCachePath(kind: SourceKind, id: string): string {
+  return cachePathOf(kind, canonicalSourceId(kind, id));
+}
+
+/**
+ * External references in a note, one per source however it is spelled. The
+ * first spelling stands for the source: it is the one a fetch asks for.
  *
  * This is the trigger for the connector inlet: rather than syncing Jira or
  * Confluence on a schedule, the agent reaches for them exactly when a note
@@ -404,31 +472,57 @@ const slugForUrl = (url: string): string =>
  */
 export function findExternalRefs(text: string, options: RefOptions = {}): ExternalRef[] {
   const refs = new Map<string, ExternalRef>();
+  const add = (kind: ExternalRef['kind'], id: string) => {
+    const source = sourceKindOf(kind);
+    const canonical = canonicalSourceId(source, id);
+    // `https://` with nothing after it is nothing `cache_source` would write.
+    if (canonical === '') return;
+    const key = identityOf(source, canonical);
+    if (!refs.has(key)) refs.set(key, { kind, id, cachePath: cachePathOf(source, canonical) });
+  };
   const issues = issuePattern(options.issuePrefixes ?? []);
   if (issues !== null) {
-    for (const match of text.matchAll(issues)) {
-      const id = match[0];
-      refs.set(id, {
-        kind: 'issue',
-        id,
-        cachePath: `${SOURCES_DIR}/issues/${id.toLowerCase()}.md`,
-      });
-    }
+    for (const match of text.matchAll(issues)) add('issue', match[0]);
   }
   for (const match of text.matchAll(URL_PATTERN)) {
     // Trailing punctuation belongs to the sentence, not the URL.
-    const id = match[0].replace(/[.,;:!?)\]]+$/, '');
-    refs.set(id, { kind: 'url', id, cachePath: `${SOURCES_DIR}/web/${slugForUrl(id)}.md` });
+    add('url', match[0].replace(/[.,;:!?)\]]+$/, ''));
   }
   return [...refs.values()];
 }
 
-/** The subset of refs with nothing cached — what is actually worth a fetch. */
+/**
+ * The subset of refs with nothing cached — what is actually worth a fetch.
+ *
+ * A copy counts when it sits at the ref's `cachePath`, or anywhere under
+ * SOURCES_DIR when its `source_id` names the same source: the same canonical
+ * id, and a `source_kind` that agrees or was never recorded. The second half
+ * finds a copy written under an older path rule, which `cache_source` then
+ * refreshes where it lives. A note elsewhere that merely carries a
+ * `source_id` is not a cached copy.
+ */
 export function uncachedRefs(
   text: string,
-  existingPaths: Iterable<string>,
+  entries: readonly Pick<Entry, 'path' | 'properties'>[],
   options: RefOptions = {},
 ): ExternalRef[] {
-  const have = new Set(existingPaths);
-  return findExternalRefs(text, options).filter((ref) => !have.has(ref.cachePath));
+  const paths = new Set(entries.map((entry) => entry.path));
+  const held = new Set<string>();
+  for (const { path, properties } of entries) {
+    if (!path.startsWith(`${SOURCES_DIR}/`) || !path.endsWith('.md')) continue;
+    const id = properties.source_id;
+    if (typeof id !== 'string') continue;
+    const declared = properties.source_kind;
+    for (const kind of SOURCE_KINDS) {
+      if (declared === undefined || declared === null || declared === kind) {
+        held.add(identityOf(kind, canonicalSourceId(kind, id)));
+      }
+    }
+  }
+  return findExternalRefs(text, options).filter((ref) => {
+    const kind = sourceKindOf(ref.kind);
+    return (
+      !paths.has(ref.cachePath) && !held.has(identityOf(kind, canonicalSourceId(kind, ref.id)))
+    );
+  });
 }

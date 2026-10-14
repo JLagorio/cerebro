@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import { createTarget } from '@/engine/createRecord';
+import { createOnDayValue } from '@/engine/schedule';
 import type { Entry } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
@@ -54,6 +55,24 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
       return false;
     }
   };
+}
+
+/**
+ * A calendar day's "+" (M53.16): creates a record of `typeName` dated to the
+ * day, in the shape `field` declares.
+ *
+ * The date cannot ride the band mechanism — a band sets a grouping value, not
+ * an arbitrary property — so it goes through `useQuickAdd`'s `extra`
+ * frontmatter, shaped by `createOnDayValue`. One hook, because the type screen
+ * and a List each wrote the bare day for themselves, and a `daterange` field
+ * rejects a bare day on the very next read. A page's embedded database, which
+ * had no day "+" at all, creates through it too.
+ */
+export function useCreateOnDay(typeName: string) {
+  const quickAdd = useQuickAdd(typeName, null);
+  const schema = useSchema();
+  return (title: string, day: string, field: string): Promise<boolean> =>
+    quickAdd(title, {}, { [field]: createOnDayValue(typeName, field, day, schema) });
 }
 
 /**

@@ -22,6 +22,7 @@ use tauri::AppHandle;
 use crate::agent::meter::{Meter, Mode, RunEnd};
 use crate::agent::{AgentRequest, AgentState};
 use crate::mcp::McpState;
+use crate::runtime::cause::{CauseKind, RunCause};
 
 use super::pass::{Runner, ACTOR};
 
@@ -40,10 +41,8 @@ pub struct Live<'a> {
 
 impl Runner for Live<'_> {
     fn run(&self, run_id: &str, prompt: &str) -> Result<(), String> {
-        // The endpoint must already be up: `ensure` retargets a running server
-        // and errors if none is running, rather than starting one behind the
-        // user's back.
-        let url = self.mcp.ensure(self.app, self.vault)?.url;
+        // `ensure` starts the endpoint if it is not up, and says where it is.
+        let url = self.mcp.ensure(self.app)?.url;
         // Scoped to nothing; granted the SAME tool narrowing the argv
         // declares (M31.1b) — one list, so the boundary and the advice
         // cannot disagree. M31.2a: and the SAME durable id — the dispatch
@@ -57,6 +56,8 @@ impl Runner for Live<'_> {
             None,
             Some(declared_tools()),
             run_id.to_string(),
+            // M53.10: bound to this vault, whatever is opened while it runs.
+            self.vault,
         )?;
         let (tx, rx) = sync_channel::<RunEnd>(1);
         crate::agent::stream(
@@ -75,12 +76,14 @@ impl Runner for Live<'_> {
                 store_uuid: Some(self.store_uuid.clone()),
                 started_at: chrono::Utc::now(),
                 elapsed_limit_seconds: Some(self.elapsed_limit_seconds),
-                // Carried for completeness, not written here: a supervised
-                // meter returns before touching `runs`, and `dispatch::claim`
-                // already attributed the row with the same constant.
+                // Not written by this meter: `dispatch::claim` already
+                // attributed the row with the same constant, and gave it its
+                // cause. A supervised meter writes only the run's session id
+                // (M56.7).
                 actor: Some(super::pass::ACTOR.to_string()),
                 // Root by construction (M34.3): no tool call started this run.
                 parent_run_id: None,
+                cause: Some(RunCause::of(CauseKind::Maintenance)),
             }),
             Some(tx),
         )?;
@@ -124,6 +127,11 @@ fn request(prompt: &str, token: &str, url: &str) -> AgentRequest {
         // M31.1a — see `declared_tools` for what is granted and why. The
         // same list the mint grants (M31.1b).
         allowed_tools: Some(declared_tools()),
+        // Connectors are off, so there is nothing to deny (M54.9).
+        disallowed_tools: None,
+        // The claim recorded this run's cause, and the maintenance prompt is
+        // a versioned contract, so no WHY block is prepended (M56.7).
+        cause: None,
         // Claimed by this pass's own dispatch, never by the request
         // (M34.2.4's lane field is the renderer's path to the same gate).
         lane: None,

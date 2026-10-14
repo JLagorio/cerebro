@@ -86,6 +86,7 @@ function syntheticEntry(type: string): Entry {
     createdAt: '',
     modifiedAt: '',
     parseError: null,
+    hash: null,
   };
 }
 

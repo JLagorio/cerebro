@@ -1,0 +1,15 @@
+# The one Rust this repo builds with (M53.3). rustup reads this file from the
+# working directory upward, so the root's `cargo --manifest-path
+# src-tauri/Cargo.toml` and Tauri's cargo inside src-tauri/ both run on it, and
+# CI installs exactly this channel (.github/workflows/mac-app.yml reads it).
+# Homebrew's cargo is not rustup and ignores this file; .husky/pre-push warns
+# when rustc differs instead.
+#
+# 1.95.0 is the compiler the ledger's durability and lock claims were checked
+# on: `sync_all` issues F_FULLFSYNC (src-tauri/src/ledger/mod.rs) and
+# `try_lock` is flock (`acquire_lock` in src-tauri/src/ledger/writer.rs). A bump
+# re-opens both claims: re-verify them on the new std, then move this line.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

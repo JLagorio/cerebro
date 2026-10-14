@@ -5,7 +5,7 @@ import { collectionsFromPages, parseCollectionYaml } from '@/engine/collections'
 import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
 import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
-import { extractWikilinks } from '@/lib/mockParse';
+import { parseWikilinks } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 
 export interface VaultState {
@@ -20,9 +20,15 @@ export interface VaultState {
    * take a minute (M49); until then `entries` is the LAST vault's, unless a
    * rescan inside that window lands the new vault's early — it scans
    * `vaultPath` — and the open's older scan is then dropped (`landedScan`).
+   * An open that fails leaves `entries` the last vault's.
    * A reader that diffs one scan against the next, or acts on `entries` as
    * the open vault's, checks this first: the trigger diff, run across a
    * switch, read every note in the new vault as just created.
+   *
+   * So does any writer that names a path from `entries`: while the two
+   * differ, that path is a page in the last vault, and a write under
+   * `vaultPath` lands on whatever sits at the same path in the new one.
+   * `patchFrontmatter` and `setTitle` refuse to write then (M53.30).
    */
   entriesVault: string | null;
   /** Every List in the vault (M10) — what saved views became. */
@@ -36,14 +42,17 @@ export interface VaultState {
   rescan(): Promise<void>;
   /**
    * Writes a frontmatter patch, or `false` when it was refused or failed —
-   * never throws (store-layer invariant). The boolean exists so an inline
-   * editor can keep the text it was given rather than discarding a draft the
-   * schema turned away (M20.3); callers with nothing to undo still `void` it.
+   * never throws (store-layer invariant). It refuses a patch the schema turns
+   * away, and any patch while `entries` is another vault's (`entriesVault`).
+   * The boolean exists so an inline editor can keep the text it was given
+   * rather than discarding a draft the schema turned away (M20.3); callers
+   * with nothing to undo still `void` it.
    */
   patchFrontmatter(path: string, patch: Record<string, unknown>): Promise<boolean>;
   /**
    * Rename a record by rewriting its body's first H1 — which IS its title
-   * (M19.3). Returns whether the write landed.
+   * (M19.3). Returns whether the write landed; like `patchFrontmatter`, it
+   * refuses while `entries` is another vault's.
    *
    * Deliberately NOT `renameNote`: that moves the file, and `resolveTarget`
    * matches a wikilink on the filename stem FIRST, so moving the file would
@@ -67,7 +76,9 @@ function inTauri(): boolean {
 // null deletes the field, values containing [[wikilinks]] become
 // relationships, everything else lands in properties. Mirrors the split the
 // Rust parser performs on the next scan, so the optimistic entry and the
-// rescanned entry agree.
+// rescanned entry agree on every field but the hash, which only the write
+// knows: until it answers, the hash is null, and a trigger compares nothing
+// (M55.2).
 function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
   const properties = { ...entry.properties };
   const relationships = { ...entry.relationships };
@@ -75,11 +86,38 @@ function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
     delete properties[key];
     delete relationships[key];
     if (value === null || value === undefined) continue;
-    const links = extractWikilinks(value);
+    const links = parseWikilinks(value);
     if (links !== null) relationships[key] = links;
     else properties[key] = value as Scalar | Scalar[];
   }
-  return { ...entry, properties, relationships, modifiedAt: new Date().toISOString() };
+  return {
+    ...entry,
+    properties,
+    relationships,
+    modifiedAt: new Date().toISOString(),
+    hash: null,
+  };
+}
+
+/**
+ * Refuses an inline edit whose path came from another vault's `entries`
+ * (see `VaultState.entriesVault`, M53.30): an open is still in flight, or it
+ * failed and left the last vault's records on screen. The toast says which,
+ * and never stacks under a copy still on screen: a type rename retags its
+ * records one patch at a time, so each refusal would add another.
+ *
+ * null passes. No scan has landed yet, so the app holds no entries to take a
+ * path from, and tests seed `entries` without it.
+ */
+function refusedAcrossVaults({ vaultPath, entriesVault, status }: VaultState): boolean {
+  if (entriesVault === null || entriesVault === vaultPath) return false;
+  const message =
+    status === 'error'
+      ? "Not saved — the vault didn't open"
+      : 'Not saved — the vault is still opening';
+  const ui = useUiStore.getState();
+  if (!ui.toasts.some((t) => t.message === message)) ui.toast(message);
+  return true;
 }
 
 /** Read and parse the Lists and Collections in one pass — both surfaces are
@@ -177,8 +215,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       await started;
       if (superseded()) return;
       if (inTauri() && !watcherBound) {
-        const { listen } = await import('@tauri-apps/api/event');
-        await listen('vault-changed', () => {
+        await ipc.listenVaultChanged(() => {
           // rescan() contains its own failures (toast + keep the last good
           // snapshot, M14.8) — a transient scan error on a watcher event must
           // not flip the whole app into the dead error shell.
@@ -232,8 +269,12 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   },
 
   async patchFrontmatter(path, patch) {
-    const vault = get().vaultPath;
+    const state = get();
+    const vault = state.vaultPath;
     if (vault === null) return false;
+    // Before validation as well: the schema would be built from that other
+    // vault's entries too.
+    if (refusedAcrossVaults(state)) return false;
     // Normalize once for both the optimistic update and the disk write:
     // undefined means delete, but JSON serialization to Tauri drops
     // undefined keys silently and the mock's yaml doc.set would write
@@ -252,14 +293,27 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       }
     }
     // Optimistic: local state updates synchronously, before the disk write.
-    set({ entries: get().entries.map((e) => (e.path === path ? applyPatch(e, normalized) : e)) });
+    const optimistic = target === undefined ? null : applyPatch(target, normalized);
+    if (optimistic !== null) {
+      set({ entries: get().entries.map((e) => (e.path === path ? optimistic : e)) });
+    }
     try {
-      await ipc.updateFrontmatter(vault, path, normalized);
+      const hash = await ipc.updateFrontmatter(vault, path, normalized);
+      // The write names the bytes it landed (M55.2). The optimistic entry
+      // takes that hash only while it still stands: a scan that landed first
+      // read the disk itself, and wins.
+      if (hash !== null && optimistic !== null && get().entries.includes(optimistic)) {
+        set({
+          entries: get().entries.map((e) => (e === optimistic ? { ...optimistic, hash } : e)),
+        });
+      }
       // The mock backend has no watcher, so reconcile by rescanning after
       // the write. In Tauri no reconcile pass runs at all — the watcher
       // DISCARDS our own write's event (own-write suppression) — so the
-      // optimistic entry stands; that is correct because applyPatch
-      // classifies values exactly like the parser will on the next scan.
+      // optimistic entry stands with the hash the write answered; its fields
+      // are right because applyPatch classifies values exactly like the
+      // parser will on the next scan. A knowledge capture answers no hash,
+      // so that entry's hash stays null until the next rescan.
       if (!inTauri()) await get().rescan();
     } catch {
       // Deviation (Task 17, per execution-log deferred note from Task 11
@@ -272,8 +326,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   },
 
   async setTitle(path, title) {
-    const vault = get().vaultPath;
-    const target = get().entries.find((e) => e.path === path);
+    const state = get();
+    const vault = state.vaultPath;
+    const target = state.entries.find((e) => e.path === path);
     const trimmed = title.trim();
     // A blank title would leave the record with nothing to be called, and an
     // unchanged one is a write with no content — both are "nothing happened",
@@ -281,9 +336,17 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     if (vault === null || target === undefined || trimmed === '' || trimmed === target.title) {
       return false;
     }
+    // After those, unlike patchFrontmatter: a title cell commits on every
+    // blur, so one clicked and left unchanged mid-open must not toast.
+    if (refusedAcrossVaults(state)) return false;
     // Optimistic, like patchFrontmatter: `title` is a top-level Entry field
-    // rather than frontmatter, so applyPatch is not involved.
-    set({ entries: get().entries.map((e) => (e.path === path ? { ...e, title: trimmed } : e)) });
+    // rather than frontmatter, so applyPatch is not involved. The new bytes'
+    // hash is not known until the rescan below reads them (M55.2).
+    set({
+      entries: get().entries.map((e) =>
+        e.path === path ? { ...e, title: trimmed, hash: null } : e,
+      ),
+    });
     try {
       await ipc.setNoteTitle(vault, path, trimmed);
     } catch {

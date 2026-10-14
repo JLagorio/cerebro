@@ -31,6 +31,7 @@ function entry(path: string, title: string, partial: Partial<Entry> = {}): Entry
     createdAt: '2026-08-01T00:00:00Z',
     modifiedAt: '2026-08-01T00:00:00Z',
     parseError: null,
+    hash: null,
     ...partial,
   };
 }

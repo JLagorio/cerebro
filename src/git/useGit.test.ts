@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 vi.mock('@/lib/gitIpc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/gitIpc')>();
@@ -12,6 +12,9 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
     getConflictMode: vi.fn(async () => 'none' as const),
     gitRemoteStatus: vi.fn(async () => ({ hasRemote: false })),
     gitCommit: vi.fn(async () => null as string | null),
+    getVaultPulse: vi.fn(async (): Promise<VaultPulse> => ({ tracked: true, commits: [] })),
+    getFileHistory: vi.fn(async () => [] as GitCommit[]),
+    getCommitDiff: vi.fn(async () => ''),
   };
 });
 
@@ -24,13 +27,16 @@ import {
   checkpointMessage,
   resetGitState,
   useBatchCheckpoint,
+  useCommitDiff,
+  useFileHistory,
   useGit,
+  useVaultPulse,
   withLedgerTrailer,
 } from '@/git/useGit';
 import { ledgerHead } from '@/lib/ipc';
 import * as gitIpc from '@/lib/gitIpc';
 import { useVaultStore } from '@/stores/vaultStore';
-import type { ModifiedFile } from '@/engine/git';
+import type { GitCommit, ModifiedFile, VaultPulse } from '@/engine/git';
 
 const file = (path: string): ModifiedFile => ({ path, status: 'modified', staged: false });
 
@@ -150,5 +156,150 @@ describe('useGit shares one state', () => {
     act(() => useVaultStore.setState({ vaultPath: '/other-vault' }));
     await waitFor(() => expect(result.current.isRepo).toBe(false));
     expect(vi.mocked(gitIpc.isGitRepo)).toHaveBeenLastCalledWith('/other-vault');
+  });
+});
+
+// M53.13: the shell stopped letting WebKit throttle a hidden window, so an
+// awake 20 s poll would keep spawning git for as long as the app sat hidden,
+// for a state nothing hidden shows. It sleeps instead, and coming back reads.
+describe('the git poll sleeps while the window is hidden', () => {
+  /** useGit's POLL_MS. */
+  const POLL = 20_000;
+  let visibility: MockInstance<() => DocumentVisibilityState> | null = null;
+
+  /** Let fake time pass, and every probe it started land. */
+  const pass = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    resetGitState();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
+  });
+  afterEach(() => {
+    cleanup();
+    visibility?.mockRestore();
+    visibility = null;
+    vi.useRealTimers();
+  });
+
+  it('probes nothing while hidden, reads once on coming back, then polls again', async () => {
+    visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    renderHook(() => useGit());
+    await pass(0);
+    // Opening the vault reads it, whatever the window is doing.
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(1);
+
+    await pass(POLL);
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(1);
+
+    visibility.mockReturnValue('visible');
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await pass(0);
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(2);
+
+    // Asleep, not gone: the next tick in view probes again.
+    await pass(POLL);
+    expect(gitIpc.isGitRepo).toHaveBeenCalledTimes(3);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+const commit = (hash: string): GitCommit => ({
+  hash,
+  shortHash: hash.slice(0, 7),
+  message: `commit ${hash}`,
+  author: 'Ana Rios',
+  date: 1_753_700_000,
+});
+
+// M53.15: these hooks caught a failed read and handed back [] — so the History
+// page said "No history yet" and a note's History block vanished when git
+// could not be read at all. A failed read is its own answer now.
+describe('history reads tell a failed read from an empty one', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useVaultStore.setState({ vaultPath: '/demo-vault', entries: [] });
+  });
+  afterEach(cleanup);
+
+  it('starts loading, and a rejected read is unavailable rather than empty', async () => {
+    vi.mocked(gitIpc.getFileHistory).mockRejectedValueOnce(new Error('git log exited 128'));
+    const { result } = renderHook(() => useFileHistory('notes/plan.md'));
+    expect(result.current.kind).toBe('loading');
+    await waitFor(() => expect(result.current.kind).toBe('unavailable'));
+  });
+
+  it('hands back what a resolved read returned', async () => {
+    vi.mocked(gitIpc.getFileHistory).mockResolvedValueOnce([commit('aaaaaaaa')]);
+    const { result } = renderHook(() => useFileHistory('notes/plan.md'));
+    await waitFor(() =>
+      expect(result.current).toEqual({ kind: 'ready', data: [commit('aaaaaaaa')] }),
+    );
+    expect(gitIpc.getFileHistory).toHaveBeenCalledWith('/demo-vault', 'notes/plan.md');
+  });
+
+  it('reads the pulse again on reload', async () => {
+    vi.mocked(gitIpc.getVaultPulse).mockRejectedValueOnce(new Error('git log exited 128'));
+    const { result } = renderHook(() => useVaultPulse());
+    await waitFor(() => expect(result.current.pulse.kind).toBe('unavailable'));
+    act(() => result.current.reload());
+    await waitFor(() =>
+      expect(result.current.pulse).toEqual({ kind: 'ready', data: { tracked: true, commits: [] } }),
+    );
+    expect(gitIpc.getVaultPulse).toHaveBeenCalledTimes(2);
+  });
+
+  it("goes back to loading on a new path and ignores the old path's late answer", async () => {
+    const forA = deferred<GitCommit[]>();
+    const forB = deferred<GitCommit[]>();
+    vi.mocked(gitIpc.getFileHistory)
+      .mockReturnValueOnce(forA.promise)
+      .mockReturnValueOnce(forB.promise);
+    const { result, rerender } = renderHook(({ path }) => useFileHistory(path), {
+      initialProps: { path: 'notes/a.md' },
+    });
+    rerender({ path: 'notes/b.md' });
+    expect(result.current.kind).toBe('loading');
+
+    await act(async () => forA.resolve([commit('aaaaaaaa')]));
+    expect(result.current.kind).toBe('loading');
+
+    await act(async () => forB.resolve([commit('bbbbbbbb')]));
+    expect(result.current).toEqual({ kind: 'ready', data: [commit('bbbbbbbb')] });
+  });
+
+  it('reads no diff until a commit is asked for', async () => {
+    vi.mocked(gitIpc.getCommitDiff).mockResolvedValueOnce('diff --git a/x b/x');
+    const { result, rerender } = renderHook(({ hash }) => useCommitDiff(hash), {
+      initialProps: { hash: null as string | null },
+    });
+    expect(result.current.kind).toBe('loading');
+    expect(gitIpc.getCommitDiff).not.toHaveBeenCalled();
+
+    rerender({ hash: 'c2c2c2c2' });
+    await waitFor(() =>
+      expect(result.current).toEqual({ kind: 'ready', data: 'diff --git a/x b/x' }),
+    );
+    expect(gitIpc.getCommitDiff).toHaveBeenCalledWith('/demo-vault', 'c2c2c2c2');
+  });
+
+  it('is unavailable, not empty, with no vault to read', () => {
+    useVaultStore.setState({ vaultPath: null });
+    const { result } = renderHook(() => useVaultPulse());
+    expect(result.current.pulse.kind).toBe('unavailable');
+    expect(gitIpc.getVaultPulse).not.toHaveBeenCalled();
   });
 });

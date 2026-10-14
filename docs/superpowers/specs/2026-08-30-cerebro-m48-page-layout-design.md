@@ -22,10 +22,13 @@ right order; drag without columns is what we already have.
 
 ## 2. What exists — measured, not assumed (2026-08-30)
 
-- **Toggle lists already ship.** `toggleListItem` is one of BlockNote's
-  `defaultBlockSpecs`, which `cerebroSchema` spreads
-  (`src/editor/MarkdownEditor.tsx:46`). Half of the menu in the screenshot is
-  already in the `/` menu. Nothing to build.
+- **Toggle lists shipped with no carrier on disk.** `toggleListItem` is one of
+  BlockNote's `defaultBlockSpecs`, which `cerebroSchema` spreads, so the `/`
+  menu offered it. This bullet said "Nothing to build", and that was refuted on
+  2026-10-12: a save wrote a toggle as a bullet, and it reopened as one, its
+  fold gone. M53.31 took the toggles off the `/` menu, and M55.4 gave them a
+  carrier (`:::toggle <summary>` and `:::toggle-heading`, the same directive
+  spelling as the columns) and brought them back.
 - **The drag handle is wired and it works, but it feels wrong** — the author's
   own verdict after trying it. `SideMenuController` mounts BlockNote's
   `DragHandleButton`, which renders `draggable="true"` on the "Open block menu"
@@ -134,7 +137,7 @@ serializer rule this codebase already follows.
 | **D2** | **Build our own column blocks.** `@blocknote/xl-multi-column` is GPL-3.0-or-commercial against our Apache-2.0; the spike proves `createReactBlockSpec` is enough. |
 | **D3** | **Drag is rebuilt on `useDragGesture`, not extended on BlockNote's DnD.** The author's verdict is "it moves, but feels wrong", and the harness cannot see HTML5 drag at all. Polishing something untestable buys a feel we can never regression-test. |
 | **D4** | **`width` is a flex ratio.** Not pixels, not percentages. |
-| **D5** | **Toggle lists are not built** — they already ship. |
+| **D5** | **Toggle lists are not built here.** They shipped with no carrier (refuted 2026-10-12, §2); M53.31 hid them, and M55.4 carries them as `:::toggle` directives. |
 | **D6** | **A column may not contain a `columnList`.** Notion allows it; it is where nested-layout editors become unusable, and every drop target doubles. Enforced where a layout is CREATED — the `/` menu simply does not offer one inside a column. (The plan said "at the drop layer"; M48.4 found the drop layer needs no rule about columns at all, so there was nowhere there to put it.) |
 
 ---
@@ -146,9 +149,9 @@ chip and database-fence passes that already live there.
 
 **Reading.** Loosen the markdown string (blank lines around marker lines) →
 `tryParseMarkdownToBlocks` → a flat list where each marker is its own paragraph
-→ `promoteColumns` folds the flat list back into the nest.
+→ `promoteContainers` folds the flat list back into the nest.
 
-**Writing.** `demoteColumns` flattens the nest into marker paragraphs →
+**Writing.** `demoteContainers` flattens the nest into marker paragraphs →
 `blocksToMarkdownLossy` → tighten the string (drop the blank lines the loosener
 would re-add).
 
@@ -168,7 +171,7 @@ it is wrong.
 | | | |
 | --- | --- | --- |
 | **M48.1** | The `columnList`/`column` block specs, the CSS that lays them out, and the schema registration. Renders a hand-built nest; nothing creates one yet. | **done** `8977879` |
-| **M48.2** | The markdown round trip: loosen/tighten, `promoteColumns`/`demoteColumns`, byte-stability tests, and the malformed-input tolerance. | **done** `536b478` |
+| **M48.2** | The markdown round trip: loosen/tighten, `promoteColumns`/`demoteColumns` (renamed `promoteContainers`/`demoteContainers` in M53.9), byte-stability tests, and the malformed-input tolerance. | **done** `536b478` |
 | **M48.3** | The `/` menu: **2 / 3 / 4 / 5 columns**, and the "turn into" variants that wrap the current block. | **done** `aa43061` |
 | **M48.4** | Drag rebuilt on `useDragGesture`: the grip, the insertion line, and drop targets that include the gaps between and inside columns. | **done** `1085054` |
 | **M48.5** | Column resize by dragging the gutter, writing `width=`. | **done** |

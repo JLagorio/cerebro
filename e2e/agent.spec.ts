@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { boot, seedBeforeBoot } from './boot';
 
 /**
@@ -320,19 +320,33 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
   await expect(cards.filter({ hasText: 'PRD' })).toContainText('fills itself');
 });
 
-test('library: an agent is built from pickers, not from remembered strings', async ({ page }) => {
-  await boot(page);
+/** The Library's agent shelf, then Release scout's card: its page (M55.12). */
+async function openScoutFromLibrary(page: Page) {
   await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
   await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+  await expect(page.getByTestId('doc-page')).toBeVisible();
+  await expect(page.getByTestId('agent-properties')).toBeVisible();
+}
 
-  const editor = page.getByTestId('library-editor');
-  await expect(editor).toBeVisible();
-  // Not a doc canvas and not a property table: what an unattended process may
-  // do is on screen, as a chip you can see and remove.
+const SCOUT = 'records/agents/release-scout.md';
+const scoutFile = (page: Page) =>
+  page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', SCOUT);
+
+test('agent page: an agent is built from pickers, not from remembered strings', async ({
+  page,
+}) => {
+  await boot(page);
+  await openScoutFromLibrary(page);
+
+  // Not a property table: what an unattended process may do is a row that
+  // says it, and opens a picker in place.
+  const writes = page.getByTestId('agent-prop-scope');
+  await expect(writes).toContainText('records/risks/');
+  await expect(page.getByTestId('dossier-duty')).toContainText('Off duty — nothing can fire it');
+  await writes.getByTestId('agent-prop-open').click();
   const scope = page.getByTestId('agent-scope');
   await expect(scope.getByTestId('picker-chip')).toHaveText(/records\/risks/);
-  await expect(editor).toContainText('Nothing fires it');
 
   // Scope is PICKED from folders that exist, with what is in each. Typed, it
   // accepted a folder that does not exist and scoped the agent to nothing.
@@ -341,20 +355,27 @@ test('library: an agent is built from pickers, not from remembered strings', asy
   await expect(options.filter({ hasText: 'records/agents' })).toBeVisible();
   await expect(options.filter({ hasText: 'knowledge' }).first()).toBeVisible();
   await page.keyboard.press('Escape');
+  // The picker took that Escape; the row's editor is still open.
+  await expect(page.getByTestId('agent-editor-scope')).toBeVisible();
+  await page.getByTestId('agent-editor-scope').getByRole('button', { name: 'Cancel' }).click();
 
   // Tools come from the catalog the server actually serves, in sets — and the
   // picker says the one thing it owes you: can this change my files?
-  await page.getByText('Restrict this agent to specific tools').click();
-  const tools = page.getByTestId('agent-allowed-tools');
-  await tools.getByTestId('picker-add').click();
+  await page.getByTestId('agent-prop-tools').getByTestId('agent-prop-open').click();
+  const toolsEditor = page.getByTestId('agent-editor-tools');
+  await toolsEditor.getByText('Restrict this agent to specific tools').click();
+  await page.getByTestId('agent-allowed-tools').getByTestId('picker-add').click();
   await page.getByTestId('picker-group').filter({ hasText: 'Read the vault' }).click();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('agent-tools-summary')).toContainText('Read-only');
+  await toolsEditor.getByRole('button', { name: 'Done' }).click();
+  await expect.poll(() => scoutFile(page)).toContain('allowed-tools:');
+  await expect(page.getByTestId('agent-prop-tools')).toContainText('5 granted');
 
   // A trigger is clauses, not YAML, and the sentence under it is the same one
   // the library prints — so what will fire it is readable before it ever runs.
-  await page.getByRole('button', { name: 'Add trigger' }).click();
-  const trigger = page.getByTestId('agent-trigger');
+  await page.getByTestId('agent-add-trigger').click();
+  const trigger = page.getByTestId('agent-editor-trigger-new').getByTestId('agent-trigger');
   await trigger.getByLabel('Trigger 1 field').selectOption('status');
   // The value list is what the field has ACTUALLY held in this vault. Typed,
   // `status: blocked` in a vault whose statuses are todo/progress/done fires
@@ -368,26 +389,22 @@ test('library: an agent is built from pickers, not from remembered strings', asy
   await trigger.getByLabel('Trigger 1 instructions').fill('Check the release date first.');
   await expect(trigger).toContainText('then: Check the release date first.');
   await expect(trigger).toContainText('status');
-  await expect(editor).toContainText('On duty');
 
-  // Nothing has been written yet: a half-typed boundary is a wrong boundary,
-  // and a background runner does not wait for you to finish typing.
-  const path = 'records/agents/release-scout.md';
-  const before = await page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path);
-  expect(before).not.toContain('when:');
+  // Nothing has been written yet: a half-built trigger is live to a
+  // background runner that does not wait for you to finish.
+  expect(await scoutFile(page)).not.toContain('when:');
 
-  await page.getByRole('button', { name: 'Save' }).click();
-  const after = expect.poll(async () =>
-    page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path),
-  );
+  await page.getByTestId('agent-editor-trigger-new').getByRole('button', { name: 'Done' }).click();
+  const after = expect.poll(() => scoutFile(page));
   await after.toContain('at-risk');
   await after.toContain('Check the release date first.');
+  await expect(page.getByTestId('dossier-duty')).toContainText('On duty');
 });
 
-test('library: an agent record carries its own run history (M33.6)', async ({ page }) => {
-  // The dossier answers "what has this agent done, what did it cost, when
-  // does it run next" without leaving the editor — and nothing about the
-  // agent itself is stored outside the vault to do it.
+test('agent page: the duty bar and the Runs tab carry its history (M33.6)', async ({ page }) => {
+  // The duty bar answers "what has this agent done, what did it cost, when
+  // does it run next" on every tab — and nothing about the agent itself is
+  // stored outside the vault to do it.
   await seedBeforeBoot(
     page,
     '__cerebroSeedFleet',
@@ -407,64 +424,61 @@ test('library: an agent record carries its own run history (M33.6)', async ({ pa
         proposals_submitted: 0,
         applied: 0,
         rejected: 0,
+        parent_run_id: null,
       },
     ],
     {},
   );
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
-  await page.getByTestId('library-tab-agent').click();
-  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+  await openScoutFromLibrary(page);
 
   const dossier = page.getByTestId('agent-dossier');
-  await expect(dossier).toBeVisible();
   await expect(dossier).toHaveAttribute('data-actor', 'process:release-scout');
-  await expect(dossier.getByTestId('fleet-row')).toHaveCount(1);
   await expect(dossier.getByTestId('dossier-runs')).toContainText('1');
   await expect(dossier.getByTestId('dossier-last')).toContainText('succeeded');
   // On duty is DERIVED. The demo scout has no schedule and no trigger, so
-  // nothing can fire it — and the strip says that rather than showing a
-  // stored flag.
+  // nothing can fire it — and the bar says that rather than a stored flag.
   await expect(dossier.getByTestId('dossier-duty')).toHaveAttribute('data-on-duty', 'false');
+
+  await page.getByTestId('record-tab-runs').click();
+  await expect(page.getByTestId('agent-run')).toHaveCount(1);
+  await expect(page.getByTestId('agent-dossier')).toBeVisible();
 });
 
-test('library: an agent with no runs says so, rather than showing a table of zeros', async ({
+test('agent page: an agent with no runs says so, rather than showing a table of zeros', async ({
   page,
 }) => {
   await seedBeforeBoot(page, '__cerebroSeedFleet', [], {});
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
-  await page.getByTestId('library-tab-agent').click();
-  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+  await openScoutFromLibrary(page);
 
-  const dossier = page.getByTestId('agent-dossier');
-  await expect(dossier.getByTestId('section-empty')).toContainText('No runs yet');
-  await expect(dossier.getByTestId('fleet-row')).toHaveCount(0);
-  await expect(dossier.getByTestId('dossier-last')).toContainText('never run');
+  await expect(page.getByTestId('dossier-last')).toContainText('never run');
+  await page.getByTestId('record-tab-runs').click();
+  await expect(page.getByTestId('agent-runs-empty')).toBeVisible();
+  await expect(page.getByTestId('agent-run')).toHaveCount(0);
 });
 
-test('library: a schedule is built, never typed as a grammar', async ({ page }) => {
+test('agent page: editing its schedule property updates the record', async ({ page }) => {
   // An unparseable `schedule:` is not an error — it is silently not a
   // schedule, so the agent never runs and nothing anywhere would say why.
+  // So the Schedule row builds one, and writes it on Done.
   await boot(page);
-  await page.getByTestId('nav-surfaces').getByRole('button', { name: 'Library' }).click();
-  await page.getByTestId('library-tab-agent').click();
-  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+  await page.getByTestId('nav-agent').filter({ hasText: 'Release scout' }).click();
+  await expect(page.getByTestId('doc-title')).toContainText('Release scout');
 
-  await page.getByLabel('Repeat').selectOption('weekly');
-  await page.getByLabel('Day').selectOption('5');
-  await page.getByTestId('schedule-time').fill('17:30');
-  await expect(page.getByTestId('library-editor')).toContainText('On duty');
+  const row = page.getByTestId('agent-prop-schedule');
+  await expect(row).toContainText('none — off duty, runs only when you ask');
+  await row.getByTestId('agent-prop-open').click();
+  const editor = page.getByTestId('agent-editor-schedule');
+  await editor.getByLabel('Repeat').selectOption('weekly');
+  await editor.getByLabel('Day').selectOption('5');
+  await editor.getByTestId('schedule-time').fill('17:30');
+  expect(await scoutFile(page)).not.toContain('weekly fri');
 
-  await page.getByRole('button', { name: 'Save' }).click();
-  await expect
-    .poll(async () =>
-      page.evaluate(
-        (p) => window.__cerebroMockFs.get(p as string) ?? '',
-        'records/agents/release-scout.md',
-      ),
-    )
-    .toContain('weekly fri 17:30');
+  await editor.getByRole('button', { name: 'Done' }).click();
+  await expect.poll(() => scoutFile(page)).toContain('weekly fri 17:30');
+  await expect(row).toContainText('weekly fri 17:30');
+  await expect(page.getByTestId('dossier-duty')).toContainText('On duty');
 });
 
 test('editor: selecting prose shows AI controls, and a rewrite is a decision', async ({ page }) => {

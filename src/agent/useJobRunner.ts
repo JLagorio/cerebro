@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { onAgentEvent, runAgent, startMcp } from './agentIpc';
+import { onAgentEvent, runAgent, stopAgent } from './agentIpc';
 import { buildSystemPrompt } from './systemPrompt';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { observeScan, type ScanBaseline, type VaultEvent } from '@/engine/events';
-import { jobQueue, KNOWLEDGE_JOB_KINDS, type AgentJob } from '@/engine/jobs';
+import { causeOfJob, jobQueue, KNOWLEDGE_JOB_KINDS, type AgentJob } from '@/engine/jobs';
 import { isRecording, useLedgerStore, useLedgerReview, useQuarantine } from '@/stores/ledgerStore';
-import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
+import { writtenPath, type RunLogEntry } from '@/engine/runLog';
 import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
 import { newRunId, shouldYield } from './runs';
-import { fireKeyDate, isSkillEntry, parseSchedule } from '@/engine/skills';
+import { fireKeyDate, isSkillEntry, parseAllowedTools, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
+import { grantedTools, type PromptGrant } from '@/engine/toolGrant';
 import {
   fleetActorSummary,
   jobLedgerClaim,
@@ -20,7 +21,7 @@ import {
   readNote,
   reviewQueue,
 } from '@/lib/ipc';
-import { splitFrontmatter } from '@/lib/mockParse';
+import { splitFrontmatter } from '@/engine/frontmatter';
 import {
   agentRunPrompt,
   currentStatePrompt,
@@ -31,6 +32,7 @@ import {
   schemaRecheckPrompt,
 } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
+import { useRunLogStore } from '@/stores/runLogStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -56,18 +58,21 @@ import { useVaultStore } from '@/stores/vaultStore';
  * 3. **It must not spin.** Every job is recorded in its ledger BEFORE the run
  *    — learn jobs by note version, scheduled runs by fire key — so a run that
  *    produces nothing, or dies, is not retried until the note changes or the
- *    schedule fires again. One refinement (PR #5 review): a scheduled run
- *    consumes its fire key only once its record's body has actually been
- *    read — a failed READ is not a run, and must not eat the whole period.
- *    The failed read itself is remembered in memory (failedReads) so it
- *    cannot hot-loop within the session either.
+ *    schedule fires again. Two refinements leave no record for a run that
+ *    never happened. A scheduled run consumes its fire key only once its
+ *    record's body has actually been read (PR #5 review): a failed READ is
+ *    not a run, and must not eat the whole period. And a run the budget gate
+ *    deferred gives its record back, durable and local, so the next launch
+ *    asks again (M53.27). Both are held in memory instead (`held`), so
+ *    neither can hot-loop within the session.
  */
 
 /** Let a burst of edits settle before reading anything. */
 const SETTLE_MS = 4_000;
 
-/** How often the wall clock re-derives the queue — a due schedule can only
- * be noticed when `now` moves. */
+/** How often the wall clock re-derives the queue. `now` moves on this tick
+ * and nowhere else, and two things wait on it: a schedule's fire coming due,
+ * and an event cooldown running out (TRIGGER_COOLDOWN_MS). */
 const TICK_MS = 60_000;
 
 /** One empty list, so "no events" keeps one identity across renders. */
@@ -99,40 +104,50 @@ export function useJobRunner(): void {
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
 
-  // The tick exists only so a due schedule can be NOTICED — a vault with no
-  // scheduled skill gets no interval and no re-render-per-minute. The hook
-  // lives in JobRunnerHost (a null-rendering component) for the same reason:
-  // its state churn must not reconcile the whole App tree.
-  const hasSchedules = useMemo(
+  // The tick exists so a due schedule can be NOTICED and an event cooldown
+  // can RUN OUT, so a `schedule:` keeps it and so does an Agent's `when:` that
+  // parses to a trigger (M53.26). It once took a schedule alone: in a
+  // trigger-only vault `now` then stayed at mount time, the agent's first
+  // event run stamped its cooldown after it, and the agent was held for the
+  // rest of the session. Paused records count, as paused schedules always
+  // have. A vault with neither gets no interval and no re-render-per-minute.
+  // The hook lives in JobRunnerHost (a null-rendering component) for the same
+  // reason: its state churn must not reconcile the whole App tree.
+  const needsClock = useMemo(
     () =>
       entries.some(
         (e) =>
-          (isSkillEntry(e) || isAgentEntry(e)) && parseSchedule(e.properties.schedule) !== null,
+          ((isSkillEntry(e) || isAgentEntry(e)) && parseSchedule(e.properties.schedule) !== null) ||
+          (isAgentEntry(e) && parseTriggers(e.properties.when).length > 0),
       ),
     [entries],
   );
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    if (!hasSchedules) return;
+    if (!needsClock) return;
     const timer = window.setInterval(() => setNow(new Date()), TICK_MS);
     return () => window.clearInterval(timer);
-  }, [hasSchedules]);
+  }, [needsClock]);
 
-  // Runs whose record could not be READ this session, vault → ledger slot
-  // (`AgentJob.key`) → run key. Vault-scoped like skillRuns and for the same
-  // reason (PR #5 review): fire keys are calendar values, so a flat map would
-  // let one vault's failed read suppress the SAME record in a vault opened
-  // later this session. Keyed by the slot, never the path: one agent record
-  // holds two lanes, its schedule's and its `#event` one, and keyed by path
-  // each lane's failure overwrote the other's, so the two took turns reading,
-  // failing and rescanning every settle — AUTOMATION-2's shared slot, again.
-  // A failed read leaves the fire key unconsumed so a schedule's run is
-  // retried — on the next app start or the next fire, not in a
-  // read→fail→rescan hot loop. An event run is not retried: events are never
-  // stored, and the first scan after a launch emits none. State rather than a
-  // ref so recording a failure re-derives `next` and lets the jobs behind it
-  // proceed.
-  const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
+  // Runs this session holds back, vault → ledger slot (`AgentJob.key`) → run
+  // key, for one of two reasons: the run died before it recorded anything
+  // (most often, its record could not be READ), or the budget gate DEFERRED
+  // it (M53.27). Neither run happened, so neither leaves a record, and the
+  // next app start asks again. Held here, neither is re-asked at every
+  // settle in the meantime — a read→fail→rescan hot loop, or a gate decision
+  // and a run-log row every few seconds. A schedule's next fire is a new run
+  // key, so it is not held. An event run is not retried: events are never
+  // stored, and the first scan after a launch emits none.
+  // Vault-scoped like skillRuns and for the same reason (PR #5 review): fire
+  // keys are calendar values, so a flat map would let one vault's held run
+  // suppress the SAME record in a vault opened later this session. Keyed by
+  // the slot, never the path: one agent record holds two lanes, its
+  // schedule's and its `#event` one, and keyed by path each lane's failure
+  // overwrote the other's, so the two took turns reading, failing and
+  // rescanning every settle — AUTOMATION-2's shared slot, again; a deferral
+  // would take turns asking the gate the same way. State rather than a ref so
+  // holding a run re-derives `next` and lets the jobs behind it proceed.
+  const [held, setHeld] = useState<Record<string, Record<string, string>>>({});
 
   /**
    * The durable ledgers, hydrated before the queue may fire (M34.2.3).
@@ -254,12 +269,11 @@ export function useJobRunner(): void {
         // vault read as already run.
         skillRuns: skillRuns[vaultPath] ?? {},
         now,
-        connectors,
         events,
         triggerRuns: triggerRuns[vaultPath] ?? {},
       }).find(
         (j) =>
-          failedReads[vaultPath]?.[j.key] !== j.runKey &&
+          held[vaultPath]?.[j.key] !== j.runKey &&
           (!KNOWLEDGE_JOB_KINDS.has(j.kind) ||
             (recording && quarantine !== 'unknown' && !quarantine.has(j.path))),
       ) ?? null
@@ -270,10 +284,9 @@ export function useJobRunner(): void {
     autoLearn,
     quarantine,
     recording,
-    connectors,
     entries,
     entriesVault,
-    failedReads,
+    held,
     events,
     ledgersReady,
     now,
@@ -313,7 +326,7 @@ export function useJobRunner(): void {
     // Recorded on the way out, once, whatever ended the run. A log that only
     // captured successes would be a log of the runs that did not need one.
     if (logged.current !== null) {
-      appendRunLog({
+      useRunLogStore.getState().append({
         ...logged.current,
         id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         at: new Date().toISOString(),
@@ -374,19 +387,71 @@ export function useJobRunner(): void {
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
       // record asks for it AND the Settings ceiling allows it.
-      const agent =
+      const entry = useVaultStore.getState().entries.find((e) => e.path === job.path);
+      const agent = job.kind === 'agent' && entry !== undefined ? agentRef(entry) : null;
+      // The run's own narrowing: an Agent record's `allowed-tools:`, and a
+      // scheduled skill's (M54.7). This runner used to drop the skill's, so a
+      // skill narrowed to reads ran with every tool on its schedule. Read off
+      // the record itself rather than through listSkills, which leaves out a
+      // skill with no usable name and would widen exactly that one.
+      const narrowing =
         job.kind === 'agent'
-          ? (() => {
-              const entry = useVaultStore.getState().entries.find((e) => e.path === job.path);
-              return entry === undefined ? null : agentRef(entry);
-            })()
-          : null;
+          ? (agent?.allowedTools ?? null)
+          : job.kind === 'scheduled'
+            ? parseAllowedTools(entry?.properties['allowed-tools'])
+            : null;
+      // Unattended runs execute vault-authored content, so none of them
+      // inherit the Settings toggle — that grant is the assistant's, made
+      // for turns a person is watching (PR #5 review). Here it is only a
+      // CEILING: the one path to shell on a schedule is an Agent record
+      // declaring `tools: shell`, and no record can grant itself what
+      // Settings denies.
+      const shellGrant = job.kind === 'agent' && shell && (agent?.shell ?? false);
+      // What this run's prompts may name (M54.7): its narrowed tools, the
+      // shell a read limit has not withdrawn (M53.5), and nobody watching.
+      const grant: PromptGrant = {
+        tools: grantedTools(narrowing),
+        shell: shellGrant && agent?.readScope == null,
+        attended: false,
+      };
+
+      /** Hold this run back for the rest of the session — see `held`. */
+      const hold = () =>
+        setHeld((m) => ({ ...m, [vaultPath]: { ...m[vaultPath], [job.key]: job.runKey } }));
+
+      /** Has the window moved to another vault since this job was derived
+       * (M53.10)? Asked after every await below: a job derived in one vault
+       * must not claim, read or spawn in it once the window is showing
+       * another. */
+      const moved = () => useVaultStore.getState().vaultPath !== vaultPath;
 
       void (async () => {
         let recorded = false;
+        /** Whether this start-up won its durable claim, so an abandoned one
+         * knows it has a claim to give back. */
+        let claimed = false;
+        /** End a start-up the vault moved out from under: the run never
+         * happens, so the claim it won goes back, durable and local alike, as
+         * a deferral's does — left in place, the old vault would read the job
+         * as answered the next time it is open. Nothing is held: the next
+         * time that vault is open, the job is simply due again. */
+        const abandon = () => {
+          if (claimed) {
+            useUiStore.getState().forgetJobRecord(vaultPath, job.ledger, job.key, job.runKey);
+            void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
+              () => undefined,
+            );
+          }
+          finish();
+        };
         try {
           if (job.ledger === 'attempts') {
             const fresh = await jobLedgerClaim(vaultPath, 'attempts', job.key, job.runKey);
+            claimed = fresh;
+            if (moved()) {
+              abandon();
+              return;
+            }
             useUiStore.getState().recordLearnAttempt(job.key, job.runKey);
             recorded = true;
             if (!fresh) {
@@ -397,9 +462,11 @@ export function useJobRunner(): void {
               return;
             }
           }
-          // M17.12: an event run says what woke it and carries the trigger's
-          // `ask:` — layer two, reached only because layer one already passed
-          // deterministically, with no model consulted.
+          // What woke an event run: the path and the trigger's words ride the
+          // request as its cause, which Rust quotes into the run's message as
+          // data (M56.7). The trigger's `ask:` and `do:` go to the prompt —
+          // layer two, reached only because layer one already passed
+          // deterministically, with no model consulted (M17.12).
           const event = job.runKey.startsWith('event:')
             ? (events.find((e) => job.runKey.endsWith(`:${e.path}@${e.entry.modifiedAt}`)) ?? null)
             : null;
@@ -442,6 +509,10 @@ export function useJobRunner(): void {
               // telling an unattended agent that nothing is waiting.
               .catch(() => null),
           ]);
+          if (moved()) {
+            abandon();
+            return;
+          }
           const state = currentStatePrompt({
             vaultName: vaultPath.split('/').filter(Boolean).pop() ?? vaultPath,
             // `todayIso` reads LOCAL date parts, which is the app's one
@@ -455,14 +526,24 @@ export function useJobRunner(): void {
             job.kind === 'agent' || job.kind === 'scheduled'
               ? splitFrontmatter(await readNote(vaultPath, job.path)).body.trim()
               : '';
+          if (moved()) {
+            abandon();
+            return;
+          }
           const body =
             job.kind === 'agent'
               ? agentRunPrompt(
+                  grant,
                   job.path,
                   job.title,
                   agent?.actor ?? 'process:agent',
                   agent?.memory ?? { recent: '', preferences: '' },
-                  woken,
+                  woken === null
+                    ? null
+                    : {
+                        ...(woken.ask === undefined ? {} : { ask: woken.ask }),
+                        ...(woken.do === undefined ? {} : { do: woken.do }),
+                      },
                   agent?.scope ?? null,
                   agent?.readScope ?? null,
                 )
@@ -479,20 +560,6 @@ export function useJobRunner(): void {
           // would be read as a footnote to them rather than a correction of
           // them.
           const message = `${state}\n\n${body}`;
-          // Per job, never cached: `startMcp` is also what points the one
-          // loopback server at a vault (mcp.rs `ensure`), and every tool call
-          // resolves against that pointer. A session kept from the first job
-          // left every later one, in a vault switched to as well, on
-          // whichever vault the server was last pointed at.
-          const mcp = await startMcp(vaultPath);
-          // Ownership re-check (PR #5 review): while this start-up was
-          // parked on readNote or startMcp, a chat preemption may have taken
-          // the stream — the takeover subscriber dropped this claim — and a
-          // spawn now would replace the chat's child mid-answer through the
-          // single shared AgentState. Checked before the ledger records
-          // anything, so a preempted job keeps its fire key and simply runs
-          // when the agent is next idle.
-          if (!running.current) return;
           // The body is in hand: NOW the fire key is consumed — still before
           // the run itself, so a run that dies waits for the next fire, but
           // after the read, so a read that dies surrenders the key instead
@@ -502,6 +569,11 @@ export function useJobRunner(): void {
           // nothing.
           if (job.ledger === 'skillRuns') {
             const fresh = await jobLedgerClaim(vaultPath, 'skillRuns', job.key, job.runKey);
+            claimed = fresh;
+            if (moved()) {
+              abandon();
+              return;
+            }
             useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
             recorded = true;
             if (!fresh) {
@@ -512,11 +584,12 @@ export function useJobRunner(): void {
           const start = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
-            // The same rules the panel's agent gets — the conventions about
-            // sources, anchors and never self-certifying are the contract, not
-            // panel decoration. `selection` is 'none': a background reader is
-            // not standing anywhere, and telling it otherwise would colour
-            // what it takes from a note with wherever you happen to be.
+            // The panel's composer, matched to this run's grant (M54.7): it
+            // names only the tools the run holds, and never tells it to call
+            // open_note, because nobody is watching a screen it would move.
+            // `selection` is 'none': a background reader is not standing
+            // anywhere, and telling it otherwise would colour what it takes
+            // from a note with wherever you happen to be.
             systemPrompt:
               buildSystemPrompt(
                 { kind: 'none' },
@@ -527,6 +600,7 @@ export function useJobRunner(): void {
                   // all but name until M35 — they keep the fragment. An Agent
                   // record gets it only by declaring the capability.
                   capabilities: job.kind === 'agent' ? (agent?.capabilities ?? []) : ['knowledge'],
+                  grant,
                 },
               ) +
               (job.kind === 'agent' && record !== ''
@@ -540,49 +614,61 @@ export function useJobRunner(): void {
             // context would carry one note's framing into the next one's.
             sessionId: null,
             model: null,
-            // Unattended runs execute vault-authored content, so none of
-            // them inherit the Settings toggle — that grant is the
-            // assistant's, made for turns a person is watching (PR #5
-            // review). Here it is only a CEILING: the one path to shell on
-            // a schedule is an Agent record declaring `tools: shell`, and
-            // no record can grant itself what Settings denies.
-            shell: job.kind === 'agent' && shell && (agent?.shell ?? false),
+            // A ceiling, never the Settings toggle itself: see shellGrant.
+            shell: shellGrant,
             // M17.13/M17.8: the record's own declarations, enforced in Rust.
-            // Both are narrowings — neither can widen what Settings granted.
+            // Each is a narrowing — none can widen what Settings granted —
+            // and the tools are the narrowing the grant above was read from.
             scope: agent?.scope ?? null,
             readScope: agent?.readScope ?? null,
-            allowedTools: agent?.allowedTools ?? null,
+            allowedTools: narrowing,
+            // M54.9: the connector tools an agent's record denies; only an
+            // agent job reaches connectors at all.
+            disallowedTools: agent?.disallowedTools ?? null,
             connectorNames: agent?.connectors ?? null,
             connectors,
             // Unattended, and it matters beyond bookkeeping: with connectors
             // on but no connectors.json, an attended turn falls back to the
             // user's global MCP config — this run must not, because it
             // executes vault-authored content with nobody watching. The one
-            // path to connectors on a schedule is the vault's own explicit
-            // list, stdio entries machine-approved (PR #5 security review).
+            // path to connectors on a schedule is an Agent record that names
+            // them, from the vault's own explicit list, each entry approved
+            // on this machine (PR #5 security review, M54.9): a job whose
+            // record names none reaches none.
             attended: false,
             // M34.2.4: the job's kind IS its budget lane — the run claims a
             // dispatcher lease and faces the ambient gate, so schedules and
             // ingest share one budget and one deferral record.
             lane: job.kind,
+            // Why it started (M56.7): admitted by Rust, written with the
+            // run's row, and opening its message as quoted data.
+            cause: causeOfJob(
+              job,
+              woken,
+              typeof entry?.properties.schedule === 'string' ? entry.properties.schedule : null,
+            ),
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
-            mcp,
           });
           if ('deferred' in start) {
             // The gate said "not now" — over a ceiling, paused, accounting
-            // unknown. One honest row, and the claim is SURRENDERED so the
-            // deferral never eats the fire it refused: for a schedule, the
-            // next launch re-hydrates the open fire and retries it. A
-            // deferred EVENT run is not retried: events are never stored,
-            // and the first scan after a launch emits none. The local record
-            // stays, as this session's suppression — re-asking the gate
-            // every tick would be sixty deferral rows an hour.
-            if (job.ledger === 'skillRuns' || job.ledger === 'attempts') {
-              void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
-                () => undefined,
-              );
-            }
-            appendRunLog({
+            // unknown. One honest row, and the claim gives back both records
+            // it made, so the deferral never eats the run it refused: the
+            // durable row is SURRENDERED, and the local record FORGOTTEN —
+            // the next launch starts from its localStorage mirror, and a
+            // record left there comes back as answered
+            // (uiStore.forgetJobRecord). So the next launch asks again: a
+            // schedule's open fire or a concept recheck still due. A
+            // deferred EVENT run is not retried: events are
+            // never stored, and the first scan after a launch emits none.
+            // Within this session the run is `held` instead, and held FIRST,
+            // so no render offers it again: re-asking at every settle would
+            // be a gate decision and a run-log row every few seconds.
+            hold();
+            useUiStore.getState().forgetJobRecord(vaultPath, job.ledger, job.key, job.runKey);
+            void jobLedgerUnclaim(vaultPath, job.ledger, job.key, job.runKey).catch(
+              () => undefined,
+            );
+            useRunLogStore.getState().append({
               id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
               at: new Date().toISOString(),
               owner: 'job',
@@ -598,6 +684,15 @@ export function useJobRunner(): void {
             return;
           }
           const { run: runId, durableId } = start;
+          // The vault moved while the spawn was in flight. Opening the new
+          // vault stops the old one's runs in Rust (`start_watcher`), but a
+          // spawn that lands after that sweep is still the old vault's: stop
+          // it by id, and give its claim back — it never got to run.
+          if (moved()) {
+            void stopAgent(runId).catch(() => undefined);
+            abandon();
+            return;
+          }
           // The cooldown clock starts at the RUN, not at its end: an agent
           // that watches a folder it also writes to would otherwise re-fire
           // on its own output the moment it finished (M17.12). After the
@@ -655,7 +750,7 @@ export function useJobRunner(): void {
           // because "found nothing to do" and "could not tell" are different
           // sentences and an absent row reads as the first one.
           if (logged.current === null) {
-            appendRunLog({
+            useRunLogStore.getState().append({
               id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
               at: new Date().toISOString(),
               owner: 'job',
@@ -668,12 +763,7 @@ export function useJobRunner(): void {
               error: `could not read ${job.path} — this run cannot say what it found`,
             });
           }
-          if (!recorded) {
-            setFailedReads((m) => ({
-              ...m,
-              [vaultPath]: { ...m[vaultPath], [job.key]: job.runKey },
-            }));
-          }
+          if (!recorded) hold();
           finish();
         }
       })();

@@ -4,6 +4,7 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  createOnDayValue,
   dateAtCentre,
   dateFieldOptions,
   dateKindOf,
@@ -38,6 +39,7 @@ import {
   weekStartIndex,
   weekdayLabels,
 } from './schedule';
+import { validateValue } from './properties';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { Entry, FieldKind, Presentation } from './types';
@@ -455,6 +457,64 @@ describe('reschedule', () => {
     const scalar = makeEntry({ properties: { w: '2026-08-01' } });
     expect(dateKindOf(ranged, 'w', schema)).toBe('daterange');
     expect(dateKindOf(scalar, 'w', schema)).toBe('date');
+  });
+});
+
+/**
+ * Create-on-day (M53.16). A day's "+" wrote the bare day whatever the field
+ * declared, so a calendar keyed to a `daterange` created records that failed
+ * their own validation on the next read: "window must be a start/end range".
+ */
+describe('createOnDayValue (M53.16)', () => {
+  const schema = buildSchema([
+    makeEntry({
+      path: 'types/campaign.md',
+      title: 'Campaign',
+      type: 'Type',
+      properties: {
+        fields: { due: { kind: 'date' }, window: { kind: 'daterange' } },
+      } as unknown as Entry['properties'],
+    }),
+    // The same field name, declared as a plain date on another type.
+    makeEntry({
+      path: 'types/sprint.md',
+      title: 'Sprint',
+      type: 'Type',
+      properties: { fields: { window: { kind: 'date' } } } as unknown as Entry['properties'],
+    }),
+  ]);
+  const declared = (field: string) => {
+    const def = schema.types.get('Campaign')?.fields.find((f) => f.name === field);
+    if (def === undefined) throw new Error(`Campaign declares no ${field}`);
+    return def;
+  };
+
+  it('gives a declared daterange an open range, which its own validation accepts', () => {
+    const value = createOnDayValue('Campaign', 'window', '2026-08-05', schema);
+    expect(value).toEqual({ start: '2026-08-05', end: null });
+    expect(validateValue(declared('window'), value)).toBeNull();
+    // What every host used to write, and the error it read back.
+    expect(validateValue(declared('window'), '2026-08-05')).toBe(
+      'window must be a start/end range',
+    );
+  });
+
+  it('gives a declared date the bare day', () => {
+    const value = createOnDayValue('Campaign', 'due', '2026-08-05', schema);
+    expect(value).toBe('2026-08-05');
+    expect(validateValue(declared('due'), value)).toBeNull();
+  });
+
+  it('gives an undeclared field the bare day — a new record has no shape on disk to keep', () => {
+    expect(createOnDayValue('Campaign', 'kickoff', '2026-08-05', schema)).toBe('2026-08-05');
+  });
+
+  it('gives a type the schema does not know the bare day', () => {
+    expect(createOnDayValue('Nonesuch', 'window', '2026-08-05', schema)).toBe('2026-08-05');
+  });
+
+  it('reads the kind off the type being created, not off any type with that field', () => {
+    expect(createOnDayValue('Sprint', 'window', '2026-08-05', schema)).toBe('2026-08-05');
   });
 });
 

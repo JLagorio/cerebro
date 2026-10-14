@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { isPlace, placeKey, placeLabel, placeOf, samePlace, selectionKey } from '@/engine/place';
+import {
+  isPlace,
+  placeKey,
+  placeLabel,
+  placeOf,
+  samePlace,
+  selectionKey,
+  type Place,
+} from '@/engine/place';
 import type { CollectionFile, ListFile, Selection } from '@/engine/types';
 import { makeEntry } from '@/test/factories';
 
@@ -18,6 +26,41 @@ const list = (over: Partial<ListFile> = {}): ListFile => ({
   },
   ...over,
 });
+
+/**
+ * One selection of every kind, lenses filled in (M53.14). The mapped type is
+ * the point: a kind added to Selection does not compile here until it has a
+ * row, and every test that walks this table then covers it unasked.
+ */
+const ONE_OF_EACH: { [K in Selection['kind']]: Extract<Selection, { kind: K }> } = {
+  home: { kind: 'home' },
+  inbox: { kind: 'inbox' },
+  mywork: { kind: 'mywork' },
+  knowledge: { kind: 'knowledge', nav: { tab: 'runs', run: 'run-1' }, path: 'knowledge/a.md' },
+  doc: { kind: 'doc', path: 'a/b.md', tab: 'spec' },
+  diagram: { kind: 'diagram', path: 'a/flow.mmd' },
+  collection: { kind: 'collection', folder: 'a/b' },
+  list: { kind: 'list', id: 'x', collection: 'a', view: 'board' },
+  type: { kind: 'type', name: 'Work item', view: 'at-risk' },
+  changes: { kind: 'changes' },
+  pulse: { kind: 'pulse' },
+  library: { kind: 'library', tab: 'agent', path: 'agents/scout.md' },
+  workspace: { kind: 'workspace', root: 'cerebro', path: 'README.md' },
+  studio: { kind: 'studio', project: 'landing' },
+  agents: { kind: 'agents', actor: 'process:release-scout' },
+  settings: { kind: 'settings' },
+};
+
+/** Every shape a place can take: ONE_OF_EACH, plus what its filled-in rows
+ * cannot reach — the bare Studio and Agents lobbies, and the two Knowledge
+ * navs a place keeps. */
+const EVERY_SHAPE: Selection[] = [
+  ...Object.values(ONE_OF_EACH),
+  { kind: 'studio' },
+  { kind: 'agents' },
+  { kind: 'knowledge', nav: { tab: 'section', folder: 'knowledge/ops' } },
+  { kind: 'knowledge', nav: { tab: 'entity', key: 'Acme' } },
+];
 
 describe('placeOf — a place is a subject, not a lens', () => {
   it('is the same place whichever view tab of a List is open', () => {
@@ -146,36 +189,21 @@ describe('placeLabel', () => {
   });
 
   it('labels every place kind with something non-empty and no vault at all', () => {
-    const places: Selection[] = [
-      { kind: 'home' },
-      { kind: 'inbox' },
-      { kind: 'changes' },
-      { kind: 'pulse' },
-      { kind: 'settings' },
-      { kind: 'knowledge' },
-      { kind: 'knowledge', nav: { tab: 'entity', key: 'Acme' } },
-      { kind: 'knowledge', nav: { tab: 'section', folder: 'knowledge/ops' } },
-      { kind: 'doc', path: 'a/b.md' },
-      { kind: 'collection', folder: 'a/b' },
-      { kind: 'list', id: 'x' },
-      { kind: 'type', name: 'Work item' },
-    ];
-    for (const place of places) expect(placeLabel(placeOf(place))).not.toBe('');
+    // `toMatch` also fails on undefined, which `not.toBe('')` let through.
+    for (const sel of EVERY_SHAPE) expect(placeLabel(placeOf(sel)), sel.kind).toMatch(/\S/);
   });
 });
 
 describe('isPlace — the loader guard', () => {
-  it('accepts what placeOf produces', () => {
-    const places: Selection[] = [
-      { kind: 'home' },
-      { kind: 'knowledge' },
-      { kind: 'knowledge', nav: { tab: 'entity', key: 'Acme' } },
-      { kind: 'doc', path: 'a.md' },
-      { kind: 'collection', folder: 'a' },
-      { kind: 'list', id: 'x', collection: null },
-      { kind: 'type', name: 'T' },
-    ];
-    for (const place of places) expect(isPlace(placeOf(place))).toBe(true);
+  it('accepts what placeOf produces for every kind, after a JSON round trip (M53.14)', () => {
+    // The round trip is localStorage's. My work and Work threads failed this
+    // guard and came back unanchored on every reload.
+    for (const sel of EVERY_SHAPE) {
+      const stored: unknown = JSON.parse(JSON.stringify(placeOf(sel)));
+      expect(isPlace(stored), JSON.stringify(sel)).toBe(true);
+      expect(placeKey(stored as Place)).toBe(selectionKey(sel));
+      expect(placeLabel(stored as Place)).toMatch(/\S/);
+    }
   });
 
   it('rejects anything it could not key or label', () => {
@@ -187,7 +215,6 @@ describe('isPlace — the loader guard', () => {
       'home',
       42,
       {},
-      { kind: 'project', id: 'x' },
       { kind: 'doc' },
       { kind: 'doc', path: 7 },
       { kind: 'list', collection: 'a' },
@@ -195,8 +222,16 @@ describe('isPlace — the loader guard', () => {
       { kind: 'collection', folder: null },
       { kind: 'knowledge', nav: { tab: 'entity' } },
       { kind: 'knowledge', nav: 'all' },
+      // Every kind Selection has retired, in the shape it had. `review` still
+      // passed until M53.14 and came back as a place nothing renders.
+      { kind: 'view', id: 'roadmap' }, // M10
+      { kind: 'project', path: 'onboarding/project.md' }, // M12.5
+      { kind: 'review' }, // M33.3
+      { kind: 'pipeline' }, // M33.4
+      { kind: 'status', section: 'fleet' }, // M33a.2
+      { kind: 'docs' }, // M38.3
     ]) {
-      expect(isPlace(raw)).toBe(false);
+      expect(isPlace(raw), JSON.stringify(raw)).toBe(false);
     }
   });
 });
